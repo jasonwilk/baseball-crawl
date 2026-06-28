@@ -1574,6 +1574,9 @@ def _make_spray_gen():
 
     gen.crawl_result = _CR()
     gen.spray_games = None
+    # _spray_stage reads load_result.redirect_map (E-244); load always runs
+    # before the spray stage in production, so None mirrors a redirect-free run.
+    gen.load_result = None
     return gen
 
 

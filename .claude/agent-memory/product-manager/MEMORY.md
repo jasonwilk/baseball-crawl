@@ -15,10 +15,9 @@ Only READY/ACTIVE epics. Full details in the epic file under `/epics/`.
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
-- **E-244** (READY): File Plays & Spray Under Canonical Game IDs After Cross-Perspective Dedup — bug fix (pre-existing, introduced by E-237). Dedup redirects boxscores to canonical game_id but plays/spray/reconcile stages stay keyed on source event_ids → silently skipped for deduped games (FPS%/QAB%/pitches-per-BF/PA under-covered; reconcile no-ops). Fix: thread `{source→canonical}` redirect map (GameLoader instance → new `LoadResult.redirect_map` field → single assign in scouting_loader → generator dict-key remap before plays/spray load). Plays = 3 generator remaps (precheck/reconcile/return-deduped-canonical) + spray = 1 dict-key remap (no return remap; spray query is game-id-agnostic). Load-keying only, perspective_team_id unchanged. 1 story, 10 ACs, deduped-game fixture mandatory. Scorecard 12/12/0. NOT dispatched (stops at READY).
 - **E-242** (READY): Align Dispatch Vocabulary to Subagents — context-layer vocab/breakage fix (TeamCreate/TeamDelete removed in CC v2.1.178; Option B named-subagent framing, keep `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, no behavioral change). Surgical scope (user-confirmed): remove only TeamCreate/TeamDelete ceremony + `[team-name]` placeholder + explicit create/delete-team STEP framing; KEEP "team"/"teammate" collective nouns. CA-led, 3 file-disjoint stories. Planning Scorecard 16/16/0. NOT dispatched (stops at READY).
 
-Recently completed epics (E-218 — E-243) are one-line-indexed in [archived-epics.md](archived-epics.md). Most recent: **E-243** (probable-starter usefulness, COMPLETED + archived 2026-06-28).
+Recently completed epics (E-218 — E-244) are one-line-indexed in [archived-epics.md](archived-epics.md). Most recent: **E-244** (file plays & spray under canonical game IDs after cross-perspective dedup, COMPLETED + archived 2026-06-28).
 
 ## Strategic Frame (reports-first reframe, 2026-06-12)
 - Reports are the SOLE coaching surface (generate report for a GC `public_id` + share link). Dashboard / member-sync / tracked-opponent surfaces were REMOVED in E-239 (ROADMAP D2, −59k lines). Admin surface = `src/api/routes/reports_admin.py`.

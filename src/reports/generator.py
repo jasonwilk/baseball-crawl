@@ -753,6 +753,7 @@ def _crawl_and_load_spray(
     gc_uuid: str | None = None,
     games_data: list | None = None,
     team_id: int | None = None,
+    redirect_map: dict[str, str] | None = None,
 ) -> _SprayOutcome:
     """Crawl and load spray chart data in-memory (E-220-06).
 
@@ -769,6 +770,12 @@ def _crawl_and_load_spray(
             INFORMATIONAL ``spray_games_with_data`` coverage count is computed
             via a perspective-filtered ``COUNT(DISTINCT game_id)`` so
             cross-perspective spray rows are not miscounted.
+        redirect_map: ``{source_event_id: canonical_game_id}`` from the dedup
+            stage (E-244). The crawl FETCHES by source event id (the scouted
+            team's perspective), but spray rows are FILED under the canonical id
+            via a dict-key remap of ``spray_data`` before load, so deduped games
+            land under the canonical row instead of being FK-skipped. Defaults to
+            identity passthrough (no remap) for non-deduped runs.
 
     Returns:
         A :class:`_SprayOutcome` recording the stage status, the distinct games
@@ -790,10 +797,20 @@ def _crawl_and_load_spray(
                 status=STATUS_FAILED, games_crawled=0, errors=spray_result.errors,
             )
 
+        # Remap spray dict keys from source event ids to canonical game ids so
+        # deduped games are filed under (and idempotency-checked against) the
+        # canonical row (E-244 TN-3). The spray loader derives game_id solely
+        # from the dict key, so this key remap is the only change spray needs --
+        # the spray query is game-id-agnostic. .get(k, k) is identity for the
+        # common non-deduped case.
+        redirect = redirect_map or {}
+        remapped_spray = {
+            redirect.get(k, k): v for k, v in spray_result.spray_data.items()
+        }
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
             load_result = spray_loader.load_from_data(
-                spray_result.spray_data, public_id=public_id,
+                remapped_spray, public_id=public_id,
             )
 
         # INFORMATIONAL coverage (TN-2 / AC-1): distinct games with spray ROWS
@@ -847,6 +864,7 @@ def _crawl_and_load_plays(
     season_id: str,
     game_ids: list[str] | None = None,
     recon_out: _ReconCounts | None = None,
+    redirect_map: dict[str, str] | None = None,
 ) -> list[str]:
     """Crawl, load, and reconcile plays data in-memory (E-220-06).
 
@@ -859,33 +877,57 @@ def _crawl_and_load_plays(
         public_id: The scouted team's ``public_id`` slug.
         team_id: The team's DB integer PK.
         season_id: Canonical DB season_id for query scoping.
-        game_ids: List of game IDs from the crawl result boxscores.
+        game_ids: List of game IDs (SOURCE event ids) from the crawl result
+            boxscores.
         recon_out: Optional mutable accumulator (E-235-02 / TN-2). When
             provided, the reconciliation pass populates it with per-generation
             ``discrepancies_found`` / ``discrepancies_corrected`` /
             ``games_reconciled`` for the run record. The return value stays
             ``list[str]`` (the E-211 contract) regardless.
+        redirect_map: ``{source_event_id: canonical_game_id}`` from the dedup
+            stage (E-244). The API FETCH continues to use the SOURCE event id
+            (it returns the scouted team's perspective), but the idempotency
+            precheck, the DB-write key, the reconcile loop, and the returned
+            game-id list (the rate-query scope) all use the CANONICAL id so
+            deduped games are filed under -- and counted from -- the canonical
+            row. Defaults to identity passthrough for non-deduped runs.
 
     Returns:
-        List of game_id strings that were processed.
+        List of CANONICAL game_id strings that were processed, deduped (two
+        source perspectives can collapse to one canonical id).
     """
     if not game_ids:
         logger.info("No game IDs for plays stage for public_id=%s; skipping.", public_id)
         return []
 
+    redirect = redirect_map or {}
+    # Canonical, deduped, order-preserving id list for the DB-write/reconcile/
+    # query scope. Two source ids can collapse to one canonical id, so a naive
+    # remap would put a duplicate id in the rate-query IN-clause (E-244 TN-3).
+    canonical_ids: list[str] = []
+    _seen_canonical: set[str] = set()
+    for _src_id in game_ids:
+        _cid = redirect.get(_src_id, _src_id)
+        if _cid not in _seen_canonical:
+            _seen_canonical.add(_cid)
+            canonical_ids.append(_cid)
+
     try:
         # Crawl: fetch plays for each game in-memory (per-game error isolation)
         plays_data: dict[str, dict] = {}
         for game_id in game_ids:
-            # Check DB idempotency (perspective-aware)
+            # Fetch by SOURCE id; file/idempotency-check by CANONICAL id (E-244).
+            canonical_id = redirect.get(game_id, game_id)
+            # Check DB idempotency (perspective-aware) against the canonical id,
+            # else every re-run re-fetches the API for every deduped game.
             with closing(get_connection()) as conn:
                 existing = conn.execute(
                     "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
-                    (game_id, team_id),
+                    (canonical_id, team_id),
                 ).fetchone()
             if existing is not None:
-                logger.debug("Plays already loaded for game %s perspective %d; skipping.", game_id, team_id)
-                plays_data[game_id] = {}  # mark as processed for reconcile
+                logger.debug("Plays already loaded for game %s perspective %d; skipping.", canonical_id, team_id)
+                plays_data[canonical_id] = {}  # mark as processed for reconcile
                 # Idempotency skip is a non-error outcome -- the game's plays
                 # fetch did NOT raise, so it counts as fetched_ok (TN-7).
                 if recon_out is not None:
@@ -897,8 +939,10 @@ def _crawl_and_load_plays(
                     f"/game-stream-processing/{game_id}/plays",
                     accept=_PLAYS_ACCEPT,
                 )
-                plays_data[game_id] = raw if isinstance(raw, dict) else {}
-                logger.debug("Fetched plays for game %s.", game_id)
+                # Key the payload by the canonical id so PlaysLoader (which
+                # derives game_id from the dict key) files rows under it.
+                plays_data[canonical_id] = raw if isinstance(raw, dict) else {}
+                logger.debug("Fetched plays for game %s (canonical %s).", game_id, canonical_id)
                 if recon_out is not None:
                     recon_out.plays_fetched_ok += 1
             except CredentialExpiredError:
@@ -949,7 +993,10 @@ def _crawl_and_load_plays(
         # 6 cluster 4: pass perspective_team_id=team_id so reconcile targets
         # the report's team perspective.  Otherwise cross-perspective games
         # where team_id != home_team_id would reconcile the wrong rows.
-        for game_id in game_ids:
+        # Iterate CANONICAL ids so reconcile finds the deduped games' plays
+        # rows (under the bug it keyed off source ids and silently no-opped on
+        # deduped games -- E-244 TN-3 site 2).
+        for game_id in canonical_ids:
             try:
                 with closing(get_connection()) as conn:
                     has_plays = conn.execute(
@@ -970,7 +1017,9 @@ def _crawl_and_load_plays(
                     exc_info=True,
                 )
 
-        return game_ids
+        # Return CANONICAL deduped ids -- the single propagation point for the
+        # three plays-derived rate queries' game-id scope (E-244 TN-3 site 3).
+        return canonical_ids
 
     except CredentialExpiredError:
         raise
@@ -1926,11 +1975,13 @@ class _ReportGeneration:
         and must NEVER register as "partial". Status flips off "completed" only
         on a real crawl/load error.
         """
+        redirect_map = self.load_result.redirect_map if self.load_result else {}
         spray_outcome = _crawl_and_load_spray(
             self.client, self.public_id, self.season_id,
             gc_uuid=self.resolved_gc_uuid,
             games_data=self.crawl_result.games,
             team_id=self.team_id,
+            redirect_map=redirect_map,
         )
         self.spray_games = _coerce_int(getattr(spray_outcome, "games_crawled", None))
         spray_games_with_data = _coerce_int(
@@ -1969,11 +2020,13 @@ class _ReportGeneration:
         self.plays_game_ids = []
         plays_games_expected = len(self.crawl_result.boxscores)
         recon = _ReconCounts()
+        redirect_map = self.load_result.redirect_map if self.load_result else {}
         try:
             self.plays_game_ids = _crawl_and_load_plays(
                 self.client, self.public_id, self.team_id, self.season_id,
                 game_ids=sorted(self.crawl_result.boxscores.keys()),
                 recon_out=recon,
+                redirect_map=redirect_map,
             )
             # Sum the ERROR-driven count the run record records as plays_errors
             # (TN-2): per-game fetch failures + folded PlaysLoader load errors.

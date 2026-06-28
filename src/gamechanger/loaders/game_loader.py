@@ -233,6 +233,13 @@ class GameLoader:
         self._season_id, self._season_year = derive_season_id_for_team(
             db, owned_team_ref.id
         )
+        # {source_event_id: canonical_game_id} accumulated as a side-effect each
+        # time _find_duplicate_game redirects a cross-perspective duplicate to an
+        # existing canonical row (E-244). GameLoader is constructed fresh per
+        # report run, so this map is naturally scoped to one run (no reset).
+        # Exposed to the report generator via LoadResult.redirect_map so the
+        # plays/spray stages file rows under the canonical id.
+        self.redirect_map: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -597,6 +604,10 @@ class GameLoader:
                 "Dedup: redirecting game %s → %s (same date %s, same teams)",
                 summary.event_id, canonical_id, game_date,
             )
+            # Record the redirect BEFORE replace() rewrites summary.event_id, so
+            # the source→canonical mapping is captured for the generator's
+            # plays/spray stages (E-244 TN-2). Only actual redirects are recorded.
+            self.redirect_map[summary.event_id] = canonical_id
             summary = replace(summary, event_id=canonical_id)
 
         return self._upsert_game_and_stats(

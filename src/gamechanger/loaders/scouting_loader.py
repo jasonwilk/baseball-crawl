@@ -136,6 +136,12 @@ class ScoutingLoader:
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
 
+        # Expose the dedup redirect map produced by GameLoader THIS run so the
+        # generator's plays/spray stages file rows under the canonical id rather
+        # than skipping deduped games under the orphaned source ids (E-244 TN-2).
+        # Single whole-map assignment (NOT summed per-game like the int counts).
+        total.redirect_map = game_loader.redirect_map
+
         # Post-boxscore validation: check for duplicate game rows.
         self._check_duplicate_games(tid, db_season_id)
 
@@ -212,6 +218,10 @@ class ScoutingLoader:
         total.loaded += bs_result.loaded
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
+
+        # Expose the dedup redirect map produced by GameLoader THIS run (E-244
+        # TN-2); disk-flow parity with the in-memory load_team path above.
+        total.redirect_map = game_loader.redirect_map
 
         self._check_duplicate_games(team_id, db_season_id)
 

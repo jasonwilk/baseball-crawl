@@ -23,11 +23,18 @@ class LoadResult:
         loaded: Number of records successfully upserted into the database.
         skipped: Number of records skipped due to missing required fields.
         errors: Number of records that caused unexpected errors.
+        redirect_map: ``{source_event_id: canonical_game_id}`` entries produced
+            by ``GameLoader`` when cross-perspective dedup redirects a game to an
+            existing canonical row (E-244). Empty for non-redirected loads.
+            Carries the redirect to the report generator's plays/spray stages so
+            those rows are filed under the canonical id rather than skipped under
+            the now-orphaned source event id.
     """
 
     loaded: int = field(default=0)
     skipped: int = field(default=0)
     errors: int = field(default=0)
+    redirect_map: dict[str, str] = field(default_factory=dict)
 
 
 def derive_season_id_for_team(

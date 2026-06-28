@@ -1,7 +1,7 @@
 # E-244: File Plays & Spray Under Canonical Game IDs After Cross-Perspective Dedup
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -40,7 +40,7 @@ Two expert consultations (data-engineer, software-engineer) shaped the fix; see 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-244-01 | Thread dedup redirect map to plays, spray, and reconciliation stages | TODO | None | - |
+| E-244-01 | Thread dedup redirect map to plays, spray, and reconciliation stages | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -95,3 +95,26 @@ The regression fixture MUST include a cross-perspective DEDUPED game -- two sour
 | Internal iter 1 — Holistic team (DE + SE) | 2 | 2 | 0 | SE MUST-FIX: AC-6 spray clause (row-level idempotency, not fetch-level); DE/SE: `field(default_factory=dict)` safe mutable default |
 | Codex iter 1 | 3 | 3 | 0 | P1: AC-6 split not propagated to epic Goals/Success Criteria (body-vs-AC contradiction) |
 | **Total** | **12** | **12** | **0** | — |
+
+- 2026-06-28: COMPLETED. Single-story load-keying fix (E-244-01) threading the `GameLoader` dedup redirect map (the new `LoadResult.redirect_map` field) through the generator's plays stage (idempotency precheck, DB-write key, reconcile loop, and deduped return value) and spray stage (dict-key remap) so cross-perspective-deduped games file their plays/spray rows and run reconciliation under the canonical `game_id` instead of being silently FK-skipped under the orphaned source event ids. Restores plays-derived rate-stat coverage (FPS%, QAB%, pitches/BF, pitches/PA) for the scouted perspective. The fetch path is unchanged (still by source event id); this is load-keying only, `perspective_team_id` semantics untouched. Implemented by software-engineer; per-story CR, CR integration review, and Codex headless review all clean (0 findings); a 9-test deduped-game regression suite (genuine `_find_duplicate_game` collapse fixture) added. PM verified all 10 ACs PASS. Full suite green at SE's run (3414 passed, 0 failed); authoritative confirmation is the closure full-suite green gate.
+
+### Closure Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|-------------|----------|----------|-----------|
+| Per-story CR — E-244-01 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 0 | 0 | 0 |
+| **Total** | **0** | **0** | **0** |
+
+### Documentation Assessment
+No documentation impact. This is an internal data-correctness fix: no admin/coaching docs change, and no `docs/api/` flow docs change (the fetch behavior is unchanged — load-keying only). No update trigger fires.
+
+### Context-Layer Assessment (six-trigger)
+- **Trigger 1 — new convention/pattern/constraint: YES.** New generator per-game stages must remap source→canonical via the dedup `redirect_map` before keying DB writes/idempotency/reconcile/query-scope off game ids. Codified by claude-architect this closure.
+- **Trigger 2 — architectural decision with ongoing implications: NO.**
+- **Trigger 3 — footgun/failure mode/boundary: YES.** Downstream per-game stages that key off `crawl_result`/`boxscores` SOURCE ids silently skip cross-perspective-deduped games (the E-244 defect, originally introduced by E-237). Codified by claude-architect this closure as a guardrail note.
+- **Trigger 4 — agent behavior/routing/coordination change: NO.**
+- **Trigger 5 — domain knowledge for future agents: NO.**
+- **Trigger 6 — new CLI command/workflow/procedure: NO.**
+
+Triggers 1 and 3 fire; claude-architect is being dispatched this closure to codify a concise guardrail note. The codification is in progress and will land in the closure patch.

@@ -688,6 +688,9 @@ def _make_plays_gen(game_ids: list[str]) -> "_gen._ReportGeneration":
     gen.season_id = _SEASON_ID
     gen.plays_game_ids = []
     gen.crawl_result = _FakeCrawlResult(game_ids)
+    # _plays_stage reads load_result.redirect_map (E-244); load always runs
+    # before the plays stage in production, so None mirrors a redirect-free run.
+    gen.load_result = None
     return gen
 
 
@@ -866,3 +869,535 @@ class TestPlaysErrorsColumnWrite:
         ).fetchone()
         conn.close()
         assert row == ("partial", 4)
+
+
+# ---------------------------------------------------------------------------
+# E-244: dedup redirect map threaded to plays + spray stages
+#
+# These tests are built on a cross-perspective DEDUPED-game fixture: two source
+# event ids collapse to one canonical id via GameLoader._find_duplicate_game
+# (TN-6). A single-event-id fixture would pass vacuously and hide the bug, so
+# the redirect map consumed by the plays/spray stages is the GENUINE map the
+# real GameLoader produced this run -- not a hand-built dict.
+# ---------------------------------------------------------------------------
+
+# Distinct id space from the module-level constants above (avoid collisions).
+_E244_SLUG = "scoutedteamslug"
+_E244_OWN_UUID = "scouted-team-uuid-aaa-0001"
+_E244_OPP_UUID = "0c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f"  # 36-char UUID = opp key
+_E244_CANON_ID = "e244-canonical-game-001"
+_E244_SOURCE_ID = "e244-source-game-002"
+_E244_SPRAY_PLAYER = "e244-spray-player-001"
+# Batter/pitcher ids MUST be 36-char hex+dash UUIDs -- the plays parser extracts
+# them via the regex ``\$\{([0-9a-f-]{36})\}`` from the final_details templates.
+_E244_BATTER = "aaaaaaaa-1111-2222-3333-444444444444"
+_E244_PITCHER = "bbbbbbbb-5555-6666-7777-888888888888"
+_E244_OWN_BAT = "e244-own-bat-001"
+_E244_OWN_PIT = "e244-own-pit-001"
+_E244_OPP_BAT = "e244-opp-bat-001"
+_E244_OPP_PIT = "e244-opp-pit-001"
+_E244_START = "2026-04-01T18:00:00.000Z"
+
+
+def _e244_boxscore() -> dict:
+    """Minimal valid boxscore: own-team slug key + opponent UUID key."""
+    return {
+        _E244_SLUG: {
+            "players": [],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "extra": [],
+                    "stats": [
+                        {
+                            "player_id": _E244_OWN_BAT,
+                            "stats": {"AB": 3, "R": 1, "H": 2, "RBI": 1, "BB": 1, "SO": 0},
+                        }
+                    ],
+                },
+                {
+                    "category": "pitching",
+                    "extra": [],
+                    "stats": [
+                        {
+                            "player_id": _E244_OWN_PIT,
+                            "stats": {"IP": 5, "H": 3, "R": 2, "ER": 2, "BB": 1, "SO": 7},
+                        }
+                    ],
+                },
+            ],
+        },
+        _E244_OPP_UUID: {
+            "players": [],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "extra": [],
+                    "stats": [
+                        {
+                            "player_id": _E244_OPP_BAT,
+                            "stats": {"AB": 4, "R": 1, "H": 1, "RBI": 0, "BB": 0, "SO": 2},
+                        }
+                    ],
+                },
+                {
+                    "category": "pitching",
+                    "extra": [],
+                    "stats": [
+                        {
+                            "player_id": _E244_OPP_PIT,
+                            "stats": {"IP": 4, "H": 5, "R": 5, "ER": 4, "BB": 2, "SO": 4},
+                        }
+                    ],
+                },
+            ],
+        },
+    }
+
+
+def _e244_summary(event_id: str) -> "object":
+    from src.gamechanger.loaders.game_loader import GameSummaryEntry
+
+    return GameSummaryEntry(
+        event_id=event_id,
+        game_stream_id=event_id,
+        home_away="home",
+        owning_team_score=5,
+        opponent_team_score=2,
+        opponent_id=_E244_OPP_UUID,
+        last_scoring_update="2026-04-01T18:00:00.000Z",
+        start_time=_E244_START,
+    )
+
+
+def _e244_plays_payload() -> dict:
+    """A plays response that parses into exactly one plays row."""
+    return {
+        "sport": {"batting_style": "normal"},
+        "team_players": {},
+        "plays": [
+            {
+                "order": 0,
+                "inning": 1,
+                "half": "top",
+                "name_template": {"template": "Single"},
+                "at_plate_details": [
+                    {"template": "Strike 1 looking"},
+                    {"template": "In play"},
+                ],
+                "final_details": [
+                    {"template": f"${{{_E244_BATTER}}} singles to left field"},
+                    {"template": f"${{{_E244_PITCHER}}} pitching"},
+                ],
+                "home_score": 0,
+                "away_score": 0,
+                "did_score_change": False,
+                "outs": 1,
+                "did_outs_change": True,
+            }
+        ],
+    }
+
+
+def _e244_spray_payload() -> dict:
+    return {
+        "spray_chart_data": {
+            "offense": {
+                _E244_SPRAY_PLAYER: [
+                    {
+                        "id": "e244-spray-event-1",
+                        "createdAt": 1700000000000,
+                        "attributes": {
+                            "playResult": "single",
+                            "playType": "ground_ball",
+                            "defenders": [
+                                {
+                                    "position": "SS",
+                                    "location": {"x": 100.0, "y": 80.0},
+                                    "error": False,
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+            "defense": {},
+        }
+    }
+
+
+def _e244_fresh_file_db(tmp_path: Path) -> str:
+    """Create a file-backed DB with the real schema and return its path."""
+    db_path = str(tmp_path / "e244.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys=ON;")
+    for mig in _MIGRATIONS:
+        conn.executescript(mig.read_text(encoding="utf-8"))
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def _e244_conn_factory(db_path: str):
+    def _fresh():
+        c = sqlite3.connect(db_path)
+        c.execute("PRAGMA foreign_keys=ON;")
+        c.row_factory = sqlite3.Row
+        return c
+
+    return _fresh
+
+
+def _e244_seed_and_dedup(db_path: str) -> tuple[int, dict[str, str]]:
+    """Seed the scouted team and drive a GENUINE cross-event dedup collapse.
+
+    Loads the canonical game (CANON), then the same real game under a second
+    source event id (SOURCE): GameLoader._find_duplicate_game collapses SOURCE
+    into CANON, so only the canonical games row survives and the loader's
+    redirect_map carries {SOURCE: CANON}. Returns (scouted_team_id, redirect_map).
+    """
+    from src.gamechanger.loaders import ensure_season_row
+    from src.gamechanger.loaders.game_loader import GameLoader
+    from src.gamechanger.types import TeamRef
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys=ON;")
+    cur = conn.execute(
+        "INSERT INTO teams (gc_uuid, public_id, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, ?, 'member', 1, 2026)",
+        (_E244_OWN_UUID, _E244_SLUG, "Scouted Team"),
+    )
+    scouted_id = cur.lastrowid
+    ensure_season_row(conn, "2026")
+    # Spray player on the scouted (home) roster so spray events resolve to it.
+    conn.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Spray', 'Player')",
+        (_E244_SPRAY_PLAYER,),
+    )
+    conn.execute(
+        "INSERT INTO team_rosters (player_id, team_id, season_id) VALUES (?, ?, '2026')",
+        (_E244_SPRAY_PLAYER, scouted_id),
+    )
+    conn.commit()
+
+    loader = GameLoader(
+        conn,
+        owned_team_ref=TeamRef(id=scouted_id, gc_uuid=_E244_OWN_UUID, public_id=_E244_SLUG),
+    )
+    loader.load_payload(_e244_boxscore(), _e244_summary(_E244_CANON_ID))
+    loader.load_payload(_e244_boxscore(), _e244_summary(_E244_SOURCE_ID))
+    redirect_map = dict(loader.redirect_map)
+    conn.commit()
+    conn.close()
+    return scouted_id, redirect_map
+
+
+class TestE244RedirectMapSeam:
+    """AC-1 / AC-8: GameLoader produces the {source: canonical} redirect map."""
+
+    def test_dedup_collapse_populates_redirect_map(self, tmp_path: Path) -> None:
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+
+        # Exactly the source->canonical entry; the non-redirected first load adds
+        # nothing (AC-1: a non-redirected game produces no map entry).
+        assert redirect_map == {_E244_SOURCE_ID: _E244_CANON_ID}
+
+        # Only the canonical games row survives the collapse.
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute("SELECT game_id FROM games").fetchall()
+        conn.close()
+        assert [r[0] for r in rows] == [_E244_CANON_ID]
+
+    def test_scouting_loader_exposes_map_on_load_result(self, tmp_path: Path) -> None:
+        """The map rides out on LoadResult.redirect_map via ScoutingLoader."""
+        from types import SimpleNamespace
+
+        from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        # Seed only the scouted team; let the loader create the games itself.
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA foreign_keys=ON;")
+        cur = conn.execute(
+            "INSERT INTO teams (gc_uuid, public_id, name, membership_type, is_active, season_year) "
+            "VALUES (?, ?, ?, 'member', 1, 2026)",
+            (_E244_OWN_UUID, _E244_SLUG, "Scouted Team"),
+        )
+        scouted_id = cur.lastrowid
+        conn.commit()
+
+        def _game(gid: str) -> dict:
+            return {
+                "id": gid,
+                "game_status": "completed",
+                "score": {"team": 5, "opponent_team": 2},
+                "home_away": "home",
+                "start_ts": _E244_START,
+                "timezone": "America/Chicago",
+                "opponent_team": {"name": "Opp"},
+            }
+
+        crawl_result = SimpleNamespace(
+            team_id=scouted_id,
+            roster=[],
+            games=[_game(_E244_CANON_ID), _game(_E244_SOURCE_ID)],
+            boxscores={
+                _E244_CANON_ID: _e244_boxscore(),
+                _E244_SOURCE_ID: _e244_boxscore(),
+            },
+        )
+
+        loader = ScoutingLoader(conn)
+        result = loader.load_team(crawl_result)
+        conn.close()
+
+        assert result.redirect_map == {_E244_SOURCE_ID: _E244_CANON_ID}
+
+
+class TestE244PlaysRemap:
+    """AC-2/-3/-4/-6/-7: plays stage files + scopes by the canonical id."""
+
+    def test_plays_filed_and_scoped_under_canonical(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+        assert redirect_map == {_E244_SOURCE_ID: _E244_CANON_ID}
+
+        client = MagicMock()
+        client.get.return_value = _e244_plays_payload()
+
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)):
+            result = _gen._crawl_and_load_plays(
+                client,
+                public_id=_E244_SLUG,
+                team_id=scouted_id,
+                season_id="2026",
+                game_ids=[_E244_SOURCE_ID],
+                redirect_map=redirect_map,
+            )
+
+        # AC-4: returned list (=> self.plays_game_ids => rate-query scope) is the
+        # CANONICAL id, not the source id.
+        assert result == [_E244_CANON_ID]
+
+        # The API FETCH used the SOURCE event id (scouted perspective).
+        fetched_paths = [c.args[0] for c in client.get.call_args_list]
+        assert any(_E244_SOURCE_ID in p for p in fetched_paths)
+        assert all(_E244_CANON_ID not in p for p in fetched_paths)
+
+        conn = sqlite3.connect(db_path)
+        # AC-2: plays rows under CANONICAL with perspective = scouted team...
+        canon_rows = conn.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = ? AND perspective_team_id = ?",
+            (_E244_CANON_ID, scouted_id),
+        ).fetchone()[0]
+        # ...and NONE under the orphaned source id.
+        source_rows = conn.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = ?", (_E244_SOURCE_ID,)
+        ).fetchone()[0]
+        conn.close()
+        assert canon_rows > 0
+        assert source_rows == 0
+
+    def test_reconcile_invoked_with_canonical_id(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+
+        client = MagicMock()
+        client.get.return_value = _e244_plays_payload()
+
+        recon_spy = MagicMock(return_value=MagicMock())
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)), \
+                patch.object(_gen, "reconcile_game", recon_spy):
+            _gen._crawl_and_load_plays(
+                client,
+                public_id=_E244_SLUG,
+                team_id=scouted_id,
+                season_id="2026",
+                game_ids=[_E244_SOURCE_ID],
+                redirect_map=redirect_map,
+            )
+
+        # AC-3: reconcile_game keyed off the CANONICAL id (positional arg 1),
+        # never the orphaned source id.
+        assert recon_spy.called
+        called_game_ids = [c.args[1] for c in recon_spy.call_args_list]
+        assert called_game_ids == [_E244_CANON_ID]
+
+    def test_two_sources_collapse_to_single_canonical_in_return(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-4: two source ids -> one canonical id, deduped in the return list."""
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, _ = _e244_seed_and_dedup(db_path)
+
+        client = MagicMock()
+        client.get.return_value = _e244_plays_payload()
+
+        # Both source perspectives map to the same canonical id.
+        second_source = "e244-source-game-003"
+        redirect_map = {_E244_SOURCE_ID: _E244_CANON_ID, second_source: _E244_CANON_ID}
+
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)):
+            result = _gen._crawl_and_load_plays(
+                client,
+                public_id=_E244_SLUG,
+                team_id=scouted_id,
+                season_id="2026",
+                game_ids=[_E244_SOURCE_ID, second_source],
+                redirect_map=redirect_map,
+            )
+
+        assert result == [_E244_CANON_ID]
+
+    def test_run_two_does_not_refetch_plays(self, tmp_path: Path) -> None:
+        """AC-6 (plays): the precheck remap finds canonical rows -> no re-fetch."""
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+
+        client = MagicMock()
+        client.get.return_value = _e244_plays_payload()
+
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)):
+            _gen._crawl_and_load_plays(
+                client, public_id=_E244_SLUG, team_id=scouted_id,
+                season_id="2026", game_ids=[_E244_SOURCE_ID], redirect_map=redirect_map,
+            )
+            client.reset_mock()
+            result2 = _gen._crawl_and_load_plays(
+                client, public_id=_E244_SLUG, team_id=scouted_id,
+                season_id="2026", game_ids=[_E244_SOURCE_ID], redirect_map=redirect_map,
+            )
+
+        # Plays endpoint NOT re-fetched on run 2 (precheck hit the canonical id).
+        assert client.get.call_count == 0
+        # The game is still reported as processed under the canonical id.
+        assert result2 == [_E244_CANON_ID]
+
+    def test_zero_dedup_identity_passthrough(self, tmp_path: Path) -> None:
+        """AC-7: with no redirects, plays behave exactly as before (identity)."""
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, _ = _e244_seed_and_dedup(db_path)
+
+        client = MagicMock()
+        client.get.return_value = _e244_plays_payload()
+
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)):
+            result = _gen._crawl_and_load_plays(
+                client,
+                public_id=_E244_SLUG,
+                team_id=scouted_id,
+                season_id="2026",
+                game_ids=[_E244_CANON_ID],
+                redirect_map={},
+            )
+
+        assert result == [_E244_CANON_ID]
+        fetched_paths = [c.args[0] for c in client.get.call_args_list]
+        assert any(_E244_CANON_ID in p for p in fetched_paths)
+
+        conn = sqlite3.connect(db_path)
+        canon_rows = conn.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = ?", (_E244_CANON_ID,)
+        ).fetchone()[0]
+        conn.close()
+        assert canon_rows > 0
+
+
+class TestE244SprayRemap:
+    """AC-5/-6: spray stage files rows under the canonical id (dict-key remap)."""
+
+    def _fake_spray_result(self, source_id: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            spray_data={source_id: _e244_spray_payload()},
+            errors=0,
+            games_crawled=1,
+        )
+
+    def test_spray_filed_under_canonical_and_queryable(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+        assert redirect_map == {_E244_SOURCE_ID: _E244_CANON_ID}
+
+        client = MagicMock()
+        fake_crawler = MagicMock()
+        fake_crawler.crawl_team.return_value = self._fake_spray_result(_E244_SOURCE_ID)
+
+        with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)), \
+                patch.object(_gen, "ScoutingSprayChartCrawler", return_value=fake_crawler):
+            _gen._crawl_and_load_spray(
+                client,
+                public_id=_E244_SLUG,
+                season_id="2026",
+                gc_uuid=None,
+                games_data=[],
+                team_id=scouted_id,
+                redirect_map=redirect_map,
+            )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        # AC-5: spray rows under CANONICAL, none under the source id.
+        canon_rows = conn.execute(
+            "SELECT COUNT(*) FROM spray_charts WHERE game_id = ?", (_E244_CANON_ID,)
+        ).fetchone()[0]
+        source_rows = conn.execute(
+            "SELECT COUNT(*) FROM spray_charts WHERE game_id = ?", (_E244_SOURCE_ID,)
+        ).fetchone()[0]
+        # AC-5: the game-id-agnostic spray query picks them up automatically.
+        charts = _gen._query_spray_charts(conn, scouted_id, "2026")
+        conn.close()
+        assert canon_rows > 0
+        assert source_rows == 0
+        assert _E244_SPRAY_PLAYER in charts
+
+    def test_run_two_inserts_no_duplicate_spray_rows(self, tmp_path: Path) -> None:
+        """AC-6 (spray): row-level loader idempotency keyed on the canonical id."""
+        from unittest.mock import MagicMock
+
+        db_path = _e244_fresh_file_db(tmp_path)
+        scouted_id, redirect_map = _e244_seed_and_dedup(db_path)
+
+        client = MagicMock()
+
+        def _run() -> None:
+            fake_crawler = MagicMock()
+            fake_crawler.crawl_team.return_value = self._fake_spray_result(_E244_SOURCE_ID)
+            with patch.object(_gen, "get_connection", side_effect=_e244_conn_factory(db_path)), \
+                    patch.object(_gen, "ScoutingSprayChartCrawler", return_value=fake_crawler):
+                _gen._crawl_and_load_spray(
+                    client, public_id=_E244_SLUG, season_id="2026",
+                    gc_uuid=None, games_data=[], team_id=scouted_id,
+                    redirect_map=redirect_map,
+                )
+
+        _run()
+        conn = sqlite3.connect(db_path)
+        count_1 = conn.execute(
+            "SELECT COUNT(*) FROM spray_charts WHERE game_id = ?", (_E244_CANON_ID,)
+        ).fetchone()[0]
+        conn.close()
+
+        _run()
+        conn = sqlite3.connect(db_path)
+        count_2 = conn.execute(
+            "SELECT COUNT(*) FROM spray_charts WHERE game_id = ?", (_E244_CANON_ID,)
+        ).fetchone()[0]
+        conn.close()
+
+        assert count_1 > 0
+        assert count_2 == count_1  # no duplicate rows under the canonical id
