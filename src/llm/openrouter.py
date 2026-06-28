@@ -9,7 +9,7 @@ Environment variables:
                          by ``is_llm_available()`` so callers can skip
                          Tier 2 silently.
     OPENROUTER_MODEL     Optional model override.  Defaults to
-                         ``anthropic/claude-haiku-4.5``.
+                         ``google/gemini-2.5-flash-lite``.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_DEFAULT_MODEL = "anthropic/claude-haiku-4.5"
+_DEFAULT_MODEL = "google/gemini-2.5-flash-lite"
 _TIMEOUT_SECONDS = 30
 
 
@@ -49,7 +49,7 @@ def query_openrouter(
         messages: Chat messages in OpenAI format
             (``[{"role": "system", "content": "..."}, ...]``).
         model: Model identifier.  Defaults to ``OPENROUTER_MODEL`` env var,
-            then ``anthropic/claude-haiku-4.5``.
+            then ``google/gemini-2.5-flash-lite``.
         max_tokens: Maximum tokens in the response.
         temperature: Sampling temperature.
         response_format: Optional OpenRouter ``response_format`` constraint

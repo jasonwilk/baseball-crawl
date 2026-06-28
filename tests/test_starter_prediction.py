@@ -17,8 +17,12 @@ from src.reports.starter_prediction import (
     NSAA_PRE_APRIL,
     RestTier,
     StarterPrediction,
+    _apply_rest_rerank,
     _is_excluded,
     _is_nsaa_excluded,
+    _preferred_rest_from_ip_outs,
+    _preferred_rest_from_pitches,
+    _rest_state,
     compute_starter_prediction,
     get_nsaa_rules,
     is_predicted_starter_enabled,
@@ -1672,3 +1676,415 @@ class TestLegionEndToEnd:
     def test_legion_has_bullpen(self, prediction):
         """AC-2: Bullpen order populated under Legion rules."""
         assert len(prediction.bullpen_order) > 0
+
+
+# ── E-243-01: Hard rest-discount re-rank tiebreaker ─────────────────────
+
+
+def _rest_profile(
+    appearances: list[dict], *, total_starts: int = 3,
+) -> dict:
+    """Minimal pitcher profile carrying only the fields the rerank reads."""
+    return {
+        "total_starts": total_starts,
+        "total_games": len(appearances),
+        "first_name": "Test",
+        "last_name": "Pitcher",
+        "appearances": appearances,
+    }
+
+
+def _cand(player_id: str, likelihood: float) -> dict:
+    """Minimal candidate dict as produced by the engine before re-rank."""
+    return {"player_id": player_id, "likelihood": likelihood}
+
+
+class TestPreferredRestThresholds:
+    """AC-3 / AC-8(iv): preferred-rest bands by most-recent-day pitch count."""
+
+    def test_pitch_band_edges(self):
+        # 30 -> 2-day band, 31 -> 4-day band, 60 -> 4-day, 61 -> 5-day.
+        assert _preferred_rest_from_pitches(30) == 2
+        assert _preferred_rest_from_pitches(31) == 4
+        assert _preferred_rest_from_pitches(60) == 4
+        assert _preferred_rest_from_pitches(61) == 5
+
+    def test_low_band(self):
+        assert _preferred_rest_from_pitches(1) == 2
+        assert _preferred_rest_from_pitches(15) == 2
+
+
+class TestRestStateThresholds:
+    """AC-3 / AC-8(iv): days_rest == preferred is AVAILABLE (>=)."""
+
+    def test_days_rest_equals_preferred_is_available(self):
+        # 70 pitches -> preferred 5; exactly 5 days rest -> available.
+        apps = [{"game_date": "2026-04-10", "pitches": 70, "ip_outs": 18}]
+        days_rest, last_pitches, elig, est = _rest_state(
+            _rest_profile(apps), datetime.date(2026, 4, 15),
+        )
+        assert days_rest == 5
+        assert last_pitches == 70
+        assert elig == "available"
+        assert est is False
+
+    def test_one_day_short_of_preferred_is_discounted(self):
+        # 70 pitches -> preferred 5; 4 days rest -> discounted.
+        apps = [{"game_date": "2026-04-10", "pitches": 70, "ip_outs": 18}]
+        days_rest, _last, elig, est = _rest_state(
+            _rest_profile(apps), datetime.date(2026, 4, 14),
+        )
+        assert days_rest == 4
+        assert elig == "discounted"
+        assert est is False
+
+    def test_negative_days_rest_is_available(self):
+        # Future-dated appearance (anomalous data): rest can't be evaluated, so
+        # the arm stays fully-available -- aligned with _is_excluded, not
+        # discounted below available arms.
+        apps = [{"game_date": "2026-04-20", "pitches": 70, "ip_outs": 18}]
+        days_rest, last_pitches, elig, est = _rest_state(
+            _rest_profile(apps), datetime.date(2026, 4, 15),
+        )
+        assert days_rest == -5
+        assert last_pitches is None
+        assert elig == "available"
+        assert est is False
+
+
+class TestRestStateDoubleheader:
+    """AC-3 / AC-8(vi): same-day pitch counts summed before band lookup."""
+
+    def test_doubleheader_sum_determines_band(self):
+        # 20 + 20 = 40 -> 31-60 band -> preferred 4; 1 day rest -> discounted.
+        apps = [
+            {"game_date": "2026-04-14", "pitches": 20, "ip_outs": 9},
+            {"game_date": "2026-04-14", "pitches": 20, "ip_outs": 9},
+        ]
+        days_rest, last_pitches, elig, est = _rest_state(
+            _rest_profile(apps), datetime.date(2026, 4, 15),
+        )
+        assert days_rest == 1
+        assert last_pitches == 40
+        assert elig == "discounted"
+        assert est is False
+
+
+class TestRestStateIPProxy:
+    """AC-4 / AC-8(v): null pitch count -> IP proxy, never fully-available."""
+
+    def test_null_pitches_five_ip_discounted_estimate(self):
+        # null pitches + 5 IP (15 outs) -> 61+ bucket -> preferred 5.
+        # Even with abundant rest, null is conservatively DISCOUNTED.
+        apps = [{"game_date": "2026-04-05", "pitches": None, "ip_outs": 15}]
+        days_rest, last_pitches, elig, est = _rest_state(
+            _rest_profile(apps), datetime.date(2026, 4, 15),
+        )
+        assert days_rest == 10
+        assert last_pitches is None
+        assert elig == "discounted"
+        assert est is True
+
+    def test_ip_proxy_buckets(self):
+        # <=2 IP -> 2-day band, 3-4 IP -> 4-day, 5+ IP -> 5-day.
+        assert _preferred_rest_from_ip_outs(6) == 2    # 2.0 IP
+        assert _preferred_rest_from_ip_outs(9) == 4    # 3.0 IP
+        assert _preferred_rest_from_ip_outs(12) == 4   # 4.0 IP
+        assert _preferred_rest_from_ip_outs(15) == 5   # 5.0 IP
+
+
+class TestRestRerankPartition:
+    """AC-1 / AC-2 / AC-5 / AC-7: stable available-ahead-of-discounted partition."""
+
+    def test_anti_soft_regression_available_arm_wins(self):
+        """AC-8(i): discounted #1 (1.0) loses to available #2 (0.3)."""
+        # tired: 70 pitches, 1 day rest -> discounted (cleared min, < preferred 5).
+        tired = _rest_profile(
+            [{"game_date": "2026-04-14", "pitches": 70, "ip_outs": 18}],
+        )
+        # fresh: 70 pitches, 10 days rest -> available.
+        fresh = _rest_profile(
+            [{"game_date": "2026-04-05", "pitches": 70, "ip_outs": 18}],
+        )
+        candidates = [_cand("tired", 1.0), _cand("fresh", 0.3)]
+        result = _apply_rest_rerank(
+            candidates, {"tired": tired, "fresh": fresh},
+            datetime.date(2026, 4, 15),
+        )
+        assert [c["player_id"] for c in result] == ["fresh", "tired"]
+        # AC-7: attached rest-state on each candidate.
+        fresh_c = next(c for c in result if c["player_id"] == "fresh")
+        tired_c = next(c for c in result if c["player_id"] == "tired")
+        assert fresh_c["rest_eligibility"] == "available"
+        assert tired_c["rest_eligibility"] == "discounted"
+        assert tired_c["days_rest"] == 1
+        assert tired_c["last_outing_pitches"] == 70
+
+    def test_all_available_order_unchanged(self):
+        """AC-8(iii): all-available set keeps engine order (stability)."""
+        a = _rest_profile([{"game_date": "2026-04-01", "pitches": 70, "ip_outs": 18}])
+        b = _rest_profile([{"game_date": "2026-04-02", "pitches": 70, "ip_outs": 18}])
+        candidates = [_cand("a", 0.5), _cand("b", 0.4)]
+        result = _apply_rest_rerank(
+            candidates, {"a": a, "b": b}, datetime.date(2026, 4, 15),
+        )
+        assert [c["player_id"] for c in result] == ["a", "b"]
+        assert all(c["rest_eligibility"] == "available" for c in result)
+
+    def test_all_discounted_order_unchanged(self):
+        """AC-8(iii): all-discounted set keeps engine order (stability)."""
+        # Both 70 pitches, 1 day rest -> both discounted.
+        a = _rest_profile([{"game_date": "2026-04-14", "pitches": 70, "ip_outs": 18}])
+        b = _rest_profile([{"game_date": "2026-04-14", "pitches": 70, "ip_outs": 18}])
+        candidates = [_cand("a", 0.5), _cand("b", 0.4)]
+        result = _apply_rest_rerank(
+            candidates, {"a": a, "b": b}, datetime.date(2026, 4, 15),
+        )
+        assert [c["player_id"] for c in result] == ["a", "b"]
+        assert all(c["rest_eligibility"] == "discounted" for c in result)
+
+    def test_partition_does_not_add_or_remove(self):
+        """AC-5: only ordering changes -- no arm added or dropped."""
+        a = _rest_profile([{"game_date": "2026-04-14", "pitches": 70, "ip_outs": 18}])
+        b = _rest_profile([{"game_date": "2026-04-05", "pitches": 70, "ip_outs": 18}])
+        c = _rest_profile([{"game_date": "2026-04-14", "pitches": 70, "ip_outs": 18}])
+        candidates = [_cand("a", 0.5), _cand("b", 0.4), _cand("c", 0.3)]
+        result = _apply_rest_rerank(
+            candidates, {"a": a, "b": b, "c": c}, datetime.date(2026, 4, 15),
+        )
+        assert sorted(x["player_id"] for x in result) == ["a", "b", "c"]
+
+
+class TestRestRerankEndToEnd:
+    """AC-1 / AC-6: re-rank applied in place; named pick is the fresh arm."""
+
+    @pytest.fixture
+    def prediction(self):
+        # 3-man rotation tired-rested-last3.  Cycle predicts `tired` next, but
+        # `tired` relieved 1 day ago (30 pitches -> cleared min, < preferred 2
+        # -> DISCOUNTED).  `rested` last started 4 days ago at 30 pitches
+        # (>= preferred 2 -> AVAILABLE).  `last3` started yesterday at 70
+        # pitches -> hard-excluded.  Engine ranks tired #1 by likelihood; the
+        # re-rank must flip the fresh arm to the named predicted_starter.
+        starters = [
+            ("tired", "g1", "2026-04-01"),
+            ("rested", "g2", "2026-04-05"),
+            ("last3", "g3", "2026-04-09"),
+            ("tired", "g4", "2026-04-13"),
+            ("rested", "g5", "2026-04-16"),
+            ("last3", "g6", "2026-04-19"),
+        ]
+        history = []
+        for pid, gid, gdate in starters:
+            pitches = 70 if pid == "last3" else 30
+            history.append(_make_appearance(
+                pid, gid, gdate,
+                ip_outs=18, pitches=pitches, so=4,
+                appearance_order=1, team_game_number=int(gid[1:]),
+            ))
+        # tired relieves in g6 (2026-04-19) -> most recent appearance, 1d rest.
+        history.append(_make_appearance(
+            "tired", "g6", "2026-04-19",
+            ip_outs=3, pitches=30, so=1,
+            appearance_order=2, team_game_number=6,
+        ))
+        profiles = build_pitcher_profiles(history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 20),
+        )
+
+    def test_fresh_arm_ranked_first(self, prediction):
+        """AC-1: fully-available arm is #1 in top_candidates."""
+        assert prediction.top_candidates[0]["player_id"] == "rested"
+
+    def test_named_starter_is_fresh_arm(self, prediction):
+        """AC-6: in-place re-rank feeds the named predicted_starter."""
+        assert prediction.predicted_starter is not None
+        assert prediction.predicted_starter["player_id"] == "rested"
+
+    def test_excluded_arm_absent(self, prediction):
+        """AC-5: hard-excluded last3 is not resurrected into candidates."""
+        ids = [c["player_id"] for c in prediction.top_candidates]
+        assert "last3" not in ids
+
+    def test_attached_rest_state(self, prediction):
+        """AC-7: each candidate carries its rest-state for E-243-03."""
+        for cand in prediction.top_candidates:
+            assert cand["rest_eligibility"] in ("available", "discounted")
+            assert "days_rest" in cand
+            assert "last_outing_pitches" in cand
+            assert "rest_estimate" in cand
+        tired_c = next(
+            c for c in prediction.top_candidates if c["player_id"] == "tired"
+        )
+        assert tired_c["rest_eligibility"] == "discounted"
+
+
+# ── E-243-02: is_estimate flag on the prediction output ─────────────────
+
+
+class TestIsEstimateFlag:
+    """AC-2 / AC-3 / AC-5: youth/travel is flagged; binding leagues are not."""
+
+    def _build(self):
+        rotation = ["ace", "bravo"] * 3
+        dates = [
+            "2026-03-10", "2026-03-13", "2026-03-16",
+            "2026-03-19", "2026-03-22", "2026-03-25",
+        ]
+        history = _build_rotation_history(rotation, dates, starter_pitches=70)
+        return build_pitcher_profiles(history), history
+
+    def test_youth_travel_is_estimate_true(self):
+        """AC-5: youth_travel yields a ranked prediction flagged as estimate."""
+        profiles, history = self._build()
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            league="youth_travel",
+        )
+        assert pred.confidence != "suppress"
+        assert len(pred.top_candidates) > 0
+        assert pred.is_estimate is True
+
+    def test_nsaa_varsity_is_estimate_false(self):
+        """AC-3 / AC-5: nsaa_varsity is unaffected, is_estimate stays False."""
+        profiles, history = self._build()
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            league="nsaa_varsity",
+        )
+        assert pred.is_estimate is False
+
+    def test_legion_is_estimate_false(self):
+        """AC-3: legion (a binding rule unit) keeps is_estimate False."""
+        profiles, history = self._build()
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            league="legion",
+        )
+        assert pred.is_estimate is False
+
+    def test_default_is_estimate_false(self):
+        """AC-2: StarterPrediction defaults is_estimate to False."""
+        assert StarterPrediction(confidence="low").is_estimate is False
+
+
+# ── E-243-03: per-candidate display enrichment + unavailable_arms ───────
+
+
+class TestEngineDisplayEnrichment:
+    """AC-2 / AC-3: candidates carry display fields; excluded starters surface."""
+
+    @pytest.fixture
+    def prediction(self):
+        # 3-man rotation ace/bravo/charlie over 6 games every 3 days, plus a
+        # reliever ("closer") who throws 80p every game.  ref = day after g6:
+        # charlie (started g6, 70p, 1d rest -> needs 2) is hard-excluded; the
+        # closer (80p, 1d rest -> needs 3) is excluded but is NOT a starter.
+        rotation = ["ace", "bravo", "charlie"] * 2
+        dates = [
+            "2026-03-10", "2026-03-13", "2026-03-16",
+            "2026-03-19", "2026-03-22", "2026-03-25",
+        ]
+        history = _build_rotation_history(
+            rotation, dates, starter_pitches=70,
+            reliever="closer", reliever_pitches=80,
+        )
+        profiles = build_pitcher_profiles(history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 26),
+        )
+
+    def test_candidates_carry_start_share(self, prediction):
+        # ace/bravo each started 2 of 6 games -> round(2/6*100) = 33.
+        assert len(prediction.top_candidates) >= 1
+        for cand in prediction.top_candidates:
+            assert cand["start_share_pct"] == 33
+            assert cand["total_team_games"] == 6
+
+    def test_candidates_carry_display_fields(self, prediction):
+        for cand in prediction.top_candidates:
+            assert "throws" in cand          # None when schema unpopulated
+            assert "preferred_rest" in cand
+            assert "days_rest" in cand
+            assert cand["rest_eligibility"] in ("available", "discounted")
+
+    def test_excluded_starter_in_unavailable_arms(self, prediction):
+        names = [a["name"] for a in prediction.unavailable_arms]
+        assert "Charlie Player" in names
+        charlie = next(
+            a for a in prediction.unavailable_arms if a["name"] == "Charlie Player"
+        )
+        assert charlie["reason"]  # non-empty engine exclusion reason
+
+    def test_excluded_reliever_not_in_unavailable_arms(self, prediction):
+        # The closer is excluded too, but has no starts -> not a starter card.
+        names = [a["name"] for a in prediction.unavailable_arms]
+        assert "Closer Player" not in names
+
+    def test_excluded_arm_absent_from_candidates(self, prediction):
+        ids = [c["player_id"] for c in prediction.top_candidates]
+        assert "charlie" not in ids
+
+    def test_unavailable_arms_default_empty(self):
+        assert StarterPrediction(confidence="low").unavailable_arms == []
+
+
+# ── E-243-03 (FIX 2): suppress_reason set on both suppress paths ────────
+
+
+class TestSuppressReason:
+    """The engine tags which suppress path it took, for softened coach copy."""
+
+    def test_insufficient_data_path(self):
+        # 3 games (< _MIN_GAMES_FOR_ROTATION) on a supported league.
+        rotation = ["ace", "bravo", "charlie"]
+        dates = ["2026-03-10", "2026-03-13", "2026-03-16"]
+        history = _build_rotation_history(rotation, dates)
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 16),
+            league="nsaa_varsity",
+        )
+        assert pred.confidence == "suppress"
+        assert pred.suppress_reason == "insufficient_data"
+
+    def test_unsupported_level_path(self):
+        # Plenty of games, but an unsupported league (rules None).
+        rotation = ["ace", "bravo"] * 3
+        dates = [
+            "2026-03-10", "2026-03-13", "2026-03-16",
+            "2026-03-19", "2026-03-22", "2026-03-25",
+        ]
+        history = _build_rotation_history(rotation, dates)
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            league="usssa",
+        )
+        assert pred.confidence == "suppress"
+        assert pred.suppress_reason == "unsupported_level"
+
+    def test_non_suppress_has_no_suppress_reason(self):
+        rotation = ["ace", "bravo"] * 3
+        dates = [
+            "2026-03-10", "2026-03-13", "2026-03-16",
+            "2026-03-19", "2026-03-22", "2026-03-25",
+        ]
+        history = _build_rotation_history(rotation, dates, starter_pitches=70)
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            league="nsaa_varsity",
+        )
+        assert pred.confidence != "suppress"
+        assert pred.suppress_reason is None
+
+    def test_default_suppress_reason_none(self):
+        assert StarterPrediction(confidence="low").suppress_reason is None

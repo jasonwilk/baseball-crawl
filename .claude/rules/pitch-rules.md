@@ -128,6 +128,8 @@ Currently NSAA only. The engine in `src/reports/starter_prediction.py` uses froz
 
 Adding Legion would follow the same pattern (pitch-count-based, different threshold constants). USSSA and Perfect Game would need new dataclass types for innings-based and outs-based rules.
 
+**Youth/travel fallback (E-243-02)**: A team whose competition level resolves to `youth_travel` (e.g. a `\d+U` age-bracket name with no recognized NGB) has no binding league rule unit, so `get_rules_for_league()` routes it to the USA Baseball Pitch Smart 15-18 curve (the `PITCH_SMART_15_18` constant: max 105, tiers 30/45/60/80/105 -- a *distinct* constant from Legion on purpose, even though the tiers match today, so a future Legion-only change cannot silently move the estimate) instead of suppressing the card. The prediction is flagged `is_estimate=True` and the report banners it as a directional, non-binding read. This is consistent with the baseball-coach model doc's "soft prior for unknown leagues" guidance (`.claude/agent-memory/baseball-coach/league-pitch-rules.md`). Truly unsupported levels (`usssa`, `perfect_game`, `unknown`) still return `None` and suppress with softened copy -- so the `usssa` program_type and the age-pattern `youth_travel` classification are NOT the same path.
+
 ### Tier 2: LLM Prompt Injection (Agent Reference)
 
 The LLM Tier 2 prompt (`src/reports/llm_analysis.py`) injects the active NSAA rest table based on reference_date so the LLM can flag compliance concerns in its narrative. For non-NSAA teams, agents should inject the correct league's rest table based on team classification. This rule file is agent reference data -- it is not read at runtime by the application.

@@ -9,6 +9,7 @@ import pytest
 
 from src.llm.openrouter import LLMError
 from src.reports.llm_analysis import (
+    _SYSTEM_PROMPT_TEMPLATE,
     EnrichedPrediction,
     _build_user_prompt,
     _format_pitcher_table,
@@ -53,6 +54,14 @@ def _make_prediction(**kwargs) -> StarterPrediction:
                 "reasoning": "Next in rotation",
                 "games_started": 8,
                 "recent_starts": [],
+                "days_rest": 5,
+                "last_outing_pitches": 85,
+                "rest_eligibility": "available",
+                "rest_estimate": False,
+                "preferred_rest": None,
+                "start_share_pct": 27,
+                "total_team_games": 30,
+                "throws": None,
             },
         ],
         "rest_table": [
@@ -131,82 +140,136 @@ def _response_with_content(content: str, *, model: str = "test/model") -> dict:
 # ── Prompt construction tests (AC-10) ──────────────────────────────────
 
 
+class TestSystemPrompt:
+    """AC-1 / AC-2: validated Variant A system prompt, no no-predict guideline."""
+
+    def test_no_manufacture_guideline(self):
+        # AC-1: the removed "Do not manufacture a prediction" guideline is gone.
+        assert "manufacture" not in _SYSTEM_PROMPT_TEMPLATE
+        assert "Do not manufacture" not in _SYSTEM_PROMPT_TEMPLATE
+        assert "LOW/COMMITTEE" not in _SYSTEM_PROMPT_TEMPLATE
+
+    def test_variant_a_lead_and_structure(self):
+        # AC-2: leads with the named most-likely arm + concrete rest reason.
+        assert "bench briefing" in _SYSTEM_PROMPT_TEMPLATE
+        assert "single most-likely arm by name" in _SYSTEM_PROMPT_TEMPLATE
+        assert "Always name a specific pitcher in your first sentence." in (
+            _SYSTEM_PROMPT_TEMPLATE
+        )
+
+    def test_retains_json_envelope(self):
+        # The response contract (JSON envelope) is retained for the parser.
+        assert '"narrative"' in _SYSTEM_PROMPT_TEMPLATE
+        assert "JSON object" in _SYSTEM_PROMPT_TEMPLATE
+
+
 class TestPromptConstruction:
-    """Verify prompt includes required data."""
+    """AC-2: the Variant A ranked-arms data block."""
 
-    def test_includes_pitcher_data(self):
+    def test_ranked_arms_block_header(self):
         pred = _make_prediction()
         prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
+        assert "MOST LIKELY ARMS TODAY:" in prompt
         assert "Ace Smith" in prompt
-        assert "ace-dominant" in prompt
 
-    def test_includes_tier1_prediction(self):
+    def test_arm_line_has_rest_eligibility_and_starts(self):
         pred = _make_prediction()
         prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
-        assert "Confidence: high" in prompt
-        assert "Predicted starter: Ace Smith" in prompt
+        # "1. Ace Smith (#22) — 5 days rest, fully rested (only eligible arm
+        #  today) | 85 pitches 5 days ago | 8 of 30 starts this season"
+        assert "1. Ace Smith (#22)" in prompt
+        assert "5 days rest" in prompt
+        assert "fully rested" in prompt
+        assert "85 pitches" in prompt
+        assert "8 of 30 starts this season" in prompt
 
-    def test_includes_team_records(self):
-        pred = _make_prediction()
-        prompt = _build_user_prompt(
-            pred, _SAMPLE_HISTORY,
-            team_record="15-3", opponent_record="12-6",
-        )
-        assert "15-3" in prompt
-        assert "12-6" in prompt
-        assert "Scouted team:" in prompt
-        assert "Our team:" in prompt
-
-    def test_records_omitted_when_none(self):
+    def test_single_candidate_marked_only_eligible(self):
         pred = _make_prediction()
         prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
-        assert "Records" not in prompt
+        assert "(only eligible arm today)" in prompt
 
-    def test_includes_game_count(self):
-        pred = _make_prediction()
-        prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
-        assert "Total completed games in season: 1" in prompt
-
-    def test_includes_alternative_when_present(self):
+    def test_discounted_label(self):
         pred = _make_prediction(
-            confidence="moderate",
-            alternative={
-                "player_id": "p2",
-                "name": "Bravo Lee",
-                "jersey_number": "15",
-                "likelihood": 0.4,
-                "reasoning": "Higher K/9",
-                "games_started": 4,
-                "recent_starts": [],
-            },
+            top_candidates=[
+                {
+                    "player_id": "p1", "name": "Ace Smith", "jersey_number": "22",
+                    "likelihood": 0.85, "reasoning": "x", "games_started": 8,
+                    "recent_starts": [], "days_rest": 2,
+                    "last_outing_pitches": 70, "rest_eligibility": "discounted",
+                    "rest_estimate": False, "preferred_rest": 4,
+                    "start_share_pct": 27, "total_team_games": 30, "throws": None,
+                },
+                {
+                    "player_id": "p2", "name": "Bravo Lee", "jersey_number": "15",
+                    "likelihood": 0.4, "reasoning": "y", "games_started": 6,
+                    "recent_starts": [], "days_rest": 6,
+                    "last_outing_pitches": 60, "rest_eligibility": "available",
+                    "rest_estimate": False, "preferred_rest": None,
+                    "start_share_pct": 20, "total_team_games": 30, "throws": None,
+                },
+            ],
         )
         prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
-        assert "Alternative: Bravo Lee" in prompt
+        assert "eligible but on short rest" in prompt
+        # 2+ candidates -> no "only eligible arm" tag.
+        assert "only eligible arm today" not in prompt
 
-    def test_includes_data_note_when_present(self):
+    def test_unavailable_block(self):
         pred = _make_prediction(
-            data_note="Compressed schedule detected -- rotation predictions less reliable.",
+            unavailable_arms=[
+                {"name": "Carl Diaz", "reason": "0d rest -- needs 2"},
+            ],
         )
         prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
-        assert "Compressed schedule" in prompt
+        assert "UNAVAILABLE TODAY:" in prompt
+        assert "- Carl Diaz: 0d rest -- needs 2" in prompt
 
-    def test_includes_rest_table(self):
+    def test_opponent_header_and_closing(self):
+        pred = _make_prediction()
+        prompt = _build_user_prompt(pred, _SAMPLE_HISTORY, team_name="Gretna 216")
+        assert "OPPONENT: Gretna 216" in prompt
+        assert "Write a 2-4 sentence briefing for the coach now." in prompt
+
+    def test_retains_integer_ip_outs_game_log(self):
+        # AC-8 guard: the integer "IP Outs" recent-game-log column is preserved.
         pred = _make_prediction()
         table = _format_pitcher_table(pred)
-        assert "Rest & Availability Table" in table
-        assert "Ace Smith" in table
-
-    def test_includes_bullpen_order(self):
-        pred = _make_prediction()
-        table = _format_pitcher_table(pred)
-        assert "Bullpen Order" in table
-        assert "Closer Jones" in table
-
-    def test_includes_recent_game_log(self):
-        pred = _make_prediction()
-        table = _format_pitcher_table(pred)
-        assert "Recent Game Log" in table
+        assert "IP Outs" in table
         assert "2026-03-28" in table
+
+    def test_no_decimal_ip_field(self):
+        # AC-8 guard: no decimal IP field (e.g. "6.0 IP") in the data block.
+        pred = _make_prediction()
+        table = _format_pitcher_table(pred)
+        assert " IP)" not in table
+        assert "6.0 IP" not in table
+
+
+class TestEstimateAndNoJargon:
+    """AC-3 / AC-6(a): estimate consequence framing + no brand-emit directive."""
+
+    def test_estimate_consequence_framing_reaches_prompt(self):
+        pred = _make_prediction(is_estimate=True)
+        prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
+        assert "league pitch rules are not on file" in prompt
+        assert "treat borderline calls as approximate" in prompt
+
+    def test_estimate_framing_is_jargon_free(self):
+        pred = _make_prediction(is_estimate=True)
+        prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
+        for brand in ("Pitch Smart", "USA Baseball", "soft prior"):
+            assert brand not in prompt
+
+    def test_no_estimate_note_when_not_estimate(self):
+        pred = _make_prediction(is_estimate=False)
+        prompt = _build_user_prompt(pred, _SAMPLE_HISTORY)
+        assert "not on file" not in prompt
+
+    def test_system_prompt_forbids_brands_not_a_directive(self):
+        # AC-6(a): brand terms appear ONLY inside the prohibition line, never as
+        # an instruction to emit them in the output.
+        assert "Never use these words or phrases" in _SYSTEM_PROMPT_TEMPLATE
+        assert '"Pitch Smart," "Legion,"' in _SYSTEM_PROMPT_TEMPLATE
 
 
 # ── Response parsing tests (AC-10) ─────────────────────────────────────
@@ -269,7 +332,9 @@ class TestResponseParsing:
 
         assert not hasattr(result, "confidence_adjustment")
 
-    def test_records_passed_to_prompt(self, monkeypatch):
+    def test_records_accepted_but_not_rendered(self, monkeypatch):
+        """E-243-04 AC-5: Variant A drops the records section; the params are
+        still accepted for call-site compatibility but no longer rendered."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
 
         captured_messages = []
@@ -285,8 +350,8 @@ class TestResponseParsing:
             )
 
         user_msg = captured_messages[1]["content"]
-        assert "15-3" in user_msg
-        assert "10-8" in user_msg
+        assert "15-3" not in user_msg
+        assert "10-8" not in user_msg
 
     def test_model_used_from_response_not_env_or_constant(self, monkeypatch):
         """model_used derives from response['model'], not env or the constant (AC-5, F-A)."""
@@ -467,8 +532,8 @@ class TestDefensiveParseAndRetry:
         assert result.narrative == "Recovered on retry."
         assert mock_qr.call_count == 2
 
-    def test_retry_uses_temperature_zero_and_identical_kwargs(self, monkeypatch):
-        """Both calls share identical kwargs, varying only temperature (AC-8, TN-3)."""
+    def test_both_calls_temperature_zero_and_identical_kwargs(self, monkeypatch):
+        """E-243-04 AC-7c: initial call is now 0.0 (retry already 0.0)."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
 
         calls: list[dict] = []
@@ -483,9 +548,9 @@ class TestDefensiveParseAndRetry:
             enrich_prediction(_make_prediction(), _SAMPLE_HISTORY)
 
         assert len(calls) == 2
-        # Initial call uses 0.3, retry uses 0.
-        assert calls[0]["temperature"] == 0.3
-        assert calls[1]["temperature"] == 0
+        # Both the initial call and the retry use temperature 0.0.
+        assert calls[0]["temperature"] == 0.0
+        assert calls[1]["temperature"] == 0.0
         # Every kwarg other than temperature is identical across both calls.
         first = {k: v for k, v in calls[0].items() if k != "temperature"}
         second = {k: v for k, v in calls[1].items() if k != "temperature"}

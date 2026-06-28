@@ -4,7 +4,7 @@
 [E-243: Make the Probable-Starter Analysis Useful on Game Morning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the deterministic engine ranks a fully-available starter ahead of a still-tired (preferred-rest-window) one. A hard re-rank partitions the engine's already-ranked starter candidates into fully-available vs. discounted-by-rest groups and orders all available arms ahead of all discounted arms, preserving the engine's relative order within each group. This directly addresses the user's complaint that the report sometimes recommends a tired arm over a fresh one.

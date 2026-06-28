@@ -3742,6 +3742,7 @@ class TestTier2EnrichmentStatus:
         with patch("src.llm.openrouter.is_llm_available", return_value=False):
             result, status = _run_tier2_enrichment(
                 pred, history,
+                team_name="Gretna 216 Reserve",
                 team_record="10-2", reference_date=None, public_id="abc123",
             )
 
@@ -3763,12 +3764,16 @@ class TestTier2EnrichmentStatus:
         ):
             result, status = _run_tier2_enrichment(
                 pred, history,
+                team_name="Gretna 216 Reserve",
                 team_record="10-2", reference_date=None, public_id="abc123",
             )
 
         assert result is sentinel
         assert status == TIER2_SUCCESS
         mock_enrich.assert_called_once()
+        # E-243-04 FIX: the real opponent name is forwarded to the prompt (not
+        # the "this opponent" placeholder).
+        assert mock_enrich.call_args.kwargs["team_name"] == "Gretna 216 Reserve"
 
     def test_failed_status_on_llmerror(self, caplog):
         """enrich_prediction raises LLMError → (None, failed); WARNING + exc_info (AC-2)."""
@@ -3788,6 +3793,7 @@ class TestTier2EnrichmentStatus:
         ):
             result, status = _run_tier2_enrichment(
                 pred, history,
+                team_name="Gretna 216 Reserve",
                 team_record="10-2", reference_date=None, public_id="abc123",
             )
 
@@ -3813,6 +3819,7 @@ class TestTier2EnrichmentStatus:
         ):
             result, status = _run_tier2_enrichment(
                 pred, history,
+                team_name="Gretna 216 Reserve",
                 team_record="10-2", reference_date=None, public_id="abc123",
             )
 

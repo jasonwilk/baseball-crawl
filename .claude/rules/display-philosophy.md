@@ -81,3 +81,12 @@ Implementation reference (top-down first-match):
 Batting:  [(9,4), (7,3), (5,2), (3,1)]  -- 0-2 qualified = max 0
 Pitching: [(6,4), (4,3), (3,2), (2,1)]  -- 0-1 qualified = max 0
 ```
+
+## Coach-Facing Copy: Internal Diagnostics Stay Internal
+
+Engine dataclasses may carry internal/diagnostic fields that must NEVER be rendered raw to the coach. The Most Likely Arms card (`StarterPrediction` in `src/reports/starter_prediction.py`, rendered in `scouting_report.html`) is the live example (E-243):
+
+- **`data_note` is internal-only.** It is a diagnostic string for operators/debugging, not coach copy. The renderer maps the `suppress_reason` discriminator (`"insufficient_data"` / `"unsupported_level"` / `None`) to softened, jargon-free copy and NEVER echoes `data_note`. Any future card with an engine diagnostic field follows the same split: discriminator -> coach copy; raw note stays out of the template.
+- **Discounted is not unavailable.** A still-tired arm that PASSES the hard rest gate is *discounted* -- kept in the ranked pool, re-ranked below fully-rested arms, shown with a "Short rest"/"(prefers N)" annotation. Only hard-gate failures land in the "Unavailable today" sub-block. Do not collapse the two: a discounted arm can still start; an unavailable one cannot.
+
+This is the card-copy counterpart of the operator-vs-coach honesty split in `.claude/rules/architecture-subsystems.md` (Reports Package). It does not override "Never suppress" above: that principle governs *stat rows* (present data always renders at full weight), whereas the starter card's suppress state is honest *absence* of a projection, not the hiding of present data.

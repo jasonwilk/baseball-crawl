@@ -14,8 +14,8 @@ LLM writes words. It does not rank arms. All eligibility, role, and rotation log
 
 ## Two Bad-Example Root Cause
 Both failures came from missing two hard gates:
-1. **Pitch Smart eligibility gate** — must disqualify ineligible arms before prediction
-2. **Preferred-rest discount** — arms that clear the minimum but are still inside the preferred rest window get downweighted, not elevated
+1. **Applicable league/level/phase rest gate** — must disqualify ineligible arms before prediction (gate is keyed by league × competition level × season phase; see [[league-pitch-rules]] — not Pitch-Smart-specific)
+2. **Preferred-rest discount** — arms that clear the minimum but are still inside the preferred rest window get demoted below fully-available arms (HARD tiebreaker), not softly downweighted
 
 ## Ranked Prediction Signals
 
@@ -76,15 +76,15 @@ Eligible: `days_rest >= required_rest_days`
 (Day 0 = appearance date. Game day is not a rest day.)
 
 ### Two-tier availability model
-- **UNAVAILABLE**: days_rest < Pitch Smart minimum. Hard gate. Never override.
-- **AVAILABLE BUT DISCOUNTED**: days_rest >= minimum but < preferred rest window. Apply preference discount in rotation ranking.
+- **UNAVAILABLE**: days_rest < applicable league/level/phase minimum. Hard gate. Never override.
+- **AVAILABLE BUT DISCOUNTED**: days_rest >= minimum but < preferred rest window. **HARD tiebreaker**: all fully-available arms rank above all discounted arms in the candidate list (stable partition — relative order within each group preserved). Soft/graduated weight penalties were validated as ineffective in backtesting (17 opponent seasons) — they made no measurable difference on top-1 accuracy.
 
 ### Preferred rest thresholds (for starter role)
 - 0-30 pitches: 2 days preferred
 - 31-60 pitches: 4 days preferred
 - 61+ pitches (full start): 5 days preferred
 
-**Fallback when pitch count unavailable:** Use IP proxy: ≤2 IP → 0-30 bucket, 3-4 IP → 31-60 bucket, 5+ IP → 61+ bucket. Flag as estimate.
+**Fallback when pitch count unavailable:** Use IP proxy: ≤2 IP → 0-30 bucket, 3-4 IP → 31-60 bucket, 5+ IP → 61+ bucket. Flag as estimate. **M1 ruling: null pitch count is always DISCOUNTED, never fully-available.** Treating null as available would invert the conservative-when-uncertain principle — and the null path fires precisely for youth/travel opponents where pitch tracking is least reliable. Confirmed against as-built implementation: `_rest_state()` routes null pitch count through the IP proxy; any non-zero preferred-rest result → DISCOUNTED (minimum preferred-rest is 2 days, so null is always DISCOUNTED).
 
 ## Role Classification
 
@@ -107,7 +107,7 @@ CLOSER/LATE RELIEVER: avg appearance_order ≥ 2.5
 2. Classify role (STARTER / SWING / RELIEVER / CLOSER / ROLE UNCLEAR)
 3. Eliminate UNAVAILABLE and RELIEVER/CLOSER arms from candidate pool
 4. Among eligible starters: rank by least-recently-started (longest days since last start = highest priority)
-5. Apply preferred-rest discount to arms in AVAILABLE BUT DISCOUNTED tier
+5. Apply preferred-rest HARD tiebreaker: re-rank so all fully-available arms sort before all discounted ones (stable — preserves relative order within each group)
 6. Apply quality boost to ace arm for high-stakes games
 7. Score and rank; assign confidence level
 8. Pass ranked list + unavailability list to LLM for narration
@@ -129,31 +129,49 @@ Minimum output: "X arms are unavailable by rest. Of Y eligible arms, [Name] has 
 
 ## Report Output Shape
 
+**Validated shape: ranked top 2–3 most likely arms** (not a single predicted starter).
+
+**Why ranked, not single-named — backtest finding (17 opponent seasons / 357 games):** The engine commits to one name only rarely. When it does, that prediction is wrong ~85% of the time. Overall top-1 accuracy across all games is ~20%; top-2 is ~40%. "Committee" is structurally true at the high school level — pitch-count caps mean no arm owns the rotation the way an MLB ace does. The honest, actionable output is a ranked list, not a headline name.
+
 ```
-PROBABLE STARTER
+MOST LIKELY ARMS
 #22 Martinez — RIGHT
 7 days rest | Last outed June 20 (58 pitches, 5.1 IP)
-8 of 12 GS this season, avg. 5.0 IP/start | K/BB 2.8 (37.2 IP)
-Confidence: HIGH
+8 of 12 GS this season (67%) | K/BB 2.8 (37.2 IP)
+Fully available
 
-ALSO AVAILABLE (lower probability)
 #33 Williams — LEFT
 4 days rest | Last outed June 23 (38 pitches, 3.0 IP)
-Primarily reliever (3 of 11 starts) — swing role
+3 of 12 GS this season (25%) — swing role
+Fully available
+
+#7 Ramirez — RIGHT
+2 days rest | Last outed June 25 (52 pitches, 4.1 IP)
+5 of 12 GS this season (42%)
+Discounted — prefers 4 days rest
 
 UNAVAILABLE TODAY
-#14 Johnson: 67 pitches 3 days ago — needs Day 4 (NSAA rest rule)
-#8 Torres: 45 pitches 1 day ago — needs Day 3 (NSAA rest rule)
+#14 Johnson: 88 pitches 1 day ago — needs 3 days rest (NSAA Varsity)
+#8 Torres: 67 pitches 1 day ago — needs 2 days rest (NSAA Varsity)
 ```
 
 Design rules:
-- One name at top, always. Never open with "this is unclear."
+- **Ranked top 2–3 arms, always a list.** The old "One name at top, always" framing is retired — the backtest showed it is wrong ~85% of the time on the rare occasions the engine commits to one name.
+- **Fully-available arms sort above discounted arms** (hard tiebreaker). Show rest eligibility inline: "Fully available" or "Discounted — prefers N days rest".
 - Handedness mandatory (coach needs it for lineup construction immediately)
 - Sample size badge on all rate stats: "K/BB 2.8 (37.2 IP)"
 - Unavailability section always present
 - No narrative hedging, no conditional prose, 10-second scan target
 
 ## Backtesting Scoring
+
+### Validated Findings (17 opponent seasons / 357 games — 2026 backtest)
+
+- **Top-1 accuracy ~20%** across all games. The engine rarely names one clear starter; when it does, the prediction is wrong ~85% of the time.
+- **Top-2 accuracy ~40%.** The ranked list (2–3 arms) is the correct output shape.
+- **Committee is structurally true** at the high school level. Pitch-count caps mean no arm owns the rotation the way an MLB ace does; the engine cannot reliably isolate a single starter from boxscore data alone.
+- **Soft/graduated rest penalties were ineffective.** Replacing the soft downweight with a HARD fully-available-first tiebreaker produced no regression on top-1 accuracy and a measurable improvement on unavailability recall. The hard partition is the validated mechanism.
+- These findings are the basis for the "ranked top 2–3 arms" output shape (see Report Output Shape above).
 
 **Primary:** Top-1 accuracy
 - Hit = predicted #1 is actual appearance_order=1. Score 1.0.

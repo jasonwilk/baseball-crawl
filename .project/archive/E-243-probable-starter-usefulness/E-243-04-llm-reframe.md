@@ -4,7 +4,7 @@
 [E-243: Make the Probable-Starter Analysis Useful on Game Morning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the optional Tier-2 LLM narration leads with the named most-likely arm and a concrete rest reason, names the unavailable arms, and uses plain English with no hedge — replacing the hedge-heavy "committee situation" prose. It installs the bake-off-validated "Variant A" prompt, runs the Tier-2 model as `google/gemini-2.5-flash-lite` at temperature 0.0, keeps the LLM data block to pitch count (no decimal IP field), and removes the "do not manufacture a prediction" guideline. This aligns the prose with the reframed deterministic card from E-243-03 and closes the "the narrative is the one thing we didn't validate" gap.

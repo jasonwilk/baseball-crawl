@@ -4,7 +4,7 @@
 [E-243: Make the Probable-Starter Analysis Useful on Game Morning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the baseball-coach domain memory for the probable-starter model records the corrected output shape (a ranked top-2/3 list of likely arms) and the corrected rest-discount mechanism (a HARD tiebreaker), replacing the prior "always name ONE starter at top" guidance that the backtest showed is 85% wrong when the engine does name one.

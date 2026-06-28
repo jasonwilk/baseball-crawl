@@ -1269,6 +1269,7 @@ def _run_tier2_enrichment(
     starter_prediction: StarterPrediction | None,
     pitching_history_rows: list[dict],
     *,
+    team_name: str | None,
     team_record: str | None,
     reference_date: date | None,
     public_id: str,
@@ -1303,6 +1304,7 @@ def _run_tier2_enrichment(
         enriched = enrich_prediction(
             starter_prediction,
             pitching_history_rows,
+            team_name=team_name,
             team_record=team_record,
             reference_date=reference_date,
         )
@@ -2154,6 +2156,7 @@ class _ReportGeneration:
                         enriched_prediction, enrichment_status = _run_tier2_enrichment(
                             starter_prediction,
                             pitching_history_rows,
+                            team_name=self.team_name_from_api,
                             team_record=team_record_str,
                             reference_date=date.fromisoformat(generated_at[:10]),
                             public_id=self.public_id,

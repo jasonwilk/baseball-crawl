@@ -106,7 +106,7 @@ class TestQueryOpenrouterHeaders:
         with patch.object(httpx.Client, "post", mock_post):
             query_openrouter(_MESSAGES)
 
-        assert captured["json"]["model"] == "anthropic/claude-haiku-4.5"
+        assert captured["json"]["model"] == "google/gemini-2.5-flash-lite"
 
     def test_response_format_included_when_provided(self, monkeypatch):
         """response_format appears in the request body when supplied (AC-2)."""

@@ -334,8 +334,24 @@ class TestGetRulesForLeague:
         ref = datetime.date(2026, 4, 15)
         assert get_rules_for_league("usssa", ref) is None
         assert get_rules_for_league("perfect_game", ref) is None
-        assert get_rules_for_league("youth_travel", ref) is None
         assert get_rules_for_league("unknown", ref) is None
+
+    def test_youth_travel_returns_pitch_smart(self) -> None:
+        """E-243-02: youth_travel falls back to the Pitch Smart 15-18 curve."""
+        import datetime
+
+        from src.reports.starter_prediction import PITCH_SMART_15_18
+        ref = datetime.date(2026, 4, 15)
+        rules = get_rules_for_league("youth_travel", ref)
+        assert rules is PITCH_SMART_15_18
+        assert rules.max_pitches == 105
+
+    def test_pitch_smart_is_distinct_constant_from_legion(self) -> None:
+        """TN-4: distinct constant so a Legion-only change can't move it."""
+        from src.reports.starter_prediction import LEGION, PITCH_SMART_15_18
+        assert PITCH_SMART_15_18 is not LEGION
+        # Same tiers today, but separately defined.
+        assert PITCH_SMART_15_18.rest_tiers == LEGION.rest_tiers
 
 
 class TestSubvarsityRules:
@@ -486,3 +502,60 @@ class TestWarningOutputContract:
         if pred.data_note:
             assert "not yet supported" not in pred.data_note
             assert "not detected" not in pred.data_note
+
+
+# ── E-243-02: youth/travel labeled-estimate fallback ──────────────────
+
+
+class TestYouthTravelFallback:
+    """youth_travel falls back to the Pitch Smart estimate instead of a blank card."""
+
+    def test_youth_travel_produces_ranked_prediction(self) -> None:
+        """AC-1: youth_travel with >=4 games -> ranked prediction, not suppress."""
+        history = _build_history_for_warning_test()
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 4, 1),
+            league="youth_travel",
+        )
+        assert pred.confidence != "suppress"
+        assert len(pred.top_candidates) > 0
+        # Not the no-rules warning card.
+        if pred.data_note:
+            assert "not yet supported" not in pred.data_note
+            assert "not detected" not in pred.data_note
+
+    def test_youth_travel_flagged_as_estimate(self) -> None:
+        """AC-2: youth_travel fallback sets is_estimate True."""
+        history = _build_history_for_warning_test()
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 4, 1),
+            league="youth_travel",
+        )
+        assert pred.is_estimate is True
+
+    def test_youth_travel_under_4_games_still_suppresses(self) -> None:
+        """AC-7: the min-games gate is independent of the league gate."""
+        # Only 3 games -> below _MIN_GAMES_FOR_ROTATION.
+        history = []
+        for i, d in enumerate(["2026-03-10", "2026-03-13", "2026-03-16"]):
+            gid = f"g{i + 1:02d}"
+            history.append(_make_appearance(
+                "ace", gid, d, ip_outs=18, pitches=75, so=6,
+                appearance_order=1,
+            ))
+            history.append(_make_appearance(
+                "reliever", gid, d, ip_outs=3, pitches=15, so=1,
+                appearance_order=2,
+            ))
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 16),
+            league="youth_travel",
+        )
+        assert pred.confidence == "suppress"
+        assert pred.predicted_starter is None

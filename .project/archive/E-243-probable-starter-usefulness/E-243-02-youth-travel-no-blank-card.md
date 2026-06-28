@@ -4,7 +4,7 @@
 [E-243: Make the Probable-Starter Analysis Useful on Game Morning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, an opponent whose team name resolves to youth/travel (e.g., "GI Home Federal 18U") renders a probable-starter prediction labeled as an estimate, instead of a suppressed/blank card. The engine applies a pitch-count rule set (the USA Baseball Pitch Smart 15-18 soft prior) for youth/travel competition levels rather than returning the `suppress` no-rules path, and tags the result so downstream presentation can mark it as an estimate.

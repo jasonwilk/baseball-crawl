@@ -15,11 +15,7 @@ from typing import Any
 
 from src.llm.json_extract import extract_json_object
 from src.llm.openrouter import LLMError, query_openrouter
-from src.reports.starter_prediction import (
-    StarterPrediction,
-    format_nsaa_rest_table,
-    get_nsaa_rules,
-)
+from src.reports.starter_prediction import StarterPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -36,97 +32,116 @@ class EnrichedPrediction:
 
 # ── Prompt construction ─────────────────────────────────────────────────
 
+# REQUIRED POST-MERGE MANUAL STEP (E-243-04 AC-6b): live-model output is not
+# deterministically unit-testable.  After merge, generate a sample youth/travel
+# report (is_estimate=True) with OPENROUTER_API_KEY set and confirm the rendered
+# narrative contains NONE of: "Pitch Smart", "Legion", "USA Baseball",
+# "soft prior".  The deterministic prompt-construction surface is covered by the
+# unit tests in tests/test_llm_analysis.py (TestEstimateAndNoJargon).
+#
+# Validated "Variant A" bench-briefing prompt (E-243-04 / bake-off winner;
+# google/gemini-2.5-flash-lite scored 16/16).  Source of truth, reproduced
+# verbatim from epics/E-243-probable-starter-usefulness/E-243-04-narration-
+# prompt.md.  The JSON OUTPUT block below is the unchanged response contract
+# (the deterministic parser + response_format hardening require a JSON
+# envelope); the narration substance above it is Variant A as-validated.
+# This string has no .format() placeholders -- the literal JSON braces are
+# intentional and must not be doubled.
 _SYSTEM_PROMPT_TEMPLATE = """\
-You are a high school baseball coaching analyst. You analyze pitching \
-rotation data and produce concise, actionable scouting intelligence for \
-coaches preparing for their next game.
+You are a baseball scout writing a brief bench briefing for a high school coach preparing for today's game. The ranked pitching data has already been computed for you — your job is to narrate it in 2-4 sentences of plain English prose.
 
-{nsaa_rest_table}
+STRUCTURE (follow this order):
+1. Lead with the single most-likely arm by name and the concrete reason — how many days of rest they have, or how many pitches they threw and when. One name. One reason. First sentence.
+2. Mention the next 1-2 likely arms if they appear in the data, with their rest situation.
+3. Name anyone who is unavailable today and state why in plain English (e.g., "threw 72 pitches four days ago and needs one more day").
+4. If the data is flagged as a pitch-count estimate, say so plainly in one phrase (e.g., "rest eligibility is estimated — their league rules aren't on file").
 
-Your analysis should be practical and bench-ready. Coaches want to know:
-1. Who is most likely to start and why
-2. What bullpen sequence to expect
-3. Any workload or rest concerns
-4. Any NSAA pitch count compliance issues (unavailable arms, approaching limits)
+HARD RULES:
+— Always name a specific pitcher in your first sentence. Never open with uncertainty, ambiguity, or a description of the situation.
+— The ranked order in the data is correct. Do not reorder, reverse, or qualify the ranking. Do not present the #2 arm as more likely than #1.
+— 2-4 sentences total. No bullet lists. Flowing prose only.
+— Never use these words or phrases: "committee situation," "committee," "Pitch Smart," "Legion," "WHIP," "FIP," or any phrase that amounts to refusing to name a likely starter.
+— "Days of rest" and "threw X pitches N days ago" are fine. Rule-set names and advanced stats are not.
+— A discounted arm (eligible but on short rest) is still a real candidate — mention it, but as secondary to a fully-rested arm.
 
-Respond ONLY with a JSON object (no markdown, no code fences) containing:
-{{
-  "narrative": "2-4 sentence analysis of the predicted starter and key factors",
-  "bullpen_sequence": "Expected bullpen sequence after the starter (1-2 sentences, or null if insufficient data)",
-  "confidence_adjustment": "agree" or "disagree-higher" or "disagree-lower" (your assessment vs the deterministic prediction)
-}}
-
-Guidelines:
-- Use plain English a coach understands. No jargon like "WHIP" unless the data includes it.
-- At HIGH confidence: confirm the prediction, note any workload concerns.
-- At MODERATE confidence: explain the alternative scenario clearly.
-- At LOW/COMMITTEE confidence: explain the ambiguity honestly. Do not manufacture a prediction.
-- If W-L records suggest a meaningful matchup (e.g., strong team vs weak), note that coaches sometimes elevate their top arm for big games (~25-30% of HS games), but do not overstate this -- record alone cannot predict deployment decisions.
-- If compressed schedule is noted, mention that rotation predictions are less reliable in tournament play.
-- If any bullpen pitcher is marked unavailable, note the reason and suggest skipping them in the sequence.
+Respond ONLY with a JSON object (no markdown, no code fences):
+{"narrative": "<your 2-4 sentence briefing as a single prose string>", "bullpen_sequence": null}
 """
 
 
+def _availability_label(eligibility: str | None, *, only_eligible: bool) -> str:
+    """Translate the two-valued rest eligibility into the validated phrasing."""
+    if eligibility == "available":
+        label = "fully rested"
+    else:
+        label = "eligible but on short rest"
+    if only_eligible:
+        label += " (only eligible arm today)"
+    return label
+
+
+def _pitch_display(candidate: dict) -> str:
+    """Render a ranked arm's most-recent pitch load, with no decimal IP (AC-8).
+
+    Real pitch count -> ``"{N} pitches"``.  Null/IP-proxy case (E-243-01 M1) ->
+    a non-numeric estimate phrase, since the engine output carries no innings
+    field to derive a count and AC-8 forbids introducing one.
+    """
+    pitches = candidate.get("last_outing_pitches")
+    if pitches is not None:
+        return f"{pitches} pitches"
+    return "an estimated recent workload (pitch count not on file)"
+
+
 def _format_pitcher_table(prediction: StarterPrediction) -> str:
-    """Format pitcher candidates and rest table as structured text."""
+    """Format the ranked-arms data block (validated Variant A shape).
+
+    Surfaces pitch count only -- no decimal IP field (AC-8).  Consumes the
+    enriched candidate fields from E-243-03 (days_rest, rest_eligibility,
+    games_started, total_team_games) and the additive unavailable_arms output.
+    """
     lines: list[str] = []
 
-    if prediction.top_candidates:
-        lines.append("## Top Starter Candidates")
-        lines.append(
-            f"{'Name':<20} {'GS':>3} {'Likelihood':>10} {'Reasoning'}"
+    candidates = prediction.top_candidates
+    only_eligible = len(candidates) == 1
+    lines.append("MOST LIKELY ARMS TODAY:")
+    for i, c in enumerate(candidates, start=1):
+        jersey = c.get("jersey_number") or "?"
+        days_rest = c.get("days_rest")
+        rest_str = (
+            f"{days_rest} days rest" if days_rest is not None else "rest unknown"
         )
-        lines.append("-" * 70)
-        for c in prediction.top_candidates:
-            lines.append(
-                f"{c['name']:<20} {c['games_started']:>3} "
-                f"{c['likelihood']:>10.1%} {c['reasoning']}"
-            )
+        label = _availability_label(
+            c.get("rest_eligibility"),
+            only_eligible=only_eligible and i == 1,
+        )
+        # days_since equals days_rest for the ranked line (verbatim spec).
+        days_since_str = (
+            f"{days_rest} days ago" if days_rest is not None else "recently"
+        )
+        gs = c.get("games_started")
+        tg = c.get("total_team_games")
+        if gs is not None and tg:
+            starts_str = f"{gs} of {tg} starts this season"
+        else:
+            starts_str = f"{gs} starts this season"
+        lines.append(
+            f"{i}. {c['name']} (#{jersey}) — {rest_str}, {label} | "
+            f"{_pitch_display(c)} {days_since_str} | {starts_str}"
+        )
 
-    if prediction.rest_table:
+    if prediction.unavailable_arms:
         lines.append("")
-        lines.append("## Rest & Availability Table")
-        lines.append(
-            f"{'Name':<20} {'GS':>3} {'Last Outing':>12} "
-            f"{'Days Rest':>9} {'Last Pitches':>12} {'7d Workload':>11}"
-        )
-        lines.append("-" * 80)
-        for r in prediction.rest_table:
-            last_date = r.get("last_outing_date") or "?"
-            days = r.get("days_since_last_appearance")
-            days_str = str(days) if days is not None else "?"
-            pitches = r.get("last_outing_pitches")
-            pitches_str = str(pitches) if pitches is not None else "?"
-            wl = r.get("workload_7d")
-            wl_str = str(wl) if wl is not None else "?"
-            lines.append(
-                f"{r['name']:<20} {r['games_started']:>3} "
-                f"{last_date:>12} {days_str:>9} "
-                f"{pitches_str:>12} {wl_str:>11}"
-            )
+        lines.append("UNAVAILABLE TODAY:")
+        for arm in prediction.unavailable_arms:
+            lines.append(f"- {arm['name']}: {arm['reason']}")
 
-    if prediction.bullpen_order:
-        lines.append("")
-        lines.append("## Bullpen Order (by first-relief frequency)")
-        lines.append(
-            f"{'Name':<20} {'Freq':>4} {'Games Sampled':>13} {'Status':<30}"
-        )
-        lines.append("-" * 70)
-        for b in prediction.bullpen_order:
-            status = "available"
-            if not b.get("available", True):
-                reason = b.get("unavailability_reason") or "unavailable"
-                status = f"(unavailable: {reason})"
-            lines.append(
-                f"{b['name']:<20} {b['frequency']:>4} "
-                f"{b['games_sampled']:>13} {status}"
-            )
-
+    # Preserve the top arm's recent game log with its INTEGER "IP Outs" column
+    # (AC-8 guard: do not strip it, do not add a decimal IP field).
     if prediction.predicted_starter and prediction.predicted_starter.get("recent_starts"):
-        lines.append("")
-        lines.append("## Predicted Starter Recent Game Log")
         starter = prediction.predicted_starter
-        lines.append(f"Name: {starter['name']}")
+        lines.append("")
+        lines.append(f"## Most Recent Game Log — {starter['name']}")
         lines.append(
             f"{'Date':<12} {'IP Outs':>7} {'Pitches':>7} "
             f"{'K':>3} {'BB':>3} {'Dec':>3} {'Rest':>4}"
@@ -152,48 +167,34 @@ def _build_user_prompt(
     prediction: StarterPrediction,
     pitching_history: list[dict],
     *,
+    team_name: str | None = None,
     team_record: str | None = None,
     opponent_record: str | None = None,
 ) -> str:
-    """Build the user prompt with structured data and Tier 1 results."""
+    """Build the Variant A user/data block.
+
+    ``team_record``/``opponent_record`` are accepted for call-site
+    compatibility but intentionally unused: the validated Variant A block drops
+    the records section (the "elevate the ace for big games" guideline is gone).
+    The estimate NOTE is emitted from ``prediction.is_estimate`` (E-243-02), in
+    jargon-free consequence framing (no brand/rule-set names reach the prose).
+    """
     parts: list[str] = []
 
-    # Context
-    parts.append("# Pitching Rotation Analysis Request")
+    parts.append(f"OPPONENT: {team_name}" if team_name else "OPPONENT: this opponent")
     parts.append("")
-
-    if team_record or opponent_record:
-        parts.append("## Records")
-        if team_record:
-            parts.append(f"Scouted team: {team_record}")
-        if opponent_record:
-            parts.append(f"Our team: {opponent_record}")
-        parts.append("")
-
-    # Tier 1 summary
-    parts.append("## Deterministic Prediction (Tier 1)")
-    parts.append(f"Confidence: {prediction.confidence}")
-    parts.append(f"Rotation pattern: {prediction.rotation_pattern}")
-    if prediction.predicted_starter:
-        parts.append(
-            f"Predicted starter: {prediction.predicted_starter['name']} "
-            f"(#{prediction.predicted_starter.get('jersey_number') or '?'})"
-        )
-    if prediction.alternative:
-        parts.append(
-            f"Alternative: {prediction.alternative['name']} "
-            f"(#{prediction.alternative.get('jersey_number') or '?'})"
-        )
-    if prediction.data_note:
-        parts.append(f"Note: {prediction.data_note}")
-    parts.append("")
-
-    # Structured data
     parts.append(_format_pitcher_table(prediction))
 
-    # Game count context
-    game_ids = set(r["game_id"] for r in pitching_history)
-    parts.append(f"\nTotal completed games in season: {len(game_ids)}")
+    if prediction.is_estimate:
+        parts.append("")
+        parts.append(
+            "NOTE: This opponent's league pitch rules are not on file. The rest "
+            "eligibility above is a standard pitch-count estimate — the actual "
+            "rules may differ, so treat borderline calls as approximate."
+        )
+
+    parts.append("")
+    parts.append("Write a 2-4 sentence briefing for the coach now.")
 
     return "\n".join(parts)
 
@@ -205,6 +206,7 @@ def enrich_prediction(
     prediction: StarterPrediction,
     pitching_history: list[dict],
     *,
+    team_name: str | None = None,
     team_record: str | None = None,
     opponent_record: str | None = None,
     reference_date: datetime.date | None = None,
@@ -215,10 +217,12 @@ def enrich_prediction(
         prediction: The deterministic ``StarterPrediction`` from Tier 1.
         pitching_history: Raw pitching history rows from
             ``get_pitching_history()``.
-        team_record: W-L record of the scouted team (e.g., ``"15-3"``).
-        opponent_record: W-L record of our team (e.g., ``"12-6"``).
-        reference_date: Anchor date for NSAA rule selection (defaults to
-            today if not provided).
+        team_name: Opponent team name for the data-block header (optional).
+        team_record: W-L record of the scouted team.  Accepted for call-site
+            compatibility; the validated Variant A prompt does not use records.
+        opponent_record: W-L record of our team.  Same compatibility note.
+        reference_date: Accepted for call-site compatibility; the Variant A
+            prompt is self-contained and no longer injects an NSAA rest table.
 
     Returns:
         ``EnrichedPrediction`` wrapping the base prediction with narrative.
@@ -226,16 +230,11 @@ def enrich_prediction(
     Raises:
         LLMError: On API failures or malformed responses.
     """
-    if reference_date is None:
-        reference_date = datetime.date.today()
-
-    rules = get_nsaa_rules(reference_date)
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        nsaa_rest_table=format_nsaa_rest_table(rules),
-    )
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE
 
     user_prompt = _build_user_prompt(
         prediction, pitching_history,
+        team_name=team_name,
         team_record=team_record, opponent_record=opponent_record,
     )
     messages = [
@@ -279,7 +278,9 @@ def enrich_prediction(
     # (TN-3).  HTTP/transport errors (from ``_invoke``) and malformed-envelope
     # errors (from ``_content_of``) propagate WITHOUT a retry -- only
     # ``extract_json_object`` failures are retried.
-    response = _invoke(0.3)
+    # Temperature 0.0 for deterministic narration (E-243-04 AC-7c); the retry
+    # is already 0.0.  Temperature is NOT env-controlled.
+    response = _invoke(0.0)
     content = _content_of(response)
     try:
         parsed = extract_json_object(content)

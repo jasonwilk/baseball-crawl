@@ -4,7 +4,7 @@
 [E-243: Make the Probable-Starter Analysis Useful on Game Morning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the probable-starter section of every report with sufficient data shows a ranked list of the likely arms — up to 3, as many genuine candidates as exist (a single arm when only one genuine candidate exists), each with start-share, days rest, and rest-eligibility — instead of the all-or-nothing "name one starter or show a blank/committee card." The section wording is reframed from "Predicted Starter" toward "Most Likely Arms," and the leading "true committee situation" hedge is gone. This is the core presentation fix and the heart of the user's request.

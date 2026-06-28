@@ -51,6 +51,19 @@ _REST_TABLE_SIZE = 3
 _BULLPEN_SIZE = 3
 _CANDIDATES_SIZE = 3
 
+# Preferred-rest ("discounted") thresholds (E-243-01).  These sit ON TOP of
+# the legal minimum the hard exclusion gate (_is_excluded) already enforces:
+# an arm that cleared the gate but has not reached its preferred rest window is
+# AVAILABLE BUT DISCOUNTED and re-ranked below fully-available arms.
+_PREFERRED_REST_LOW_MAX = 30   # <=30 pitches on the most recent game day
+_PREFERRED_REST_MID_MAX = 60   # 31-60 pitches
+_PREFERRED_REST_LOW_DAYS = 2   # <=30 pitches -> 2 days preferred
+_PREFERRED_REST_MID_DAYS = 4   # 31-60 pitches -> 4 days preferred
+_PREFERRED_REST_HIGH_DAYS = 5  # 61+ pitches -> 5 days preferred
+# IP-proxy buckets (in innings) when the most-recent-day pitch count is null.
+_IP_PROXY_LOW_MAX = 2          # <=2 IP -> 0-30 bucket
+_IP_PROXY_MID_MAX = 4          # 3-4 IP -> 31-60 bucket; 5+ IP -> 61+ bucket
+
 
 # ── Dataclass ───────────────────────────────────────────────────────────
 
@@ -67,6 +80,12 @@ class StarterPrediction:
     rest_table: list[dict[str, Any]] = field(default_factory=list)
     bullpen_order: list[dict[str, Any]] = field(default_factory=list)
     data_note: str | None = None
+    is_estimate: bool = False
+    unavailable_arms: list[dict[str, Any]] = field(default_factory=list)
+    # Why the engine suppressed, for the renderer to map to softened coach copy
+    # (never render raw data_note to the coach).  One of "insufficient_data",
+    # "unsupported_level", or None when not suppressed.
+    suppress_reason: str | None = None
 
 
 # ── NSAA Pitch Count Rules ─────────────────────────────────────────────
@@ -168,6 +187,25 @@ LEGION = PitchCountRules(
 )
 
 
+# ── Pitch Smart 15-18 fallback (youth/travel estimate) ────────────────
+
+# USA Baseball Pitch Smart 15-18 curve, applied as a LABELED ESTIMATE for
+# youth/travel teams that have no binding league rule unit (E-243-02).  The
+# tiers happen to equal the Legion Senior/Junior curve today, but this is a
+# DISTINCT constant on purpose: a future Legion-only change must not silently
+# move the youth/travel estimate.  See .claude/rules/pitch-rules.md.
+PITCH_SMART_15_18 = PitchCountRules(
+    max_pitches=105,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 45, 1),
+        RestTier(46, 60, 2),
+        RestTier(61, 80, 3),
+        RestTier(81, 105, 4),
+    ),
+)
+
+
 # ── League/Level Detection ─────────────────────────────────────────────
 
 # NGB values mapped to league identifiers.
@@ -203,7 +241,6 @@ _NAME_KEYWORDS: list[tuple[re.Pattern[str], str]] = [
 _LEAGUE_WARNINGS: dict[str, str] = {
     "usssa": "USSSA pitch rules not yet supported",
     "perfect_game": "Perfect Game pitch rules not yet supported",
-    "youth_travel": "Youth travel league detected -- specific pitch rules not available",
     "unknown": "League not detected -- pitch count rules cannot be applied",
 }
 
@@ -312,13 +349,21 @@ def _nsaa_level_from_name(team_name: str | None) -> str:
 def get_rules_for_league(
     league: str, reference_date: datetime.date,
 ) -> PitchCountRules | None:
-    """Return the pitch count rule set for a league, or None if unsupported."""
+    """Return the pitch count rule set for a league, or None if unsupported.
+
+    ``youth_travel`` resolves to the Pitch Smart 15-18 curve as a labeled
+    estimate (E-243-02), so it no longer drops into the suppress path.  Truly
+    unsupported levels (``usssa``, ``perfect_game``, ``unknown``) still return
+    None.
+    """
     if league == "nsaa_varsity":
         return get_nsaa_rules(reference_date)
     if league == "nsaa_subvarsity":
         return get_subvarsity_rules(reference_date)
     if league == "legion":
         return LEGION
+    if league == "youth_travel":
+        return PITCH_SMART_15_18
     return None
 
 
@@ -473,6 +518,125 @@ def _is_nsaa_excluded(
     Convenience wrapper around ``_is_excluded()`` for backward compatibility.
     """
     return _is_excluded(profile, reference_date, get_nsaa_rules(reference_date))
+
+
+def _preferred_rest_from_pitches(pitches: int) -> int:
+    """Preferred (not minimum) rest days for a most-recent-day pitch count."""
+    if pitches <= _PREFERRED_REST_LOW_MAX:
+        return _PREFERRED_REST_LOW_DAYS
+    if pitches <= _PREFERRED_REST_MID_MAX:
+        return _PREFERRED_REST_MID_DAYS
+    return _PREFERRED_REST_HIGH_DAYS
+
+
+def _preferred_rest_from_ip_outs(ip_outs: int) -> int:
+    """Preferred rest days via the IP proxy when pitch count is unavailable.
+
+    Buckets: <=2 IP -> 0-30 band, 3-4 IP -> 31-60 band, 5+ IP -> 61+ band.
+    Values between bucket edges round conservatively into the higher band.
+    """
+    ip = ip_outs / 3
+    if ip <= _IP_PROXY_LOW_MAX:
+        return _PREFERRED_REST_LOW_DAYS
+    if ip <= _IP_PROXY_MID_MAX:
+        return _PREFERRED_REST_MID_DAYS
+    return _PREFERRED_REST_HIGH_DAYS
+
+
+def _rest_state(
+    profile: dict,
+    reference_date: datetime.date,
+) -> tuple[int | None, int | None, str, bool]:
+    """Compute the preferred-rest discount state for a ranked candidate.
+
+    This runs ON TOP of the hard exclusion gate (``_is_excluded``): callers
+    pass only arms that already cleared the legal minimum.  An arm that has
+    reached its preferred rest window is FULLY AVAILABLE; one that cleared the
+    gate but is still inside the window is DISCOUNTED.
+
+    Most-recent-day pitch counts are summed (doubleheader aggregation),
+    matching ``_is_excluded``.  When that count is null, the IP proxy is
+    applied and the arm is treated as DISCOUNTED whenever the proxied bucket
+    maps to a non-zero preferred-rest requirement (conservative-when-uncertain
+    -- null is NEVER treated as fully-available).
+
+    Returns:
+        ``(days_rest, last_outing_pitches, rest_eligibility, estimate)`` where
+        *rest_eligibility* is ``"available"`` or ``"discounted"``,
+        *last_outing_pitches* is ``None`` when the count was unavailable, and
+        *estimate* is ``True`` when the IP proxy supplied the rest state.
+    """
+    apps = profile.get("appearances", [])
+    if not apps:
+        return None, None, "available", False
+
+    last_date_str = apps[-1].get("game_date")
+    if not last_date_str:
+        return None, None, "available", False
+    try:
+        last_date = datetime.date.fromisoformat(last_date_str)
+    except (ValueError, TypeError):
+        return None, None, "available", False
+
+    days_rest = (reference_date - last_date).days
+    if days_rest < 0:
+        # Future-dated / anomalous most-recent appearance: rest cannot be
+        # evaluated.  Mirror _is_excluded (negative rest -> can't-evaluate, arm
+        # stays in pool) by treating as fully-available, not discounted, so the
+        # two rest helpers stay aligned.
+        return days_rest, None, "available", False
+
+    last_day_apps = [a for a in apps if a.get("game_date") == last_date_str]
+    pcounts = [a.get("pitches") for a in last_day_apps]
+
+    # ── Null pitch count -> IP proxy (M1 ruling: never fully-available) ──
+    if any(p is None for p in pcounts):
+        total_ip_outs = sum(a.get("ip_outs") or 0 for a in last_day_apps)
+        preferred = _preferred_rest_from_ip_outs(total_ip_outs)
+        eligibility = "discounted" if preferred > 0 else "available"
+        return days_rest, None, eligibility, True
+
+    # ── Doubleheader aggregation: sum pitches on the most recent day ──
+    total_pitches = sum(pcounts)
+    preferred = _preferred_rest_from_pitches(total_pitches)
+    eligibility = "available" if days_rest >= preferred else "discounted"
+    return days_rest, total_pitches, eligibility, False
+
+
+def _apply_rest_rerank(
+    candidates: list[dict[str, Any]],
+    pitcher_profiles: dict[str, dict],
+    reference_date: datetime.date,
+) -> list[dict[str, Any]]:
+    """Stable rest-discount partition of the already-ranked candidate list.
+
+    Attaches each candidate's rest state (``days_rest``,
+    ``last_outing_pitches``, ``rest_eligibility``, ``rest_estimate``) in place,
+    then returns a new list ordering all FULLY-AVAILABLE arms ahead of all
+    DISCOUNTED ones while preserving the engine's relative order within each
+    group.  Operates only on the candidates passed in (already cleared the hard
+    gate and already truncated) -- it never adds, removes, or resurrects an arm.
+    """
+    for cand in candidates:
+        days_rest, last_pitches, eligibility, estimate = _rest_state(
+            pitcher_profiles[cand["player_id"]], reference_date,
+        )
+        cand["days_rest"] = days_rest
+        cand["last_outing_pitches"] = last_pitches
+        cand["rest_eligibility"] = eligibility
+        cand["rest_estimate"] = estimate
+        # Preferred-rest days for the discounted "(prefers N)" display (E-243-03).
+        # None when the pitch count was unavailable (IP-proxy path) -- the
+        # display omits the suffix in that case.
+        cand["preferred_rest"] = (
+            _preferred_rest_from_pitches(last_pitches)
+            if last_pitches is not None else None
+        )
+
+    return (
+        [c for c in candidates if c["rest_eligibility"] == "available"]
+        + [c for c in candidates if c["rest_eligibility"] == "discounted"]
+    )
 
 
 def _build_reasoning(
@@ -875,7 +1039,14 @@ def compute_starter_prediction(
             rest_table=_build_rest_table(pitcher_profiles, roles, workload),
             bullpen_order=[],
             data_note=warning,
+            suppress_reason="unsupported_level",
         )
+
+    # Youth/travel runs on the Pitch Smart 15-18 fallback curve, which is a
+    # labeled estimate rather than a binding league rule (E-243-02).  The flag
+    # rides on every non-suppressed-by-league return below so downstream
+    # presentation (E-243-03) and narration (E-243-04) can mark it as such.
+    is_estimate = league == "youth_travel"
 
     # Count unique completed games
     game_ids = sorted(set(r["game_id"] for r in pitching_history))
@@ -906,6 +1077,8 @@ def compute_starter_prediction(
                 pitcher_profiles, pitching_history, suppress_excluded,
             ),
             data_note=note,
+            is_estimate=is_estimate,
+            suppress_reason="insufficient_data",
         )
 
     # ── Classify roles ──────────────────────────────────────────────
@@ -984,6 +1157,26 @@ def compute_starter_prediction(
             "recent_starts": _recent_starts(profile),
         })
 
+    # ── Hard rest-discount re-rank (E-243-01) ───────────────────────
+    # Applied IN PLACE before the confidence tier so the named
+    # predicted_starter/alternative and the Tier-2 LLM consume the new order.
+    candidates = _apply_rest_rerank(
+        candidates, pitcher_profiles, reference_date,
+    )
+
+    # ── Display enrichment (E-243-03) ───────────────────────────────
+    # Attach the fields the "Most Likely Arms" card renders per arm: start
+    # share grounded in games, the team-game denominator, and optional
+    # handedness (None when the schema column is unpopulated).
+    for cand in candidates:
+        profile = pitcher_profiles[cand["player_id"]]
+        cand["start_share_pct"] = (
+            round(cand["games_started"] / total_team_games * 100)
+            if total_team_games else 0
+        )
+        cand["total_team_games"] = total_team_games
+        cand["throws"] = profile.get("throws")
+
     # ── Confidence tier ─────────────────────────────────────────────
     predicted_starter: dict[str, Any] | None = None
     alternative: dict[str, Any] | None = None
@@ -1061,6 +1254,34 @@ def compute_starter_prediction(
         pitcher_profiles, pitching_history, excluded,
     )
 
+    # ── Unavailable arms (E-243-03) ─────────────────────────────────
+    # Hard-excluded starter-capable arms are popped from the candidate pool,
+    # so they can never appear as a ranked line.  Surface them (with the
+    # engine's existing exclusion reason) in their own sub-block.  Scoped to
+    # arms with starts so the card shows "their ace is out today" rather than
+    # every excluded reliever (relievers already surface in bullpen_order).
+    # Ordered by start count descending so the most prominent arm leads.
+    unavailable_arms = [
+        {
+            "name": (
+                f"{pitcher_profiles[pid]['first_name']} "
+                f"{pitcher_profiles[pid]['last_name']}"
+            ),
+            "reason": reason,
+        }
+        for pid, reason in sorted(
+            (
+                (pid, r)
+                for pid, r in excluded.items()
+                if pitcher_profiles[pid]["total_starts"] > 0
+            ),
+            key=lambda item: (
+                -pitcher_profiles[item[0]]["total_starts"],
+                pitcher_profiles[item[0]]["last_name"],
+            ),
+        )
+    ]
+
     return StarterPrediction(
         confidence=confidence,
         predicted_starter=predicted_starter,
@@ -1070,4 +1291,6 @@ def compute_starter_prediction(
         rest_table=rest_table,
         bullpen_order=bullpen_order,
         data_note=data_note,
+        is_estimate=is_estimate,
+        unavailable_arms=unavailable_arms,
     )
