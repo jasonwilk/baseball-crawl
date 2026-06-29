@@ -50,6 +50,12 @@ This guides our data-source decisions:
 - **Web scraping** (fallback): Screen-scrape when the API does not cover a data point, but only for data already visible in the UI.
 - **Freshness for coaches**: Coaches think in games, not sync timestamps. Data freshness should be presented as game coverage ("Through [date] ([N] games)"), not system sync dates ("Updated Mar 27"). This applies to dashboards, cards, and any UI showing how current the data is.
 
+### Operating Principle: Always Get Closer to Byte-Identical Play Ingestion
+
+**Every change to play ingestion moves plays-derived stats closer to GameChanger's official box scores -- never further.** When we derive a stat from play-by-play and call it the same stat GameChanger reports, the burden is on us to prove it reconciles, and to keep proving it as the parser and data sources evolve. This binds all play-ingestion, parser, and reconciliation work: a change that improves one stat's fidelity at the cost of regressing another is not acceptable; the standing direction is the whole-season plays-to-boxscore gap trending toward zero.
+
+This is a direction and a discipline, not a one-time threshold -- quick-scored games, abandoned at-bats, and scorekeeper noise leave an irreducible residual, so a perfect zero is not the bar. See the canonical statement in `docs/VISION.md` ("North Star: Always Get Closer to Byte-Identical Play Ingestion"). The concrete enforcement mechanism (a plays-to-boxscore reconciliation scoreboard, and the rule that ingestion changes must not regress it) is being designed in E-245 and lands when that scoreboard exists; until then, this principle binds intent.
+
 ## Tech Stack
 - Python end-to-end (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) -- crawlers, API, dashboard, migrations, and tests
 - FastAPI + Jinja2 for the serving layer (server-rendered HTML)

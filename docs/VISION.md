@@ -90,6 +90,14 @@ The immediate goal is a working data pipeline and a coaching dashboard that coac
 
 Each of these arrives when the pain is real, not before.
 
+## North Star: Always Get Closer to Byte-Identical Play Ingestion
+
+Plays-derived box scores should reconcile against GameChanger's official box scores across an entire season **as closely as mathematically possible** -- and every change to play ingestion should move that gap closer, never further.
+
+This is a standing commitment to continuous fidelity, not a one-time threshold. We do not declare victory at some target number and stop. The measure is a plays-to-boxscore reconciliation scoreboard that diffs derived stats against the official box scores, per stat, over the full season; the discipline is that the gap trends toward zero and never regresses. "Always try to get closer."
+
+We are honest about the limit. Quick-scored games, abandoned at-bats, and ordinary scorekeeper noise mean some residual is irreducible -- a perfect zero is not on the table, and pretending otherwise would be a fake 100%. The north star is the *direction and the discipline*, not a promised endpoint. When we extract a stat from play-by-play and call it the same stat GameChanger reports, the burden is on us to prove it reconciles -- and to keep proving it as the parser, the data sources, and the season evolve.
+
 ## The Measure of Success
 
 This system is working when a coach opens the dashboard before a game, finds what they need in under a minute, and makes a better decision because of it. Not a revolutionary decision -- maybe just moving a hitter up one spot in the order, or choosing the right reliever for a platoon matchup, or knowing that the opponent's cleanup hitter can't hit breaking balls on the road.
