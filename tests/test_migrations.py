@@ -742,6 +742,120 @@ class TestReportRunCountColumnsMigration:
         )
 
 
+class TestPlayEventsPitchColumnsMigration:
+    """Verify migration 007_play_events_pitch_columns.sql (E-245-01, TN-4).
+
+    The migration adds two nullable columns to play_events: pitch_type (TEXT,
+    no CHECK constraint) and pitch_speed_mph (INTEGER). Both default to NULL.
+    These tests assert the columns exist with the right type/nullability, carry
+    no CHECK constraint on pitch_type, and round-trip values + NULL.
+
+    play_events has an FK chain (play_id -> plays -> games/seasons/teams/
+    players). These tests target the new columns only, so they insert directly
+    into play_events on a connection at the default foreign_keys=OFF -- the
+    column round-trip does not depend on the parent chain.
+    """
+
+    _NEW_COLUMNS = {"pitch_type", "pitch_speed_mph"}
+
+    def test_new_pitch_columns_exist(self, fresh_db: Path) -> None:
+        """Both new columns are present on play_events after migration."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(play_events);")}
+        conn.close()
+        missing = self._NEW_COLUMNS - columns
+        assert not missing, f"Migration 007 columns missing: {missing}"
+
+    def test_pitch_columns_types_and_nullable(self, fresh_db: Path) -> None:
+        """pitch_type is nullable TEXT; pitch_speed_mph is nullable INTEGER."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        # table_info: (cid, name, type, notnull, dflt_value, pk)
+        info = {
+            row[1]: row
+            for row in conn.execute("PRAGMA table_info(play_events);").fetchall()
+        }
+        conn.close()
+        expected_types = {"pitch_type": "TEXT", "pitch_speed_mph": "INTEGER"}
+        for col, want_type in expected_types.items():
+            assert col in info, f"{col} not found"
+            _cid, _name, col_type, notnull, dflt, _pk = info[col]
+            assert col_type == want_type, f"{col} type is {col_type!r}, want {want_type}"
+            assert notnull == 0, f"{col} is NOT NULL; should be nullable"
+            assert dflt is None, f"{col} has a DEFAULT {dflt!r}; should have none"
+
+    def test_pitch_type_has_no_check_constraint(self, fresh_db: Path) -> None:
+        """pitch_type carries no CHECK constraint (TN-4: vocabulary may grow).
+
+        An out-of-vocabulary value must insert cleanly. Run with FKs OFF
+        (the connection default) so the parent chain is not required.
+        """
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type, pitch_type) "
+            "VALUES (1, 1, 'pitch', 'Knuckleball');"
+        )
+        conn.commit()
+        value = conn.execute(
+            "SELECT pitch_type FROM play_events WHERE play_id = 1 AND event_order = 1;"
+        ).fetchone()[0]
+        conn.close()
+        assert value == "Knuckleball", (
+            "Out-of-vocabulary pitch_type should insert -- no CHECK constraint expected"
+        )
+
+    def test_pitch_columns_round_trip_values_and_null(self, fresh_db: Path) -> None:
+        """The new columns round-trip explicit values and read back NULL when omitted.
+
+        Also covers AC-4: an insert that does not set the new columns succeeds
+        and they default to NULL.
+        """
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+
+        # Row 1: explicit values for both new columns.
+        conn.execute(
+            "INSERT INTO play_events "
+            "(play_id, event_order, event_type, pitch_type, pitch_speed_mph) "
+            "VALUES (1, 1, 'pitch', 'Fastball', 82);"
+        )
+        # Row 2: omit the new columns -> they must read back NULL.
+        conn.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type) "
+            "VALUES (1, 2, 'pitch');"
+        )
+        conn.commit()
+
+        valued = conn.execute(
+            "SELECT pitch_type, pitch_speed_mph FROM play_events "
+            "WHERE play_id = 1 AND event_order = 1;"
+        ).fetchone()
+        omitted = conn.execute(
+            "SELECT pitch_type, pitch_speed_mph FROM play_events "
+            "WHERE play_id = 1 AND event_order = 2;"
+        ).fetchone()
+        conn.close()
+
+        assert valued == ("Fastball", 82), f"value round-trip mismatch: {valued}"
+        assert omitted == (None, None), (
+            f"omitted columns should read back NULL: {omitted}"
+        )
+
+    def test_migration_idempotent_second_run(self, fresh_db: Path) -> None:
+        """A second run_migrations does not error or duplicate the columns (AC-3)."""
+        run_migrations(db_path=fresh_db)
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(play_events);")]
+        conn.close()
+        # No column name appears twice and both new columns are present once.
+        assert len(cols) == len(set(cols)), f"Duplicate columns found: {cols}"
+        for col in self._NEW_COLUMNS:
+            assert cols.count(col) == 1, f"{col} not present exactly once: {cols}"
+
+
 class TestE220UpgradeGuard:
     """E-220 remediation: run_migrations must detect in-place upgrade mismatch.
 
@@ -799,6 +913,11 @@ class TestE220UpgradeGuard:
                 batting_team_id INTEGER NOT NULL,
                 batter_id TEXT NOT NULL
             );
+            -- play_events must exist so pending additive migration 007
+            -- (ALTER TABLE play_events ADD COLUMN ...) applies cleanly before
+            -- the E-220 guard runs; it is not one of the perspective-checked
+            -- tables, so its shape is otherwise immaterial here.
+            CREATE TABLE play_events (id INTEGER PRIMARY KEY);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
@@ -827,6 +946,9 @@ class TestE220UpgradeGuard:
             CREATE TABLE player_game_pitching (id INTEGER PRIMARY KEY, team_id INTEGER);
             CREATE TABLE spray_charts (id INTEGER PRIMARY KEY, team_id INTEGER);
             CREATE TABLE plays (id INTEGER PRIMARY KEY, team_id INTEGER);
+            -- play_events must exist so pending additive migration 007 applies
+            -- before the E-220 guard runs (see sibling test for rationale).
+            CREATE TABLE play_events (id INTEGER PRIMARY KEY);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )

@@ -4,7 +4,7 @@
 [E-245: High-Fidelity Play Ingestion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the plays parser will correctly classify pitches that carry a
@@ -53,11 +53,18 @@ re-derive `batting_team_id` from the current games-row home/away (AC-9, TN-3b); 
       `plays.is_first_pitch_strike` are re-derived, then they reflect the recovered annotated pitch
       as the true first pitch (they are NOT trusted from stored values, which are wrong on affected
       games — epic TN-3a).
-- [ ] **AC-6**: Given the reload recomputes `plays.is_qab`, when it runs, then it uses the OR-merge
-      in epic TN-3a (`stored_is_qab OR check_2s_plus_3 OR pitch_count >= 6`) and NEVER a from-scratch
-      `_compute_qab`. Verified specifically: an HHB-only QAB (a hard-hit ball with `pitch_count = 0`
-      pre-reload) SURVIVES the reparse — its `is_qab` stays true (no false-negative regression from
-      the unavailable `final_details`).
+- [ ] **AC-6**: Given the reload recomputes `plays.is_qab`, when it runs, then it FIRST excludes any
+      outcome in the forward path's `_QAB_EXCLUDED_OUTCOMES` (Intentional Walk / Dropped 3rd Strike /
+      Catcher's Interference) → `is_qab = 0`, and ONLY otherwise applies the OR-merge in epic TN-3a
+      (`stored_is_qab OR check_2s_plus_3 OR pitch_count >= 6`). It reuses the forward path's exclusion
+      set and NEVER a from-scratch `_compute_qab` (the offline property is preserved — the exclusion
+      check reads only `outcome`, not `final_details`). Without the exclusion-first guard, an excluded
+      outcome with a recovered long count (e.g. a Dropped-3rd-Strike PA reaching 6+ pitches) would
+      flip from the correct `is_qab = 0` to `1`, corrupting even pitch-count-unaffected games. Verified
+      specifically: (a) an HHB-only QAB (a hard-hit ball with `pitch_count = 0` pre-reload — HHB is NOT
+      in the excluded set) SURVIVES the reparse, its `is_qab` staying true (no false-negative
+      regression from the unavailable `final_details`); and (b) an excluded-outcome PA with a recovered
+      6+-pitch count stays `is_qab = 0`.
 - [ ] **AC-7**: Given the reload mechanism is run twice, when it completes, then it is idempotent
       (re-running does not double-count or corrupt counts).
 - [ ] **AC-8**: Every `play_events` / `plays` write continues to carry `perspective_team_id` on the

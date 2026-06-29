@@ -1051,6 +1051,12 @@ def _query_plays_pitching_stats(
     prevents cross-pipeline game leakage).  Falls back to team_id scope.
 
     Returns dict keyed by player_id with ``fps_pct`` and ``pitches_per_bf``.
+
+    FPS% and P-BF denominators count only CHARTED PAs (``pitch_count > 0``)
+    per E-245 TN-5: an un-charted PA (no pitch-by-pitch data) carries
+    ``pitch_count = 0`` and would otherwise dilute the rate toward zero.  The
+    numerators (``is_first_pitch_strike`` sum, ``pitch_count`` sum) are already
+    zero for un-charted PAs, so gating only the denominator is the whole fix.
     """
     if game_ids is not None:
         if not game_ids:
@@ -1061,9 +1067,9 @@ def _query_plays_pitching_stats(
             SELECT
                 p.pitcher_id,
                 SUM(p.is_first_pitch_strike) AS fps_sum,
-                COUNT(*) AS fps_denom,
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS fps_denom,
                 SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_bf
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS total_bf
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.perspective_team_id = ?
@@ -1078,9 +1084,9 @@ def _query_plays_pitching_stats(
             SELECT
                 p.pitcher_id,
                 SUM(p.is_first_pitch_strike) AS fps_sum,
-                COUNT(*) AS fps_denom,
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS fps_denom,
                 SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_bf
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS total_bf
             FROM plays p
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
@@ -1118,6 +1124,13 @@ def _query_plays_batting_stats(
     Falls back to season_id + batting_team_id scope.
 
     Returns dict keyed by player_id with ``qab_pct`` and ``pitches_per_pa``.
+
+    Denominator policy (E-245 TN-5):
+    - QAB% KEEPS its all-PA denominator (every PA is a QAB opportunity,
+      regardless of whether pitches were charted) -- NOT gated on
+      ``pitch_count > 0``.
+    - P-PA counts only CHARTED PAs (``pitch_count > 0``) so un-charted PAs do
+      not dilute the rate.
     """
     if game_ids is not None:
         if not game_ids:
@@ -1129,7 +1142,8 @@ def _query_plays_batting_stats(
                 p.batter_id,
                 SUM(p.is_qab) AS qab_sum,
                 SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_pa
+                COUNT(*) AS total_pa,
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.batting_team_id = ?
@@ -1145,7 +1159,8 @@ def _query_plays_batting_stats(
                 p.batter_id,
                 SUM(p.is_qab) AS qab_sum,
                 SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_pa
+                COUNT(*) AS total_pa,
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
             FROM plays p
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
@@ -1159,9 +1174,12 @@ def _query_plays_batting_stats(
     result: dict[str, dict] = {}
     for row in rows:
         batter_id = row[0]
-        qab_sum, total_pitches, total_pa = row[1], row[2], row[3]
+        qab_sum, total_pitches, total_pa, charted_pa = row[1], row[2], row[3], row[4]
+        # QAB%: all-PA denominator (TN-5). P-PA: charted-PA denominator (TN-5).
         qab_pct = (qab_sum / total_pa) if total_pa and total_pa > 0 else None
-        pitches_per_pa = (total_pitches / total_pa) if total_pa and total_pa > 0 else None
+        pitches_per_pa = (
+            (total_pitches / charted_pa) if charted_pa and charted_pa > 0 else None
+        )
         result[batter_id] = {
             "qab_pct": qab_pct,
             "pitches_per_pa": pitches_per_pa,
@@ -1181,21 +1199,33 @@ def _query_plays_team_stats(
     Falls back to team_id scope.
 
     Returns dict with ``team_fps_pct``, ``team_pitches_per_pa``,
-    ``has_plays_data``, and ``plays_game_count``.
+    ``team_qab_pct``, ``has_plays_data``, ``plays_game_count`` (games-with-plays,
+    K -- drives QAB% coverage), and ``pitch_charted_game_count`` (N -- games with
+    >=1 charted PA, drives FPS%/P-PA and the coverage badge).
+
+    Two distinct coverage counts (E-245 TN-5): FPS%/P-PA are charted-gated, so
+    they ride ``pitch_charted_game_count``; QAB% keeps its all-PA denominator,
+    so it rides ``plays_game_count``.  ``has_plays_data`` is true when ANY plays
+    rows exist (games-with-plays > 0), distinct from whether any were charted.
     """
-    # Check how many games have plays data
+    # Two perspective-scoped coverage counts in one pass:
+    #   K = games with any plays rows; N = games with >=1 charted PA.
     if game_ids is not None:
         if not game_ids:
             return {
                 "team_fps_pct": None,
                 "team_pitches_per_pa": None,
+                "team_qab_pct": None,
                 "has_plays_data": False,
                 "plays_game_count": 0,
+                "pitch_charted_game_count": 0,
             }
         placeholders = ",".join("?" for _ in game_ids)
         row = conn.execute(
             f"""
-            SELECT COUNT(DISTINCT p.game_id)
+            SELECT
+                COUNT(DISTINCT p.game_id),
+                COUNT(DISTINCT CASE WHEN p.pitch_count > 0 THEN p.game_id END)
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.perspective_team_id = ?
@@ -1205,7 +1235,9 @@ def _query_plays_team_stats(
     else:
         row = conn.execute(
             """
-            SELECT COUNT(DISTINCT p.game_id)
+            SELECT
+                COUNT(DISTINCT p.game_id),
+                COUNT(DISTINCT CASE WHEN p.pitch_count > 0 THEN p.game_id END)
             FROM plays p
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
@@ -1215,23 +1247,27 @@ def _query_plays_team_stats(
             (season_id, team_id, team_id, team_id),
         ).fetchone()
     plays_game_count = row[0] if row else 0
+    pitch_charted_game_count = row[1] if row else 0
     has_plays_data = plays_game_count > 0
 
     if not has_plays_data:
         return {
             "team_fps_pct": None,
             "team_pitches_per_pa": None,
+            "team_qab_pct": None,
             "has_plays_data": False,
             "plays_game_count": 0,
+            "pitch_charted_game_count": 0,
         }
 
-    # Team FPS%: pitchers for this team (matched via roster)
+    # Team FPS%: pitchers for this team (matched via roster). Denominator is
+    # CHARTED BF only (pitch_count > 0) per TN-5.
     if game_ids is not None:
         fps_row = conn.execute(
             f"""
             SELECT
                 SUM(p.is_first_pitch_strike),
-                COUNT(*)
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END)
             FROM plays p
             JOIN team_rosters tr ON tr.player_id = p.pitcher_id
                 AND tr.team_id = ?
@@ -1247,7 +1283,7 @@ def _query_plays_team_stats(
             """
             SELECT
                 SUM(p.is_first_pitch_strike),
-                COUNT(*)
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END)
             FROM plays p
             JOIN games g ON g.game_id = p.game_id
             JOIN team_rosters tr ON tr.player_id = p.pitcher_id
@@ -1264,11 +1300,16 @@ def _query_plays_team_stats(
     fps_denom = fps_row[1] if fps_row and fps_row[1] else 0
     team_fps_pct = (fps_sum / fps_denom) if fps_denom > 0 else None
 
-    # Team pitches per PA (batting side)
+    # Team batting side: P/PA uses the CHARTED-PA denominator (TN-5); QAB% uses
+    # the ALL-PA denominator (TN-5 -- every PA is a QAB opportunity).
     if game_ids is not None:
         ppa_row = conn.execute(
             f"""
-            SELECT SUM(p.pitch_count), COUNT(*)
+            SELECT
+                SUM(p.pitch_count),
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END),
+                SUM(p.is_qab),
+                COUNT(*)
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.batting_team_id = ?
@@ -1279,7 +1320,11 @@ def _query_plays_team_stats(
     else:
         ppa_row = conn.execute(
             """
-            SELECT SUM(p.pitch_count), COUNT(*)
+            SELECT
+                SUM(p.pitch_count),
+                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END),
+                SUM(p.is_qab),
+                COUNT(*)
             FROM plays p
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
@@ -1289,14 +1334,19 @@ def _query_plays_team_stats(
             (season_id, team_id, team_id),
         ).fetchone()
     total_pitches = ppa_row[0] if ppa_row and ppa_row[0] else 0
-    total_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
-    team_pitches_per_pa = (total_pitches / total_pa) if total_pa > 0 else None
+    charted_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
+    qab_sum = ppa_row[2] if ppa_row and ppa_row[2] else 0
+    all_pa = ppa_row[3] if ppa_row and ppa_row[3] else 0
+    team_pitches_per_pa = (total_pitches / charted_pa) if charted_pa > 0 else None
+    team_qab_pct = (qab_sum / all_pa) if all_pa > 0 else None
 
     return {
         "team_fps_pct": team_fps_pct,
         "team_pitches_per_pa": team_pitches_per_pa,
+        "team_qab_pct": team_qab_pct,
         "has_plays_data": has_plays_data,
         "plays_game_count": plays_game_count,
+        "pitch_charted_game_count": pitch_charted_game_count,
     }
 
 
@@ -2289,8 +2339,10 @@ class _ReportGeneration:
                 "runs_allowed_avg": runs_allowed_avg,
                 "team_fps_pct": plays_team["team_fps_pct"],
                 "team_pitches_per_pa": plays_team["team_pitches_per_pa"],
+                "team_qab_pct": plays_team["team_qab_pct"],
                 "has_plays_data": plays_team["has_plays_data"],
                 "plays_game_count": plays_team["plays_game_count"],
+                "pitch_charted_game_count": plays_team["pitch_charted_game_count"],
                 "pitching_workload": pitching_workload,
                 "generation_date": generation_date,
                 "starter_prediction": starter_prediction,

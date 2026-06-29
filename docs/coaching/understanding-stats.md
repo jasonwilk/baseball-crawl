@@ -119,7 +119,7 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 **Why it matters:** Batters who see a lot of pitches per PA drive up pitch counts for the entire game. A pitcher throwing 5+ pitches per batter will be out of the game by the fifth inning. When scouting your own lineup, high P/PA batters help the guys hitting behind them by tiring out opposing pitchers. When scouting an opponent, a high team P/PA means your pitcher needs to command the zone early in counts or he will struggle to go deep into the game.
 
-**Important note:** Like QAB%, P/PA is computed from pitch-by-pitch data and only appears when that data was recorded.
+**Important note:** P/PA is computed over pitch-charted plate appearances only -- an uncharted plate appearance has no recorded pitch sequence, so it is excluded from this rate. This matches how GameChanger calculates P/PA. The number of charted games that contribute to the stat is shown in the report next to the column header. "—" means no pitch data was available.
 
 **Example:** A team averaging 4.2 P/PA as a lineup will see roughly 150+ pitches in a nine-inning game. That kind of patience will knock most high school starters out before the sixth inning.
 
@@ -229,7 +229,7 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 **Why it matters:** The first pitch sets the tone for every at-bat. A pitcher who regularly gets ahead 0-1 can expand the zone, use off-speed pitches, and work efficiently. A pitcher who starts 1-0 is handing the hitter the advantage on every at-bat. FPS% is often the first number to check when scouting a pitching staff -- a low FPS% pitcher will run up his pitch count and be easier to work deep counts against.
 
-**Important note:** FPS% is computed from pitch-by-pitch data. It only appears for games where that data was recorded. If a pitcher shows "—" for FPS%, the pitch data was not available.
+**Important note:** FPS% is computed over pitch-charted plate appearances only -- an uncharted plate appearance has no recorded first pitch, so it is excluded from this rate. This matches how GameChanger calculates FPS%. The number of charted games that contribute to the stat is shown in the report next to the column header. "—" means no pitch data was available.
 
 **Example:** An opposing starter with a 48% FPS% is starting behind in more than half of all at-bats. Your lineup should be patient and look for fastballs early -- he needs to throw strikes.
 
@@ -297,7 +297,7 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 **Why it matters:** P/BF tells you how long an opposing pitcher will last. A pitcher throwing 4.5 pitches per batter will hit 100 pitches by the fifth or sixth inning. A pitcher at 3.5 can easily go seven or eight. When you are building a game plan, knowing P/BF helps you set realistic expectations for when you will get to their bullpen.
 
-**Important note:** Like FPS%, P/BF is computed from pitch-by-pitch data and only appears when that data was recorded.
+**Important note:** Like FPS%, P/BF is computed over pitch-charted plate appearances only -- an uncharted batter faced has no recorded pitch sequence. This matches GameChanger's method. "—" means pitch data was not available.
 
 **Example:** If their ace averages 3.4 P/BF, he will probably finish seven innings even if he faces 27 batters. Your lineup may only get two cracks at him before he hands it off to the bullpen.
 
@@ -359,4 +359,4 @@ Splits break down a player's stats by specific situations. The two most useful s
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d)), E-204 (GS/GR), E-239 (removed "live dashboard" reference from Rest display note)*
+*Last updated: 2026-06-29 | Source: E-245 (charted-PA denominator clarification for FPS%, P/PA, P/BF), E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d)), E-204 (GS/GR), E-239 (removed "live dashboard" reference from Rest display note)*

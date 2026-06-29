@@ -81,6 +81,40 @@ After the backfill completes, regenerate any standalone reports for affected opp
 bb data backfill-appearance-order --db /path/to/app.db
 ```
 
+### Reloading Annotated Pitches (`bb data reload-annotated-pitches`)
+
+`bb data reload-annotated-pitches` re-derives pitch-level data for already-loaded games from stored play text, without re-fetching anything from the GameChanger API. It reclassifies pitches that were previously dropped because they carried a trailing type or velocity annotation (e.g., `"Strike (Fastball, 72mph)"`), and recomputes the derived pitch flags (`pitch_count`, `is_first_pitch_strike`) in place.
+
+Run this command once on a database with historical plays data loaded before E-245:
+
+```bash
+bb data reload-annotated-pitches
+```
+
+**What it corrects**: The parser previously silently dropped annotated pitches (pitches with a trailing type or velocity suffix), causing `pitch_count` undercounts and unreliable `is_first_pitch_strike` values. After this pass, FPS% and pitch-count stats reflect all recorded pitches.
+
+**Idempotent**: Safe to run multiple times. Only rows whose computed values change are updated.
+
+### Fixing Self-Game Rows (`bb data fix-self-games`)
+
+`bb data fix-self-games` corrects games where the home team and away team resolved to the same entry -- an opponent-resolution bug that causes a team's stats to appear as though they played themselves. The command re-fetches the affected games' boxscores from GameChanger and re-derives the corrupted rows in place.
+
+**Default mode is dry-run** (detects self-games, makes no changes):
+
+```bash
+bb data fix-self-games
+```
+
+**Execute mode** applies corrections:
+
+```bash
+bb data fix-self-games --execute
+```
+
+The command exits 0 only when zero self-games remain after the run. A non-zero exit in dry-run mode means self-games were detected; in execute mode it means not all could be resolved (re-run or investigate the affected games manually).
+
+**When to run**: Once, if you suspect historical data includes self-game rows. Dry-run first to assess scope, then `--execute` to apply.
+
 ### Deduplicating Player Entries (`bb data dedup-players`)
 
 `bb data dedup-players` detects and merges same-team duplicate player entries caused by cross-perspective UUID mismatch. Use `--dry-run` (default) to preview, then `--execute` to apply. Recomputes season aggregates after merge.
@@ -826,4 +860,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-28 | Source: E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-06-29 | Source: E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

@@ -2,8 +2,8 @@
   "_meta": {
     "basis": "seed.sql header math",
     "note": "Values hand-reviewed against the seed.sql header math at creation (record 5-2, K/9 11.0/9.0/7.5, ERA 3.50/6.00/3.00, runs avg 31/7 & 17/7, workload anchored to GAME_007 2026-04-21). Regeneration is observable in git diff; re-review before commit.",
-    "reviewed_by": "software-engineer (E-234-01)",
-    "reviewed_date": "2026-06-13"
+    "reviewed_by": "software-engineer (E-245-03)",
+    "reviewed_date": "2026-06-29"
   },
   "batting": [
     {
@@ -947,9 +947,11 @@
   "plays_pitching": {},
   "plays_team": {
     "has_plays_data": false,
+    "pitch_charted_game_count": 0,
     "plays_game_count": 0,
     "team_fps_pct": null,
-    "team_pitches_per_pa": null
+    "team_pitches_per_pa": null,
+    "team_qab_pct": null
   },
   "recent_games": [
     {

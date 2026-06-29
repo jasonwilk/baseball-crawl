@@ -4,7 +4,7 @@
 [E-245: High-Fidelity Play Ingestion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/key-metrics.md` will describe FPS% with the data-bearing

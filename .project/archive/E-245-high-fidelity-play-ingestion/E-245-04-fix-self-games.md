@@ -4,7 +4,7 @@
 [E-245: High-Fidelity Play Ingestion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, no completed game will have `home_team_id == away_team_id`. Two

@@ -1,7 +1,7 @@
 # E-245: High-Fidelity Play Ingestion
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -104,11 +104,11 @@ epic worktree — see TN-9); fixture/unit verification happens during dispatch.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-245-01 | Add `pitch_type` + `pitch_speed_mph` columns to `play_events` (migration 007) | TODO | None | - |
-| E-245-02 | Recover annotated pitches, capture type/velocity, reload affected games | TODO | E-245-01 | - |
-| E-245-03 | Data-bearing pitch-detail denominator + honest pitch-charted coverage badge | TODO | None | - |
-| E-245-04 | Fix self-game (`home == away`) opponent-resolution corruption | TODO | E-245-02 (reuses its reload to re-derive `batting_team_id`) | - |
-| E-245-05 | Update `key-metrics.md` FPS% definition for the data-bearing denominator | TODO | E-245-03 | - |
+| E-245-01 | Add `pitch_type` + `pitch_speed_mph` columns to `play_events` (migration 007) | DONE | None | data-engineer |
+| E-245-02 | Recover annotated pitches, capture type/velocity, reload affected games | DONE | E-245-01 | software-engineer |
+| E-245-03 | Data-bearing pitch-detail denominator + honest pitch-charted coverage badge | DONE | None | software-engineer |
+| E-245-04 | Fix self-game (`home == away`) opponent-resolution corruption | DONE | E-245-02 (reuses its reload to re-derive `batting_team_id`) | data-engineer |
+| E-245-05 | Update `key-metrics.md` FPS% definition for the data-bearing denominator | DONE | E-245-03 | claude-architect |
 
 ## Dispatch Team
 - data-engineer
@@ -171,13 +171,20 @@ half. Without this, E-245-04 cannot reuse the reload.
 column, the loader never writes it. It is needed for exactly one thing in a from-scratch parent-flag
 recompute: QAB condition 4 (hard-hit ball — `_check_hhb` scans `final_details`). So a naive "re-run
 `_compute_qab` from DB rows" on reload would silently drop HHB-only QABs — a real `is_qab`
-regression. The reload MUST therefore recompute `is_qab` as an OR-MERGE, never from scratch:
+regression. The reload MUST therefore recompute `is_qab` as an exclusion-guarded OR-MERGE, never from scratch:
+it FIRST returns `is_qab = 0` for any outcome in the forward path's `_QAB_EXCLUDED_OUTCOMES`
+(Intentional Walk / Dropped 3rd Strike / Catcher's Interference), and ONLY otherwise computes
 `new_is_qab = stored_is_qab OR check_2s_plus_3(recovered_pitch_events) OR (recovered_pitch_count >= 6)`.
-This is provably sound and monotonic: the pitch-drop bug only ever produces FALSE-NEGATIVE QABs, and
-only on the two pitch-count-dependent conditions (2S+3, 6+ pitches); conditions 3–7 (XBH / HHB /
+The exclusion-first guard is mandatory: without it, an excluded outcome whose recovered count reaches a
+pitch-count condition (e.g. a Dropped-3rd-Strike PA with 6+ recovered pitches) would flip from the
+correct `is_qab = 0` to `1`, corrupting even pitch-count-unaffected games — the forward `_compute_qab`
+excludes those outcomes BEFORE any pitch-count condition, and the reload must match. With the guard in
+place this is provably sound and monotonic: the pitch-drop bug only ever produces FALSE-NEGATIVE QABs,
+and only on the two pitch-count-dependent conditions (2S+3, 6+ pitches); conditions 3–7 (XBH / HHB /
 walk / sac) do not depend on `pitch_count` and are already baked into stored `is_qab`, and the bug
-never ADDS pitches (no false positive to discard). The OR-merge never reads `final_details`, so the
-offline property holds. A from-scratch `_compute_qab` is explicitly NOT used on the reload path (it
+never ADDS pitches (no false positive to discard). Both the exclusion check (reads only `outcome`) and
+the OR-merge never read `final_details`, so the offline property holds. HHB is NOT in the excluded set,
+so HHB-only QABs still survive. A from-scratch `_compute_qab` is explicitly NOT used on the reload path (it
 would require `final_details` and thus a re-fetch). This applies to the RELOAD path only — the
 forward parser path has `final_details` in memory and computes QAB normally. Likewise,
 `play_events.is_first_pitch` is currently WRONG on affected games (the annotated true-first pitch was
@@ -362,16 +369,104 @@ mechanism (TN-4, TN-6), baseball-coach on QAB denominator + copy + the success h
   ACs. All Codex iteration-1 findings now resolved.
 - 2026-06-29: Set **READY** (user-approved; path was straight to READY, no Codex iteration 2). Quality
   checklist passed.
+- 2026-06-29: Dispatch — E-245-01 DONE (migration 007; AC PASS + reviewer APPROVED). E-245-02 in
+  review.
+- 2026-06-29: Dispatch review-iteration finding (code-reviewer, E-245-02, MUST FIX). The reload's
+  `is_qab` OR-merge as originally specified (`stored_is_qab OR check_2s_plus_3 OR pitch_count >= 6`)
+  omitted the forward path's outcome exclusions: an outcome in `_QAB_EXCLUDED_OUTCOMES` (Intentional
+  Walk / Dropped 3rd Strike / Catcher's Interference) whose recovered count reaches a pitch-count
+  condition would flip from the correct `is_qab = 0` to `1`, corrupting even pitch-count-unaffected
+  games. Amended AC-6 (story 02) and TN-3a to mandate an exclusion-FIRST guard (reusing the forward
+  path's `_QAB_EXCLUDED_OUTCOMES`, no from-scratch `_compute_qab`, offline property preserved — the
+  exclusion check reads only `outcome`). HHB-only-QAB survival is unchanged (HHB is not in the excluded
+  set). SE owns the one-line code guard; this is the AC/TN reconciliation. Consistency sweep: the OR-
+  merge formula appeared in AC-6 and TN-3a (both updated); the QAB Denominator Policy and story-02
+  Technical Approach reference the OR-merge by name only (no formula) and remain accurate.
+- 2026-06-29: **Dispatch complete — all 5 stories DONE.** Shipped: (01) migration 007 adds nullable
+  `play_events.pitch_type` + `pitch_speed_mph`; (02) the plays parser now classifies annotated pitches
+  (type/velocity) instead of dropping them, captures type/speed, and a mandated in-place
+  reparse-from-`raw_template` reload (`reload_game_plays`, no clear / no API / no `parse_game`) repairs
+  already-loaded games, including the AC-6/TN-3a exclusion-first `is_qab` OR-merge (per-story CR MUST
+  FIX — see the prior entry) and `is_first_pitch`/`batting_team_id` re-derivation; (03) FPS%/P-PA/P-BF
+  denominators restricted to charted PAs (`pitch_count > 0`) with QAB% kept all-PA, plus the
+  "Pitch-charted: N of M games" badge, inline charted-game counts, and the two never-suppress
+  zero-charted notes; (04) `game_loader.py` now always resolves a distinct opponent (by name → "Unknown
+  Opponent" sentinel) with a home≠away invariant guard, and `bb data fix-self-games` corrects the 23
+  existing self-games (boxscore re-ingest + in-place `reload_game_plays` re-derivation, no plays clear);
+  (05) `key-metrics.md` FPS% wording reconciled to the charted-PA denominator. Per-story review found:
+  E-245-02 QAB OR-merge exclusions (MUST FIX, fixed); E-245-03 golden `_meta` attribution (SHOULD FIX,
+  fixed); E-245-04 CLI test coverage (MUST FIX, fixed) + a shared-sentinel/`_find_duplicate_game`
+  natural-key collision edge (SHOULD FIX, awareness-only, AC-2-sanctioned → captured as **IDEA-088**,
+  not a blocker). E-245-05 was context-layer-only (code-reviewer skipped; PM verified ACs solo).
+- 2026-06-29: **Phase 4 ("and review").** 4a CR holistic integration review over the full epic diff:
+  clean (0 findings). 4b Codex code review: 2 findings on `bb data fix-self-games`, both ACCEPTED and
+  remediated (P1 MUST FIX — shared-connection transaction isolation: the per-team `except` did not
+  `rollback()`, so a mid-run partial write could be silently committed by a later team or the final
+  rederive; fixed with a one-line `conn.rollback()` in the CLI except, in-scope, no AC/`load_team`
+  semantics change. P2 MUST FIX — error-path test now asserts post-failure rollback). Both live within
+  the command surface E-245-04 owns, so no AC amendment.
+- 2026-06-29: **Documentation assessment (PM, per `.claude/rules/documentation.md`): IMPACT EXISTS —
+  docs-writer dispatch required before archive.** Triggers fired: #1 (new feature/commands ship), #4
+  (schema change — migration 007), #5 (epic changes how coaches read the report). Affected files +
+  required updates: (a) `docs/admin/operations.md` — add the two new operator maintenance commands
+  `bb data reload-annotated-pitches` and `bb data fix-self-games` to the `bb data` command catalog
+  (alongside the existing reconcile / dedup-players / backfill-appearance-order entries), each with
+  dry-run/execute semantics and the one-time-historical-pass framing; (b)
+  `docs/coaching/standalone-reports.md` — describe the new "Pitch-charted: N of M games" coverage badge,
+  the inline per-stat "(N charted games)" counts, and the two zero-charted notes (no-plays vs
+  plays-but-uncharted), refining the existing exec-summary coverage sentence (line ~31); (c)
+  `docs/coaching/understanding-stats.md` — sharpen the FPS%/P-PA/P-BF "important note" wording so it
+  reflects the charted-PA denominator (the rate is computed over pitch-charted PAs and matches
+  GameChanger; "—" still means no pitch data). Migration 007's columns are storage-only / not surfaced
+  (future surfacing is IDEA-086), so trigger #4 needs no operator/coach schema-doc change beyond the
+  command additions; the schema reference home is `.claude/rules/data-model.md` (context-layer,
+  handled below). Not yet dispatched — main session to route docs-writer before archival.
+- 2026-06-29: **Context-layer assessment (six-trigger, per `.claude/rules/context-layer-assessment.md`).**
+  T1 (new convention/pattern/constraint): **YES** — data-bearing charted-PA denominator gate; the
+  `home_team_id != away_team_id` games invariant; the in-place offline reload-from-`raw_template` repair
+  pattern (no clear-and-re-ingest for plays). T2 (architectural decision, ongoing): **YES** —
+  `reload_game_plays` as the canonical reusable per-game in-place re-derivation entry point; storing
+  per-pitch type/velocity. T3 (footgun/failure mode/boundary): **YES** — shared-connection
+  partial-commit-on-failure in multi-item CLI loops (must `rollback()` in the per-item `except`);
+  already-loaded plays do NOT self-heal (reload required); the self-game root cause (`opponent_id=""` →
+  `opp_team_id = own_team_id`). T4 (agent behavior/routing/coordination): **NO**. T5 (domain knowledge
+  for future agents): **YES** — FPS%/P-PA/P-BF computed over charted PAs matches GameChanger; QAB
+  exclusion-outcome semantics; pitch grammar (already in the endpoint doc). T6 (new CLI command/
+  workflow): **YES** — `bb data reload-annotated-pitches` and `bb data fix-self-games` (CLAUDE.md
+  Commands section). E-245-05 already pre-handled one context-layer item (`key-metrics.md` FPS% wording,
+  per TN-10) as a dispatch story; the remaining firing triggers are codified by claude-architect
+  (dispatched in parallel) before archival.
 
 ### Review Scorecard
+
+**Planning (spec review):**
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal review iter 1 — CR spec audit + SE/DE/coach holistic (consolidated, deduped) | 12 | 12* | 0* |
 | Codex spec review iter 1 | 4 | 4 | 0 |
-| **Total** | **16** | **16** | **0** |
+| **Spec subtotal** | **16** | **16** | **0** |
+
+**Dispatch (per-story CR + Phase 4 reviews):**
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-245-01 | 0 | 0 | 0 |
+| Per-story CR — E-245-02 (QAB OR-merge exclusions, MUST FIX) | 1 | 1 | 0 |
+| Per-story CR — E-245-03 (golden `_meta` attribution, SHOULD FIX) | 1 | 1 | 0 |
+| Per-story CR — E-245-04 (CLI test coverage MUST FIX; + 1 SHOULD FIX → IDEA-088) | 2 | 1** | 0 |
+| Per-story CR — E-245-05 | — | — | — *(context-layer-only; CR skipped, PM verified solo)* |
+| CR integration review (4a, full-epic diff) | 0 | 0 | 0 |
+| Codex code review (4b — shared-connection rollback P1 + test-assert P2) | 2 | 2 | 0 |
+| **Dispatch subtotal** | **6** | **5** | **0** |
 
 \* The internal-review row's 12 deduped items were 11 straight ACCEPTs (B1, B2, B3, M1, M2, M3,
 S1–S5) plus **X1**, a CR-vs-SE read-timing split: the "Context prose" half was ACCEPTED and fixed,
 while the stale "is_qab OR-merge / is_first_pitch ACs are missing" half was DISMISSED as a false
 positive (those ACs were already present — a message-crossing timing artifact, not a substantive
 finding). Counted as accepted; **no substantive finding was dismissed** in either pass.
+
+\*\* E-245-04's second finding (the shared "Unknown Opponent" sentinel + `_find_duplicate_game`
+natural-key collision edge) was a code-reviewer awareness-only SHOULD FIX, NOT a within-AC defect
+(AC-2 sanctions the shared stub) — DEFERRED to **IDEA-088** rather than dismissed; the real 23
+self-games all resolve by name, so the edge is unreached today. Across all passes, **no substantive
+finding was dismissed** (16 spec + 6 dispatch findings; 21 accepted, 1 deferred to an idea, 0
+dismissed).

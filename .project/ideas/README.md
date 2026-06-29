@@ -106,6 +106,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-085](IDEA-085-richer-llm-data-block-field-translations.md) | Richer LLM data-block field-translations to match Variant A SOT exactly (E-243-04 conscious-accepts: null-pitch IP-proxy `pitch_display` numeric form + structured UNAVAILABLE rows; both AC-compliant + jargon-free today, refinement needs richer engine output) | CANDIDATE | 2026-09-26 |
 | [IDEA-086](IDEA-086-leverage-pitch-selection-velocity.md) | Leverage pitch selection + velocity in scouting (E-245 stores per-pitch `pitch_type` + `pitch_speed_mph`; future pitch-mix/sequencing/velocity in reports; scorekeeper-coverage dependent; overlaps IDEA-030) | CANDIDATE | 2026-09-27 |
 | [IDEA-087](IDEA-087-multi-pitcher-boundary-attribution-drift.md) | Multi-pitcher-boundary attribution drift (cause-4; +23 BF outlier `e283438c`, NOT a self-game; within-game pitcher-boundary mis-assignment; scoped OUT of E-245; likely a recon-engine BF-corrector gap) | CANDIDATE | 2026-09-27 |
+| [IDEA-088](IDEA-088-per-game-sentinel-no-name-opponents.md) | Per-game sentinel for genuinely no-name unresolvable opponents (E-245-04 shared "Unknown Opponent" stub + `_find_duplicate_game` natural-key dedup could conflate two no-name opponents on same team+date; reviewer awareness-only, NOT a within-AC defect; reuse the loader's game-suffixed sentinel technique; real 23 self-games resolve by name so unreached today) | CANDIDATE | 2026-09-27 |
 
 ## Status Definitions
 

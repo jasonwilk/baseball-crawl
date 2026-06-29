@@ -317,8 +317,9 @@ class PlaysLoader:
                     """
                     INSERT INTO play_events (
                         play_id, event_order, event_type,
-                        pitch_result, is_first_pitch, raw_template
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        pitch_result, is_first_pitch, raw_template,
+                        pitch_type, pitch_speed_mph
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         play_id,
@@ -327,6 +328,8 @@ class PlaysLoader:
                         event.pitch_result,
                         event.is_first_pitch,
                         event.raw_template,
+                        event.pitch_type,
+                        event.pitch_speed_mph,
                     ),
                 )
 

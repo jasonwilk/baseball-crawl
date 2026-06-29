@@ -165,12 +165,20 @@ def test_resolve_team_ids_returns_own_team_id(db: sqlite3.Connection) -> None:
     assert own_id == expected_own
 
 
-def test_resolve_team_ids_returns_none_when_no_opp_identifier(db: sqlite3.Connection) -> None:
-    """When neither opponent_id nor opp_key is available, opp_team_id is None."""
+def test_resolve_team_ids_uses_sentinel_when_no_opp_identifier(db: sqlite3.Connection) -> None:
+    """When neither opponent_id, opp_key, nor name is available, the opponent
+    resolves to a DISTINCT 'Unknown Opponent' sentinel -- never None and never
+    own_team_id (E-245-04 / TN-6 home != away invariant; supersedes the old
+    None contract)."""
+    from src.gamechanger.loaders.game_loader import _UNKNOWN_OPPONENT_NAME
+
     loader = _make_loader(db)
     summary = _make_summary(opponent_id=None)
     own_id, opp_id = loader._resolve_team_ids(summary, opp_key=None)
-    assert opp_id is None
+    assert opp_id is not None and opp_id != own_id
+    assert db.execute(
+        "SELECT name FROM teams WHERE id = ?", (opp_id,)
+    ).fetchone()[0] == _UNKNOWN_OPPONENT_NAME
 
 
 # ---------------------------------------------------------------------------

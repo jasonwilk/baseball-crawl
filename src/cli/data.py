@@ -1,4 +1,4 @@
-"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-appearance-order)."""
+"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-appearance-order, reload-annotated-pitches, fix-self-games)."""
 
 from __future__ import annotations
 
@@ -507,3 +507,183 @@ def backfill_appearance_order(
     )
 
     raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# bb data reload-annotated-pitches
+# ---------------------------------------------------------------------------
+
+
+@app.command("reload-annotated-pitches")
+def reload_annotated_pitches(
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Recover stranded annotated pitches in already-loaded games (E-245).
+
+    Re-derives every loaded game's play_events + parent plays flags IN PLACE
+    from the stored raw_template -- reclassifying pitch events that carry a
+    trailing type/velocity annotation, populating pitch_type / pitch_speed_mph,
+    and recomputing pitch_count / is_first_pitch_strike / is_qab. No API
+    re-fetch and no DELETE. Idempotent and re-runnable. Boxscore-derived
+    player_game_* and season-aggregate rows are left untouched.
+
+    Examples:
+        bb data reload-annotated-pitches
+    """
+    from src.gamechanger.loaders.plays_reload import reload_all_games
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        try:
+            summary = reload_all_games(conn)
+        except Exception as exc:
+            typer.echo(f"Error reloading annotated pitches: {exc}", err=True)
+            raise SystemExit(1) from exc
+
+    typer.echo("\nReload Summary:")
+    typer.echo(f"  Games processed: {summary['games_processed']}")
+    typer.echo(f"  Games changed (pitches recovered): {summary['games_changed']}")
+    typer.echo(f"  Plays re-derived: {summary['plays_updated']}")
+    typer.echo(f"  Pitch events recovered: {summary['events_recovered']}")
+    typer.echo(f"  Games with errors: {summary['games_with_errors']}")
+    typer.echo(
+        "\nReminder: regenerate reports for affected teams so the forward "
+        "pipeline recomputes plays-derived stats from the recovered pitches."
+    )
+
+    raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# bb data fix-self-games
+# ---------------------------------------------------------------------------
+
+
+@app.command("fix-self-games")
+def fix_self_games(
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Apply the corrective re-ingest (default: dry-run, change nothing).",
+    ),
+) -> None:
+    """Correct self-game (home == away) corruption from the pre-fix loader (E-245-04).
+
+    A scouting boxscore whose opponent never used GC scorekeeping was ingested
+    with the opponent collapsed onto the scouted team, producing a self-game
+    (home_team_id == away_team_id) and collapsing the plays' batting_team_id
+    onto one team (TN-6).
+
+    Dry-run (default) lists the corrupt games and the teams that need an API
+    re-fetch. --execute re-fetches each affected team's boxscores via the
+    scouting crawl->load pipeline (running the FIXED loader so the games row
+    becomes home != away and the opponent is created by name), then re-derives
+    the collapsed batting_team_id IN PLACE via reload_game_plays. Plays and
+    play_events are NEVER cleared or re-fetched.
+
+    Examples:
+        bb data fix-self-games            # dry-run
+        bb data fix-self-games --execute  # apply
+    """
+    from src.gamechanger.loaders.self_game_fix import (
+        affected_team_ids,
+        find_self_games,
+        rederive_corrected_game_plays,
+    )
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        self_games = find_self_games(conn)
+        if not self_games:
+            typer.echo(
+                "No self-games found (home_team_id == away_team_id). Nothing to do."
+            )
+            raise SystemExit(0)
+
+        affected = affected_team_ids(conn)
+        team_public: dict[int, Optional[str]] = {}
+        for tid in affected:
+            row = conn.execute(
+                "SELECT public_id FROM teams WHERE id = ?", (tid,)
+            ).fetchone()
+            team_public[tid] = row[0] if row else None
+
+        typer.echo(
+            f"\nSelf-games found: {len(self_games)} across {len(affected)} team(s)."
+        )
+        for tid in affected:
+            pid = team_public[tid]
+            n = sum(1 for _, t in self_games if t == tid)
+            marker = pid if pid else "NO public_id -- cannot re-fetch (will skip)"
+            typer.echo(f"  team_id={tid}: {n} self-game(s)  public_id={marker}")
+
+        if not execute:
+            typer.echo(
+                "\nDry-run only. Re-run with --execute to apply the corrective "
+                "re-ingest (requires GC credentials)."
+            )
+            raise SystemExit(0)
+
+        # --- execute: re-fetch boxscores per affected team, then re-derive ---
+        from src.gamechanger.client import GameChangerClient
+        from src.gamechanger.crawlers.scouting import ScoutingCrawler
+        from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+
+        client = GameChangerClient()
+        crawler = ScoutingCrawler(client, conn)
+        loader = ScoutingLoader(conn)
+        refetched = 0
+        for tid in affected:
+            pid = team_public[tid]
+            if not pid:
+                typer.echo(
+                    f"Skipping team_id={tid}: no public_id to re-fetch.", err=True
+                )
+                continue
+            try:
+                crawl_result = crawler.scout_team(pid)
+                loader.load_team(crawl_result, team_id=tid)
+                refetched += 1
+            except Exception as exc:  # noqa: BLE001 -- per-team error isolation
+                # Discard the failed team's PARTIAL writes on the shared
+                # connection. load_team writes incrementally and commits only at
+                # the end (scouting_loader.py), so a mid-load failure leaves
+                # uncommitted partials pending -- without this rollback a later
+                # team's commit, or the final rederive per-game commit, would
+                # silently persist those orphaned rows. Prior successful teams
+                # already committed, so their data is preserved.
+                conn.rollback()
+                typer.echo(
+                    f"Re-fetch failed for team_id={tid} (public_id={pid}): {exc}",
+                    err=True,
+                )
+
+        # Re-derive batting_team_id in place for the games that were self-games.
+        original_ids = [gid for gid, _ in self_games]
+        summary = rederive_corrected_game_plays(conn, original_ids)
+
+        remaining = len(find_self_games(conn))
+        typer.echo("\nFix Summary:")
+        typer.echo(f"  Teams re-fetched: {refetched}/{len(affected)}")
+        typer.echo(f"  Games re-derived: {summary['games_rederived']}")
+        typer.echo(f"  Plays re-derived: {summary['plays_updated']}")
+        typer.echo(f"  Games with re-derive errors: {summary['games_with_errors']}")
+        typer.echo(f"  Self-games remaining (target 0): {remaining}")
+        typer.echo(
+            "\nReminder: regenerate reports for the affected teams so "
+            "plays-derived rollups pick up the corrected batting_team_id."
+        )
+
+    raise SystemExit(0 if remaining == 0 else 1)

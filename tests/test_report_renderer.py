@@ -1415,8 +1415,10 @@ class TestRenderReportPlaysIntegration:
             "runs_allowed_avg": 3.0,
             "team_fps_pct": 0.625,
             "team_pitches_per_pa": 4.2,
+            "team_qab_pct": 0.45,
             "has_plays_data": True,
             "plays_game_count": 8,
+            "pitch_charted_game_count": 4,
         }
 
     def test_pitching_columns_rendered(self, plays_data: dict):
@@ -1434,22 +1436,25 @@ class TestRenderReportPlaysIntegration:
         assert "P/PA" in html
 
     def test_exec_summary_with_plays(self, plays_data: dict):
-        """AC-4: Team FPS% and P/PA in executive summary."""
+        """E-245 AC-5: charted FPS%/P/PA ride their charted-game count; QAB% its own."""
         html = render_report(plays_data)
-        assert "62.5% FPS" in html
-        assert "4.2 P/PA" in html
+        # pitch_charted_game_count=4 -> "(4 charted games)" on FPS%/P/PA.
+        assert "FPS% 62.5% (4 charted games)" in html
+        assert "P/PA 4.2 (4 charted games)" in html
+        # QAB% rides its own games-with-plays count (plays_game_count=8).
+        assert "QAB% 45.0% (8 games)" in html
 
     def test_exec_summary_partial_coverage(self, plays_data: dict):
-        """AC-7: Partial coverage shows game count context."""
+        """E-245 AC-4: badge reads 'Pitch-charted: N of M games' (N charted, M to date)."""
         html = render_report(plays_data)
-        # plays_game_count=8, game_count=10 -> "(8 of 10 games)"
-        assert "8 of 10 games" in html
+        # pitch_charted_game_count=4, game_count=10 -> "Pitch-charted: 4 of 10 games"
+        assert "Pitch-charted: 4 of 10 games" in html
 
-    def test_exec_summary_full_coverage_no_annotation(self, plays_data: dict):
-        """AC-7: Full coverage omits game count annotation."""
-        plays_data["plays_game_count"] = 10
+    def test_exec_summary_full_coverage_badge_always_shown(self, plays_data: dict):
+        """E-245 AC-4: the badge is shown even at full charted coverage (never suppress)."""
+        plays_data["pitch_charted_game_count"] = 10
         html = render_report(plays_data)
-        assert "of 10 games" not in html
+        assert "Pitch-charted: 10 of 10 games" in html
 
     def test_no_plays_data_no_exec_plays_stats(self, plays_data: dict):
         """AC-3: No plays data -> exec summary omits FPS/P/PA."""
@@ -1467,6 +1472,45 @@ class TestRenderReportPlaysIntegration:
         # Exec summary should NOT contain "FPS" before the pitching section
         exec_section = html.split("Pitching")[0]
         assert "FPS" not in exec_section
+
+    def test_zero_plays_renders_no_pitch_by_pitch_note(self, plays_data: dict):
+        """E-245 AC-6: zero charted AND zero games-with-plays -> full note, never suppressed."""
+        plays_data["has_plays_data"] = False
+        plays_data["plays_game_count"] = 0
+        plays_data["pitch_charted_game_count"] = 0
+        plays_data["team_fps_pct"] = None
+        plays_data["team_pitches_per_pa"] = None
+        plays_data["team_qab_pct"] = None
+
+        html = render_report(plays_data)
+        exec_section = html.split("Pitching")[0]
+        assert "No pitch-by-pitch data available for this team" in exec_section
+        # The narrowed (case b) note must NOT appear here.
+        assert "Pitch-charting not available" not in exec_section
+
+    def test_zero_charted_with_plays_renders_narrowed_note_and_qab(
+        self, plays_data: dict
+    ):
+        """E-245 AC-7: plays exist but none charted -> narrowed note; QAB% still shows."""
+        plays_data["has_plays_data"] = True
+        plays_data["plays_game_count"] = 6
+        plays_data["pitch_charted_game_count"] = 0
+        plays_data["team_fps_pct"] = None
+        plays_data["team_pitches_per_pa"] = None
+        plays_data["team_qab_pct"] = 0.4
+
+        html = render_report(plays_data)
+        exec_section = html.split("Pitching")[0]
+        # Narrowed note (NOT the "no data" note).
+        assert (
+            "Pitch-charting not available — FPS% and P/PA cannot be computed"
+            in exec_section
+        )
+        assert "No pitch-by-pitch data available" not in exec_section
+        # QAB% still renders with its games-with-plays count.
+        assert "QAB% 40.0% (6 games)" in exec_section
+        # Badge present, N=0.
+        assert "Pitch-charted: 0 of 10 games" in exec_section
 
     def test_render_without_plays_keys(self):
         """AC-8: Data dict without plays keys renders successfully."""

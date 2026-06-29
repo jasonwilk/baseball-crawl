@@ -4,7 +4,7 @@
 [E-245: High-Fidelity Play Ingestion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report's pitch-detail rate stats (FPS%, P-PA, P-BF) will be

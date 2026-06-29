@@ -724,12 +724,15 @@ def render_report(data: dict[str, Any]) -> str:
         f"{runs_allowed_raw:.1f}" if runs_allowed_raw is not None else None
     )
 
-    # Plays-derived team-level stats
+    # Plays-derived team-level stats (E-245 TN-5: two distinct coverage counts).
     has_plays_data = data.get("has_plays_data", False)
-    plays_game_count = data.get("plays_game_count", 0)
-    game_count = data.get("game_count", 0)
+    plays_game_count = data.get("plays_game_count", 0)        # K -- games-with-plays (QAB%)
+    pitch_charted_game_count = data.get("pitch_charted_game_count", 0)  # N -- charted games
+    has_charted_data = pitch_charted_game_count > 0
+    game_count = data.get("game_count", 0)                    # M -- games to date
     team_fps_pct = _format_pct(data.get("team_fps_pct"))
     team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
+    team_qab_pct = _format_pct(data.get("team_qab_pct"))
 
     context = {
         "team": data.get("team") or {},
@@ -754,8 +757,11 @@ def render_report(data: dict[str, Any]) -> str:
         "has_recent_form": bool(recent_form_str),
         "has_plays_data": has_plays_data,
         "plays_game_count": plays_game_count,
+        "pitch_charted_game_count": pitch_charted_game_count,
+        "has_charted_data": has_charted_data,
         "team_fps_pct": team_fps_pct,
         "team_pitches_per_pa": team_pitches_per_pa,
+        "team_qab_pct": team_qab_pct,
         "generation_date": generation_date,
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),

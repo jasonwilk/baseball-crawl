@@ -40,6 +40,23 @@ logger = logging.getLogger(__name__)
 _UUID_PATTERN = re.compile(r"\$\{([0-9a-f-]{36})\}")
 
 # ---------------------------------------------------------------------------
+# Pitch annotation grammar (E-245 TN-2; endpoint doc "Pitch event grammar").
+# A pitch template is a base result plus an OPTIONAL single trailing
+# parenthetical carrying speed and/or type:
+#   "Strike 1 looking"                      (bare)
+#   "Strike 1 looking (Curveball)"          (type only)
+#   "Strike 1 looking (101 MPH Curveball)"  (speed + type)
+#   "Ball 1 (75 MPH)"                       (speed only)
+# ---------------------------------------------------------------------------
+# Splits a template into (base, inner-annotation) on a single trailing
+# "(...)" group.  Only matches when the group is at the very end; a leading
+# parenthetical like "(Play Edit) ..." does NOT match (no trailing ")$").
+_PITCH_ANNOTATION_PATTERN = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
+# Sub-parses the inner annotation into optional speed (integer MPH) and
+# optional type.  Either component may be absent (empty type -> unknown).
+_PITCH_INNER_PATTERN = re.compile(r"^(?:(\d+)\s*MPH\s*)?(.*?)$")
+
+# ---------------------------------------------------------------------------
 # Template classification patterns (TN-4)
 # ---------------------------------------------------------------------------
 
@@ -139,6 +156,10 @@ class ParsedEvent:
         pitch_result: Pitch classification (only set for pitch events).
         is_first_pitch: Whether this is the first pitch event in the PA.
         raw_template: Original template string from the API.
+        pitch_type: Charted pitch type (one of the 6-value vocabulary) or None
+            when absent/unknown.  Only set for annotated pitch events (E-245).
+        pitch_speed_mph: Charted velocity in MPH, or None when absent.  Only
+            set for annotated pitch events (E-245).
     """
 
     event_order: int
@@ -146,6 +167,8 @@ class ParsedEvent:
     pitch_result: str | None
     is_first_pitch: bool
     raw_template: str
+    pitch_type: str | None = None
+    pitch_speed_mph: int | None = None
 
 
 @dataclass
@@ -421,8 +444,10 @@ class PlaysParser:
         for i, detail in enumerate(at_plate_details):
             template = detail.get("template", "")
 
-            event_type, pitch_result = cls._classify_template(
-                template, game_id=game_id, play_order=play_order,
+            event_type, pitch_result, pitch_type, pitch_speed_mph = (
+                cls._classify_template(
+                    template, game_id=game_id, play_order=play_order,
+                )
             )
 
             is_first_pitch = False
@@ -444,6 +469,8 @@ class PlaysParser:
                 pitch_result=pitch_result,
                 is_first_pitch=is_first_pitch,
                 raw_template=template,
+                pitch_type=pitch_type,
+                pitch_speed_mph=pitch_speed_mph,
             ))
 
         return events, pitcher_state, pitcher_at_first_pitch
@@ -455,34 +482,78 @@ class PlaysParser:
         *,
         game_id: str,
         play_order: int,
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None, int | None]:
         """Classify a single at_plate_details template string.
 
+        Pitch templates may carry a trailing speed/type annotation (E-245
+        TN-2).  The strip-and-match is gated so it only fires when the
+        post-strip base is a known pitch template -- a non-pitch template
+        that happens to end in a parenthetical (none observed, but defended
+        per AC-3) is never misclassified as a pitch.
+
         Returns:
-            Tuple of (event_type, pitch_result).  pitch_result is None for
-            non-pitch events.
+            Tuple of (event_type, pitch_result, pitch_type, pitch_speed_mph).
+            pitch_result/pitch_type/pitch_speed_mph are None for non-pitch
+            events; pitch_type/pitch_speed_mph are None for bare pitches and
+            for annotation components that are absent.
         """
-        # 1. Check pitch templates (exact match).
+        # 1. Check pitch templates (exact match -- bare form).
         pitch_result = _PITCH_TEMPLATES.get(template)
         if pitch_result is not None:
-            return "pitch", pitch_result
+            return "pitch", pitch_result, None, None
 
-        # 2. Check substitution patterns.
+        # 2. Annotated pitch: strip a single trailing "(...)" group and match
+        #    the base.  Gated -- only treated as a pitch when the post-strip
+        #    base is itself a known pitch template (AC-3).
+        annotation_match = _PITCH_ANNOTATION_PATTERN.match(template)
+        if annotation_match is not None:
+            base = annotation_match.group(1)
+            pitch_result = _PITCH_TEMPLATES.get(base)
+            if pitch_result is not None:
+                speed, ptype = cls._parse_pitch_annotation(
+                    annotation_match.group(2),
+                )
+                return "pitch", pitch_result, ptype, speed
+
+        # 3. Check substitution patterns.
         if cls._is_substitution(template):
-            return "substitution", None
+            return "substitution", None, None, None
 
-        # 3. Check baserunner patterns (must contain UUID + keyword).
+        # 4. Check baserunner patterns (must contain UUID + keyword).
         if cls._is_baserunner(template):
-            return "baserunner", None
+            return "baserunner", None, None, None
 
-        # 4. Unknown template -- log warning (AC-13).
+        # 5. Unknown template -- log warning (AC-13).
         logger.warning(
             "Unknown at_plate_details template: game_id=%s play_order=%d template=%r",
             game_id,
             play_order,
             template,
         )
-        return "other", None
+        return "other", None, None, None
+
+    @staticmethod
+    def _parse_pitch_annotation(inner: str) -> tuple[int | None, str | None]:
+        """Sub-parse a pitch annotation's inner content into speed and type.
+
+        The inner content (the text inside the trailing parenthetical) is one
+        of: ``"<speed> MPH <type>"``, ``"<speed> MPH"``, or ``"<type>"`` (E-245
+        TN-2).  Either component may be absent.
+
+        Args:
+            inner: The text between the parentheses (already stripped of the
+                enclosing ``(`` / ``)``).
+
+        Returns:
+            Tuple of (pitch_speed_mph, pitch_type).  Each element is None when
+            its component is absent or empty (empty type -> unknown).
+        """
+        match = _PITCH_INNER_PATTERN.match(inner.strip())
+        if match is None:  # pragma: no cover -- pattern matches any string
+            return None, None
+        speed = int(match.group(1)) if match.group(1) else None
+        ptype = match.group(2).strip() or None
+        return speed, ptype
 
     @staticmethod
     def _is_substitution(template: str) -> bool:

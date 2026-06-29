@@ -120,6 +120,11 @@ _PITCHING_EXTRAS: dict[str, str] = {
 # HR allowed is genuinely not in the boxscore pitching extras (confirmed by E-100).
 _PITCHING_EXTRAS_SKIP_DEBUG = {"HR"}
 
+# Sentinel opponent name used when an opponent is truly unresolvable (no stat
+# block, no UUID, no schedule name). Resolving to a distinct sentinel row -- not
+# ``own_team_id`` -- is the home != away invariant guard (E-245-04 / TN-6).
+_UNKNOWN_OPPONENT_NAME = "Unknown Opponent"
+
 
 # ---------------------------------------------------------------------------
 # Internal dataclasses
@@ -575,13 +580,16 @@ class GameLoader:
         own_data = raw.get(own_key) if own_key else None
         opp_data = raw.get(opp_key) if opp_key else None
 
-        # Resolve INTEGER PKs for home/away team rows.
-        own_team_id, opp_team_id_result = self._resolve_team_ids(summary, opp_key, opponent_name=opponent_name)
-        if opp_team_id_result is None:
-            opp_data = None
-            opp_team_id: int = own_team_id  # placeholder, not used when opp_data is None
-        else:
-            opp_team_id = opp_team_id_result
+        # Resolve INTEGER PKs for home/away team rows.  The opponent ALWAYS
+        # resolves to a DISTINCT team id -- by boxscore key/UUID, by name when
+        # the opponent stat block is absent, or an "Unknown Opponent" sentinel
+        # stub when truly unresolvable -- so a self-game (home == away) is never
+        # produced (E-245-04 / TN-6).  ``opp_data`` is already None whenever the
+        # boxscore lacks the opponent stat block (``opp_key`` is None); the
+        # opponent then simply has no per-player stat rows (truthful).
+        own_team_id, opp_team_id = self._resolve_team_ids(
+            summary, opp_key, opponent_name=opponent_name,
+        )
 
         # Resolve home/away for games table.
         home_team_id, away_team_id, home_score, away_score = self._resolve_home_away(
@@ -621,8 +629,23 @@ class GameLoader:
         summary: GameSummaryEntry,
         opp_key: str | None,
         opponent_name: str | None = None,
-    ) -> tuple[int, int | None]:
+    ) -> tuple[int, int]:
         """Resolve INTEGER PKs for own and opponent teams.
+
+        The opponent ALWAYS resolves to a DISTINCT team id so a self-game
+        (``home_team_id == away_team_id``) is never produced (E-245-04 / TN-6):
+
+        1. By the boxscore stat-block key / opponent UUID when present.
+        2. By NAME (``opponent_name``) when the opponent stat block is absent
+           (these opponents never used GC scorekeeping, so the boxscore carries
+           only the scouted team's key).  The opponent row gets no per-player
+           stat rows -- truthful, not fabricated.
+        3. By an "Unknown Opponent" sentinel stub when truly unresolvable (no
+           key, no UUID, no name) -- NEVER ``own_team_id``.
+
+        A final invariant guard substitutes the sentinel if name dedup happened
+        to collapse the opponent onto ``own_team_id`` (e.g. an opponent name
+        matching the scouted team).
 
         Args:
             summary: Game summary entry containing opponent_id.
@@ -631,18 +654,48 @@ class GameLoader:
                 creating or updating the teams row.
 
         Returns:
-            ``(own_team_id, opp_team_id)`` where ``opp_team_id`` is ``None``
-            if the opponent UUID cannot be determined.
+            ``(own_team_id, opp_team_id)`` -- both are real, DISTINCT team PKs.
         """
         own_team_id: int = self._team_ref.id
         opp_identifier = summary.opponent_id or opp_key
-        if not opp_identifier:
-            logger.warning(
-                "Cannot determine opponent identifier for game %s; opponent stats will be skipped.",
-                summary.event_id,
+        if opp_identifier:
+            opp_team_id = self._ensure_team_row(opp_identifier, opponent_name=opponent_name)
+        elif opponent_name:
+            # No opponent stat block/UUID, but the schedule names the opponent:
+            # create a DISTINCT opponent row by name (E-245-04 / TN-6).
+            logger.info(
+                "No opponent stat block for game %s; resolving opponent by name %r.",
+                summary.event_id, opponent_name,
             )
-            return own_team_id, None
-        return own_team_id, self._ensure_team_row(opp_identifier, opponent_name=opponent_name)
+            opp_team_id = self._ensure_team_row(opponent_name, opponent_name=opponent_name)
+        else:
+            # Truly unresolvable -- use the sentinel stub, never own_team_id.
+            logger.warning(
+                "Opponent unresolvable for game %s (no stat block, UUID, or name); "
+                "using %r sentinel stub.",
+                summary.event_id, _UNKNOWN_OPPONENT_NAME,
+            )
+            opp_team_id = self._ensure_team_row(
+                _UNKNOWN_OPPONENT_NAME, opponent_name=_UNKNOWN_OPPONENT_NAME,
+            )
+
+        # Invariant guard (TN-6): the opponent MUST be distinct from own team.
+        # If name dedup collapsed it onto own_team_id, fall back to the sentinel.
+        if opp_team_id == own_team_id:
+            logger.warning(
+                "Opponent for game %s resolved to own team id %d; substituting "
+                "%r sentinel to preserve home != away.",
+                summary.event_id, own_team_id, _UNKNOWN_OPPONENT_NAME,
+            )
+            opp_team_id = self._ensure_team_row(
+                _UNKNOWN_OPPONENT_NAME, opponent_name=_UNKNOWN_OPPONENT_NAME,
+            )
+            if opp_team_id == own_team_id:
+                # Pathological: own team is itself named the sentinel. Use a
+                # game-suffixed sentinel so the row is guaranteed distinct.
+                suffixed = f"{_UNKNOWN_OPPONENT_NAME} ({summary.event_id})"
+                opp_team_id = self._ensure_team_row(suffixed, opponent_name=suffixed)
+        return own_team_id, opp_team_id
 
     def _resolve_home_away(
         self,
@@ -710,7 +763,9 @@ class GameLoader:
                 start_time=summary.start_time,
                 timezone=summary.timezone,
             )
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, ValueError) as exc:
+            # ValueError = the _upsert_game home != away invariant guard
+            # (E-245-04 / TN-6) refusing to write a self-game.
             logger.error("Failed to upsert game %s: %s", summary.event_id, exc)
             return LoadResult(errors=1)
 
@@ -1243,7 +1298,19 @@ class GameLoader:
             game_stream_id: Stream ID from game-summaries (boxscore file key).
             start_time: ISO 8601 datetime string from schedule/public endpoint.
             timezone: IANA timezone identifier (e.g., ``America/Chicago``).
+
+        Raises:
+            ValueError: If ``home_team_id == away_team_id`` -- the home != away
+                invariant guard (E-245-04 / TN-6).  Opponent resolution
+                guarantees a distinct opponent, so this is a defensive last
+                gate; the caller turns it into a ``LoadResult(errors=1)``.
         """
+        if home_team_id == away_team_id:
+            raise ValueError(
+                f"Refusing to upsert self-game {game_id}: "
+                f"home_team_id == away_team_id == {home_team_id} "
+                f"(E-245-04 / TN-6 home != away invariant)."
+            )
         self._db.execute(
             """
             INSERT INTO games

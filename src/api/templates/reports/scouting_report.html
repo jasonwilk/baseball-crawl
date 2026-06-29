@@ -508,9 +508,18 @@
   {% if freshness_date %} &middot; through {{ freshness_date | format_date }}{% endif %}
   {% if runs_scored_avg %} &middot; Avg: {{ runs_scored_avg }} scored{% endif %}
   {% if runs_allowed_avg %} / {{ runs_allowed_avg }} allowed{% endif %}
+  {# ===== Pitch-detail coverage (E-245 TN-5) -- never suppress, always contextualize ===== #}
   {% if has_plays_data %}
-  &middot; {{ team_fps_pct }} FPS
-  &middot; {{ team_pitches_per_pa }} P/PA{% if plays_game_count < game_count %} ({{ plays_game_count }} of {{ game_count }} games){% endif %}
+  &middot; Pitch-charted: {{ pitch_charted_game_count }} of {{ game_count }} game{{ "s" if game_count != 1 else "" }}
+  {% if has_charted_data %}
+  &middot; FPS% {{ team_fps_pct }} ({{ pitch_charted_game_count }} charted game{{ "s" if pitch_charted_game_count != 1 else "" }})
+  &middot; P/PA {{ team_pitches_per_pa }} ({{ pitch_charted_game_count }} charted game{{ "s" if pitch_charted_game_count != 1 else "" }})
+  {% else %}
+  &middot; Pitch-charting not available — FPS% and P/PA cannot be computed
+  {% endif %}
+  &middot; QAB% {{ team_qab_pct }} ({{ plays_game_count }} game{{ "s" if plays_game_count != 1 else "" }})
+  {% else %}
+  &middot; No pitch-by-pitch data available for this team
   {% endif %}
 </div>
 {% endif %}

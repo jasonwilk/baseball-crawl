@@ -31,6 +31,9 @@ from tests.conftest import load_real_schema
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATIONS = [
     _PROJECT_ROOT / "migrations" / "001_initial_schema.sql",
+    # E-245-01: play_events.pitch_type / pitch_speed_mph columns (the plays
+    # loader writes these, so the schema fixture must include them).
+    _PROJECT_ROOT / "migrations" / "007_play_events_pitch_columns.sql",
 ]
 
 
@@ -171,12 +174,19 @@ class TestQueryPlaysPitchingStats:
         assert result[_PITCHER_A]["fps_pct"] == pytest.approx(3.0 / 4.0)
         assert result[_PITCHER_A]["pitches_per_bf"] == pytest.approx(4.0)
 
-    def test_fps_includes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
-        """HBP and Intentional Walk outcomes are included in FPS% denominator (matches GC)."""
+    def test_fps_denominator_counts_only_charted_pas(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """FPS%/P-BF denominators count only charted PAs (E-245 TN-5).
+
+        Supersedes the prior all-BF policy: an un-charted PA carries
+        pitch_count=0 and is excluded from the denominator. A charted HBP
+        (pitch_count>0) still counts; a 0-pitch IBB (no pitch-by-pitch data,
+        the same pitch_count=0 signal as an un-charted PA) is excluded.
+        """
         _seed_base(db)
-        # 2 normal PAs (1 FPS each), 1 HBP (FPS=0), 1 IBB (FPS=0)
-        # Old formula (exclude HBP/IBB): 2/2 = 1.0
-        # New formula (all BF):          2/4 = 0.5
+        # 2 normal charted PAs (1 FPS each), 1 charted HBP (FPS=0, 2 pitches),
+        # 1 IBB with 0 charted pitches (excluded from the charted denominator).
         _insert_play(
             db, _GAME_ID_1, 1,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
@@ -205,10 +215,10 @@ class TestQueryPlaysPitchingStats:
 
         result = _query_plays_pitching_stats(db, _TEAM_ID, _SEASON_ID)
         stats = result[_PITCHER_A]
-        # FPS%: 2 FPS / 4 total BF = 0.5 (HBP and IBB included in denom)
-        assert stats["fps_pct"] == pytest.approx(2.0 / 4.0)
-        # Pitches per BF: (3 + 5 + 2 + 0) / 4 total BF = 2.5
-        assert stats["pitches_per_bf"] == pytest.approx(2.5)
+        # FPS%: 2 FPS / 3 charted BF (IBB with 0 pitches excluded) = 0.667
+        assert stats["fps_pct"] == pytest.approx(2.0 / 3.0)
+        # Pitches per BF: (3 + 5 + 2) / 3 charted BF = 3.333
+        assert stats["pitches_per_bf"] == pytest.approx(10.0 / 3.0)
 
     def test_pitching_scoping_includes_both_home_and_away(
         self, db: sqlite3.Connection
@@ -507,14 +517,13 @@ class TestMultiSeasonScoping:
 
 
 class TestTeamFpsInclusion:
-    """Team-level FPS% must include all PAs in denominator (matches GC)."""
+    """Team-level FPS% denominator counts only charted BF (E-245 TN-5)."""
 
-    def test_team_fps_includes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
-        """HBP and IBB plays are included in team FPS% denominator."""
+    def test_team_fps_counts_only_charted_bf(self, db: sqlite3.Connection) -> None:
+        """A 0-pitch IBB is excluded from the charted team FPS% denominator."""
         _seed_base(db)
-        # Pitcher A (on roster): 2 normal FPS, 1 HBP (FPS=0), 1 IBB (FPS=0)
-        # Old formula (exclude HBP/IBB): 2/2 = 1.0
-        # New formula (all BF):          2/4 = 0.5
+        # Pitcher A (on roster): 2 charted FPS, 1 charted HBP (FPS=0), 1 IBB
+        # with 0 charted pitches (excluded from the charted denominator).
         _insert_play(
             db, _GAME_ID_1, 1,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
@@ -542,8 +551,111 @@ class TestTeamFpsInclusion:
         db.commit()
 
         result = _query_plays_team_stats(db, _TEAM_ID, _SEASON_ID)
-        # Team FPS%: 2 FPS / 4 total BF (HBP + IBB included) = 0.5
-        assert result["team_fps_pct"] == pytest.approx(2.0 / 4.0)
+        # Team FPS%: 2 FPS / 3 charted BF (0-pitch IBB excluded) = 0.667
+        assert result["team_fps_pct"] == pytest.approx(2.0 / 3.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: E-245-03 data-bearing denominators + two coverage counts (TN-5)
+# ---------------------------------------------------------------------------
+
+
+class TestE245DataBearingDenominators:
+    """FPS%/P-PA charted-gated; QAB% all-PA; two distinct coverage counts."""
+
+    def test_two_coverage_counts_differ(self, db: sqlite3.Connection) -> None:
+        """AC-4: pitch_charted_game_count (N) < plays_game_count (K) with a mix.
+
+        Game 1 is pitch-charted (pitch_count > 0); game 2 has plays but is
+        un-charted (every PA pitch_count = 0).
+        """
+        _seed_base(db)
+        # Game 1: charted.
+        _insert_play(
+            db, _GAME_ID_1, 1,
+            batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
+            pitcher_id=_PITCHER_A, is_first_pitch_strike=1, pitch_count=4,
+        )
+        # Game 2: un-charted (pitch_count = 0).
+        _insert_play(
+            db, _GAME_ID_2, 1,
+            batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
+            pitcher_id=_PITCHER_A, is_first_pitch_strike=0, pitch_count=0,
+        )
+        db.commit()
+
+        result = _query_plays_team_stats(db, _TEAM_ID, _SEASON_ID)
+        assert result["plays_game_count"] == 2          # K -- games-with-plays
+        assert result["pitch_charted_game_count"] == 1  # N -- charted games
+        assert result["has_plays_data"] is True
+
+    def test_team_qab_all_pa_fps_ppa_charted(self, db: sqlite3.Connection) -> None:
+        """AC-1/2/3: team QAB% over all PA; FPS%/P-PA over charted PA only."""
+        _seed_base(db)
+        # Batting side (our team bats): 1 charted (5 pitches, QAB), 1 un-charted
+        # (0 pitches, QAB via outcome).
+        _insert_play(
+            db, _GAME_ID_1, 1,
+            batting_team_id=_TEAM_ID, batter_id=_BATTER_X,
+            pitcher_id=_PITCHER_B, is_qab=1, pitch_count=5,
+        )
+        _insert_play(
+            db, _GAME_ID_1, 2,
+            batting_team_id=_TEAM_ID, batter_id=_BATTER_X,
+            pitcher_id=_PITCHER_B, is_qab=1, pitch_count=0,
+        )
+        db.commit()
+
+        result = _query_plays_team_stats(db, _TEAM_ID, _SEASON_ID)
+        # QAB%: 2 QAB / 2 all-PA = 1.0 (NOT gated on pitch_count).
+        assert result["team_qab_pct"] == pytest.approx(1.0)
+        # P/PA: 5 pitches / 1 charted PA = 5.0 (un-charted PA excluded).
+        assert result["team_pitches_per_pa"] == pytest.approx(5.0)
+
+    def test_per_batter_qab_all_pa_ppa_charted(self, db: sqlite3.Connection) -> None:
+        """AC-2/3 (per-batter): QAB% all-PA; P-PA charted-only."""
+        _seed_base(db)
+        _insert_play(
+            db, _GAME_ID_1, 1,
+            batting_team_id=_TEAM_ID, batter_id=_BATTER_X,
+            pitcher_id=_PITCHER_B, is_qab=1, pitch_count=4,
+        )
+        _insert_play(
+            db, _GAME_ID_1, 2,
+            batting_team_id=_TEAM_ID, batter_id=_BATTER_X,
+            pitcher_id=_PITCHER_B, is_qab=1, pitch_count=0,
+        )
+        db.commit()
+
+        result = _query_plays_batting_stats(db, _TEAM_ID, _SEASON_ID)
+        stats = result[_BATTER_X]
+        assert stats["qab_pct"] == pytest.approx(1.0)          # 2/2 all-PA
+        assert stats["pitches_per_pa"] == pytest.approx(4.0)   # 4 / 1 charted
+
+    def test_zero_charted_but_plays_exist(self, db: sqlite3.Connection) -> None:
+        """AC-7 data shape: plays exist, none charted -> N=0, K>0, FPS/P-PA None, QAB set."""
+        _seed_base(db)
+        # Pitching side, un-charted.
+        _insert_play(
+            db, _GAME_ID_1, 1,
+            batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
+            pitcher_id=_PITCHER_A, is_first_pitch_strike=0, pitch_count=0,
+        )
+        # Batting side, un-charted but a QAB by outcome.
+        _insert_play(
+            db, _GAME_ID_1, 2,
+            batting_team_id=_TEAM_ID, batter_id=_BATTER_X,
+            pitcher_id=_PITCHER_B, is_qab=1, pitch_count=0,
+        )
+        db.commit()
+
+        result = _query_plays_team_stats(db, _TEAM_ID, _SEASON_ID)
+        assert result["has_plays_data"] is True
+        assert result["plays_game_count"] == 1
+        assert result["pitch_charted_game_count"] == 0
+        assert result["team_fps_pct"] is None          # no charted BF
+        assert result["team_pitches_per_pa"] is None    # no charted PA
+        assert result["team_qab_pct"] == pytest.approx(1.0)  # all-PA QAB still computed
 
 
 # ---------------------------------------------------------------------------

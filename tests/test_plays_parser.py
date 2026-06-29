@@ -1676,3 +1676,161 @@ class TestRealFixture:
         assert parsed_plays[0].did_outs_change == 0
         assert parsed_plays[2].outs_after == 1
         assert parsed_plays[2].did_outs_change == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pitch annotation grammar (E-245 AC-1, AC-2, AC-3)
+# ---------------------------------------------------------------------------
+
+
+class TestPitchAnnotationGrammar:
+    """Annotated pitch templates classify as pitches and capture type/speed."""
+
+    def test_type_only_annotation_classifies_as_pitch(self):
+        """'(Curveball)' -- type only: classified as pitch, type captured."""
+        plays = _parse([_make_play(
+            outcome="Strikeout",
+            at_plate_details=[
+                {"template": "Strike 1 looking (Curveball)"},
+                {"template": "Strike 2 looking (Slider)"},
+                {"template": "Strike 3 swinging (Changeup)"},
+            ],
+            final_details=[
+                {"template": f"${{{_BATTER_UUID}}} strikes out swinging, "
+                             f"${{{_PITCHER_UUID}}} pitching"},
+            ],
+        )])
+        play = plays[0]
+        assert play.pitch_count == 3
+        for ev in play.events:
+            assert ev.event_type == "pitch"
+            assert ev.pitch_speed_mph is None
+        types = [ev.pitch_type for ev in play.events]
+        assert types == ["Curveball", "Slider", "Changeup"]
+
+    def test_speed_and_type_annotation(self):
+        """'(101 MPH Curveball)' -- speed + type both captured."""
+        plays = _parse([_make_play(
+            at_plate_details=[
+                {"template": "Strike 1 looking (101 MPH Curveball)"},
+                {"template": "In play (75 MPH Fastball)"},
+            ],
+        )])
+        events = plays[0].events
+        assert events[0].event_type == "pitch"
+        assert events[0].pitch_result == "strike_looking"
+        assert events[0].pitch_speed_mph == 101
+        assert events[0].pitch_type == "Curveball"
+        assert events[1].pitch_result == "in_play"
+        assert events[1].pitch_speed_mph == 75
+        assert events[1].pitch_type == "Fastball"
+
+    def test_speed_only_annotation(self):
+        """'(75 MPH)' -- speed only: speed captured, type None."""
+        plays = _parse([_make_play(
+            at_plate_details=[
+                {"template": "Ball 1 (75 MPH)"},
+                {"template": "Foul (88 MPH)"},
+            ],
+        )])
+        events = plays[0].events
+        assert events[0].event_type == "pitch"
+        assert events[0].pitch_result == "ball"
+        assert events[0].pitch_speed_mph == 75
+        assert events[0].pitch_type is None
+        assert events[1].pitch_result == "foul"
+        assert events[1].pitch_speed_mph == 88
+        assert events[1].pitch_type is None
+
+    def test_bare_pitch_leaves_type_and_speed_null(self):
+        """A bare pitch leaves both annotation columns NULL (AC-2)."""
+        plays = _parse([_make_play(
+            at_plate_details=[
+                {"template": "Ball 1"},
+                {"template": "In play"},
+            ],
+        )])
+        for ev in plays[0].events:
+            assert ev.event_type == "pitch"
+            assert ev.pitch_type is None
+            assert ev.pitch_speed_mph is None
+
+    def test_all_forms_interleaved_in_one_game(self):
+        """Bare + all three annotation forms interleave within one PA (AC-1)."""
+        plays = _parse([_make_play(
+            outcome="Strikeout",
+            at_plate_details=[
+                {"template": "Ball 1"},                              # bare
+                {"template": "Strike 1 looking (Curveball)"},        # type only
+                {"template": "Foul (75 MPH)"},                       # speed only
+                {"template": "Strike 3 swinging (88 MPH Slider)"},   # speed+type
+            ],
+            final_details=[
+                {"template": f"${{{_BATTER_UUID}}} strikes out swinging, "
+                             f"${{{_PITCHER_UUID}}} pitching"},
+            ],
+        )])
+        play = plays[0]
+        assert play.pitch_count == 4
+        assert all(ev.event_type == "pitch" for ev in play.events)
+        # First pitch is the bare Ball 1 -- FPS = 0.
+        assert play.events[0].is_first_pitch is True
+        assert play.is_first_pitch_strike == 0
+        # Per-event annotation capture.
+        assert (play.events[1].pitch_type, play.events[1].pitch_speed_mph) == ("Curveball", None)
+        assert (play.events[2].pitch_type, play.events[2].pitch_speed_mph) == (None, 75)
+        assert (play.events[3].pitch_type, play.events[3].pitch_speed_mph) == ("Slider", 88)
+
+    def test_annotated_first_pitch_strike_counts_for_fps(self):
+        """An annotated strike on pitch 1 yields FPS = 1 (regression guard)."""
+        plays = _parse([_make_play(
+            at_plate_details=[
+                {"template": "Strike 1 looking (Fastball)"},
+                {"template": "In play"},
+            ],
+        )])
+        play = plays[0]
+        assert play.events[0].is_first_pitch is True
+        assert play.is_first_pitch_strike == 1
+
+    def test_unclear_type_token_captured(self):
+        """'(Unclear)' renders as a literal type token and is captured as-is."""
+        plays = _parse([_make_play(
+            at_plate_details=[
+                {"template": "Ball 1 (Unclear)"},
+                {"template": "In play"},
+            ],
+        )])
+        events = plays[0].events
+        assert events[0].event_type == "pitch"
+        assert events[0].pitch_type == "Unclear"
+        assert events[0].pitch_speed_mph is None
+
+    def test_non_pitch_with_parens_not_misclassified(self):
+        """A '(Play Edit)' substitution is NOT stripped into a pitch (AC-3)."""
+        # "(Play Edit) ${a} in for ${b}" -- leading paren, substitution.
+        sub_template = (
+            f"(Play Edit) ${{{_PITCHER2_UUID}}} in for ${{{_PITCHER_UUID}}}"
+        )
+        event_type, pitch_result, ptype, speed = PlaysParser._classify_template(
+            sub_template, game_id=_GAME_ID, play_order=0,
+        )
+        assert event_type == "substitution"
+        assert pitch_result is None
+        assert ptype is None
+        assert speed is None
+
+    def test_baserunner_with_trailing_parens_not_a_pitch(self):
+        """A non-pitch template ending in '(...)' is not stripped to a pitch (AC-3).
+
+        Synthetic guard: the post-strip base ('Runner shenanigans') is not a
+        known pitch template, so the strip must NOT fire -- it falls through to
+        the normal (here: 'other') classification rather than becoming a pitch.
+        """
+        event_type, pitch_result, ptype, speed = PlaysParser._classify_template(
+            "Runner shenanigans (Fastball)", game_id=_GAME_ID, play_order=0,
+        )
+        assert event_type != "pitch"
+        assert pitch_result is None
+        assert ptype is None
+        assert speed is None

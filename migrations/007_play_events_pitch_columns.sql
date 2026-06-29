@@ -1,0 +1,37 @@
+-- ===========================================================================
+-- Migration 007: play_events pitch_type + pitch_speed_mph columns
+-- ===========================================================================
+-- Epic E-245 (story E-245-01), Technical Notes TN-4.
+--
+-- WHAT: Adds two nullable columns to play_events:
+--       - pitch_type      TEXT    -- one of the 6-value vocabulary
+--                                    Fastball|Curveball|Slider|Changeup|Cutter|
+--                                    Unclear, or NULL when absent/unknown.
+--       - pitch_speed_mph INTEGER -- the charted velocity, or NULL.
+--
+-- WHY:  The plays endpoint emits pitch type and velocity as a trailing
+--       annotation on pitch templates (TN-2; docs/api/endpoints/
+--       get-game-stream-processing-event_id-plays.md). The parser currently
+--       strands these annotated pitch events (the suffix is unparsed), so the
+--       type/velocity GameChanger shows in its charting mode is dropped. E-245
+--       captures both while the parser is being touched, consistent with the
+--       project's store-every-stat preference. This story lays the schema
+--       foundation only -- the parser (E-245-02) writes these columns; nothing
+--       populates them here, so existing rows read back NULL.
+--
+-- DESIGN (TN-4): both columns are NULLABLE with no DEFAULT and captured per
+--   event INDEPENDENTLY -- a speed-only pitch sets pitch_speed_mph and leaves
+--   pitch_type NULL; a type-only pitch does the reverse; a bare pitch leaves
+--   both NULL. There is deliberately NO CHECK constraint on pitch_type: the
+--   vocabulary may grow if GameChanger adds a type, so we do not pin it in DDL.
+--
+-- IDEMPOTENCY: SQLite has no "ADD COLUMN IF NOT EXISTS", but the migration
+--   runner (apply_migrations.py) tracks applied migrations by filename in
+--   _migrations and applies each exactly once, so an ADD COLUMN never re-runs.
+--   The target table play_events already exists (migration 001). All existing
+--   INSERT INTO play_events callers use explicit column lists, so adding
+--   trailing nullable columns is backward-compatible (no positional inserts).
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE play_events ADD COLUMN pitch_type TEXT;
+ALTER TABLE play_events ADD COLUMN pitch_speed_mph INTEGER;

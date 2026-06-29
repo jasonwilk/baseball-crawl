@@ -4,7 +4,7 @@
 [E-245: High-Fidelity Play Ingestion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `play_events` table will carry two new nullable columns —
