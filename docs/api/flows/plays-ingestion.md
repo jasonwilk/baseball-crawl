@@ -2,7 +2,7 @@
 
 This document covers the full pipeline for fetching and storing pitch-by-pitch play data from the GameChanger API: which endpoint to call, how to discover event IDs, how to parse the response, how to resolve player names, and how to store the data idempotently.
 
-**Confirmed:** 2026-03-26. Endpoint re-verified via fresh browser curl and Python client fix applied.
+**Confirmed:** 2026-03-26. Endpoint re-verified via fresh browser curl and Python client fix applied. **Updated 2026-06-28:** §6 pitch-template grammar re-documented (three-form trailing parenthetical incl. MPH velocity) and §10 abandoned-PA edge clarified, ground-truthed against real team-133 games plus a controlled test team that charted speed + type.
 
 ---
 
@@ -228,6 +228,51 @@ Strike 3 looking    Strike 3 swinging
 Foul    Foul tip    In play
 ```
 
+**Pitch annotation (CRITICAL — the trailing parenthetical, three forms):**
+
+When the scorekeeper charts pitch *type* and/or *speed*, every pitch-count event above carries a SINGLE trailing parenthetical. The content has **three forms** — type only, speed + type, or speed only:
+
+```
+Ball 1 (Fastball)                  <- type only
+Strike 1 looking (101 MPH Curveball)  <- speed + type
+Ball 1 (75 MPH)                    <- speed only, NO type
+In play (75 MPH Curveball)         <- BIP terminal pitch, speed + type
+Strike 2 looking (Unclear)         <- type "Unclear" (see below)
+```
+
+**Trailing-parenthetical grammar (single group, three inner forms):**
+
+| Form | Example | Inner content |
+|------|---------|---------------|
+| type only | `(Fastball)` | `<PitchType>` |
+| speed + type | `(101 MPH Curveball)` | `<int> MPH <PitchType>` |
+| speed only | `(75 MPH)` | `<int> MPH` |
+
+Velocity unit is `MPH` (uppercase); speed is an integer (in-sample). Speed (when present) always precedes the type. Either component can be absent.
+
+Closed 6-value pitch-type vocabulary GameChanger offers:
+
+| Value | Observed? | Meaning |
+|-------|-----------|---------|
+| `Fastball` | yes | Real pitch type |
+| `Curveball` | yes | Real pitch type |
+| `Slider` | yes | Real pitch type — e.g. `"Ball 1 (75 MPH Slider)"`, `"Foul (75 MPH Slider)"` (2026-06-28) |
+| `Changeup` | yes | Real pitch type |
+| `Cutter` | yes | Real pitch type |
+| `Unclear` | **NOT yet observed** | From GameChanger's stated vocabulary; never seen in any capture. Semantic: a pitch *was* charted but the scorekeeper could not identify the type — NOT a real pitch type; treat as "type unknown." **Open question:** whether it emits a literal `(Unclear)` token or instead renders as type-absent (bare, or speed-only `(75 MPH)`). The capture regex `^(?:(\d+)\s*MPH\s*)?(.*?)$` handles both — a literal `Unclear` lands in the type slot (map to unknown), and a type-absent render yields an empty/absent type. |
+
+5 of the 6 values are observed in live data (all except `Unclear`).
+
+Structural rules confirmed via live pulls (2026-06-28; real games — Empire Netting & Fence Sr. Legion, type-only — plus a controlled test team that charted speed + type):
+
+- The annotation is **ALWAYS a single trailing ` (...)` group**, never mid-template, never two parentheticals. Strip with `\s*\([^)]*\)\s*$`, then match the bare base for `pitch_count`/FPS.
+- **To CAPTURE the annotation**, sub-parse the stripped inner content with `^(?:(\d+)\s*MPH\s*)?(.*?)$` → optional `speed_mph` + optional `pitch_type` (either can be absent; empty type → unknown).
+- **Bare and annotated forms interleave within one game** (mixed scoring). Classify **per-event, not per-game**: strip the trailing parenthetical on each event before matching.
+- **Only `at_plate_details` pitch templates** take this suffix. Non-pitch templates that happen to end in parentheses must not be mangled — only strip-and-match when the post-strip base is a known pitch template.
+- **Parser-compatibility note:** the original captures that seeded this spec normalized the trailing parenthetical away, so the early vocabulary (and the plays parser built against it, `src/gamechanger/parsers/plays_parser.py`) handled only the bare form. A game charted with type/speed therefore parsed as zero pitches (`pitch_count = 0`, `is_first_pitch_strike = 0`) — the data was present in the API but silently dropped. Future parser work must target the real multi-form shape (strip-then-match), and may capture speed/type as new scouting signal.
+
+**No pitch timestamp in this payload.** An exhaustive scan of the plays payload (every key name and value at every level) found NO time/timestamp/clock/epoch field — the `at_plate_details` entry is single-key (`template`) and carries no time. A real per-pitch record timestamp (`createdAt`, epoch ms) and the same speed/type as STRUCTURED fields (`speed`, `style`, `speedProvider`, `result`) live in the raw game-stream events endpoint (`GET /game-streams/{game_stream_id}/events`), of which this plays response is the flattened/processed view. Use the events endpoint if you need pitch timing or clean structured pitch attributes. See `docs/api/endpoints/get-game-streams-game_stream_id-events.md`.
+
 **Baserunner events (mid-at-bat):**
 ```
 ${uuid} advances to 2nd on error by pitcher ${uuid}
@@ -403,6 +448,8 @@ for play in response["plays"]:
         continue  # abandoned at-bat — skip
     # ... process play
 ```
+
+> **An unresolved PA can still carry charted pitches.** The common abandoned-PA shape has `at_plate_details: []` too, but it is NOT guaranteed — confirmed 2026-06-28 against the test team that an unresolved `"${uuid} at bat"` play held a full pitch sequence in `at_plate_details` while `final_details` was empty. The skip-on-empty-`final_details` rule therefore **deliberately discards those pitches** (an unresolved PA has no batter outcome to attribute, so it correctly contributes nothing to FPS/P/PA/QAB). Treat this as a conscious choice; do not assume empty `final_details` implies empty `at_plate_details`.
 
 ### `messages` Array
 
