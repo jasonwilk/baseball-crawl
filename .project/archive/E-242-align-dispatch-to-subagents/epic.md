@@ -1,7 +1,7 @@
 # E-242: Align Dispatch/Plan/Implement Workflow to Subagent Framing
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Claude Code v2.1.178 removed the `TeamCreate` / `TeamDelete` tools; multi-agent coordination is now done by spawning named subagents via the `Agent` tool with implicit team formation. Our context layer still instructs agents to call those removed tools, which is a hard breakage. This epic updates the dispatch/plan/implement workflow and supporting rules to current Claude Code guidance — a vocabulary alignment plus removal of two dead tool calls. There is NO change to the dispatch model: PM and code-reviewer stay long-lived and resumable via `SendMessage`, and every routing rule, staging boundary, circuit breaker, closure step, and shutdown ordering stays exactly as written.
@@ -44,9 +44,9 @@ Two items investigated during design and resolved:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-242-01 | Subagent vocabulary in plan + implement skills | TODO | None | - |
-| E-242-02 | Subagent vocabulary in rules + ancillary skills (incl. serial-stories fix) | TODO | None | - |
-| E-242-03 | CLAUDE.md flag note + agent-memory platform facts | TODO | None | - |
+| E-242-01 | Subagent vocabulary in plan + implement skills | DONE | None | claude-architect |
+| E-242-02 | Subagent vocabulary in rules + ancillary skills (incl. serial-stories fix) | DONE | None | claude-architect |
+| E-242-03 | CLAUDE.md flag note + agent-memory platform facts | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -129,3 +129,30 @@ The per-file inventory, glossary, and design-sensitive preservation calls in thi
 | **Total** | **16** | **16** | **0** |
 
 All findings accepted/reconciled to the SURGICAL scope; zero dismissed. The CR audit and CA holistic passes overlap on the S3 routing-inversion finding (CR-F3 ≈ CA-F4), counted once per pass.
+
+- 2026-06-29: **Dispatched and completed.** Stories executed in order S3 → S1 → S2 (soft ordering: S3 authored the durable `CLAUDE.md` flag note that S1's skill preambles point to). Per-story AC verification was PM-solo per the context-layer-only convention (code-reviewer skipped for per-story review). All three stories PASS: S3 (AC-1–5), S1 (AC-1–7), S2 (AC-1–8). Phase 4a CR integration review: **APPROVED** with 1 SHOULD FIX (the PM-owned `lessons-learned.md` historical note, handled as TN-9 closure work — it lives in PM's own memory). Phase 4b Codex code review: 2 Medium findings, both accepted and remediated length-neutrally by CA — residual "team creation" → "team formation" framing softened in the plan/implement skills, and the Pattern-1 prohibited bullet reworded to distinguish fire-and-forget one-shots from a live coordinated team. No behavioral change (TN-2): every routing rule, staging boundary, circuit breaker, closure step, and shutdown ordering is preserved; the sole intentional behavioral correction is `multi-agent-patterns/SKILL.md` L55 (parallel → serial, in-scope per AC-6/TN-6). Success Criteria met: zero instructional `TeamCreate`/`TeamDelete` and zero literal `[team-name]` across `CLAUDE.md` + `.claude/rules/` + `.claude/skills/`; the dated historical removal notes (CA memory + PM lessons-learned) are permitted per TN-5.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story PM AC verification — E-242-03 | 0 | 0 | 0 |
+| Per-story PM AC verification — E-242-01 | 0 | 0 | 0 |
+| Per-story PM AC verification — E-242-02 | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | 1 | 0 | 1 (SHOULD FIX → deferred to TN-9 PM-own-memory closure work, not invalid) |
+| Codex code review (Phase 4b) | 2 | 2 | 0 |
+| **Total** | **3** | **2** | **1** |
+
+The CR SHOULD FIX was not dismissed-as-invalid — it was deferred to TN-9 PM closure work because it lives in PM's own memory (the "Dismissed" column here is the scorecard's "not remediated as a dispatched finding" bucket).
+
+### Documentation Assessment
+No documentation impact — only context-layer files (`CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.claude/agent-memory/`) changed; no `docs/admin/` or `docs/coaching/` content; no agent-definition (`.claude/agents/*.md`) created or materially modified (agent ROLES unchanged). No docs-writer dispatch required.
+
+### Context-Layer Assessment (six triggers)
+1. **New convention/pattern/constraint — YES**: subagent-spawning vocabulary + implicit formation is now the standard. Codified in-epic; no further CA dispatch.
+2. **Architectural decision with ongoing implications — YES**: Option B (keep `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, adopt subagent vocab). Codified in-epic.
+3. **Footgun/failure mode/boundary — YES**: the flag dependency (without it, no `SendMessage`/`Task*` and spawns are one-shot). Codified in `CLAUDE.md` + CA memory.
+4. **Change to agent behavior/routing/coordination — YES**: spawn mental model + coordination vocabulary (vocabulary-only; behavior preserved per TN-2). Codified across skills/rules.
+5. **Domain knowledge for future epics — NO.**
+6. **New CLI/workflow/skill — NO**: no skill added/renamed/retired; only vocabulary edited within existing skills, so the `/workflow-help` cheat sheet and the CLAUDE.md Workflows section need no update.
+
+All "yes" triggers were the epic's own deliverable and CA codified them in-epic — context-layer gate satisfied, no additional claude-architect dispatch required.

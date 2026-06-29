@@ -52,7 +52,7 @@ Before spawning an implementer for a story:
 - [ ] Read the epic Technical Notes in full
 - [ ] Include full story file text + Technical Notes in the prompt (not a summary)
 - [ ] Route to PM to set story status to IN_PROGRESS
-- [ ] Spawn stories in parallel when they have no file conflicts
+- [ ] Execute stories **serially** -- one at a time -- letting the staging boundary (`git add -A` after each story passes review) isolate each story's diff. The implement skill (Phase 3) is authoritative on the dispatch loop.
 
 ## When to Shorten the Chain
 

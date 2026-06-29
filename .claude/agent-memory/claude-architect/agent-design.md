@@ -125,8 +125,9 @@ Without these tools, spawned teammates can do file work but cannot reply to assi
 
 **Discovered 2026-05-15 during E-228 dispatch**: all 5 teammates (PM, DE, SE, UXD, CR) silently failed a "reply ALIVE via SendMessage" diagnostic ping. Audit revealed none of the 9 agent definitions had any team-comms tools — they had never been present in any git revision. Fix: added the 5 tools to all 9 agent definitions.
 
-Spawner-only tools (NOT to be added to teammates):
-- `TeamCreate`, `TeamDelete` -- main session only
+Team formation is now implicit and teardown automatic (the explicit `TeamCreate`/`TeamDelete` tools were removed in Claude Code v2.1.178). The flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` gates the team-coordination surface: without it, both `SendMessage` and the shared `Task*` task list are unavailable and spawned agents are one-shot (consistent with TN-4 and the durable `CLAUDE.md` Agent Ecosystem note).
+
+Spawner-only tool (NOT to be added to teammates):
 - `Agent` (Task tool) -- main session only
 
 Any future new agent definition MUST include the 5 team-comms tools unless it is intentionally isolated from team dispatch.

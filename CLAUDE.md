@@ -169,3 +169,5 @@ This project uses specialized agents coordinated by the product-manager:
 | **code-reviewer** | | Adversarial code reviewer -- verifies ACs and code quality before stories are marked DONE during dispatch. Spawned automatically by the implement skill; does not write or edit code. |
 
 PM discovers requirements, writes epics/stories, and owns status transitions during dispatch. Code-reviewer gates every code story. Any agent identifying future work flags it to PM for idea capture. **Direct-routing exceptions**: `api-scout`, `baseball-coach`, `claude-architect` may be invoked without PM intermediation.
+
+Dispatch relies on long-lived resumable named subagents (PM and code-reviewer persist across an epic, re-engaged via `SendMessage` with context intact). This requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (set in `.claude/settings.json`); without it the team-coordination tools (`SendMessage` and the shared `Task*` task list) are unavailable and spawned agents are one-shot.

@@ -37,6 +37,8 @@ Codify Jason's planning workflow (plan -> internal review -> codex validation ->
 
 This skill owns the planning process (phases, gates, transitions). The PM agent definition owns PM capabilities (quality checklist, consultation triggers). Rules stay where they are (`workflow-discipline.md`, `agent-routing.md`, `agent-team-compliance.md`) -- this skill references them, does not duplicate them. This skill does NOT modify the codex-spec-review skill or the implement skill's core phases.
 
+**Subagent model**: The agents this skill spawns are long-lived, resumable named subagents (spawned via the `Agent` tool, with the team forming implicitly on the first spawn); the runtime flag they depend on is stated once in `CLAUDE.md` (Agent Ecosystem) and is not repeated in the spawn blocks below.
+
 ---
 
 ## Prerequisites
@@ -61,7 +63,7 @@ Before parsing domain signals, check whether the user explicitly named agents in
 
 **PM is always included on the planning team**, even if the user does not name PM explicitly. PM is infrastructure for planning (just as PM is infrastructure for dispatch). If the user names agents that do not include PM, add PM automatically.
 
-- **If the user names 2+ agents**: This is a Pattern 1 (Explicit Team Request) per `agent-team-compliance.md`. The named agents (plus PM if not named) override the domain suggestion table entirely. Use `TeamCreate` to create the team and spawn all agents (named agents + PM) using the spawn contexts in Step 4. Skip Steps 2-3 (domain parsing and suggestion are not needed since the user named agents explicitly) and Step 4's `TeamCreate` call (team was already created here in Step 1). Proceed directly to Phase 1.
+- **If the user names 2+ agents**: This is a Pattern 1 (Explicit Team Request) per `agent-team-compliance.md`. The named agents (plus PM if not named) override the domain suggestion table entirely. Spawn all agents (named agents + PM) as named subagents via the `Agent` tool -- the team forms implicitly on the first spawn -- using the spawn contexts in Step 4. Skip Steps 2-3 (domain parsing and suggestion are not needed since the user named agents explicitly) and Step 4's spawn step (the agents were already spawned here in Step 1). Proceed directly to Phase 1.
 
 - **If the user names exactly 1 agent**: This is a Pattern 2 (Explicit Consultation Directive) per `agent-team-compliance.md`. The named agent is added to the team alongside PM. The main session may still suggest additional experts based on domain signals (Steps 2-3), but the named agent is guaranteed.
 
@@ -98,29 +100,29 @@ Wait for the user to confirm or modify. The user may:
 - Remove experts: exclude them
 - Replace the entire suggestion: honor the replacement
 
-### Step 4: Create the team and spawn agents
+### Step 4: Spawn the planning subagents
 
-Use `TeamCreate` to create the planning team. Spawn all confirmed agents with the appropriate mode:
+The team forms implicitly on the first spawn -- there is no separate setup step. Spawn all confirmed agents as named subagents via the `Agent` tool, with the appropriate mode:
 
 **PM** -- spawned WITHOUT consultation mode (PM produces artifacts as its normal function):
 
 ```
-You are the product-manager agent on the [team-name] team. Your role during planning is discovery and epic formation. Operate in discover mode first (Phase 1), then plan mode (Phase 2). Consult domain experts on the team for requirements. Write the DRAFT epic and stories. Run your quality checklist before declaring the epic complete. Do not set the epic to READY -- that happens in Phase 5 after spec review and refinement are complete. Wait for direction from the main session via SendMessage.
+You are the product-manager subagent. Your role during planning is discovery and epic formation. Operate in discover mode first (Phase 1), then plan mode (Phase 2). Consult domain experts on the team for requirements. Write the DRAFT epic and stories. Run your quality checklist before declaring the epic complete. Do not set the epic to READY -- that happens in Phase 5 after spec review and refinement are complete. Wait for direction from the main session via SendMessage.
 ```
 
 **Primary-capacity domain experts** (api-scout, baseball-coach, claude-architect) -- spawned WITHOUT consultation mode. These agents produce artifacts as their normal function per `workflow-discipline.md` "When to declare consultation mode" guidance. Spawn context:
 
 ```
-You are a [agent-type] agent on the [team-name] team for planning epic E-NNN. Provide domain expertise when consulted by PM or the main session. Wait for questions via SendMessage.
+You are a [agent-type] subagent for planning epic E-NNN. Provide domain expertise when consulted by PM or the main session. Wait for questions via SendMessage.
 ```
 
 **Implementing-type domain experts** (software-engineer, data-engineer, docs-writer) -- spawned WITH consultation mode per `workflow-discipline.md` Consultation Mode Constraint. Include the exact activation phrase in the spawn context:
 
 ```
-You are a [agent-type] agent on the [team-name] team for planning epic E-NNN. Consultation mode: do not create or modify implementation files or planning artifacts. Provide domain expertise when consulted by PM or the main session. Wait for questions via SendMessage.
+You are a [agent-type] subagent for planning epic E-NNN. Consultation mode: do not create or modify implementation files or planning artifacts. Provide domain expertise when consulted by PM or the main session. Wait for questions via SendMessage.
 ```
 
-**Exit condition**: Team is created, all agents spawned and ready.
+**Exit condition**: All planning subagents spawned and ready (the team formed implicitly on the first spawn).
 
 ---
 
@@ -181,7 +183,7 @@ Track the current internal review iteration: `internal_review_iteration` (starts
 If CR is not already spawned (`cr_spawned = false`), spawn a code-reviewer into the planning team. CR spawn context:
 
 ```
-You are the code-reviewer agent on the [team-name] team. During planning, you perform spec audits on epic and story files -- not code reviews. Wait for review assignments from the main session via SendMessage. Each assignment will include spec-review criteria and the epic directory path.
+You are the code-reviewer subagent. During planning, you perform spec audits on epic and story files -- not code reviews. Wait for review assignments from the main session via SendMessage. Each assignment will include spec-review criteria and the epic directory path.
 ```
 
 If spawn succeeds, set `cr_spawned = true`. If spawn fails, leave `cr_spawned = false` and escalate to the user with options: (a) retry spawn, (b) skip CR sub-pass for this iteration (run holistic team review only), (c) abort internal review and advance to Codex (Phase 4) or READY (Phase 5).
@@ -611,7 +613,7 @@ git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
 
 The main session loads the implement skill (`.claude/skills/implement/SKILL.md`). The implement skill detects the handoff (planning team already active) and begins at its Prerequisites check. Since the epic is READY (just set in Step 1), prerequisites pass and dispatch proceeds through the implement skill's phases using the transitioned team.
 
-Set `handoff_from_plan = true` so the implement skill skips team creation (Phase 2 Steps 1-3) and reuses the existing team.
+Set `handoff_from_plan = true` so the implement skill skips team formation (Phase 2 Steps 1-3) and reuses the existing team.
 
 **Exit condition**: Planning workflow is complete (READY and stopped, or handed off to implement skill).
 

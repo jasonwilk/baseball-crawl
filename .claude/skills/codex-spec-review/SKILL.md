@@ -86,7 +86,7 @@ After the receipt and complete digest are satisfied, offer the user an advisory 
 1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, agent infrastructure, UX).
 2. Map those domains to agents from CLAUDE.md's Agent Ecosystem table (ambient context at runtime -- do NOT use a hardcoded roster).
 3. The triage team always includes the **product-manager** (PM owns spec work). Other agents are consultative based on the findings' domains.
-4. Offer to spawn the triage team. If the user accepts, create the team and spawn agents. If the user declines, the workflow ends.
+4. Offer to spawn the triage team. If the user accepts, spawn the relevant agents as named subagents via the `Agent` tool (the triage team forms implicitly on the first spawn). If the user declines, the workflow ends.
 
 **Triage is advisory.** The team assesses findings and recommends action (refine, fix, defer, dismiss) but does NOT implement changes directly. PM owns all epic/story file updates during triage.
 

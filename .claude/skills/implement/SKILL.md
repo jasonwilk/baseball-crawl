@@ -27,6 +27,8 @@ Load this skill when the user says any of:
 
 Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, creates an epic worktree, spawns implementers, code-reviewer, and PM (all working in the epic worktree), assigns stories serially, routes completion reports through review and AC verification, manages the staging boundary between stories, and runs the closure sequence (merge epic worktree to main, commit, cleanup). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add/remove` for epic worktree lifecycle, `git diff`/`git apply` for closure merge to main, `git add -A` for staging boundary and closure commit, `git commit` for the closure commit, `git branch -D` for branch cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
+**Subagent model**: The agents this skill spawns are long-lived, resumable named subagents (spawned via the `Agent` tool, with the team forming implicitly on the first spawn); the runtime flag they depend on is stated once in `CLAUDE.md` (Agent Ecosystem) and is not repeated in the spawn blocks below.
+
 **Enforcement model**: A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to the main checkout during dispatch (all paths except `.claude/agent-memory/`). Outside dispatch, it blocks implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). This provides deterministic enforcement that dispatch work happens in worktrees. The hook is the primary mechanism; instruction-based constraints in this skill are backup for edge cases the hook cannot cover (e.g., Bash file writes).
 
 When invoked via plan skill handoff (`handoff_from_plan = true`), the planning team is already active with PM and domain experts. The implement skill reuses these agents rather than creating a fresh team, preserving expert context from the planning session (unified team lifecycle).
@@ -94,13 +96,13 @@ Do not report the result to the user or treat a failure as an error. Proceed to 
 
 ## Phase 2: Dispatch
 
-**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active, the epic worktree was created by the plan skill's handoff sequence, and agents have been transitioned. Skip Steps 1-3 (epic worktree creation, team creation, agent spawning). Proceed directly to Step 4 (set epic to ACTIVE). Code-reviewer is already on the team -- either spawned during the plan skill's Phase 3 (internal review cycle) and transitioned to code-review mode, or spawned fresh during Phase 5 Step 3a if Phase 3 was skipped. Do not re-spawn it. If any additional implementer types are needed that were not on the planning team, spawn them now using the universal spawn context below.
+**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active, the epic worktree was created by the plan skill's handoff sequence, and agents have been transitioned. Skip Steps 1-3 (epic worktree creation, team formation, agent spawning). Proceed directly to Step 4 (set epic to ACTIVE). Code-reviewer is already on the team -- either spawned during the plan skill's Phase 3 (internal review cycle) and transitioned to code-review mode, or spawned fresh during Phase 5 Step 3a if Phase 3 was skipped. Do not re-spawn it. If any additional implementer types are needed that were not on the planning team, spawn them now using the universal spawn context below.
 
-**If `handoff_from_plan = false`** (standard dispatch): Create the epic worktree, the team, and spawn all agents as described below.
+**If `handoff_from_plan = false`** (standard dispatch): Create the epic worktree and spawn all agents as described below (the team forms implicitly on the first spawn).
 
 ### Step 1: Create the epic worktree
 
-Before team creation, create an epic-level worktree where all agents work during dispatch.
+Before spawning agents, create an epic-level worktree where all agents work during dispatch.
 
 **Command** (substitute the actual epic ID):
 
@@ -114,9 +116,9 @@ git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
 
 If the branch or worktree already exists (e.g., resuming a previously interrupted dispatch), reuse the existing worktree rather than failing.
 
-### Step 2: Create the team
+### Step 2: Team formation (implicit)
 
-Use `TeamCreate` to create a dispatch team for the epic.
+There is no explicit team-creation step -- the team forms implicitly when the first subagent is spawned in Step 3.
 
 ### Step 3: Spawn implementing agents, code-reviewer, and PM
 
@@ -125,7 +127,7 @@ All agents are spawned WITHOUT `isolation: "worktree"` and receive the epic work
 **Universal implementer spawn context:**
 
 ```
-You are a [agent-type] agent on the [team-name] team. Wait for the main session to assign you a story via SendMessage. Do not begin work until you receive your story assignment with the full story file text and Technical Notes.
+You are a [agent-type] subagent. Wait for the main session to assign you a story via SendMessage. Do not begin work until you receive your story assignment with the full story file text and Technical Notes.
 
 Your working directory for all file operations: [epic-worktree-path]
 (e.g., /tmp/.worktrees/baseball-crawl-E-NNN/)
@@ -137,7 +139,7 @@ Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- th
 **Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. Code-reviewer spawn context:
 
 ```
-You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list.
+You are the code-reviewer subagent. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list.
 
 Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use it when reading files and running git diff.
@@ -149,7 +151,7 @@ Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- th
 **Spawn the product-manager (PM)** alongside implementers and code-reviewer. PM is infrastructure -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. PM spawn context:
 
 ```
-You are the product-manager agent on the [team-name] team. Your role during dispatch is status management and AC verification. You own: story status file updates (TODO -> IN_PROGRESS -> DONE), epic Stories table updates, epic status transitions (READY -> ACTIVE -> COMPLETED), and AC verification ("did they build what was specified"). Wait for routing from the main session via SendMessage -- the main session will send you status update requests and completion reports for AC verification. Do not self-initiate work.
+You are the product-manager subagent. Your role during dispatch is status management and AC verification. You own: story status file updates (TODO -> IN_PROGRESS -> DONE), epic Stories table updates, epic status transitions (READY -> ACTIVE -> COMPLETED), and AC verification ("did they build what was specified"). Wait for routing from the main session via SendMessage -- the main session will send you status update requests and completion reports for AC verification. Do not self-initiate work.
 
 Epic file: [absolute path to epic.md in epic worktree]
 Epic worktree path: [epic-worktree-path]
@@ -157,7 +159,7 @@ All story work happens in this worktree. Use absolute paths under the epic workt
 Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree. Exception: `.claude/agent-memory/product-manager/` (your persistent memory in the main checkout).
 ```
 
-**PM context window recovery**: If PM's context fills during large epics, the main session respawns PM with a fresh summary of current epic state: which stories are DONE, which are IN_PROGRESS, and a reminder of PM's role. No state is lost because PM's work products (status files, epic table) persist on disk.
+**PM context window recovery**: The normal path is `SendMessage` resumption -- PM is a long-lived resumable subagent, so the main session re-engages it with its context intact. As a documented fallback, if PM's context fills during large epics, the main session respawns PM with a fresh summary of current epic state: which stories are DONE, which are IN_PROGRESS, and a reminder of PM's role. No state is lost because PM's work products (status files, epic table) persist on disk.
 
 ### Step 4: Set epic to ACTIVE
 
@@ -357,7 +359,7 @@ Send the integration review assignment to the code-reviewer via `SendMessage` wi
 Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings **one at a time** (serial, not parallel). For each finding: spawn an implementer, wait for completion, stage with `git add -A`, then proceed to the next finding. Select agent type via the routing table. Spawn WITHOUT `isolation: "worktree"`. Provide the **remediation spawn context**:
 
 ```
-You are a [agent-type] agent spawned for post-review remediation on the [team-name] team.
+You are a [agent-type] subagent spawned for post-review remediation.
 Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
 Constraints: Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/`. No git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
 Remediation authorized by post-review remediation exception in workflow-discipline.md.
@@ -599,13 +601,13 @@ The `--force` flag is required because the epic worktree still has staged change
 
 Verifiable: after this step, `ls /tmp/.worktrees/` does not include `baseball-crawl-E-NNN/` and `git branch --list 'epic/E-NNN'` is empty.
 
-### Step 10: Shut down PM and delete team
+### Step 10: Shut down PM
 
-Shutdown PM, wait for confirmation, delete team.
+Send PM an explicit `shutdown_request` and wait for confirmation. Team teardown is automatic on session exit -- there is no explicit delete step.
 
 ### Step 11: Post-shutdown reconciliation sweep
 
-PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMORY.md` update is sub-step 7, captured by the closure commit), but a final memory flush can land *after* the Step 8 closure commit -- as PM spins down at Step 10. After PM is shut down and the team is deleted, re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
+PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMORY.md` update is sub-step 7, captured by the closure commit), but a final memory flush can land *after* the Step 8 closure commit -- as PM spins down at Step 10. After PM is shut down, re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
 
 - **Tree clean**: done.
 - **Only `.claude/agent-memory/**` stragglers remain** (files written by agents that ran in this dispatch): fold them into the closure commit with `cd /workspaces/baseball-crawl && git commit --amend --no-edit` (safe while unpushed), then confirm the tree is clean.
@@ -621,7 +623,7 @@ PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMOR
 Prerequisites -> Phase 0 (tmux) -> Phase 1 (team composition) -> Phase 2 (dispatch setup)
   |
   v
-Phase 2: Create epic worktree -> create team -> spawn agents (all in epic worktree, no isolation) -> PM sets ACTIVE
+Phase 2: Create epic worktree -> team forms implicitly on first spawn -> spawn agents (all in epic worktree, no isolation) -> PM sets ACTIVE
   (handoff_from_plan: skip Steps 1-3, reuse existing team + worktree)
   |
   v
@@ -641,7 +643,7 @@ Phase 4 (if "and review"): 4a CR integration review + 4b Codex code review (head
 Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1b full-suite-green gate (`python -m pytest tests/` in main, unconditional; reds -> Phase 4a remediation loop) -> PM completes epic -> doc + context-layer assessments -> summary
   -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
   -> closure merge and commit (patch -> dry-run -> apply -> archive mv -> PM memory -> approval gate -> single commit)
-  -> worktree cleanup -> shut down PM + delete team
+  -> worktree cleanup -> shut down PM (teardown automatic on session exit)
   -> post-shutdown reconciliation sweep (fold late `.claude/agent-memory/**` stragglers via --amend; narrow carve-out)
 ```
 

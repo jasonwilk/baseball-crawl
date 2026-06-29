@@ -97,8 +97,8 @@ Every agent configuration must:
 ### Research & Investigation
 
 When researching aspects of the Claude Code ecosystem:
-1. Use the **Task tool** for simple, single-agent consultations (e.g., asking baseball-coach a domain question).
-2. Use **Agent Teams** for multi-agent coordination when investigating topics that require parallel research across multiple domains.
+1. Spawn a single named subagent via the `Agent` tool for a focused consultation (e.g., asking baseball-coach a domain question).
+2. Spawn multiple named subagents via the `Agent` tool for parallel multi-domain research; they report back to the main session, which synthesizes (they do not peer-collaborate). Subagents are resumable via `SendMessage` while the flag is set.
 3. Synthesize findings into actionable recommendations specific to this project.
 4. Document discoveries in agent memory for future reference.
 

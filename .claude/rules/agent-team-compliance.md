@@ -7,7 +7,7 @@ paths:
 
 ## User Request Classification -- Execute Before Responding
 
-When you receive a user message, scan it against the three patterns below BEFORE selecting any tools. If a pattern matches, follow its required action. These patterns fire at the decision point -- before you choose between Task tool, Agent Teams, or answering directly.
+When you receive a user message, scan it against the three patterns below BEFORE selecting any tools. If a pattern matches, follow its required action. These patterns fire at the decision point -- before you choose between spawning subagent(s) via the `Agent` tool or answering directly.
 
 ## Why These Rules Exist
 
@@ -21,18 +21,18 @@ These patterns apply to **explicit agent naming only** -- cases where the user n
 
 **Trigger**: The user names 2 or more agents or roles in a team-formation context (e.g., "start a team with PM and architect", "get SE and DE working on this together", "I want architect, coach, and PM on this").
 
-**Required action**: Use Agent Teams. Create the team via TeamCreate and spawn each named agent as a teammate. Assign work through the team.
+**Required action**: Spawn each named agent as a separate named subagent via the `Agent` tool (the team forms implicitly on the first spawn -- no setup step). Route work to each via `SendMessage`.
 
 **Prohibited**:
-- Spawning one agent via Task tool and asking it to consult the others on your behalf.
-- Using sequential Task tool calls instead of a team when the user requested a team.
+- Spawning one agent via the `Agent` tool and asking it to consult the others on your behalf.
+- Spawning the named agents as one-shot, fire-and-forget consultations instead of keeping them live together as a coordinated team.
 - Silently downgrading to a non-team workflow without telling the user.
 
 ## Pattern 2: Explicit Consultation Directive
 
 **Trigger**: The user names a specific agent as a required participant -- e.g., "consult [agent]", "work with [agent]", "ask [agent]", "have [agent] look at this", "check with [agent]", "get [agent]'s input", or any phrasing that designates a specific agent to contribute.
 
-**Required action**: Actually spawn that agent (via Agent Teams if Pattern 1 also applies, or Task tool otherwise). Send the question or context to the spawned agent. Wait for the agent's response. Incorporate the agent's actual response into your work.
+**Required action**: Actually spawn that agent as a named subagent via the `Agent` tool. Send the question or context to the spawned agent. Wait for the agent's response. Incorporate the agent's actual response into your work.
 
 **Prohibited**:
 - Answering on the agent's behalf based on what you think they would say.

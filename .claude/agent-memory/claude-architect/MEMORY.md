@@ -77,9 +77,10 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - CLAUDE.md loaded every session; keep concise
 - First 200 lines of MEMORY.md auto-loaded into system prompt
 - Hooks: deterministic; CLAUDE.md: advisory
-- Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) -- teammates CAN spawn other teammates (no nesting limit)
-- Task tool: single subagent, no further nesting. Use for simple consultations.
-- Agent Teams: multi-agent coordination with free spawning. Use for epic/story dispatch.
+- Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) -- only the main session (lead) spawns subagents via the `Agent` tool; subagents cannot spawn their own (no nesting)
+- Flag gates the team-coordination surface: without `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, the team-coordination tools (`SendMessage` + the shared `Task*` task list) are unavailable and spawned agents are one-shot
+- `TeamCreate`/`TeamDelete` were removed in Claude Code v2.1.178 (recorded 2026-06-29) -- team formation is now implicit and teardown automatic; no explicit create/delete calls exist
+- `Agent` (Task tool): main session only; spawns a named subagent. Subagents are long-lived and resumable -- re-engage via `SendMessage` with context intact. Use for epic/story dispatch.
 - Context window is the #1 resource to manage
 - Statusline: configured via `statusLine` key in settings.json (type: "command", command: path to script)
 - Statusline receives JSON on stdin with model, workspace, cost, context_window, etc.
