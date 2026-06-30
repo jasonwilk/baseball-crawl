@@ -1,7 +1,7 @@
 # E-248: GC API Client Error-Ladder Refactor
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -41,8 +41,8 @@ This epic implements no `docs/ROADMAP.md` §5 slice — internal maintainability
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-248-01 | Pin per-status characterization tests for the 4 live verbs | TODO | None | - |
-| E-248-02 | Extract shared send-with-retries helper across the 4 live verbs | TODO | E-248-01 | - |
+| E-248-01 | Pin per-status characterization tests for the 4 live verbs | DONE | None | software-engineer |
+| E-248-02 | Extract shared send-with-retries helper across the 4 live verbs | DONE | E-248-01 | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -78,3 +78,25 @@ All pre-dispatch sign-offs are resolved. None remain open.
 ## History
 - 2026-06-29: Created (READY). Isolated from the whole-project code-quality sweep as the sole HIGH-blast-radius theme (H5), gated behind a per-status test-coverage prerequisite.
 - 2026-06-30: Dead-verb scope fork resolved (user-delegated to PM) — **Option A**: `post()`/`delete()` are dead (api-scout grep-verified: zero production callers, only-caller path removed in E-239 + banned). Deletion moved to E-246-07; E-248 rescoped to the 4 live verbs as a pure zero-behavior-change dedup. Removed the `post()` 5xx-gap behavior change. Recorded api-scout consult. Cross-epic ordering: E-246 before E-248. Applied Codex P2 (anchor tests on public verbs, not `_get_with_retries`) + P3 (artifact). No `verify-aggregates` gate (no aggregate surface).
+- 2026-06-30: Both stories landed. **E-248-01** pinned the per-verb characterization suite — 6 new tests filling genuine matrix gaps (`get_paginated` 401-refresh-and-retry success branch; `get_public` 200 success, integer Retry-After 429, 5xx backoff-then-raise, 5xx success-on-retry, unexpected-status raise) — all anchored on the public verbs, none on the private `_get_with_retries`. **E-248-02** extracted the single `_send_with_retries` helper (the 4 live verbs are now thin wrappers; the old `_get_with_retries` is subsumed; net −129 lines in `client.py`), proven behavior-preserving with ZERO assertion changes to the E-248-01 suite (94 passed against the refactored code). One CR integration-review SHOULD FIX (a stale comment naming the renamed method) remediated. Pure dedup, no behavior change.
+
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-248-01 | 0 | 0 | 0 |
+| Per-story CR — E-248-02 | 0 | 0 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 0 | 0 | 0 |
+| **Total** | **1** | **1** | **0** |
+
+### Closure Assessments
+- **Documentation assessment**: No documentation impact — internal behavior-preserving refactor (no new feature/endpoint, no schema change, no architecture/deployment change, no user-facing change).
+- **Context-layer assessment** — all six triggers **NO**:
+  1. New convention/pattern/constraint — **NO** (`_send_with_retries` is a localized private helper inside `client.py`, not a project-wide convention).
+  2. Architectural decision — **NO**.
+  3. Footgun/boundary — **NO**.
+  4. Agent behavior/routing — **NO**.
+  5. Domain knowledge — **NO**.
+  6. New CLI command/workflow — **NO**.
+- **Ideas backlog**: no CANDIDATE unblocked by this internal refactor (closest tangential is IDEA-073 Full-Suite CI Gate, not unblocked).
+- **Vision signals**: no new signals from this epic. Standing advisory unchanged — `docs/vision-signals.md` holds a large unprocessed backlog (43 signals; last curation 2026-03-13), so a "curate the vision" session remains recommended.

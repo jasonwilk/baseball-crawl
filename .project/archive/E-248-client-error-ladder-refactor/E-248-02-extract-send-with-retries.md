@@ -4,7 +4,7 @@
 [E-248: GC API Client Error-Ladder Refactor](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the 401/403/429/5xx error/retry ladder will live in a single shared helper, and each of the 4 LIVE client verbs (`get`, `get_public`, `get_paginated`, `post_json`) will be a thin wrapper over it. This is a pure behavior-preserving dedup — the dead verbs `post()`/`delete()` are already removed by E-246-07, so there is no 5xx-gap to close and no sanctioned behavior change.

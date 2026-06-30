@@ -1719,3 +1719,142 @@ def test_post_json_unexpected_status_raises(monkeypatch: pytest.MonkeyPatch) -> 
     client = _make_client(monkeypatch)
     with pytest.raises(GameChangerAPIError, match="418"):
         client.post_json("/search", body={"name": "test"})
+
+
+# ---------------------------------------------------------------------------
+# E-248-01: Per-status characterization tests for the 4 live verbs
+# ---------------------------------------------------------------------------
+#
+# These tests complete the per-verb status matrix (epic Technical Notes
+# "Per-verb status matrix") so each live public verb has its actual per-status
+# contract pinned BEFORE the E-248-02 error-ladder extraction. The refactor
+# must keep them green with NO assertion changes -- any required change means
+# the refactor altered behavior and is not shippable.
+#
+# Contracts (anchored on the public verbs, NOT the private _send_with_retries):
+#   get / get_paginated / post_json: 401-refresh-retry / 403 / 429 retry-after
+#                                    / 5xx backoff / unexpected-status raise
+#   get_public:                      200 / 429 retry-after / 5xx backoff
+#                                    / unexpected-status raise (NO 401 path)
+#
+# Cells already pinned by tests above are not duplicated here:
+#   get          -- 200/401/403/429/5xx/unexpected: covered above
+#   get_paginated-- 403/429/5xx/unexpected: covered above (401-success added here)
+#   post_json    -- full matrix: covered above
+#   get_public   -- 429: covered above (200/5xx/unexpected added here)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_paginated_401_force_refresh_retry_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_paginated() refreshes the token on 401 and the retried page succeeds.
+
+    Pins the success branch of the paginated 401 refresh-and-retry ladder
+    (the failure branch is pinned by test_get_paginated_401_raises_*).
+    """
+    from unittest.mock import MagicMock
+
+    fresh_token = "refreshed-access-token"
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.return_value = fresh_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS
+    )
+
+    # First request 401; retry after force_refresh returns 200 (single page).
+    route = respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json=["game-1", "game-2"]),
+        ]
+    )
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+    result = client.get_paginated("/teams/abc/game-summaries")
+
+    assert result == ["game-1", "game-2"]
+    mock_tm.force_refresh.assert_called_once()
+    assert client._session.headers["gc-token"] == fresh_token
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_get_public_returns_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_public() returns parsed JSON on 200 (the public success path)."""
+    respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        return_value=httpx.Response(200, json=[{"id": "g1"}])
+    )
+    client = _make_client(monkeypatch)
+    result = client.get_public("/public/teams/abc/games")
+    assert result == [{"id": "g1"}]
+
+
+@respx.mock
+def test_get_public_429_honors_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_public() waits the integer Retry-After then raises RateLimitError."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(
+        "src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s)
+    )
+
+    respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "12"})
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(RateLimitError):
+        client.get_public("/public/teams/abc/games")
+
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [12]
+
+
+@respx.mock
+def test_get_public_5xx_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_public() retries 3 times on 5xx (backoff) then raises GameChangerAPIError."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(
+        "src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s)
+    )
+
+    route = respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        return_value=httpx.Response(503)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError):
+        client.get_public("/public/teams/abc/games")
+
+    # 3 attempts, with backoff sleeps of 1s and 2s before attempts 2 and 3
+    # (no sleep after the final failure).
+    assert route.call_count == 3
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [1, 2]
+
+
+@respx.mock
+def test_get_public_5xx_succeeds_on_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_public() succeeds after an initial 5xx then a 200 on retry."""
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        side_effect=[
+            httpx.Response(503),
+            httpx.Response(200, json=[{"id": "g1"}]),
+        ]
+    )
+    client = _make_client(monkeypatch)
+    result = client.get_public("/public/teams/abc/games")
+    assert result == [{"id": "g1"}]
+
+
+@respx.mock
+def test_get_public_unexpected_status_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_public() raises GameChangerAPIError on an unexpected (non-5xx) status."""
+    respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        return_value=httpx.Response(418)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError, match="418"):
+        client.get_public("/public/teams/abc/games")

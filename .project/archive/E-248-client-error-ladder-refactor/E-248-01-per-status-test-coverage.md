@@ -4,7 +4,7 @@
 [E-248: GC API Client Error-Ladder Refactor](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, each of the 4 LIVE GC API client verbs (`get`, `get_public`, `get_paginated`, `post_json`) will have characterization tests pinning its actual per-status contract, and those tests will pass against the current un-refactored client. This is the prerequisite that lets the E-248-02 refactor prove it preserves behavior with no assertion changes.

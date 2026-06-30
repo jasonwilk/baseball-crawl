@@ -27,6 +27,7 @@ import logging
 import os
 import secrets
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -270,91 +271,23 @@ class GameChangerClient:
         extra_headers["Content-Type"] = _GC_CONTENT_TYPE
 
         current_params = params
-        backoff_delays = [1, 2, 4]
 
         while True:
             logger.debug("GET paginated %s", url)
 
-            last_error: GameChangerAPIError | None = None
-            page_response: httpx.Response | None = None
-
-            for attempt, backoff in enumerate(backoff_delays):
-                logger.debug("GET paginated %s (attempt %d)", url, attempt + 1)
-                response = self._session.get(
-                    url, params=current_params, timeout=timeout, headers=extra_headers
-                )
-                logger.debug("GET paginated %s -> %d", url, response.status_code)
-
-                if response.status_code == 200:
-                    page_response = response
-                    break
-
-                if response.status_code == 401:
-                    # Re-raise immediately if refresh fails -- don't retry with stale token.
-                    new_token = self._token_manager.force_refresh()
-                    self._session.headers["gc-token"] = new_token
-                    retry_response = self._session.get(
-                        url, params=current_params, timeout=timeout, headers=extra_headers
-                    )
-                    if retry_response.status_code == 200:
-                        page_response = retry_response
-                        break
-                    if retry_response.status_code == 401:
-                        raise CredentialExpiredError(
-                            f"Credentials rejected for {url} "
-                            f"(HTTP {retry_response.status_code}). "
-                            "Credentials may be expired -- check .env or run: bb creds check"
-                        )
-                    # Route the retry response through the same error handling so
-                    # 403, 429, and 5xx are surfaced with the correct exception type.
-                    response = retry_response
-
-                if response.status_code == 403:
-                    raise ForbiddenError(
-                        f"Access denied for {url} "
-                        f"(HTTP {response.status_code}). "
-                        "Credentials may be expired -- check .env or run: bb creds check"
-                    )
-
-                if response.status_code == 429:
-                    retry_after = _parse_retry_after(
-                        response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
-                    )
-                    logger.warning(
-                        "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
-                        url,
-                        retry_after,
-                    )
-                    time.sleep(retry_after)
-                    raise RateLimitError(
-                        f"Rate limit exceeded for {url} (HTTP 429). "
-                        f"Waited {retry_after}s."
-                    )
-
-                if 500 <= response.status_code < 600:
-                    last_error = GameChangerAPIError(
-                        f"Server error for {url} "
-                        f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
-                    )
-                    if attempt < len(backoff_delays) - 1:
-                        logger.warning(
-                            "Server error %d on paginated %s -- retrying in %ds (attempt %d/3)",
-                            response.status_code,
-                            url,
-                            backoff,
-                            attempt + 1,
-                        )
-                        time.sleep(backoff)
-                        continue
-
-                else:
-                    raise GameChangerAPIError(
-                        f"Unexpected status {response.status_code} for {url}."
-                    )
-
-            if page_response is None:
-                assert last_error is not None
-                raise last_error
+            # Bind the per-page url/params as defaults so the closure captures
+            # this iteration's values (they are reassigned at the loop's end for
+            # the next page).  send() is invoked synchronously inside the helper.
+            page_response = self._send_with_retries(
+                lambda u=url, p=current_params: self._session.get(
+                    u, params=p, timeout=timeout, headers=extra_headers
+                ),
+                url=url,
+                label=url,
+                log_prefix="GET paginated",
+                warn_kind="paginated ",
+                requires_auth=True,
+            )
 
             page_data = page_response.json()
             if isinstance(page_data, list):
@@ -421,7 +354,15 @@ class GameChangerClient:
         if accept is not None:
             headers["Accept"] = accept
 
-        return self._get_with_retries(url, path, params, timeout, headers)
+        response = self._send_with_retries(
+            lambda: self._session.get(url, params=params, timeout=timeout, headers=headers),
+            url=url,
+            label=path,
+            log_prefix="GET",
+            warn_kind="",
+            requires_auth=True,
+        )
+        return response.json()
 
     def get_public(
         self,
@@ -458,105 +399,89 @@ class GameChangerClient:
         if accept is not None:
             headers["Accept"] = accept
 
-        backoff_delays = [1, 2, 4]
-        last_error: GameChangerAPIError | None = None
-
-        for attempt, backoff in enumerate(backoff_delays):
-            logger.debug("GET public %s (attempt %d)", url, attempt + 1)
-            response = self._public_session.get(
+        response = self._send_with_retries(
+            lambda: self._public_session.get(
                 url, params=params, timeout=timeout, headers=headers
-            )
-            logger.debug("GET public %s -> %d", path, response.status_code)
+            ),
+            url=url,
+            label=path,
+            log_prefix="GET public",
+            warn_kind="public ",
+            requires_auth=False,
+        )
+        return response.json()
 
-            if response.status_code == 200:
-                return response.json()
-
-            if response.status_code == 429:
-                retry_after = _parse_retry_after(
-                    response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
-                )
-                logger.warning(
-                    "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
-                    path,
-                    retry_after,
-                )
-                time.sleep(retry_after)
-                raise RateLimitError(
-                    f"Rate limit exceeded for {path} (HTTP 429). "
-                    f"Waited {retry_after}s."
-                )
-
-            if 500 <= response.status_code < 600:
-                last_error = GameChangerAPIError(
-                    f"Server error for {path} "
-                    f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
-                )
-                if attempt < len(backoff_delays) - 1:
-                    logger.warning(
-                        "Server error %d on public %s -- retrying in %ds (attempt %d/3)",
-                        response.status_code,
-                        path,
-                        backoff,
-                        attempt + 1,
-                    )
-                    time.sleep(backoff)
-                    continue
-            else:
-                raise GameChangerAPIError(
-                    f"Unexpected status {response.status_code} for {path}."
-                )
-
-        assert last_error is not None
-        raise last_error
-
-    def _get_with_retries(
+    def _send_with_retries(
         self,
+        send: Callable[[], httpx.Response],
+        *,
         url: str,
-        path: str,
-        params: dict[str, Any] | None,
-        timeout: int,
-        headers: dict[str, str],
-    ) -> Any:
-        """Execute GET with up to 3 retries on 5xx and a single retry on 401.
+        label: str,
+        log_prefix: str,
+        warn_kind: str,
+        requires_auth: bool,
+    ) -> httpx.Response:
+        """Execute a request with the shared GameChanger error/retry ladder.
+
+        This is the single owner of the 401/403/429/5xx handling shared by all
+        four live verbs (``get``, ``get_public``, ``get_paginated``,
+        ``post_json``).  Each verb is a thin wrapper that supplies a ``send``
+        callable and routes the returned 200 response into its own success
+        handling (``.json()`` for the simple verbs; per-page parsing for
+        pagination).
+
+        Retry policy: up to 3 attempts on 5xx with [1, 2, 4]s backoff (no sleep
+        after the final failure); a single token refresh + retry on 401 when
+        ``requires_auth`` is True.
 
         Args:
-            url: Full URL to request.
-            path: Path segment (used in error messages).
-            params: Query parameters.
-            timeout: Request timeout in seconds.
-            headers: Per-request headers to merge with session defaults.
+            send: Zero-arg callable that issues the request and returns the
+                response.  Re-invoked for the 401 refresh-retry and each 5xx
+                backoff retry, so it must read current session state (so the
+                refreshed ``gc-token`` is picked up on the retry).
+            url: Full request URL (used only in the per-attempt debug log).
+            label: Identifier used in exception messages, the status debug log,
+                and warnings -- the API path for the simple authed/public verbs,
+                the full URL for pagination (preserving each verb's prior text).
+            log_prefix: Debug-log verb prefix ("GET", "GET paginated",
+                "GET public", "POST").
+            warn_kind: Qualifier inserted into the 5xx retry warning ("",
+                "paginated ", or "public ") to preserve each verb's prior wording.
+            requires_auth: When True, a 401 triggers a single token refresh +
+                retry; when False (public), a 401 falls through to the
+                unexpected-status branch (the public session carries no token).
 
         Returns:
-            Parsed JSON response body.
+            The successful (HTTP 200) ``httpx.Response``.
 
         Raises:
-            CredentialExpiredError: On 401 (after refresh retry) or 403.
-            RateLimitError: On 429 (after waiting).
-            GameChangerAPIError: On 5xx after all retries exhausted.
+            CredentialExpiredError: On 401 after refresh retry (authed verbs only).
+            ForbiddenError: On 403.
+            RateLimitError: On 429 (after waiting Retry-After).
+            GameChangerAPIError: On 5xx after all retries exhausted, or on any
+                unexpected status.
         """
         backoff_delays = [1, 2, 4]
         last_error: GameChangerAPIError | None = None
 
         for attempt, backoff in enumerate(backoff_delays):
-            logger.debug("GET %s (attempt %d)", url, attempt + 1)
-            response = self._session.get(url, params=params, timeout=timeout, headers=headers)
-            logger.debug("GET %s -> %d", path, response.status_code)
+            logger.debug("%s %s (attempt %d)", log_prefix, url, attempt + 1)
+            response = send()
+            logger.debug("%s %s -> %d", log_prefix, label, response.status_code)
 
             if response.status_code == 200:
-                return response.json()
+                return response
 
-            if response.status_code == 401:
+            if requires_auth and response.status_code == 401:
                 # Re-raise immediately if refresh fails -- don't retry with stale token.
                 new_token = self._token_manager.force_refresh()
                 self._session.headers["gc-token"] = new_token
-                retry_response = self._session.get(
-                    url, params=params, timeout=timeout, headers=headers
-                )
+                retry_response = send()
                 if retry_response.status_code == 200:
-                    return retry_response.json()
+                    return retry_response
                 if retry_response.status_code == 401:
                     raise CredentialExpiredError(
-                        f"Credentials rejected for {path} "
+                        f"Credentials rejected for {label} "
                         f"(HTTP {retry_response.status_code}). "
                         "Credentials may be expired -- check .env or run: bb creds check"
                     )
@@ -566,7 +491,7 @@ class GameChangerClient:
 
             if response.status_code == 403:
                 raise ForbiddenError(
-                    f"Access denied for {path} "
+                    f"Access denied for {label} "
                     f"(HTTP {response.status_code}). "
                     "Credentials may be expired -- check .env or run: bb creds check"
                 )
@@ -577,25 +502,26 @@ class GameChangerClient:
                 )
                 logger.warning(
                     "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
-                    path,
+                    label,
                     retry_after,
                 )
                 time.sleep(retry_after)
                 raise RateLimitError(
-                    f"Rate limit exceeded for {path} (HTTP 429). "
+                    f"Rate limit exceeded for {label} (HTTP 429). "
                     f"Waited {retry_after}s."
                 )
 
             if 500 <= response.status_code < 600:
                 last_error = GameChangerAPIError(
-                    f"Server error for {path} "
+                    f"Server error for {label} "
                     f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
                 )
                 if attempt < len(backoff_delays) - 1:
                     logger.warning(
-                        "Server error %d on %s -- retrying in %ds (attempt %d/3)",
+                        "Server error %d on %s%s -- retrying in %ds (attempt %d/3)",
                         response.status_code,
-                        path,
+                        warn_kind,
+                        label,
                         backoff,
                         attempt + 1,
                     )
@@ -605,8 +531,13 @@ class GameChangerClient:
 
             # Unexpected non-success status -- treat as a non-retryable API error.
             raise GameChangerAPIError(
-                f"Unexpected status {response.status_code} for {path}."
+                f"Unexpected status {response.status_code} for {label}."
             )
+
+        # Unreachable in practice: every iteration returns or raises (the final
+        # 5xx attempt raises last_error above).  Kept as a defensive invariant.
+        assert last_error is not None
+        raise last_error
 
     def post_json(
         self,
@@ -647,77 +578,17 @@ class GameChangerClient:
         url = f"{self._base_url}{path}"
         headers: dict[str, str] = {"Content-Type": content_type}
 
-        backoff_delays = [1, 2, 4]
-        last_error: GameChangerAPIError | None = None
-
-        for attempt, backoff in enumerate(backoff_delays):
-            logger.debug("POST %s (attempt %d)", url, attempt + 1)
-            response = self._session.post(
+        response = self._send_with_retries(
+            lambda: self._session.post(
                 url, json=body, params=params, timeout=timeout, headers=headers
-            )
-            logger.debug("POST %s -> %d", path, response.status_code)
-
-            if response.status_code == 200:
-                return response.json()
-
-            if response.status_code == 401:
-                new_token = self._token_manager.force_refresh()
-                self._session.headers["gc-token"] = new_token
-                retry_response = self._session.post(
-                    url, json=body, params=params, timeout=timeout, headers=headers
-                )
-                if retry_response.status_code == 200:
-                    return retry_response.json()
-                if retry_response.status_code == 401:
-                    raise CredentialExpiredError(
-                        f"Credentials rejected for {path} "
-                        f"(HTTP {retry_response.status_code}). "
-                        "Credentials may be expired -- check .env or run: bb creds check"
-                    )
-                response = retry_response
-
-            if response.status_code == 403:
-                raise ForbiddenError(
-                    f"Access denied for {path} "
-                    f"(HTTP {response.status_code}). "
-                    "Credentials may be expired -- check .env or run: bb creds check"
-                )
-
-            if response.status_code == 429:
-                retry_after = _parse_retry_after(
-                    response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
-                )
-                logger.warning(
-                    "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
-                    path,
-                    retry_after,
-                )
-                time.sleep(retry_after)
-                raise RateLimitError(
-                    f"Rate limit exceeded for {path} (HTTP 429). "
-                    f"Waited {retry_after}s."
-                )
-
-            if 500 <= response.status_code < 600:
-                last_error = GameChangerAPIError(
-                    f"Server error for {path} "
-                    f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
-                )
-                if attempt < len(backoff_delays) - 1:
-                    logger.warning(
-                        "Server error %d on %s -- retrying in %ds (attempt %d/3)",
-                        response.status_code,
-                        path,
-                        backoff,
-                        attempt + 1,
-                    )
-                    time.sleep(backoff)
-                    continue
-                raise last_error
-
-            raise GameChangerAPIError(
-                f"Unexpected status {response.status_code} for {path}."
-            )
+            ),
+            url=url,
+            label=path,
+            log_prefix="POST",
+            warn_kind="",
+            requires_auth=True,
+        )
+        return response.json()
 
     def _load_credentials(self, profile: str) -> dict[str, str]:
         """Load profile-scoped credentials from the .env file.
