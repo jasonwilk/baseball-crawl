@@ -3,12 +3,13 @@
 This is an INDEX. Detailed per-epic history lives in [archived-epics.md](archived-epics.md); reusable patterns in [lessons-learned.md](lessons-learned.md); ideas in `/.project/ideas/README.md`. Keep this file lean (< 17KB) — move detail to topic files, one line per entry here.
 
 ## Numbering State
-- **Next available epic number: E-249** (E-246/247/248 created 2026-06-29 from the whole-project /simplify sweep)
-- **Next available idea number: IDEA-089**
+- **Next available epic number: E-250** (E-249 created 2026-06-30, player-dedup stale-worklist fix)
+- **Next available idea number: IDEA-091** (IDEA-090 created 2026-06-30, codex review-script modernization)
 - Memory numbers go STALE and have caused real collisions (E-229, IDEA-071). Before assigning ANY epic/story/idea number, ALWAYS glob the live dirs: `ls /epics/` `ls /.project/archive/` `ls /.project/ideas/`. Trust the filesystem, not these counters.
 
 ## Active Epics
 Only READY/ACTIVE epics. Full details in the epic file under `/epics/`.
+- **E-249** (READY 2026-06-30): Player-Dedup Stale-Worklist Fix. CONFIRMED bug from live team_id=196 scan (51-vs-19 roster, ~15-20 caught PlayerMergeErrors). Root cause (DE): `find_duplicate_players` builds the merge worklist UP FRONT, then load path (`dedup_team_players`) + CLI (`bb data dedup-players`, inlines its own loop) iterate the FROZEN list serially while each merge DELETEs a player → stale worklist, redundant-edge errors, residual duplicates. KEY REFRAME: the current code's FAILING edge is load-bearing no-cross-merge protection — a naive union-find/chase-to-survivor fix REGRESSES into a silent two-human cross-merge (Mode B, the coach-flagged trust-killer). FIX (Tier 1): connected-components-per-roster; collapse only single-terminal-NAME components; REFUSE any fork = ≥2 terminals with DISTINCT names (equal-named two-UUID members collapse via the existing tiebreak — the DE-review must-fix; keying on terminal COUNT would have regressed the modal same-name cross-perspective duplicate); no cross-merge by construction; one txn/component; season rows via `_delete_or_repoint_season_rows` (E-237 preserve); ONE shared planner consumed by both paths (CLI stops re-inlining); refused forks = WARN-log-only (USER decision, no durable store). 2 stories: 01 core CC fix + fixture suite (DE), 02 CLI delegation + WARN surfacing (SE). Tier 2 (co-occurrence auto-collapse of same-human forks + durable surfacing) deferred → IDEA-089. Post-merge OPERATOR follow-up: re-run dedup on live DB, count team_id=196 refused-fork residuals (validates IDEA-089). READY 2026-06-30 after Phase 5: internal iter-1 (CR spec audit + DE/coach holistic — DE's must-fix = identical-name fork misclassification, caught independently by CR too) + Codex iter-1 (3 findings F-A over-claim/F-B txn-propagation/F-C test-scope, all ACCEPT); scorecard 10 findings/10 accepted/0 dismissed in epic History. Awaiting dispatch authorization.
 - **E-072** (READY): Proxy Session Ingestion Skill
 - **E-073** (READY): API Documentation Validation Sweep
 - **E-104** (READY): Athlete Profile Endpoint Probe
