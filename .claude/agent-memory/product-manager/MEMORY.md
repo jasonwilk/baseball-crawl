@@ -3,7 +3,7 @@
 This is an INDEX. Detailed per-epic history lives in [archived-epics.md](archived-epics.md); reusable patterns in [lessons-learned.md](lessons-learned.md); ideas in `/.project/ideas/README.md`. Keep this file lean (< 17KB) — move detail to topic files, one line per entry here.
 
 ## Numbering State
-- **Next available epic number: E-246**
+- **Next available epic number: E-249** (E-246/247/248 created 2026-06-29 from the whole-project /simplify sweep)
 - **Next available idea number: IDEA-089**
 - Memory numbers go STALE and have caused real collisions (E-229, IDEA-071). Before assigning ANY epic/story/idea number, ALWAYS glob the live dirs: `ls /epics/` `ls /.project/archive/` `ls /.project/ideas/`. Trust the filesystem, not these counters.
 
@@ -15,6 +15,9 @@ Only READY/ACTIVE epics. Full details in the epic file under `/epics/`.
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
+- **E-246** (READY): Dead-Code Removal & Low-Risk Consolidation — wave 1 of whole-project /simplify sweep (H3-delete, M2, M1, H1, M7, L1 + E-246-07 dead GC client verbs post()/delete(); 7 stories). Low risk. Blocking pre-closure `verify-aggregates` parity gate. **Dispatch E-246 FIRST** (before E-247 + E-248).
+- **E-247** (READY): Twin-Method & Duplicated-Block Extractions — wave 2 (H2, H4, H3-consolidate, M4, M5, M6, M3; 7 stories). Medium risk; byte-identical verification + parity gate. Overlaps E-246 on `crawlers/opponents.py` → E-246 first. api-scout consult recorded on E-247-03; CA review-time security pass on E-247-04/07.
+- **E-248** (READY): GC API Client Error-Ladder Refactor — wave 3, sole HIGH-blast-radius theme (H5). **Option A scope fork (user-delegated to PM, 2026-06-30): post()/delete() are DEAD verbs → deleted in E-246-07; E-248 refactors only the 4 LIVE verbs (get/get_public/get_paginated/post_json) as a PURE zero-behavior-change dedup** (5xx-gap dissolved). 2 stories (test-first). Overlaps E-246 on client.py → E-246 first.
 
 Recently completed epics (E-218 — E-245) are one-line-indexed in [archived-epics.md](archived-epics.md). Most recent: **E-242** (align dispatch/plan/implement vocabulary to subagent framing — context-layer vocab/breakage fix after CC v2.1.178 removed TeamCreate/TeamDelete; Option B named-subagent framing, keep `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, surgical scope, no behavioral change except multi-agent-patterns L55 parallel→serial; CA-led 3 file-disjoint stories; COMPLETED + archived 2026-06-29). Also: **E-245** (high-fidelity play ingestion — recover annotated pitches + type/velocity capture, charted-PA denominator + pitch-charted badge, self-game fix; COMPLETED + archived 2026-06-29). **Operator follow-up owed (E-245)**: run the live `bb data reload-annotated-pitches` pass + the `bb data fix-self-games` 23→0 run (need creds/live DB; verify team-133 FPS 3.4%→~64%, P-PA→~2.7).
 
