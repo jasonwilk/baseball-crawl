@@ -10,7 +10,9 @@ the surviving CLI surface and the dedup-players error path.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -18,6 +20,35 @@ from typer.testing import CliRunner
 from src.cli import app
 
 runner = CliRunner()
+
+
+def _backfill_summary() -> dict[str, int]:
+    """Minimal summary dict the backfill command prints (values irrelevant here)."""
+    return {
+        "games_processed": 0,
+        "rows_updated": 0,
+        "games_skipped": 0,
+        "games_with_errors": 0,
+    }
+
+
+def _invoke_backfill_capturing_connect(
+    args: list[str],
+) -> tuple[object, MagicMock]:
+    """Invoke `bb data backfill-appearance-order` with the DB layer stubbed.
+
+    Patches ``sqlite3.connect`` (to capture the resolved DB path the command
+    opens) and the backfill pass (to a no-op summary), so the assertion is
+    purely about which path the command resolved. Returns (result, connect_mock).
+    """
+    mock_conn = MagicMock()
+    with patch("src.cli.data.sqlite3.connect", return_value=mock_conn) as connect_mock:
+        with patch(
+            "src.gamechanger.loaders.backfill.backfill_appearance_order",
+            return_value=_backfill_summary(),
+        ):
+            result = runner.invoke(app, ["data", "backfill-appearance-order", *args])
+    return result, connect_mock
 
 
 # ---------------------------------------------------------------------------
@@ -233,3 +264,71 @@ def test_fix_self_games_execute_isolates_errors_and_exit_code() -> None:
     # Self-games persist -> exit 1 (AC-5 success signal is "remaining == 0").
     assert "Self-games remaining (target 0): 3" in result.output
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# E-246-03: bb data commands honor DATABASE_PATH via the canonical resolver
+# ---------------------------------------------------------------------------
+
+
+def test_data_command_honors_database_path_env(tmp_path: Path) -> None:
+    """AC-3 (intended behavior change): with DATABASE_PATH set and no --db, a
+    `bb data` command opens the DATABASE_PATH database."""
+    target = tmp_path / "honored.db"
+    with patch.dict(os.environ, {"DATABASE_PATH": str(target)}):
+        result, connect_mock = _invoke_backfill_capturing_connect([])
+
+    assert result.exit_code == 0
+    connect_mock.assert_called_once()
+    assert connect_mock.call_args.args[0] == str(target)
+
+
+def test_data_command_explicit_db_overrides_database_path(tmp_path: Path) -> None:
+    """AC-4: an explicit --db override wins over DATABASE_PATH."""
+    override = tmp_path / "explicit.db"
+    with patch.dict(os.environ, {"DATABASE_PATH": str(tmp_path / "env.db")}):
+        result, connect_mock = _invoke_backfill_capturing_connect(
+            ["--db", str(override)]
+        )
+
+    assert result.exit_code == 0
+    connect_mock.assert_called_once()
+    # The canonical resolver resolves an explicit override to an absolute path.
+    assert connect_mock.call_args.args[0] == str(Path(str(override)).resolve())
+
+
+def test_data_command_falls_back_to_default_db(tmp_path: Path) -> None:
+    """AC-4: with neither --db nor DATABASE_PATH, the default DB path is used."""
+    env_without = {k: v for k, v in os.environ.items() if k != "DATABASE_PATH"}
+    with patch.dict(os.environ, env_without, clear=True):
+        result, connect_mock = _invoke_backfill_capturing_connect([])
+
+    assert result.exit_code == 0
+    connect_mock.assert_called_once()
+    opened = Path(connect_mock.call_args.args[0])
+    assert opened.is_absolute()
+    assert opened.parts[-2:] == ("data", "app.db")
+
+
+def test_resolve_db_path_precedence(tmp_path: Path) -> None:
+    """Canonical resolver precedence: override > DATABASE_PATH > default.
+
+    NOTE (worktree caveat): imports the new ``src.db.paths`` module, which only
+    exists in this epic's worktree; this test is authoritatively exercised at
+    the closure gate in the merged main checkout.
+    """
+    from src.db.paths import _DEFAULT_DB_PATH, resolve_db_path
+
+    override = tmp_path / "override.db"
+    env = tmp_path / "env.db"
+
+    # Override wins even when DATABASE_PATH is set.
+    with patch.dict(os.environ, {"DATABASE_PATH": str(env)}):
+        assert resolve_db_path(override) == Path(str(override)).resolve()
+        # DATABASE_PATH (absolute) used when no override.
+        assert resolve_db_path() == env
+
+    # Default used when neither override nor env is set.
+    env_without = {k: v for k, v in os.environ.items() if k != "DATABASE_PATH"}
+    with patch.dict(os.environ, env_without, clear=True):
+        assert resolve_db_path() == _DEFAULT_DB_PATH

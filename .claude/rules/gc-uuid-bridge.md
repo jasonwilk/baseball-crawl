@@ -117,4 +117,4 @@ Pattern verified 2026-03-29:
 - `POST /search` with team name returned hits including one where `result.public_id` matched exactly
 - `result.id` from that hit was the correct `gc_uuid`, confirmed by successful authenticated API calls
 
-Implementation: `src/gamechanger/search.py` (canonical `search_teams_by_name()` helper with punctuation-normalization fallback), `src/gamechanger/resolvers/gc_uuid_resolver.py` (Tier 3 delegates to the helper), and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` filtering).
+Implementation: `src/gamechanger/search.py` (canonical `search_teams_by_name()` helper with punctuation-normalization fallback) and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` filtering). The forward bridge is the `POST /search` filtered-by-`public_id` path above; the former 3-tier `gc_uuid_resolver.py` was dead code (its upstream data sources removed in E-239) and was deleted in E-246.

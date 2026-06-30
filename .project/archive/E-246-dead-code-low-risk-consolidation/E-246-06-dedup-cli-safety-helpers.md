@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, several low-risk hand-redefined constants, predicates, and print idioms across the CLI and safety modules will be replaced by their canonical shared sources.

@@ -21,6 +21,7 @@ from typing import Optional
 
 import typer
 
+from src.gamechanger.credentials import ALL_PROFILES
 from src.http.proxy_check import (
     ProxyCheckOutcome,
     check_proxy_routing,
@@ -108,8 +109,6 @@ def review(ctx: typer.Context) -> None:
     raise SystemExit(result.returncode)
 
 
-_PROFILES = ["web", "mobile"]
-
 _OUTCOME_LABELS = {
     ProxyCheckOutcome.PASS: "PASS",
     ProxyCheckOutcome.FAIL: "FAIL",
@@ -142,7 +141,7 @@ def check() -> None:
         typer.echo("FAILED (network error -- proxy results will not be compared)")
     typer.echo("")
 
-    for profile in _PROFILES:
+    for profile in ALL_PROFILES:
         result = check_proxy_routing(profile, direct_ip)
         label = _OUTCOME_LABELS.get(result.outcome, result.outcome.value)
 

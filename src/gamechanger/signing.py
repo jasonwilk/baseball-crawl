@@ -62,8 +62,6 @@ def values_for_signer(obj: Any) -> list[str]:
         return result
 
     if isinstance(obj, dict):
-        if obj is None:
-            return ["null"]
         result = []
         for key in sorted(obj.keys()):
             result.extend(values_for_signer(obj[key]))

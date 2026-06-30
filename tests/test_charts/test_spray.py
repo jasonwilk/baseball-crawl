@@ -10,6 +10,8 @@ import pytest
 
 from src.charts.spray import (
     ZONE_ANGLE_THRESHOLD,
+    _CONTACT_MARKERS,
+    _CONTACT_TYPE_MAP,
     _classify,
     _marker_for_play_type,
     _raw_to_svg,
@@ -138,6 +140,62 @@ def test_marker_for_known_play_types(play_type: str, expected_marker: str) -> No
 def test_marker_fallback_for_unknown_play_types(play_type: str | None) -> None:
     """NULL, 'other', and unrecognized play_type values fall back to circle."""
     assert _marker_for_play_type(play_type) == "o"
+
+
+# ---------------------------------------------------------------------------
+# E-246-05: single-source contact vocabulary (markers + legend) consolidation
+# ---------------------------------------------------------------------------
+
+# Pre-story legend Row-2 entries (marker, label) in order -- pinned so the
+# consolidation proves it reproduces the exact prior legend (AC-2).
+_EXPECTED_LEGEND_ENTRIES = [
+    ("o", "Ground Ball"),
+    ("^", "Line Drive"),
+    ("D", "Fly Ball"),
+    ("s", "Popup"),
+    ("v", "Bunt"),
+]
+
+
+def test_legend_entries_match_pinned_vocabulary() -> None:
+    """AC-2: the legend table (marker, label, order) is identical to pre-story.
+
+    The legend Row 2 is built by iterating ``_CONTACT_MARKERS.values()``; this
+    asserts that shared table against the pinned pre-consolidation entries.
+    """
+    entries = [(marker, label) for marker, label in _CONTACT_MARKERS.values()]
+    assert entries == _EXPECTED_LEGEND_ENTRIES
+
+
+def test_plot_marker_and_legend_share_one_source() -> None:
+    """AC-3: every play_type's plotted marker equals the legend table's marker
+    for that play_type's contact code, so the points and legend cannot desync.
+
+    Changing a marker in ``_CONTACT_MARKERS`` would move both the plotted
+    points (via ``_marker_for_play_type``) and the legend entry together.
+    """
+    for play_type, contact in _CONTACT_TYPE_MAP.items():
+        legend_marker = _CONTACT_MARKERS[contact][0]
+        assert _marker_for_play_type(play_type) == legend_marker, play_type
+
+
+def test_draw_legend_row2_handles_derive_from_shared_table() -> None:
+    """AC-1: ``_draw_legend`` builds its play-type row by iterating the shared
+    table at runtime (no hardcoded marker/label literals).
+
+    The second ``ax.legend(...)`` call is Row 2; its handles' (marker, label)
+    pairs must equal the shared ``_CONTACT_MARKERS`` table in order.
+    """
+    from src.charts.spray import _draw_legend
+
+    mock_ax = MagicMock()
+    _draw_legend(mock_ax)
+
+    # Call 0 = outcome row, call 1 = play-type (contact) row.
+    row2_handles = mock_ax.legend.call_args_list[1].kwargs["handles"]
+    rendered = [(h.get_marker(), h.get_label()) for h in row2_handles]
+    expected = [(marker, label) for marker, label in _CONTACT_MARKERS.values()]
+    assert rendered == expected
 
 
 # ---------------------------------------------------------------------------

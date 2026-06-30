@@ -83,27 +83,45 @@ _BG_COLOR = "#FFFFFF"
 _LEGEND_GRAY = "#888888"
 
 # ---------------------------------------------------------------------------
-# Play type → marker shape mapping (TN-1)
+# Contact-type vocabulary (TN-1 / TN-5) -- single source for markers + legend
 # ---------------------------------------------------------------------------
-_PLAY_TYPE_MARKERS: dict[str, str] = {
-    "ground_ball": "o",
-    "hard_ground_ball": "o",
-    "bunt": "v",
-    "line_drive": "^",
-    "hard_line_drive": "^",
-    "fly_ball": "D",
-    "popup": "s",
-    "pop_fly": "s",
-    "pop_up": "s",
+# play_type API value -> contact-type code.
+_CONTACT_TYPE_MAP: dict[str, str] = {
+    "ground_ball": "gb",
+    "hard_ground_ball": "gb",
+    "line_drive": "ld",
+    "hard_line_drive": "ld",
+    "fly_ball": "fb",
+    "popup": "pu",
+    "pop_fly": "pu",
+    "pop_up": "pu",
+    "bunt": "bu",
+}
+
+# contact-type code -> (matplotlib marker, legend label), in legend order.
+# Both the plotted points (``_marker_for_play_type``) and the legend
+# (``_draw_legend``) derive from this one table, so a marker or label change can
+# never desync the legend from the points it describes.
+_CONTACT_MARKERS: dict[str, tuple[str, str]] = {
+    "gb": ("o", "Ground Ball"),
+    "ld": ("^", "Line Drive"),
+    "fb": ("D", "Fly Ball"),
+    "pu": ("s", "Popup"),
+    "bu": ("v", "Bunt"),
 }
 _FALLBACK_MARKER = "o"
 
 
 def _marker_for_play_type(play_type: str | None) -> str:
-    """Return the matplotlib marker code for a play_type value."""
-    if play_type is None:
+    """Return the matplotlib marker code for a play_type value.
+
+    Composes the two shared tables: play_type -> contact code -> marker.
+    Unmapped or None play_types fall back to the circle marker.
+    """
+    contact = _CONTACT_TYPE_MAP.get(play_type) if play_type is not None else None
+    if contact is None:
         return _FALLBACK_MARKER
-    return _PLAY_TYPE_MARKERS.get(play_type, _FALLBACK_MARKER)
+    return _CONTACT_MARKERS[contact][0]
 
 
 # ---------------------------------------------------------------------------
@@ -157,19 +175,10 @@ def classify_field_zone(x: float, y: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Contact type classification (TN-5)
+# Contact type classification (TN-5) -- ``_CONTACT_TYPE_MAP`` is defined above
+# alongside the marker/legend table so the whole contact-type vocabulary lives
+# in one place.
 # ---------------------------------------------------------------------------
-_CONTACT_TYPE_MAP: dict[str, str] = {
-    "ground_ball": "gb",
-    "hard_ground_ball": "gb",
-    "line_drive": "ld",
-    "hard_line_drive": "ld",
-    "fly_ball": "fb",
-    "popup": "pu",
-    "pop_fly": "pu",
-    "pop_up": "pu",
-    "bunt": "bu",
-}
 
 
 def contact_type_label(play_type: str | None) -> str | None:
@@ -408,33 +417,22 @@ def _draw_legend(ax: plt.Axes) -> None:
     )
     ax.add_artist(outcome_legend)
 
-    # Row 2: Play type shapes in neutral gray
-    gb_handle = mlines.Line2D(
-        [], [], marker="o", color="none", markerfacecolor=_LEGEND_GRAY,
-        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Ground Ball",
-    )
-    ld_handle = mlines.Line2D(
-        [], [], marker="^", color="none", markerfacecolor=_LEGEND_GRAY,
-        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Line Drive",
-    )
-    fb_handle = mlines.Line2D(
-        [], [], marker="D", color="none", markerfacecolor=_LEGEND_GRAY,
-        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Fly Ball",
-    )
-    pu_handle = mlines.Line2D(
-        [], [], marker="s", color="none", markerfacecolor=_LEGEND_GRAY,
-        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Popup",
-    )
-    bu_handle = mlines.Line2D(
-        [], [], marker="v", color="none", markerfacecolor=_LEGEND_GRAY,
-        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Bunt",
-    )
+    # Row 2: Play type shapes in neutral gray, built by iterating the shared
+    # contact->(marker, label) table so the legend can never desync from the
+    # markers drawn on the chart.
+    play_type_handles = [
+        mlines.Line2D(
+            [], [], marker=marker, color="none", markerfacecolor=_LEGEND_GRAY,
+            markeredgecolor=_LEGEND_GRAY, markersize=5, label=label,
+        )
+        for marker, label in _CONTACT_MARKERS.values()
+    ]
     ax.legend(
-        handles=[gb_handle, ld_handle, fb_handle, pu_handle, bu_handle],
+        handles=play_type_handles,
         loc="lower right",
         fontsize=5,
         framealpha=0.8,
-        ncols=5,
+        ncols=len(play_type_handles),
         bbox_to_anchor=(1.0, 0.0),
         handletextpad=0.2,
         columnspacing=0.5,

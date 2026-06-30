@@ -32,6 +32,26 @@ if str(_PROJECT_ROOT) not in sys.path:
 from src.reports.aggregate_parity import verify_aggregates  # noqa: E402
 from tests.conftest import load_real_schema  # noqa: E402
 
+# Golden, hand-verified output of the recompute SUM projection on the
+# rollup-consistent fixture, scoped to the in-scope (TEAM_T, 2026).  Each tuple
+# follows the projection's column order (the parity-subset RECOMPUTE_KEYS):
+#   batting:  player_id, games_tracked, ab, h, doubles, triples, hr, rbi, r,
+#             bb, so, sb, tb, hbp, shf, cs
+#   pitching: player_id, games_tracked, ip_outs, h, r, er, bb, so, wp, hbp,
+#             pitches, total_strikes, bf, gs   (gs NULL for the NULL-order pitcher)
+# These equal the fixture's stored boxscore_only season rows by construction
+# (the fixture is the independent oracle), so they PIN the projection's
+# byte-identical output for the E-246-04 hoist (AC-2).
+_GOLDEN_BATTING: dict[str, tuple] = {
+    "PB_01": ("PB_01", 3, 11, 4, 1, 1, 1, 3, 3, 3, 3, 2, 10, 1, 1, 1),
+    "PB_02": ("PB_02", 3, 11, 4, 1, 0, 0, 2, 2, 1, 4, 1, 5, 1, 0, 0),
+}
+_GOLDEN_PITCHING: dict[str, tuple] = {
+    "PP_01": ("PP_01", 2, 24, 6, 3, 2, 2, 10, 1, 1, 113, 75, 31, 1),
+    "PP_02": ("PP_02", 2, 36, 11, 5, 5, 4, 9, 2, 1, 170, 108, 49, 2),
+    "PP_03": ("PP_03", 1, 12, 4, 2, 2, 1, 3, 0, 0, 50, 32, 15, None),
+}
+
 
 @pytest.fixture()
 def parity_db() -> sqlite3.Connection:
@@ -360,3 +380,230 @@ class TestInjectedDivergence:
         assert m.stored == 5
         assert m.recomputed == 1
         assert result.cells_compared == 74
+
+
+class TestSharedProjectionGolden:
+    """AC-2 (E-246-04 HARD GATE): the SUM-projection bodies were hoisted into a
+    single shared source (``src.db.season_aggregates``) consumed by BOTH
+    ``canonical_recompute`` and this parity check.  These characterization tests
+    PIN the projection's output against representative season data so the
+    consolidation is provably byte-identical -- and stay green forever as a
+    drift guard on the integrity seam.
+
+    They reference only names stable across the refactor
+    (``_BATTING_RECOMPUTE_SQL`` / ``_PITCHING_RECOMPUTE_SQL`` /
+    ``canonical_recompute``), never the new builder symbols, so they execute in
+    BOTH checkouts.
+
+    Worktree caveat: pytest loads the editable-installed (main-checkout) source,
+    so in the epic worktree these run against the PRE-change projection and
+    confirm the golden values are correct; the authoritative post-change proof
+    is the closure full-suite run in merged main, where the hoisted projection
+    is loaded.  ``test_projection_source_paths`` records which source loaded.
+    """
+
+    @staticmethod
+    def _team_t_id(conn: sqlite3.Connection) -> int:
+        return conn.execute(
+            "SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'"
+        ).fetchone()[0]
+
+    def test_batting_projection_output_is_pinned(
+        self, parity_db: sqlite3.Connection
+    ) -> None:
+        """The batting recompute SQL yields the pinned golden rows exactly."""
+        from src.reports import aggregate_parity
+
+        t_id = self._team_t_id(parity_db)
+        rows = parity_db.execute(
+            aggregate_parity._BATTING_RECOMPUTE_SQL, (t_id, "2026", t_id)
+        ).fetchall()
+        got = {row[0]: tuple(row) for row in rows}
+        assert got == _GOLDEN_BATTING
+
+    def test_pitching_projection_output_is_pinned(
+        self, parity_db: sqlite3.Connection
+    ) -> None:
+        """The pitching recompute SQL yields the pinned golden rows exactly,
+        including the NULL-``gs`` branch (PP_03)."""
+        from src.reports import aggregate_parity
+
+        t_id = self._team_t_id(parity_db)
+        rows = parity_db.execute(
+            aggregate_parity._PITCHING_RECOMPUTE_SQL, (t_id, "2026", t_id)
+        ).fetchall()
+        got = {row[0]: tuple(row) for row in rows}
+        assert got == _GOLDEN_PITCHING
+
+    def test_canonical_and_parity_projections_agree(
+        self, parity_db: sqlite3.Connection
+    ) -> None:
+        """The single-source integrity property (AC-3): the canonical recompute
+        and the parity check produce IDENTICAL parity-subset values.
+
+        Runs ``canonical_recompute`` (which DELETE+INSERTs boxscore_only rows
+        from the same game rows), reads back the parity-subset columns, and
+        asserts they equal both the parity recompute output and the pinned
+        golden -- so the two consumers of the shared projection cannot diverge.
+        """
+        from src.db.season_aggregates import canonical_recompute
+        from src.reports import aggregate_parity
+
+        t_id = self._team_t_id(parity_db)
+
+        # Read-only parity recompute output for both tables.
+        parity_bat = {
+            row[0]: tuple(row)
+            for row in parity_db.execute(
+                aggregate_parity._BATTING_RECOMPUTE_SQL, (t_id, "2026", t_id)
+            ).fetchall()
+        }
+        parity_pit = {
+            row[0]: tuple(row)
+            for row in parity_db.execute(
+                aggregate_parity._PITCHING_RECOMPUTE_SQL, (t_id, "2026", t_id)
+            ).fetchall()
+        }
+
+        # Canonical recompute rewrites the boxscore_only rows; read the same
+        # parity-subset columns back out.
+        canonical_recompute(parity_db, t_id, "2026")
+
+        bat_cols = ", ".join(aggregate_parity._BATTING_RECOMPUTE_KEYS)
+        canon_bat = {
+            row[0]: tuple(row)
+            for row in parity_db.execute(
+                f"SELECT {bat_cols} FROM player_season_batting "
+                "WHERE team_id = ? AND season_id = '2026' "
+                "AND stat_completeness = 'boxscore_only'",
+                (t_id,),
+            ).fetchall()
+        }
+        pit_cols = ", ".join(aggregate_parity._PITCHING_RECOMPUTE_KEYS)
+        canon_pit = {
+            row[0]: tuple(row)
+            for row in parity_db.execute(
+                f"SELECT {pit_cols} FROM player_season_pitching "
+                "WHERE team_id = ? AND season_id = '2026' "
+                "AND stat_completeness = 'boxscore_only'",
+                (t_id,),
+            ).fetchall()
+        }
+
+        assert canon_bat == parity_bat == _GOLDEN_BATTING
+        assert canon_pit == parity_pit == _GOLDEN_PITCHING
+
+    def test_projection_source_paths(self) -> None:
+        """Record which source pytest actually loaded (worktree caveat).
+
+        Asserts only that the projection modules resolved to real files; the
+        path string surfaces in ``-s`` / failure output so the reader can see
+        whether the worktree or the merged-main source was exercised.
+        """
+        import src.db.season_aggregates as sa
+        import src.reports.aggregate_parity as ap
+
+        print(f"\naggregate_parity loaded from: {ap.__file__}")
+        print(f"season_aggregates loaded from: {sa.__file__}")
+        assert ap.__file__.endswith("aggregate_parity.py")
+        assert sa.__file__.endswith("season_aggregates.py")
+
+
+class TestDiffColumnsSingleSource:
+    """E-246-04 remediation (Codex Phase 4b): the diffed-column sets
+    (``_BATTING_COLUMNS`` / ``_PITCHING_COLUMNS``) must DERIVE their stat columns
+    from the shared ``*_RECOMPUTE_KEYS`` single source, so a parity-checked
+    column added to the shared projection flows automatically into the
+    comparison -- no second edit site.  These tests pin BOTH the single-source
+    derivation (AC-3 structural enforcement) AND byte-identical behavior on
+    existing data (the prior literal tuples reproduced exactly -> cells_compared
+    stays 74).
+    """
+
+    # The PRE-remediation literal tuples -- the byte-preservation anchor.  The
+    # derived tuples MUST equal these exactly (same pairs, same order).
+    _EXPECTED_BATTING = (
+        ("gp", "games_tracked"),
+        ("games_tracked", "games_tracked"),
+        ("ab", "ab"),
+        ("h", "h"),
+        ("doubles", "doubles"),
+        ("triples", "triples"),
+        ("hr", "hr"),
+        ("rbi", "rbi"),
+        ("r", "r"),
+        ("bb", "bb"),
+        ("so", "so"),
+        ("sb", "sb"),
+        ("tb", "tb"),
+        ("hbp", "hbp"),
+        ("shf", "shf"),
+        ("cs", "cs"),
+    )
+    _EXPECTED_PITCHING = (
+        ("gp_pitcher", "games_tracked"),
+        ("games_tracked", "games_tracked"),
+        ("ip_outs", "ip_outs"),
+        ("h", "h"),
+        ("r", "r"),
+        ("er", "er"),
+        ("bb", "bb"),
+        ("so", "so"),
+        ("wp", "wp"),
+        ("hbp", "hbp"),
+        ("pitches", "pitches"),
+        ("total_strikes", "total_strikes"),
+        ("bf", "bf"),
+        ("gs", "gs"),
+    )
+
+    def test_diff_columns_reproduce_prior_tuples_exactly(self) -> None:
+        """HARD GATE: the derived diff_columns are byte-identical to the prior
+        hand-maintained tuples -- same pairs, same order -> cells_compared 74."""
+        from src.reports import aggregate_parity
+
+        assert aggregate_parity._BATTING_COLUMNS == self._EXPECTED_BATTING
+        assert aggregate_parity._PITCHING_COLUMNS == self._EXPECTED_PITCHING
+        # 16 batting + 14 pitching diffed columns -> 2*16 + 3*14 = 74 cells on
+        # the fixture (the TestCleanGreenPath cells_compared==74 anchor).
+        assert len(aggregate_parity._BATTING_COLUMNS) == 16
+        assert len(aggregate_parity._PITCHING_COLUMNS) == 14
+
+    def test_diff_columns_track_shared_keys(self) -> None:
+        """AC-3 structural enforcement: the recompute_key sequence each
+        diff_columns references equals the shared ``*_RECOMPUTE_KEYS`` (minus
+        ``player_id``).  A column added to the shared projection therefore cannot
+        be silently skipped by the comparison."""
+        from src.db.season_aggregates import (
+            BATTING_RECOMPUTE_KEYS,
+            PITCHING_RECOMPUTE_KEYS,
+        )
+        from src.reports import aggregate_parity
+
+        # The leading entry is the non-derivable games-count stored alias
+        # (gp / gp_pitcher -> games_tracked); the REMAINDER's recompute keys are
+        # exactly the shared keys after player_id, in order.
+        batting_stat_keys = tuple(
+            rk for _, rk in aggregate_parity._BATTING_COLUMNS[1:]
+        )
+        pitching_stat_keys = tuple(
+            rk for _, rk in aggregate_parity._PITCHING_COLUMNS[1:]
+        )
+        assert batting_stat_keys == BATTING_RECOMPUTE_KEYS[1:]
+        assert pitching_stat_keys == PITCHING_RECOMPUTE_KEYS[1:]
+
+    def test_canonical_only_extras_remain_undiffed(self) -> None:
+        """The canonical-only superset extras (pitching w/l/sv, batting
+        pa/singles/xbh) and pitching ``hr`` are NOT in the shared keys, so the
+        derivation must leave them out of the comparison."""
+        from src.reports import aggregate_parity
+
+        batting_cols = {sc for sc, _ in aggregate_parity._BATTING_COLUMNS}
+        batting_keys = {rk for _, rk in aggregate_parity._BATTING_COLUMNS}
+        pitching_cols = {sc for sc, _ in aggregate_parity._PITCHING_COLUMNS}
+        pitching_keys = {rk for _, rk in aggregate_parity._PITCHING_COLUMNS}
+
+        for extra in ("pa", "singles", "xbh"):
+            assert extra not in batting_cols and extra not in batting_keys
+        for extra in ("w", "l", "sv", "hr"):
+            assert extra not in pitching_cols and extra not in pitching_keys

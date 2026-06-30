@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from contextlib import closing
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -18,23 +16,12 @@ from src.gamechanger.opponent_ladder import METHOD_NO_PRESENCE, METHOD_OPERATOR
 from src.gamechanger.team_resolver import resolve_team
 from src.gamechanger.url_parser import parse_team_url
 from src.reports.aggregate_parity import verify_aggregates
+from src.db.paths import resolve_db_path
 from src.reports.generator import (
     cleanup_expired_reports,
     generate_report,
     list_reports,
 )
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
-
-
-def _resolve_db_path() -> Path:
-    """Return DB path from DATABASE_PATH env var or the project default."""
-    env_db = os.environ.get("DATABASE_PATH")
-    if env_db is not None:
-        env_path = Path(env_db)
-        return env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
-    return _DEFAULT_DB_PATH
 
 app = typer.Typer(
     help="Scouting report generation and management.",
@@ -170,7 +157,7 @@ def verify_aggregates_cmd() -> None:
     re-pointed game rows after the season aggregate was computed.  Read-only:
     never writes to the database.
     """
-    db_path = _resolve_db_path()
+    db_path = resolve_db_path()
     if not db_path.exists():
         err_console.print(f"[red]Database not found:[/red] {db_path}")
         raise typer.Exit(code=1)
@@ -343,7 +330,7 @@ def map_opponent_cmd(
                 f"public_id={public_id!r} ({exc}); applying the mapping anyway."
             )
 
-    db_path = _resolve_db_path()
+    db_path = resolve_db_path()
     if not db_path.exists():
         err_console.print(f"[red]Database not found:[/red] {db_path}")
         raise typer.Exit(code=1)
@@ -427,7 +414,7 @@ def morning_run_cmd(
             )
             raise typer.Exit(code=2)
 
-    db_path = _resolve_db_path()
+    db_path = resolve_db_path()
     if not db_path.exists():
         err_console.print(f"[red]Database not found:[/red] {db_path}")
         raise typer.Exit(code=1)

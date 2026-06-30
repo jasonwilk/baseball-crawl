@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dead 3-tier gc_uuid resolver module and its test will be removed from the codebase. The resolver has zero importers (grep-confirmed) and its Tier-1/2 read paths depended on data removed in E-239, so it is unreachable dead code.

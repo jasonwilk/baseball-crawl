@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the override→`DATABASE_PATH`→default DB-path resolution cascade — currently hand-written in 5 modules and already non-identical — will resolve through a single canonical function. As an intended side effect, `cli/data.py` commands will newly honor the `DATABASE_PATH` env var, closing an operator-visible inconsistency.

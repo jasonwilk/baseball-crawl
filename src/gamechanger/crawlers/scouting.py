@@ -17,11 +17,9 @@ Scouting chain for each opponent::
         GET /game-stream-processing/{game_stream_id}/boxscore
         (one call per completed game)
 
-Raw responses are written to::
-
-    data/raw/{season_id}/scouting/{public_id}/games.json
-    data/raw/{season_id}/scouting/{public_id}/roster.json
-    data/raw/{season_id}/scouting/{public_id}/boxscores/{game_stream_id}.json
+Crawled data (games, roster, boxscores) is returned in memory as a
+``ScoutingCrawlResult`` for the loader to consume directly -- no raw JSON
+files are written to disk.
 
 The ``scouting_runs`` table tracks each run's status, counts, and timestamps.
 
@@ -41,12 +39,10 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from src.db.teams import ensure_team_row
@@ -104,9 +100,6 @@ _ROSTER_ACCEPT = "application/vnd.gc.com.public_player:list+json; version=0.0.0"
 _BOXSCORE_ACCEPT = "application/vnd.gc.com.event_box_score+json; version=0.0.0"
 
 
-# Default data root: data/raw/ relative to the project root.
-_DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
-
 # run_type value for full scouting runs (roster + boxscores).
 _RUN_TYPE = "full"
 
@@ -115,9 +108,9 @@ class ScoutingCrawler:
     """Crawls opponent scouting data via GameChanger public and authenticated endpoints.
 
     Given an opponent's ``public_id`` slug, fetches their game schedule
-    (unauthenticated), player roster, and per-game boxscores, writing raw JSON
-    files to ``data/raw/{season_id}/scouting/{public_id}/``.  Tracks each run
-    in the ``scouting_runs`` table for idempotency and freshness gating.
+    (unauthenticated), player roster, and per-game boxscores, returning the
+    crawled data in memory as a ``ScoutingCrawlResult``.  Tracks each run in
+    the ``scouting_runs`` table for idempotency.
 
     Args:
         client: ``GameChangerClient`` used for API requests.  Public endpoints
@@ -125,23 +118,15 @@ class ScoutingCrawler:
             ``client.get()``.
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        freshness_hours: How many hours a completed scouting run is considered
-            fresh.  Defaults to 24.
-        data_root: Root directory for raw data output.  Defaults to
-            ``data/raw/`` relative to the project root.
     """
 
     def __init__(
         self,
         client: GameChangerClient,
         db: sqlite3.Connection,
-        freshness_hours: int = 24,
-        data_root: Path = _DATA_ROOT,
     ) -> None:
         self._client = client
         self._db = db
-        self._freshness_hours = freshness_hours
-        self._data_root = data_root
 
     # ------------------------------------------------------------------
     # Public API
@@ -335,23 +320,6 @@ class ScoutingCrawler:
     # DB helpers
     # ------------------------------------------------------------------
 
-    def _resolve_team_id(self, public_id: str) -> int | None:
-        """Return the teams.id (INTEGER) for a given public_id slug, or None.
-
-        SELECT-only; does not create any rows.
-
-        Args:
-            public_id: The opponent's public_id slug.
-
-        Returns:
-            INTEGER ``teams.id`` if found, else ``None``.
-        """
-        row = self._db.execute(
-            "SELECT id FROM teams WHERE public_id = ? LIMIT 1",
-            (public_id,),
-        ).fetchone()
-        return row[0] if row is not None else None
-
     def _ensure_team_row(
         self,
         public_id: str | None = None,
@@ -399,35 +367,6 @@ class ScoutingCrawler:
             """,
             (season_id, season_id, year),
         )
-
-    def _is_scouted_recently(
-        self, team_id: int | None, season_id: str | None = None
-    ) -> bool:
-        """Return True if this team has a completed scouting run within freshness_hours."""
-        if team_id is None:
-            return False
-        if season_id is not None:
-            row = self._db.execute(
-                "SELECT last_checked FROM scouting_runs "
-                "WHERE team_id = ? AND season_id = ? AND status = 'completed' "
-                "ORDER BY last_checked DESC LIMIT 1",
-                (team_id, season_id),
-            ).fetchone()
-        else:
-            row = self._db.execute(
-                "SELECT last_checked FROM scouting_runs "
-                "WHERE team_id = ? AND status = 'completed' "
-                "ORDER BY last_checked DESC LIMIT 1",
-                (team_id,),
-            ).fetchone()
-        if row is None:
-            return False
-        try:
-            last_checked = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
-            age_hours = (datetime.now(timezone.utc) - last_checked).total_seconds() / 3600
-            return age_hours < self._freshness_hours
-        except (ValueError, AttributeError):
-            return False
 
     def _upsert_run_start(
         self,

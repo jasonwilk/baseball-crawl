@@ -21,6 +21,7 @@ from src.safety.pii_patterns import PLACEHOLDER_EMAILS
 from src.safety.pii_scanner import (
     Violation,
     _count_scannable,
+    _scannability_skip_reason,
     has_synthetic_marker,
     is_placeholder_email,
     is_rfc2606_email,
@@ -798,3 +799,60 @@ class TestSuccessConfirmation:
         assert exit_code == 1
         assert "[PII BLOCKED]" in captured.err
         assert "[pii-scan] Scanned" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# E-246-06: shared scannability predicate (AC-4 / AC-5)
+# ---------------------------------------------------------------------------
+
+
+class TestScannabilityGateEquivalence:
+    """The consolidated ``_scannability_skip_reason`` predicate must flag the
+    same file set as the prior inline 3-check gate, and both ``scan_file`` and
+    ``_count_scannable`` must route through it so they cannot diverge.
+    """
+
+    @staticmethod
+    def _prior_inline_decision(p: str) -> bool:
+        """The pre-consolidation scannability gate, composed from the SAME
+        (unchanged) ``should_skip_path`` / ``is_scannable`` / exists checks.
+        This is the 'before' behavior the predicate must reproduce exactly."""
+        return (
+            not should_skip_path(p)
+            and is_scannable(p)
+            and Path(p).exists()
+        )
+
+    def test_predicate_matches_prior_inline_decision(self, tmp_path: Path) -> None:
+        """AC-5 (security-relevant): the predicate's scannable/skip decision is
+        identical to the prior inline gate for every branch."""
+        real_py = _write_file(tmp_path, "real.py", "x = 1\n")
+        real_png = _write_file(tmp_path, "image.png", "not an image\n")
+        cases = [
+            ".git/config",                  # skip path
+            "node_modules/pkg/index.js",    # skip path
+            real_png,                       # non-scannable extension (exists)
+            str(tmp_path / "missing.py"),   # scannable ext, does not exist
+            real_py,                        # scannable + exists -> scannable
+        ]
+        for p in cases:
+            scannable = _scannability_skip_reason(p) is None
+            assert scannable == self._prior_inline_decision(p), p
+
+    def test_count_scannable_routes_through_predicate(self, tmp_path: Path) -> None:
+        """AC-4: ``_count_scannable`` counts exactly the files the predicate
+        deems scannable (per-path and over the whole list)."""
+        clean_py = _write_file(tmp_path, "clean.py", "x = 1\n")
+        png = _write_file(tmp_path, "pic.png", "data\n")
+        cases = [".git/config", png, str(tmp_path / "gone.py"), clean_py]
+        for p in cases:
+            skipped = _scannability_skip_reason(p) is not None
+            assert _count_scannable([p]) == (0 if skipped else 1), p
+        expected = sum(1 for p in cases if _scannability_skip_reason(p) is None)
+        assert _count_scannable(cases) == expected
+
+    def test_count_scannable_still_strips_whitespace(self, tmp_path: Path) -> None:
+        """Unchanged behavior: ``_count_scannable`` strips each path before the
+        gate, so a whitespace-padded scannable path still counts."""
+        real_py = _write_file(tmp_path, "ws.py", "x = 1\n")
+        assert _count_scannable([f"  {real_py}  "]) == 1

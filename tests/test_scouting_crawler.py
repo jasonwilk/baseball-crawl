@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -59,9 +58,9 @@ def mock_client() -> MagicMock:
 
 
 @pytest.fixture()
-def crawler(mock_client: MagicMock, db: sqlite3.Connection, tmp_path: Path) -> ScoutingCrawler:
-    """Return a ScoutingCrawler with mocked client and temp data_root."""
-    return ScoutingCrawler(mock_client, db, freshness_hours=24, data_root=tmp_path / "raw")
+def crawler(mock_client: MagicMock, db: sqlite3.Connection) -> ScoutingCrawler:
+    """Return a ScoutingCrawler with a mocked client."""
+    return ScoutingCrawler(mock_client, db)
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +172,9 @@ def test_public_games_accept_header_constant() -> None:
     )
 
 
-def test_scouting_crawler_constructor(mock_client: MagicMock, db: sqlite3.Connection, tmp_path: Path) -> None:
-    """ScoutingCrawler accepts client, db, freshness_hours, data_root."""
-    crawler = ScoutingCrawler(mock_client, db, freshness_hours=48, data_root=tmp_path)
+def test_scouting_crawler_constructor(mock_client: MagicMock, db: sqlite3.Connection) -> None:
+    """ScoutingCrawler accepts client and db."""
+    crawler = ScoutingCrawler(mock_client, db)
     assert crawler is not None
 
 
@@ -541,68 +540,6 @@ def test_uuid_opportunism_removed(
 
 
 # ---------------------------------------------------------------------------
-# AC-7a/b: Freshness gate season_id filtering (E-098-03)
-# ---------------------------------------------------------------------------
-
-
-def test_freshness_gate_explicit_season_id_does_not_skip_different_season(
-    crawler: ScoutingCrawler, db: sqlite3.Connection
-) -> None:
-    """AC-7a: A completed run for season A does not block scouting for season B."""
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    _insert_season(db, "2025-spring-hs")
-    _insert_season(db, "2026-spring-hs")
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
-
-    # Should NOT be considered fresh for a different season.
-    assert not crawler._is_scouted_recently(opp_id, season_id="2026-spring-hs")
-
-
-def test_freshness_gate_explicit_season_id_skips_same_season(
-    crawler: ScoutingCrawler, db: sqlite3.Connection
-) -> None:
-    """AC-7a: A completed run for season A blocks scouting for season A."""
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    _insert_season(db, "2025-spring-hs")
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
-
-    assert crawler._is_scouted_recently(opp_id, season_id="2025-spring-hs")
-
-
-def test_freshness_gate_none_season_uses_team_only(
-    crawler: ScoutingCrawler, db: sqlite3.Connection
-) -> None:
-    """AC-7b: season_id=None freshness check passes for any season's completed run."""
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    _insert_season(db, "2025-spring-hs")
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
-
-    # Should be fresh because team was recently scouted (any season).
-    assert crawler._is_scouted_recently(opp_id, season_id=None)
-
-
-# ---------------------------------------------------------------------------
-# AC-3: Failed scouting run does not trigger freshness gating (E-123-06)
-# ---------------------------------------------------------------------------
-
-
-def test_failed_scouting_run_does_not_trigger_freshness_gate(
-    crawler: ScoutingCrawler, db: sqlite3.Connection
-) -> None:
-    """AC-3: A team with a recent 'failed' run is NOT considered fresh — it gets retried."""
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    _insert_season(db, "2025-spring-hs")
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "failed", recent_ts)
-
-    # A 'failed' run must NOT satisfy the freshness check.
-    assert not crawler._is_scouted_recently(opp_id, season_id="2025-spring-hs")
-
-
-# ---------------------------------------------------------------------------
 # AC-1/AC-7c: Crawler writes 'completed' after successful crawl phase (E-123-06)
 # ---------------------------------------------------------------------------
 
@@ -667,7 +604,6 @@ class TestUpdateRunLoadStatus:
         self,
         db: sqlite3.Connection,
         mock_client: MagicMock,
-        tmp_path: Path,
     ) -> None:
         """AC-6: 'completed' status sets completed_at to a non-NULL timestamp."""
         team_id = _insert_team_with_public_id(db, "status-test-pub")
@@ -677,7 +613,7 @@ class TestUpdateRunLoadStatus:
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
         )
 
-        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler = ScoutingCrawler(mock_client, db)
         crawler.update_run_load_status(team_id, season_id, "completed")
 
         row = db.execute(
@@ -692,7 +628,6 @@ class TestUpdateRunLoadStatus:
         self,
         db: sqlite3.Connection,
         mock_client: MagicMock,
-        tmp_path: Path,
     ) -> None:
         """AC-6: 'failed' status sets completed_at to NULL."""
         team_id = _insert_team_with_public_id(db, "status-fail-pub")
@@ -702,7 +637,7 @@ class TestUpdateRunLoadStatus:
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
         )
 
-        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler = ScoutingCrawler(mock_client, db)
         crawler.update_run_load_status(team_id, season_id, "failed")
 
         row = db.execute(
@@ -717,7 +652,6 @@ class TestUpdateRunLoadStatus:
         self,
         db: sqlite3.Connection,
         mock_client: MagicMock,
-        tmp_path: Path,
     ) -> None:
         """AC-1: Verify no f-string interpolation -- a crafted status value
         cannot inject SQL. The CHECK constraint rejects invalid statuses, but
@@ -729,7 +663,7 @@ class TestUpdateRunLoadStatus:
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
         )
 
-        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler = ScoutingCrawler(mock_client, db)
         # This should fail due to CHECK constraint, not SQL injection.
         with pytest.raises(sqlite3.IntegrityError):
             crawler.update_run_load_status(
@@ -740,7 +674,6 @@ class TestUpdateRunLoadStatus:
         self,
         db: sqlite3.Connection,
         mock_client: MagicMock,
-        tmp_path: Path,
     ) -> None:
         """Verify last_checked is updated on status change."""
         team_id = _insert_team_with_public_id(db, "lastchk-test-pub")
@@ -750,7 +683,7 @@ class TestUpdateRunLoadStatus:
             db, team_id, season_id, "running", "2020-01-01T00:00:00.000Z"
         )
 
-        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler = ScoutingCrawler(mock_client, db)
         crawler.update_run_load_status(team_id, season_id, "completed")
 
         row = db.execute(

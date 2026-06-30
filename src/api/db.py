@@ -13,28 +13,27 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 import sqlite3
 from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from src.db.paths import resolve_db_path
 
-_DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
+logger = logging.getLogger(__name__)
 
 
 def get_db_path() -> Path:
     """Return the resolved path to the SQLite database file.
 
-    Reads DATABASE_PATH from the environment, falling back to the default.
+    Thin wrapper around the canonical :func:`src.db.paths.resolve_db_path`
+    (DATABASE_PATH -> default).
 
     Returns:
         Resolved Path to the database file.
     """
-    raw = os.environ.get("DATABASE_PATH", _DEFAULT_DB_PATH)
-    return Path(raw).resolve()
+    return resolve_db_path()
 
 
 def get_connection() -> sqlite3.Connection:

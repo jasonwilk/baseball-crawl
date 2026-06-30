@@ -97,6 +97,22 @@ def is_scannable(file_path: str) -> bool:
     return False
 
 
+def _scannability_skip_reason(file_path: str) -> str | None:
+    """Return why a file is skipped by the scannability gate, or None if scannable.
+
+    The single source of the scannability decision shared by ``scan_file`` and
+    ``_count_scannable`` so the two can never diverge. A file is scannable when
+    it is not in a skip path, has a scannable extension, and exists on disk.
+    """
+    if should_skip_path(file_path):
+        return "skip path"
+    if not is_scannable(file_path):
+        return "non-scannable extension"
+    if not Path(file_path).exists():
+        return "does not exist"
+    return None
+
+
 def has_synthetic_marker(lines: list[str]) -> bool:
     """Check if the first 5 lines of a file contain the synthetic data marker."""
     for line in lines[:5]:
@@ -115,19 +131,12 @@ def scan_file(file_path: str) -> list[Violation]:
         List of Violation tuples for any matches found. Empty list if the file
         is clean, skipped, or cannot be read.
     """
-    if should_skip_path(file_path):
-        logger.debug("Skipping (skip path): %s", file_path)
-        return []
-
-    if not is_scannable(file_path):
-        logger.debug("Skipping (non-scannable extension): %s", file_path)
+    skip_reason = _scannability_skip_reason(file_path)
+    if skip_reason is not None:
+        logger.debug("Skipping (%s): %s", skip_reason, file_path)
         return []
 
     path = Path(file_path)
-    if not path.exists():
-        logger.debug("Skipping (does not exist): %s", file_path)
-        return []
-
     try:
         text = path.read_text(errors="replace")
     except OSError as e:
@@ -237,13 +246,8 @@ def _count_scannable(file_paths: list[str]) -> int:
     count = 0
     for file_path in file_paths:
         fp = file_path.strip()
-        if should_skip_path(fp):
-            continue
-        if not is_scannable(fp):
-            continue
-        if not Path(fp).exists():
-            continue
-        count += 1
+        if _scannability_skip_reason(fp) is None:
+            count += 1
     return count
 
 

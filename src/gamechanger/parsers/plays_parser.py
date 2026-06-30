@@ -745,7 +745,7 @@ class PlaysParser:
                 # Not yet at 2 strikes -- check if this pitch advances count.
                 if result in ("strike_looking", "strike_swinging"):
                     strikes += 1
-                elif result == "foul" and strikes < 2:
+                elif result == "foul":
                     # Foul before 2 strikes advances the count.
                     strikes += 1
                 elif result == "foul_tip":

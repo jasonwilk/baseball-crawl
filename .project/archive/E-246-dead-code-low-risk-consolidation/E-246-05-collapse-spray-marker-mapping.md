@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the spray-chart vocabulary that maps play_type → contact type → marker/label — currently asserted in three parallel places — will derive from a single shared table, so markers drawn on the chart and the marker shown in the legend can never desync.

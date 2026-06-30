@@ -56,6 +56,126 @@ logger = logging.getLogger(__name__)
 _MEMBER_PROVENANCE = ("full", "supplemented")
 
 
+# ---------------------------------------------------------------------------
+# Shared season-aggregate SUM projection (E-246-04 / H1)
+# ---------------------------------------------------------------------------
+# The parity-checked SUM column list is declared exactly ONCE per table here.
+# Both consumers build their recompute SELECT from these constants/builders:
+#
+#   * canonical_recompute (this module) -- the protected boxscore_only recompute.
+#     It appends its own member-provenance ``NOT EXISTS`` WHERE guard + GROUP BY,
+#     and (pitching only) the non-parity decision-derived ``w``/``l``/``sv``
+#     extras (see ``include_decision_extras``).
+#   * src/reports/aggregate_parity.py -- the verify-aggregates parity check. It
+#     appends only its own WHERE scope + GROUP BY around the same projection.
+#
+# Because the SUM list lives in ONE place, a parity-checked column added here
+# flows to BOTH paths with no second edit site -- closing the H1 silent-drift
+# hazard where the parity copy could sum a STALE subset and report false parity.
+# The builders return the shared ``SELECT ... FROM ... JOIN`` body only; each
+# caller composes its own ``WHERE ... GROUP BY`` scope around it.
+
+# Batting parity-checked SUM subset (16 cols).  The canonical recompute's
+# superset extras (pa/singles/xbh) are derived in Python AFTER the fetch, not in
+# this projection, so this SELECT is identical for both consumers.
+_BATTING_SUM_SELECT = """\
+SELECT
+    pgb.player_id,
+    COUNT(*)         AS games_tracked,
+    SUM(pgb.ab)      AS ab,
+    SUM(pgb.h)       AS h,
+    SUM(pgb.doubles) AS doubles,
+    SUM(pgb.triples) AS triples,
+    SUM(pgb.hr)      AS hr,
+    SUM(pgb.rbi)     AS rbi,
+    SUM(pgb.r)       AS r,
+    SUM(pgb.bb)      AS bb,
+    SUM(pgb.so)      AS so,
+    SUM(pgb.sb)      AS sb,
+    SUM(pgb.tb)      AS tb,
+    SUM(pgb.hbp)     AS hbp,
+    SUM(pgb.shf)     AS shf,
+    SUM(pgb.cs)      AS cs"""
+
+_BATTING_FROM = """
+FROM player_game_batting pgb
+JOIN games g ON pgb.game_id = g.game_id"""
+
+# Pitching parity-checked SUM subset (14 cols, through the NULL-safe ``gs``
+# CASE).  The canonical-recompute-only decision extras are appended SEPARATELY
+# (they sit between ``gs`` and ``FROM`` in the SELECT list).
+_PITCHING_SUM_SELECT = """\
+SELECT
+    pgp.player_id,
+    COUNT(*)               AS games_tracked,
+    SUM(pgp.ip_outs)       AS ip_outs,
+    SUM(pgp.h)             AS h,
+    SUM(pgp.r)             AS r,
+    SUM(pgp.er)            AS er,
+    SUM(pgp.bb)            AS bb,
+    SUM(pgp.so)            AS so,
+    SUM(pgp.wp)            AS wp,
+    SUM(pgp.hbp)           AS hbp,
+    SUM(pgp.pitches)       AS pitches,
+    SUM(pgp.total_strikes) AS total_strikes,
+    SUM(pgp.bf)            AS bf,
+    CASE WHEN MAX(pgp.appearance_order) IS NULL THEN NULL
+         ELSE SUM(CASE WHEN pgp.appearance_order = 1 THEN 1 ELSE 0 END)
+    END AS gs"""
+
+# canonical_recompute-only superset extras (NOT parity-checked): per-game
+# decision-derived win/loss/save counts, appended to the SELECT list before
+# ``FROM``.  The parity check never includes these (they are renderer-derived,
+# not summed-stat parity columns).
+_PITCHING_DECISION_EXTRAS = """,
+    SUM(CASE WHEN pgp.decision = 'W' THEN 1 ELSE 0 END)  AS w,
+    SUM(CASE WHEN pgp.decision = 'L' THEN 1 ELSE 0 END)  AS l,
+    SUM(CASE WHEN pgp.decision = 'SV' THEN 1 ELSE 0 END) AS sv"""
+
+_PITCHING_FROM = """
+FROM player_game_pitching pgp
+JOIN games g ON pgp.game_id = g.game_id"""
+
+# Positional result keys for the parity check's row unpacking -- the
+# parity-checked subset only (the canonical-only w/l/sv extras are intentionally
+# absent).  Kept adjacent to the projection they describe so a column added to
+# the shared SELECT updates these keys in lock-step.
+BATTING_RECOMPUTE_KEYS = (
+    "player_id", "games_tracked", "ab", "h", "doubles", "triples", "hr",
+    "rbi", "r", "bb", "so", "sb", "tb", "hbp", "shf", "cs",
+)
+PITCHING_RECOMPUTE_KEYS = (
+    "player_id", "games_tracked", "ip_outs", "h", "r", "er", "bb", "so",
+    "wp", "hbp", "pitches", "total_strikes", "bf", "gs",
+)
+
+
+def batting_recompute_select() -> str:
+    """Return the shared batting ``SELECT ... FROM ... JOIN`` SUM projection.
+
+    The result is the parity-checked SUM subset (the columns in
+    :data:`BATTING_RECOMPUTE_KEYS`, in that order).  Callers append their own
+    ``WHERE ... GROUP BY pgb.player_id`` scope.  Both ``canonical_recompute``
+    and ``src/reports/aggregate_parity.py`` consume this so the SUM column list
+    cannot drift between the two paths.
+    """
+    return _BATTING_SUM_SELECT + _BATTING_FROM
+
+
+def pitching_recompute_select(*, include_decision_extras: bool) -> str:
+    """Return the shared pitching ``SELECT ... FROM ... JOIN`` SUM projection.
+
+    The base result is the parity-checked SUM subset (the columns in
+    :data:`PITCHING_RECOMPUTE_KEYS`, in that order).  When
+    ``include_decision_extras`` is True the canonical-recompute-only
+    ``w``/``l``/``sv`` columns are appended (between ``gs`` and ``FROM``); the
+    parity check passes ``False``.  Callers append their own
+    ``WHERE ... GROUP BY pgp.player_id`` scope.
+    """
+    extras = _PITCHING_DECISION_EXTRAS if include_decision_extras else ""
+    return _PITCHING_SUM_SELECT + extras + _PITCHING_FROM
+
+
 def canonical_recompute(
     conn: sqlite3.Connection,
     team_id: int,
@@ -100,27 +220,10 @@ def _recompute_batting(
         (team_id, season_id),
     )
 
+    # Shared SUM projection (single source); this recompute adds its own
+    # member-provenance guard + GROUP BY scope around it.
     rows = conn.execute(
-        """
-        SELECT
-            pgb.player_id,
-            COUNT(*)         AS games_tracked,
-            SUM(pgb.ab)      AS ab,
-            SUM(pgb.h)       AS h,
-            SUM(pgb.doubles) AS doubles,
-            SUM(pgb.triples) AS triples,
-            SUM(pgb.hr)      AS hr,
-            SUM(pgb.rbi)     AS rbi,
-            SUM(pgb.r)       AS r,
-            SUM(pgb.bb)      AS bb,
-            SUM(pgb.so)      AS so,
-            SUM(pgb.sb)      AS sb,
-            SUM(pgb.tb)      AS tb,
-            SUM(pgb.hbp)     AS hbp,
-            SUM(pgb.shf)     AS shf,
-            SUM(pgb.cs)      AS cs
-        FROM player_game_batting pgb
-        JOIN games g ON pgb.game_id = g.game_id
+        batting_recompute_select() + """
         WHERE pgb.team_id = ? AND g.season_id = ?
           AND pgb.perspective_team_id = ?
           AND NOT EXISTS (
@@ -180,30 +283,11 @@ def _recompute_pitching(
         (team_id, season_id),
     )
 
+    # Shared SUM projection (single source) plus the canonical-only w/l/sv
+    # decision extras; this recompute adds its own member-provenance guard +
+    # GROUP BY scope around it.
     rows = conn.execute(
-        """
-        SELECT
-            pgp.player_id,
-            COUNT(*)               AS games_tracked,
-            SUM(pgp.ip_outs)       AS ip_outs,
-            SUM(pgp.h)             AS h,
-            SUM(pgp.r)             AS r,
-            SUM(pgp.er)            AS er,
-            SUM(pgp.bb)            AS bb,
-            SUM(pgp.so)            AS so,
-            SUM(pgp.wp)            AS wp,
-            SUM(pgp.hbp)           AS hbp,
-            SUM(pgp.pitches)       AS pitches,
-            SUM(pgp.total_strikes) AS total_strikes,
-            SUM(pgp.bf)            AS bf,
-            CASE WHEN MAX(pgp.appearance_order) IS NULL THEN NULL
-                 ELSE SUM(CASE WHEN pgp.appearance_order = 1 THEN 1 ELSE 0 END)
-            END AS gs,
-            SUM(CASE WHEN pgp.decision = 'W' THEN 1 ELSE 0 END)  AS w,
-            SUM(CASE WHEN pgp.decision = 'L' THEN 1 ELSE 0 END)  AS l,
-            SUM(CASE WHEN pgp.decision = 'SV' THEN 1 ELSE 0 END) AS sv
-        FROM player_game_pitching pgp
-        JOIN games g ON pgp.game_id = g.game_id
+        pitching_recompute_select(include_decision_extras=True) + """
         WHERE pgp.team_id = ? AND g.season_id = ?
           AND pgp.perspective_team_id = ?
           AND NOT EXISTS (

@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the two dead public verbs on the GameChanger API client — `GameChangerClient.post()` (`client.py:722`) and `GameChangerClient.delete()` (`client.py:794`) — and their tests will be removed. Both have zero production callers; their only historical caller was the follow/unfollow path removed in E-239 (now banned). This is a pure dead-code deletion that shrinks E-248's refactor surface from 6 verbs to 4 and dissolves its 5xx-gap behavior change.

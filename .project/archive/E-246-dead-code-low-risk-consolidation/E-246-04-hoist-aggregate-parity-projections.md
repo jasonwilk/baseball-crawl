@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the season-aggregate SUM-projection bodies will live in one shared source that both `canonical_recompute` and the `verify-aggregates` parity check import, so the parity check can never silently sum a stale subset of columns when a new aggregate column is added.
@@ -42,3 +42,5 @@ data-engineer
 
 ## Notes
 This is a byte-identical consolidation of a documented integrity seam — the value is preventing future silent drift, so the single-source structure is the deliverable.
+
+**Phase 4b Codex finding (2026-06-30): AC-3 end-to-end closure.** Post-merge review found that `aggregate_parity.py` kept a SECOND manual column list (`_BATTING_COLUMNS`/`_PITCHING_COLUMNS`, the `diff_columns` mapping) separate from the `*_RECOMPUTE_KEYS` this story hoisted — `_check_table` only diffs columns in `diff_columns`, so AC-3's "no second edit site" held for the SUM projection but not end-to-end (a future column would be recomputed yet silently uncompared). No current integrity gap (`diff_columns` set == `RECOMPUTE_KEYS` today). Remediated in-dispatch by DE: `_BATTING_COLUMNS`/`_PITCHING_COLUMNS` derived from `*_RECOMPUTE_KEYS` (byte-preserving the current tuples; `cells_compared` stays 74) + guard tests pinning the single-source invariant. CR's byte-preservation verification confirmed APPROVED (byte-preserving; `cells_compared` still 74), so **AC-3 is now fully (end-to-end, literally) satisfied — no second edit site remains.** See epic History Phase 4b scorecard.

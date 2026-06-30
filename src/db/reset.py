@@ -12,19 +12,17 @@ import sqlite3
 from pathlib import Path
 
 from migrations.apply_migrations import run_migrations
+from src.db.paths import resolve_db_path
 
 logger = logging.getLogger(__name__)
-
-# Repo root: src/db/reset.py is 3 levels deep, so .parents[2] is the repo root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
 
 
 def get_db_path(override: str | Path | None = None) -> Path:
     """Return the resolved path to the SQLite database file.
 
-    Checks the caller-supplied override first, then DATABASE_PATH from the
-    environment, then falls back to the default path.
+    Thin wrapper around the canonical :func:`src.db.paths.resolve_db_path`
+    (override -> DATABASE_PATH -> default).  Retained for callers that import
+    ``get_db_path`` from this module.
 
     Args:
         override: Optional path override from the caller (string or Path).
@@ -32,13 +30,7 @@ def get_db_path(override: str | Path | None = None) -> Path:
     Returns:
         Resolved absolute Path to the database file.
     """
-    if override is not None:
-        return Path(override).resolve()
-    env_db = os.environ.get("DATABASE_PATH")
-    if env_db is not None:
-        env_path = Path(env_db)
-        return env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
-    return _DEFAULT_DB_PATH
+    return resolve_db_path(override)
 
 
 def check_production_guard(force: bool) -> None:

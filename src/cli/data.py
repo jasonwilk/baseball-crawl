@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import uuid
 from contextlib import closing
@@ -12,14 +11,29 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
+from src.db.paths import resolve_db_path
+
 if TYPE_CHECKING:
     from src.reconciliation.engine import ReconciliationSummary
 
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
+# game_runs and game_pa_count are tautological data-availability checks (same
+# source for both sides) -- excluded from cross-source reconciliation.
+_AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
+
+
+def _echo_match_rate(sig: str, match: int, total: int) -> None:
+    """Echo one reconciliation signal's match-rate line."""
+    rate = match / total * 100 if total else 0
+    typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+
+def _echo_present(sig: str, present: int, total: int) -> None:
+    """Echo one availability signal's presence line."""
+    typer.echo(f"    {sig}: {present}/{total} present")
+
 
 app = typer.Typer(
     help="Data pipeline commands.",
@@ -34,14 +48,6 @@ def _data_group(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
-
-def _resolve_db_path() -> Path:
-    """Return DB path from DATABASE_PATH env var or the project default."""
-    env_db = os.environ.get("DATABASE_PATH")
-    if env_db is not None:
-        env_path = Path(env_db)
-        return env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
-    return _DEFAULT_DB_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +77,10 @@ def dedup_players(
         "--season-id",
         help="Scope detection to a single season.",
     ),
-    db_path: Path = typer.Option(
-        _DEFAULT_DB_PATH,
+    db_path: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database.",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
     ),
 ) -> None:
     """Detect and merge duplicate players on the same team.
@@ -92,6 +98,7 @@ def dedup_players(
     # --dry-run is the default; --execute overrides it
     is_dry_run = not execute
 
+    db_path = resolve_db_path(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
@@ -204,10 +211,10 @@ def reconcile(
         "--summary",
         help="Show aggregate statistics from reconciliation records (deduplicated by signal).",
     ),
-    db_path: Path = typer.Option(
-        _DEFAULT_DB_PATH,
+    db_path: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database.",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
     ),
 ) -> None:
     """Compare plays-derived stats against boxscore ground truth.
@@ -227,6 +234,7 @@ def reconcile(
         reconcile_game,
     )
 
+    db_path = resolve_db_path(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
@@ -331,11 +339,8 @@ def _print_summary(summary: ReconciliationSummary, *, execute: bool = False) -> 
         typer.echo("  No signals to report.")
         return
 
-    # Separate pitcher vs batter vs game signals.
-    # game_runs and game_pa_count are tautological data-availability checks
-    # (same source for both sides) -- exclude from cross-source reconciliation.
-    _AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
-
+    # Separate pitcher vs batter vs game signals (availability signals excluded
+    # from cross-source reconciliation -- see module-level _AVAILABILITY_SIGNALS).
     pitcher_signals: dict[str, dict[str, int]] = {}
     batter_signals: dict[str, dict[str, int]] = {}
     game_signals: dict[str, dict[str, int]] = {}
@@ -372,34 +377,27 @@ def _print_summary(summary: ReconciliationSummary, *, execute: bool = False) -> 
         for sig in sorted(pitcher_signals):
             counts = pitcher_signals[sig]
             total = sum(counts.values())
-            match = counts.get("MATCH", 0)
-            rate = match / total * 100 if total else 0
-            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+            _echo_match_rate(sig, counts.get("MATCH", 0), total)
 
     typer.echo("\n  Batter Signals:")
     for sig in sorted(batter_signals):
         counts = batter_signals[sig]
         total = sum(counts.values())
-        match = counts.get("MATCH", 0)
-        rate = match / total * 100 if total else 0
-        typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+        _echo_match_rate(sig, counts.get("MATCH", 0), total)
 
     if game_signals:
         typer.echo("\n  Game-Level Signals:")
         for sig in sorted(game_signals):
             counts = game_signals[sig]
             total = sum(counts.values())
-            match = counts.get("MATCH", 0)
-            rate = match / total * 100 if total else 0
-            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+            _echo_match_rate(sig, counts.get("MATCH", 0), total)
 
     if availability_signals:
         typer.echo("\n  Data Availability Checks (not cross-source reconciliation):")
         for sig in sorted(availability_signals):
             counts = availability_signals[sig]
             total = sum(counts.values())
-            match = counts.get("MATCH", 0)
-            typer.echo(f"    {sig}: {match}/{total} present")
+            _echo_present(sig, counts.get("MATCH", 0), total)
 
     typer.echo("\n  Status Distribution:")
     total_all = 0
@@ -436,8 +434,6 @@ def _print_verbose_summary(
 
 def _print_db_summary(db_summary: dict) -> None:
     """Print deduplicated aggregate stats from reconciliation records."""
-    _AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
-
     typer.echo("\nReconciliation Database Summary (deduplicated)")
     typer.echo(f"  Total records: {db_summary['total_records']}")
     typer.echo(f"  Total corrected: {db_summary['total_corrected']}")
@@ -459,25 +455,22 @@ def _print_db_summary(db_summary: dict) -> None:
             for sig in sorted(recon_sigs):
                 counts = recon_sigs[sig]
                 total = sum(counts.values())
-                match = counts.get("MATCH", 0) + counts.get("CORRECTED", 0)
-                rate = match / total * 100 if total else 0
-                typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+                _echo_match_rate(sig, counts.get("MATCH", 0) + counts.get("CORRECTED", 0), total)
 
         if avail_sigs:
             typer.echo(f"\n  Data Availability Checks (not cross-source reconciliation):")
             for sig in sorted(avail_sigs):
                 counts = avail_sigs[sig]
                 total = sum(counts.values())
-                match = counts.get("MATCH", 0)
-                typer.echo(f"    {sig}: {match}/{total} present")
+                _echo_present(sig, counts.get("MATCH", 0), total)
 
 
 @app.command("backfill-appearance-order")
 def backfill_appearance_order(
-    db_path: Path = typer.Option(
-        _DEFAULT_DB_PATH,
+    db_path: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database.",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
     ),
 ) -> None:
     """Backfill appearance_order for existing player_game_pitching rows.
@@ -490,6 +483,7 @@ def backfill_appearance_order(
     """
     from src.gamechanger.loaders.backfill import backfill_appearance_order as _backfill
 
+    db_path = resolve_db_path(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
@@ -516,10 +510,10 @@ def backfill_appearance_order(
 
 @app.command("reload-annotated-pitches")
 def reload_annotated_pitches(
-    db_path: Path = typer.Option(
-        _DEFAULT_DB_PATH,
+    db_path: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database.",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
     ),
 ) -> None:
     """Recover stranded annotated pitches in already-loaded games (E-245).
@@ -536,6 +530,7 @@ def reload_annotated_pitches(
     """
     from src.gamechanger.loaders.plays_reload import reload_all_games
 
+    db_path = resolve_db_path(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
@@ -566,10 +561,10 @@ def reload_annotated_pitches(
 
 @app.command("fix-self-games")
 def fix_self_games(
-    db_path: Path = typer.Option(
-        _DEFAULT_DB_PATH,
+    db_path: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database.",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
     ),
     execute: bool = typer.Option(
         False,
@@ -601,6 +596,7 @@ def fix_self_games(
         rederive_corrected_game_plays,
     )
 
+    db_path = resolve_db_path(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")

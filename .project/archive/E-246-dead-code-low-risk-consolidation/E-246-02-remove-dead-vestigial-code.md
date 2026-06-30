@@ -4,7 +4,7 @@
 [E-246: Dead-Code Removal & Low-Risk Consolidation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the grep-confirmed dead and vestigial code scattered across the crawlers, API helpers, signing, and plays parser will be removed, and the crawler docstrings that still describe a disk-write contract will be corrected to the current in-memory contract.

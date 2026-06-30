@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from src.gamechanger.credentials import check_single_profile
+from src.gamechanger.credentials import ALL_PROFILES, check_single_profile
 from src.http.proxy_check import (
     ProxyCheckOutcome,
     ProxyCheckResult,
@@ -22,8 +22,6 @@ _DATA_ROOT = _PROJECT_ROOT / "data"
 _DB_PATH = _DATA_ROOT / "app.db"
 _RAW_DATA_ROOT = _DATA_ROOT / "raw"
 _PROXY_SESSIONS_DIR = _PROJECT_ROOT / "proxy" / "data" / "sessions"
-
-_PROFILES: tuple[str, ...] = ("web", "mobile")
 
 
 def _human_size(num_bytes: int) -> str:
@@ -44,7 +42,7 @@ def _get_credential_status() -> dict[str, tuple[int, str]]:
         Exit codes: 0=valid, 1=expired/error, 2=missing.
     """
     results: dict[str, tuple[int, str]] = {}
-    for profile in _PROFILES:
+    for profile in ALL_PROFILES:
         results[profile] = check_single_profile(profile)
     return results
 
@@ -104,7 +102,7 @@ def _get_proxy_connectivity() -> dict[str, ProxyCheckResult]:
         Mapping of profile name to :class:`ProxyCheckResult`.
     """
     direct_ip = get_direct_ip()
-    return {profile: check_proxy_routing(profile, direct_ip) for profile in _PROFILES}
+    return {profile: check_proxy_routing(profile, direct_ip) for profile in ALL_PROFILES}
 
 
 def _format_proxy_line(result: ProxyCheckResult) -> tuple[str, str]:
