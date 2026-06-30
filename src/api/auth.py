@@ -29,7 +29,7 @@ from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp
 
 from src.api.db import get_connection
@@ -317,6 +317,23 @@ def _handle_dev_bypass(email: str) -> dict[str, Any] | None:
         return None
 
 
+def _missing_table_503(exc: sqlite3.OperationalError, path: str) -> PlainTextResponse:
+    """Return a 503 response for a missing-auth-table ``OperationalError``.
+
+    The single source for the "auth table missing (migration not applied?)"
+    handler shared by the three ``OperationalError`` catch sites in
+    :meth:`SessionMiddleware.dispatch`.  When the error is NOT a "no such
+    table" error it is re-raised unchanged, preserving the original behavior.
+    """
+    if "no such table" not in str(exc).lower():
+        raise exc
+    logger.warning(
+        "Auth table missing (migration not applied?); returning 503: %s",
+        path,
+    )
+    return PlainTextResponse("Service temporarily unavailable", status_code=503)
+
+
 class SessionMiddleware(BaseHTTPMiddleware):
     """Validate session cookies on protected routes.
 
@@ -366,17 +383,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
                     request.state.permitted_teams = state["permitted_teams"]
                     return await call_next(request)
             except sqlite3.OperationalError as exc:
-                if "no such table" in str(exc).lower():
-                    logger.warning(
-                        "Auth table missing (migration not applied?); "
-                        "returning 503: %s",
-                        path,
-                    )
-                    from starlette.responses import PlainTextResponse
-                    return PlainTextResponse(
-                        "Service temporarily unavailable", status_code=503
-                    )
-                raise
+                return _missing_table_503(exc, path)
 
         cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
         if not cookie_value:
@@ -388,34 +395,14 @@ class SessionMiddleware(BaseHTTPMiddleware):
                 with closing(get_connection()) as conn:
                     conn.execute("SELECT 1 FROM sessions LIMIT 1")
             except sqlite3.OperationalError as exc:
-                if "no such table" in str(exc).lower():
-                    logger.warning(
-                        "Auth table missing (migration not applied?); "
-                        "returning 503: %s",
-                        path,
-                    )
-                    from starlette.responses import PlainTextResponse
-                    return PlainTextResponse(
-                        "Service temporarily unavailable", status_code=503
-                    )
-                raise
+                return _missing_table_503(exc, path)
             from starlette.responses import RedirectResponse
             return RedirectResponse(url="/auth/login", status_code=302)
 
         try:
             state = _resolve_session_from_cookie(cookie_value)
         except sqlite3.OperationalError as exc:
-            if "no such table" in str(exc).lower():
-                logger.warning(
-                    "Auth table missing (migration not applied?); "
-                    "returning 503: %s",
-                    path,
-                )
-                from starlette.responses import PlainTextResponse
-                return PlainTextResponse(
-                    "Service temporarily unavailable", status_code=503
-                )
-            raise
+            return _missing_table_503(exc, path)
 
         if not state:
             from starlette.responses import RedirectResponse

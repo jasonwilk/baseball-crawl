@@ -283,6 +283,31 @@ class TestGetProxyConfig:
         monkeypatch.setenv("PROXY_URL_MOBILE", "http://mobile-proxy.example.com:9001")
         assert get_proxy_config("mobile") == "http://mobile-proxy.example.com:9001"
 
+    @pytest.mark.parametrize(
+        "env, profile",
+        [
+            ({"PROXY_ENABLED": "true", "PROXY_URL_WEB": "http://p.example.com:9000"}, "web"),
+            ({"PROXY_ENABLED": "false", "PROXY_URL_WEB": "http://p.example.com:9000"}, "web"),
+            ({"PROXY_URL_WEB": "http://p.example.com:9000"}, "web"),  # PROXY_ENABLED unset
+            ({"PROXY_ENABLED": "true"}, "web"),  # URL unset
+            ({"PROXY_ENABLED": "true", "PROXY_URL_WEB": "ftp://bad"}, "web"),  # bad scheme
+            ({"PROXY_ENABLED": "true", "PROXY_URL_MOBILE": "http://m.example.com:9001"}, "mobile"),
+        ],
+    )
+    def test_delegates_to_resolve_proxy_from_dict(
+        self, monkeypatch: pytest.MonkeyPatch, env: dict, profile: str
+    ) -> None:
+        """AC-4: get_proxy_config(profile) == resolve_proxy_from_dict(env, profile).
+
+        The two read from different sources (os.environ vs an explicit dict) but
+        must resolve byte-identically for the same inputs and no session_id.
+        """
+        for key in ("PROXY_ENABLED", "PROXY_URL_WEB", "PROXY_URL_MOBILE"):
+            monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        assert get_proxy_config(profile) == resolve_proxy_from_dict(env, profile)
+
 
 class TestProxyGracefulDegradation:
     """AC-5: PROXY_ENABLED=true but URL empty/unset logs WARNING and returns None."""

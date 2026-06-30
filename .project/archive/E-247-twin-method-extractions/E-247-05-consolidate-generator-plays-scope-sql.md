@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the reports generator's three parallel plays-scope SQL blocks will share one scope builder, the hardcoded empty-result dict will be a single constant, and the inlined UTC-timestamp format will use one shared helper.

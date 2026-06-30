@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the duplicated stat math and date formatting in the reports renderer and starter-prediction modules — inline total-bases computed three ways, a copy-pasted K/9-alternative search loop, and a re-implemented short-date formatter — will each be expressed once.

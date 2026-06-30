@@ -2667,3 +2667,263 @@ class TestReconcilePerPerspective:
         ).fetchone()
         assert row2[0] == "pitcher-h2"
 
+
+# ---------------------------------------------------------------------------
+# E-247-02: Detection-extraction characterization (HARD GATE -- stats integrity)
+#
+# The per-game detection orchestration was extracted into a single
+# _detect_discrepancies() function that BOTH the dry-run path and the execute
+# (detect -> correct -> detect) path call.  These tests pin the guarantee that
+# the two paths produce byte-identical detection output, so the modes cannot
+# silently diverge.
+# ---------------------------------------------------------------------------
+
+
+def _seeded_conn() -> sqlite3.Connection:
+    """Build a fresh in-memory DB seeded exactly like the ``db`` fixture.
+
+    Returned as a standalone function (not a fixture) so a single test can
+    build two independent, identically-seeded connections and run the two
+    reconciliation modes against each.
+    """
+    conn = sqlite3.connect(":memory:")
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+    )
+    conn.executemany(
+        "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
+        [
+            (1, "Home Team", "uuid-home", "member"),
+            (2, "Away Team", "uuid-away", "member"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+        [
+            ("pitcher-h1", "Home", "Pitcher1"),
+            ("pitcher-h2", "Home", "Pitcher2"),
+            ("pitcher-a1", "Away", "Pitcher1"),
+            ("batter-h1", "Home", "Batter1"),
+            ("batter-h2", "Home", "Batter2"),
+            ("batter-h3", "Home", "Batter3"),
+            ("batter-a1", "Away", "Batter1"),
+            ("batter-a2", "Away", "Batter2"),
+            ("batter-a3", "Away", "Batter3"),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def _fetch_detection_rows(conn: sqlite3.Connection) -> list[tuple]:
+    """Return every persisted discrepancy as deterministically-ordered tuples.
+
+    Excludes ``run_id`` (a per-run UUID) so the rows are comparable across
+    independent reconciliation invocations.
+    """
+    return conn.execute(
+        "SELECT perspective_team_id, team_id, player_id, signal_name, category, "
+        "boxscore_value, plays_value, delta, status, correction_detail "
+        "FROM reconciliation_discrepancies "
+        "ORDER BY team_id, category, signal_name, player_id, status"
+    ).fetchall()
+
+
+def _build_no_correction_game(conn: sqlite3.Connection, game_id: str) -> None:
+    """Seed a multi-pitcher game whose plays are already correctly attributed.
+
+    Because no pitcher reassignment is needed, the execute path's
+    detect -> correct -> detect produces the same detection output as the
+    dry-run path's single detection -- the cleanest expression of the
+    shared-detection-function guarantee.  The boxscore BF/SO/BB are aligned
+    with the plays so the high-confidence pitches/total_strikes supplement
+    gate fires (exercising that branch in the folded accumulation loop).
+    """
+    _insert_game(conn, game_id)
+
+    # Home pitchers (team 1) pitch the top half.
+    _insert_pitching_boxscore(
+        conn, game_id, "pitcher-h1", 1,
+        bf=2, so=1, ip_outs=2, pitches=5, total_strikes=5, appearance_order=1,
+    )
+    _insert_pitching_boxscore(
+        conn, game_id, "pitcher-h2", 1,
+        bf=1, so=0, ip_outs=1, pitches=1, total_strikes=1, appearance_order=2,
+    )
+    # Away pitcher (team 2) pitches the bottom half.
+    _insert_pitching_boxscore(
+        conn, game_id, "pitcher-a1", 2,
+        bf=3, so=0, ip_outs=3, pitches=3, total_strikes=3, appearance_order=1,
+    )
+
+    # Batting boxscores.
+    _insert_batting_boxscore(conn, game_id, "batter-a1", 2, ab=2, so=1)
+    _insert_batting_boxscore(conn, game_id, "batter-a2", 2, ab=1)
+    _insert_batting_boxscore(conn, game_id, "batter-h1", 1, ab=1)
+    _insert_batting_boxscore(conn, game_id, "batter-h2", 1, ab=1)
+    _insert_batting_boxscore(conn, game_id, "batter-h3", 1, ab=1)
+
+    # Top-half plays: h1 faces a1 (SO) then a2 (out); h2 faces a1 (out).
+    p1 = _insert_play(conn, game_id, 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Strikeout", pitch_count=3, did_outs_change=1)
+    p2 = _insert_play(conn, game_id, 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Groundout", pitch_count=2, did_outs_change=1)
+    p3 = _insert_play(conn, game_id, 3, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h2",
+                      outcome="Flyout", pitch_count=1, did_outs_change=1)
+    # Bottom-half plays: a1 faces h1, h2, h3.
+    p4 = _insert_play(conn, game_id, 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=1, did_outs_change=1)
+    p5 = _insert_play(conn, game_id, 5, half="bottom", batting_team_id=1,
+                      batter_id="batter-h2", pitcher_id="pitcher-a1",
+                      outcome="Groundout", pitch_count=1, did_outs_change=1)
+    p6 = _insert_play(conn, game_id, 6, half="bottom", batting_team_id=1,
+                      batter_id="batter-h3", pitcher_id="pitcher-a1",
+                      outcome="Lineout", pitch_count=1, did_outs_change=1)
+
+    # Pitch events drive total_strikes (and exercise the events branch of the
+    # now-single-pass plays_pitchers accumulation).
+    _insert_play_event(conn, p1, 1, pitch_result="strike_swinging")
+    _insert_play_event(conn, p1, 2, pitch_result="strike_swinging")
+    _insert_play_event(conn, p1, 3, pitch_result="strike_swinging")
+    _insert_play_event(conn, p2, 1, pitch_result="strike_looking")
+    _insert_play_event(conn, p2, 2, pitch_result="in_play")
+    _insert_play_event(conn, p3, 1, pitch_result="in_play")
+    _insert_play_event(conn, p4, 1, pitch_result="in_play")
+    _insert_play_event(conn, p5, 1, pitch_result="in_play")
+    _insert_play_event(conn, p6, 1, pitch_result="in_play")
+    conn.commit()
+
+
+def _build_misattribution_game(conn: sqlite3.Connection, game_id: str) -> None:
+    """Seed a game where the home top-half plays need pitcher reassignment.
+
+    Boxscore says h1 faced 2 and h2 faced 1, but all three top-half plays are
+    attributed to h1 -- so execute mode corrects play 3 to h2 and re-detects.
+    The away team and all batter/game-level signals are unaffected by that
+    correction, so their detection rows must be byte-identical across modes.
+    """
+    _insert_game(conn, game_id)
+
+    _insert_pitching_boxscore(conn, game_id, "pitcher-h1", 1,
+                              bf=2, so=1, pitches=6, ip_outs=2, appearance_order=1)
+    _insert_pitching_boxscore(conn, game_id, "pitcher-h2", 1,
+                              bf=1, so=0, pitches=3, ip_outs=1, appearance_order=2)
+    _insert_pitching_boxscore(conn, game_id, "pitcher-a1", 2,
+                              bf=2, pitches=6, ip_outs=2, appearance_order=1)
+
+    _insert_batting_boxscore(conn, game_id, "batter-h1", 1, ab=1)
+    _insert_batting_boxscore(conn, game_id, "batter-h2", 1, ab=1)
+    _insert_batting_boxscore(conn, game_id, "batter-a1", 2, ab=2)
+    _insert_batting_boxscore(conn, game_id, "batter-a2", 2, ab=1)
+
+    # All three top-half plays misattributed to h1; play 3 belongs to h2.
+    _insert_play(conn, game_id, 1, half="top", batting_team_id=2,
+                 batter_id="batter-a1", pitcher_id="pitcher-h1",
+                 outcome="Strikeout", pitch_count=3, did_outs_change=1)
+    _insert_play(conn, game_id, 2, half="top", batting_team_id=2,
+                 batter_id="batter-a2", pitcher_id="pitcher-h1",
+                 outcome="Groundout", pitch_count=3, did_outs_change=1)
+    _insert_play(conn, game_id, 3, half="top", batting_team_id=2,
+                 batter_id="batter-a1", pitcher_id="pitcher-h1",
+                 outcome="Flyout", pitch_count=3, did_outs_change=1)
+    _insert_play(conn, game_id, 4, half="bottom", batting_team_id=1,
+                 batter_id="batter-h1", pitcher_id="pitcher-a1",
+                 outcome="Flyout", pitch_count=3, did_outs_change=1)
+    _insert_play(conn, game_id, 5, half="bottom", batting_team_id=1,
+                 batter_id="batter-h2", pitcher_id="pitcher-a1",
+                 outcome="Groundout", pitch_count=3, did_outs_change=1)
+    conn.commit()
+
+
+class TestDetectionExtractionEquivalence:
+    """E-247-02: dry-run and execute paths share one detection function."""
+
+    def test_dry_run_and_execute_detection_byte_identical_no_correction(
+        self,
+    ) -> None:
+        """On a correctly-attributed game, both modes emit identical detection.
+
+        HARD GATE: reconciliation corrects pitcher attribution, so a detection
+        regression silently corrupts stats.  When no correction is needed, the
+        execute path's detect -> correct -> detect must produce exactly the
+        rows the dry-run path's single detection produces.
+        """
+        dry_conn = _seeded_conn()
+        exec_conn = _seeded_conn()
+        _build_no_correction_game(dry_conn, "game-char-eq")
+        _build_no_correction_game(exec_conn, "game-char-eq")
+
+        dry_summary = reconcile_game(dry_conn, "game-char-eq", dry_run=True)
+        exec_summary = reconcile_game(exec_conn, "game-char-eq", dry_run=False)
+
+        # No reassignment should occur on already-correct data.
+        assert exec_summary.total_plays_reassigned == 0
+        assert dry_summary.games_processed == 1
+        assert exec_summary.games_processed == 1
+
+        dry_rows = _fetch_detection_rows(dry_conn)
+        exec_rows = _fetch_detection_rows(exec_conn)
+
+        assert dry_rows, "expected detection to emit discrepancy rows"
+        assert dry_rows == exec_rows, (
+            "dry-run and execute detection diverged on a no-correction game; "
+            "the two paths must call the same detection function"
+        )
+        # No correction implies no CORRECTED rows in either mode.
+        assert all(r[8] != "CORRECTED" for r in exec_rows)
+
+    def test_unaffected_signals_byte_identical_across_modes_with_correction(
+        self,
+    ) -> None:
+        """With a real correction, signals the correction can't touch stay equal.
+
+        The away team and all batter/game-level signals are independent of the
+        home-pitcher reassignment, so their detection rows must be byte-identical
+        between dry-run and execute -- proving the re-detection pass runs the
+        same orchestration over the (now-corrected) data.  The home-pitcher
+        signals legitimately transition CORRECTABLE -> CORRECTED/MATCH.
+        """
+        dry_conn = _seeded_conn()
+        exec_conn = _seeded_conn()
+        _build_misattribution_game(dry_conn, "game-char-corr")
+        _build_misattribution_game(exec_conn, "game-char-corr")
+
+        reconcile_game(dry_conn, "game-char-corr", dry_run=True)
+        exec_summary = reconcile_game(exec_conn, "game-char-corr", dry_run=False)
+        assert exec_summary.total_plays_reassigned == 1
+
+        dry_rows = _fetch_detection_rows(dry_conn)
+        exec_rows = _fetch_detection_rows(exec_conn)
+
+        def _unaffected(rows: list[tuple]) -> list[tuple]:
+            # team_id index 1, category index 4. Keep away-team rows plus all
+            # batter/game-level rows (everything the correction cannot move).
+            return [
+                r for r in rows
+                if r[1] == 2 or r[4] in ("batter", "game_level")
+            ]
+
+        assert _unaffected(dry_rows) == _unaffected(exec_rows), (
+            "signals independent of the pitcher correction diverged between "
+            "dry-run and execute detection"
+        )
+
+        # Sanity: the home-pitcher BF signal really does transition.
+        dry_home_bf = {
+            r[2]: r[8] for r in dry_rows
+            if r[1] == 1 and r[3] == "pitcher_bf"
+        }
+        exec_home_bf = {
+            r[2]: r[8] for r in exec_rows
+            if r[1] == 1 and r[3] == "pitcher_bf"
+        }
+        assert "CORRECTABLE" in dry_home_bf.values()
+        assert "CORRECTABLE" not in exec_home_bf.values()
+        assert "CORRECTED" in exec_home_bf.values()
+

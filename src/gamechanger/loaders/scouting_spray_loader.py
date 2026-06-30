@@ -221,7 +221,10 @@ class ScoutingSprayChartLoader:
     ) -> LoadResult:
         """Load one game's spray chart data from an in-memory dict.
 
-        Delegates to the same event insertion logic as ``_load_game_file``.
+        Shared payload core (E-247-01) for both the in-memory entry point
+        (``load_from_data`` -> here directly) and the disk entry point
+        (``load_dir`` -> ``_load_game_file`` reads the JSON, then delegates
+        here).  Mirrors the ``GameLoader.load_payload`` / ``load_file`` pattern.
         """
         spray_data = data.get("spray_chart_data")
         if spray_data is None:
@@ -279,6 +282,18 @@ class ScoutingSprayChartLoader:
                 continue
             for player_uuid, events in section.items():
                 if not isinstance(events, list):
+                    # Drift resolution (E-247-01): the in-memory and disk paths
+                    # previously disagreed here -- the disk path (_load_game_file)
+                    # logged a WARNING while the in-memory path skipped silently.
+                    # Unified to LOG-then-skip: a non-list ``events`` value is a
+                    # malformed API response worth surfacing for data-quality
+                    # follow-up, consistent with this loader's "log unexpected
+                    # shapes, don't crash" convention.  The data effect is
+                    # unchanged (skip the entry, count it once as skipped).
+                    logger.warning(
+                        "Events for player %s in %s section is not a list; skipping.",
+                        player_uuid, section_key,
+                    )
                     result.skipped += 1
                     continue
                 player_team_id = self._resolve_player_team_id(
@@ -375,7 +390,13 @@ class ScoutingSprayChartLoader:
         public_id: str,
         season_id: str,
     ) -> LoadResult:
-        """Parse and load one game's scouting spray chart JSON.
+        """Parse and load one game's scouting spray chart JSON from disk.
+
+        Thin JSON-read wrapper (E-247-01): reads the file, then delegates to the
+        shared payload core :meth:`_load_game_data`.  Mirrors the established
+        ``GameLoader.load_file`` -> ``load_payload`` pattern, so the disk and
+        in-memory paths share one orchestration body (and one non-list-event
+        drift resolution -- see :meth:`_load_game_data`).
 
         Args:
             path: Path to the spray chart JSON file.
@@ -388,113 +409,7 @@ class ScoutingSprayChartLoader:
             ``LoadResult`` for this game's events.
         """
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-
-        spray_data = data.get("spray_chart_data")
-        if spray_data is None:
-            logger.info(
-                "spray_chart_data is null for game %s public_id=%s; skipping.",
-                game_id,
-                public_id,
-            )
-            return LoadResult()
-
-        # Whole-game perspective gate: skip if spray data already loaded
-        # for this game+perspective (mirrors plays_loader pattern, TN-3).
-        # Performance optimization -- INSERT OR IGNORE is still correct without
-        # this gate.  Limitation: if the first pass was partial (e.g., some
-        # events skipped due to unresolvable players), retries will hit this
-        # gate and skip the game.  To retry, delete the partial rows first:
-        #   DELETE FROM spray_charts WHERE game_id=? AND perspective_team_id=?
-        existing = self._db.execute(
-            "SELECT 1 FROM spray_charts WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
-            (game_id, team_id),
-        ).fetchone()
-        if existing is not None:
-            logger.debug(
-                "Spray data already loaded for game %s perspective %d; skipping.",
-                game_id, team_id,
-            )
-            return LoadResult(skipped=1)
-
-        # Resolve game to get home/away team IDs.
-        game_row = self._db.execute(
-            "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",
-            (game_id,),
-        ).fetchone()
-        if game_row is None:
-            # AC-7: defensive skip -- game row absent (edge case).
-            logger.debug(
-                "Game %s not found in games table for public_id=%s; "
-                "skipping spray load (edge case: independent run or failed boxscore fetch).",
-                game_id,
-                public_id,
-            )
-            return LoadResult()
-
-        home_team_id, away_team_id = game_row
-
-        # Warn if the scouted team does not appear in this game's home/away slots.
-        if team_id not in (home_team_id, away_team_id):
-            logger.warning(
-                "Scouted team public_id=%s (id=%d) is not home or away for "
-                "game %s; player team resolution may be unreliable.",
-                public_id,
-                team_id,
-                game_id,
-            )
-
-        result = LoadResult()
-        unresolvable_players = 0
-        unresolvable_events = 0
-        section_map = [
-            ("offense", "offensive"),
-            ("defense", "defensive"),
-        ]
-        for section_key, chart_type in section_map:
-            section = spray_data.get(section_key)
-            if not section:
-                continue
-            for player_uuid, events in section.items():
-                if not isinstance(events, list):
-                    logger.warning(
-                        "Events for player %s in %s section is not a list; skipping.",
-                        player_uuid,
-                        section_key,
-                    )
-                    result.skipped += 1
-                    continue
-                player_team_id = self._resolve_player_team_id(
-                    player_uuid,
-                    home_team_id,
-                    away_team_id,
-                    season_id,
-                )
-                if player_team_id is None:
-                    unresolvable_players += 1
-                    unresolvable_events += len(events)
-                    result.skipped += len(events)
-                    continue
-                for event in events:
-                    r = self._insert_event(
-                        event, game_id, player_uuid, player_team_id, chart_type, season_id,
-                        team_id,
-                    )
-                    result.loaded += r.loaded
-                    result.skipped += r.skipped
-                    result.errors += r.errors
-
-        if unresolvable_players > 0:
-            logger.debug(
-                "Game %s: skipped %d events for %d unresolvable players "
-                "(not found in team_rosters for home/away teams in season %s).",
-                game_id,
-                unresolvable_events,
-                unresolvable_players,
-                season_id,
-            )
-
-        self._db.commit()
-        return result
+        return self._load_game_data(data, game_id, team_id, public_id, season_id)
 
     # -----------------------------------------------------------------------
     # Resolution helpers

@@ -31,6 +31,8 @@ import pytest
 from src.gamechanger.credential_parser import (
     CredentialImportError,
     CurlParseError,
+    _decode_jwt_payload,
+    _decode_jwt_type,
     atomic_merge_env_file,
     merge_env_file,
     parse_credentials,
@@ -775,3 +777,76 @@ class TestCredentialImportErrorHierarchy:
     def test_catch_base_class_catches_curl_parse_error(self) -> None:
         with pytest.raises(CredentialImportError):
             parse_credentials("not a curl but looks like wget https://example.com")
+
+
+# ---------------------------------------------------------------------------
+# E-247-04 AC-3: JWT base64url decode unification
+#
+# The single _decode_jwt_payload helper replaced two decode sites that used two
+# different padding techniques. These tests pin that the unified helper decodes
+# the SAME tokens to the SAME payloads as BOTH pre-consolidation techniques.
+# ---------------------------------------------------------------------------
+
+
+def _technique_a(segment: str) -> bytes:
+    """Pre-consolidation credentials.decode_jwt_exp padding (urlsafe_b64decode)."""
+    padding = 4 - len(segment) % 4
+    segment += "=" * (padding % 4)
+    return base64.urlsafe_b64decode(segment)
+
+
+def _technique_b(segment: str) -> bytes:
+    """Pre-consolidation credential_parser._decode_jwt_type padding (b64decode)."""
+    b = segment.replace("-", "+").replace("_", "/")
+    b += "=" * (4 - len(b) % 4)
+    return base64.b64decode(b)
+
+
+def _jwt_from_payload(payload: dict) -> str:
+    seg = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return f"eyJhbGciOiJIUzI1NiJ9.{seg}.sig"
+
+
+class TestDecodeJwtPayloadUnification:
+    """AC-3: one base64url decode helper, identical to both old techniques."""
+
+    def test_decodes_payload_dict(self) -> None:
+        token = _jwt_from_payload({"type": "user", "exp": 1234567})
+        assert _decode_jwt_payload(token) == {"type": "user", "exp": 1234567}
+
+    def test_both_old_techniques_decode_same_payload_across_lengths(self) -> None:
+        # Vary payload byte length so the base64url segment hits len%4 in
+        # {0, 2, 3} -- the only place the two techniques could have diverged.
+        # Include non-ASCII so the segment contains urlsafe '-'/'_' chars.
+        seen_mod0 = 0
+        for n in range(0, 40):
+            payload = {"type": "user", "exp": 1700001, "pad": "x" * n, "u": "ÿþ"}
+            token = _jwt_from_payload(payload)
+            segment = token.split(".")[1]
+            a = _technique_a(segment)
+            b = _technique_b(segment)
+            # Both legacy techniques agree with each other...
+            assert a == b, f"techniques diverged at len={len(segment)} (%4={len(segment) % 4})"
+            # ...and the unified helper decodes to the same payload object.
+            assert _decode_jwt_payload(token) == payload
+            if len(segment) % 4 == 0:
+                seen_mod0 += 1
+        assert seen_mod0 > 0, "expected to exercise the len%4==0 padding edge case"
+
+    def test_malformed_token_returns_none(self) -> None:
+        assert _decode_jwt_payload("not-a-jwt") is None
+
+    def test_single_segment_returns_none(self) -> None:
+        assert _decode_jwt_payload("onlyonesegment") is None
+
+    def test_non_object_payload_returns_none(self) -> None:
+        # A JSON array payload is not a dict -> None (preserves old behavior:
+        # callers did .get()/[ ] which raised and was caught).
+        seg = base64.urlsafe_b64encode(b"[1,2,3]").rstrip(b"=").decode()
+        assert _decode_jwt_payload(f"h.{seg}.s") is None
+
+    def test_decode_jwt_type_delegates_to_helper(self) -> None:
+        assert _decode_jwt_type(_jwt_from_payload({"type": "user"})) == "user"
+        # Refresh tokens have no 'type' field.
+        assert _decode_jwt_type(_jwt_from_payload({"exp": 1})) is None
+        assert _decode_jwt_type("garbage") is None

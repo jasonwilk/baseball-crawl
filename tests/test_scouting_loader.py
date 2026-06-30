@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1575,3 +1576,412 @@ def test_pitching_aggregates_filter_by_perspective(
     assert row[0] == 15, f"Expected ip_outs=15 (single perspective), got {row[0]}"
     assert row[1] == 7, f"Expected so=7 (single perspective), got {row[1]}"
     assert row[2] == 1, f"Expected games_tracked=1 (single perspective), got {row[2]}"
+
+
+# ---------------------------------------------------------------------------
+# E-247-01: in-memory vs disk path equivalence (HARD GATE -- stats integrity)
+# ---------------------------------------------------------------------------
+#
+# Characterization test (golden fixture): pins the stat rows produced by the
+# scouting loader and asserts that the in-memory (load_team(crawl_result)) and
+# disk (load_team(scouting_dir)) paths produce byte-identical output on the
+# same payload.  The golden values below were captured from the pre-refactor
+# code; the collapse of the twin in-memory/disk methods must reproduce them
+# exactly.  If equivalence cannot be proven, the story is cut -- not shipped.
+
+
+def _e247_games() -> list[dict]:
+    """Two completed games with an opponent name (representative payload)."""
+    return [
+        {
+            "id": "e247-game-1",
+            "game_status": "completed",
+            "home_away": "home",
+            "start_ts": "2025-04-10T18:00:00Z",
+            "timezone": "America/Chicago",
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Rival HS"},
+        },
+        {
+            "id": "e247-game-2",
+            "game_status": "completed",
+            "home_away": "away",
+            "start_ts": "2025-04-12T18:00:00Z",
+            "timezone": "America/Chicago",
+            "score": {"team": 2, "opponent_team": 4},
+            "opponent_team": {"name": "Rival HS"},
+        },
+    ]
+
+
+def _e247_boxscore(own_key: str) -> dict:
+    """Boxscore with a batting line (incl. a 2B extra) and a pitching line."""
+    return {
+        own_key: {
+            "players": [
+                {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
+                {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_1,
+                            "stats": {"AB": 4, "H": 2, "RBI": 1, "BB": 1, "SO": 1},
+                        },
+                    ],
+                    "extra": [
+                        {"stat_name": "2B", "stats": [{"player_id": _PLAYER_1, "value": 1}]},
+                    ],
+                },
+                {
+                    "category": "pitching",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_2,
+                            "stats": {"IP": 5, "H": 4, "R": 2, "ER": 2, "BB": 1, "SO": 7},
+                        },
+                    ],
+                },
+            ],
+        },
+        _OPP_UUID: {"players": [], "groups": []},
+    }
+
+
+def _e247_snapshot(db: sqlite3.Connection) -> dict[str, list[tuple]]:
+    """Capture the stat-bearing rows as sorted tuples for equivalence checks."""
+    return {
+        "players": db.execute(
+            "SELECT player_id, first_name, last_name FROM players ORDER BY player_id"
+        ).fetchall(),
+        "team_rosters": db.execute(
+            "SELECT team_id, player_id, season_id, jersey_number FROM team_rosters "
+            "ORDER BY team_id, player_id"
+        ).fetchall(),
+        "games": db.execute(
+            "SELECT game_id, season_id, game_date, status, home_team_id, away_team_id "
+            "FROM games ORDER BY game_id"
+        ).fetchall(),
+        "player_game_batting": db.execute(
+            "SELECT game_id, player_id, team_id, perspective_team_id, ab, h, doubles, rbi, bb, so "
+            "FROM player_game_batting ORDER BY game_id, player_id, perspective_team_id"
+        ).fetchall(),
+        "player_game_pitching": db.execute(
+            "SELECT game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, "
+            "appearance_order FROM player_game_pitching "
+            "ORDER BY game_id, player_id, perspective_team_id"
+        ).fetchall(),
+        "player_season_batting": db.execute(
+            "SELECT player_id, team_id, season_id, games_tracked, ab, h, doubles, rbi, bb, so "
+            "FROM player_season_batting ORDER BY player_id, team_id"
+        ).fetchall(),
+        "player_season_pitching": db.execute(
+            "SELECT player_id, team_id, season_id, games_tracked, ip_outs, h, r, er, bb, so, gs "
+            "FROM player_season_pitching ORDER BY player_id, team_id"
+        ).fetchall(),
+    }
+
+
+def _e247_load_in_memory(db: sqlite3.Connection) -> int:
+    """Seed a team and load the representative payload via the in-memory path."""
+    team_pk = _insert_team(db)
+    crawl_result = SimpleNamespace(
+        team_id=team_pk,
+        roster=[
+            {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
+            {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
+        ],
+        games=_e247_games(),
+        boxscores={
+            "e247-game-1": _e247_boxscore(_PUBLIC_ID),
+            "e247-game-2": _e247_boxscore(_PUBLIC_ID),
+        },
+    )
+    ScoutingLoader(db).load_team(crawl_result)
+    return team_pk
+
+
+def _e247_load_from_disk(db: sqlite3.Connection, tmp_path: Path) -> int:
+    """Seed a team and load the same payload via the disk path."""
+    team_pk = _insert_team(db)
+    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
+    scouting_dir.mkdir(parents=True, exist_ok=True)
+    (scouting_dir / "roster.json").write_text(
+        json.dumps(
+            [
+                {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
+                {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (scouting_dir / "games.json").write_text(json.dumps(_e247_games()), encoding="utf-8")
+    bs_dir = scouting_dir / "boxscores"
+    bs_dir.mkdir(parents=True, exist_ok=True)
+    (bs_dir / "e247-game-1.json").write_text(
+        json.dumps(_e247_boxscore(_PUBLIC_ID)), encoding="utf-8"
+    )
+    (bs_dir / "e247-game-2.json").write_text(
+        json.dumps(_e247_boxscore(_PUBLIC_ID)), encoding="utf-8"
+    )
+    ScoutingLoader(db).load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    return team_pk
+
+
+def test_e247_in_memory_matches_golden(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-4: in-memory load produces the pinned golden stat rows (byte-identical)."""
+    team_pk = _e247_load_in_memory(db)
+    snap = _e247_snapshot(db)
+
+    # Season batting: PLAYER_1 across 2 games -> 2 games, 8 AB, 4 H, 2 2B, 2 RBI, 2 BB, 2 SO.
+    assert snap["player_season_batting"] == [
+        (_PLAYER_1, team_pk, _SEASON_ID, 2, 8, 4, 2, 2, 2, 2),
+    ]
+    # Season pitching: PLAYER_2 across 2 games -> 2 games, 30 outs, 8 H, 4 R, 4 ER, 2 BB, 14 SO,
+    # gs=2 (appearance_order=1 in both games).
+    assert snap["player_season_pitching"] == [
+        (_PLAYER_2, team_pk, _SEASON_ID, 2, 30, 8, 4, 4, 2, 14, 2),
+    ]
+    # Per-game batting: one row per game for PLAYER_1.
+    assert snap["player_game_batting"] == [
+        ("e247-game-1", _PLAYER_1, team_pk, team_pk, 4, 2, 1, 1, 1, 1),
+        ("e247-game-2", _PLAYER_1, team_pk, team_pk, 4, 2, 1, 1, 1, 1),
+    ]
+    # Per-game pitching: one row per game for PLAYER_2 (5 IP = 15 outs).
+    assert snap["player_game_pitching"] == [
+        ("e247-game-1", _PLAYER_2, team_pk, team_pk, 15, 4, 2, 2, 1, 7, 1),
+        ("e247-game-2", _PLAYER_2, team_pk, team_pk, 15, 4, 2, 2, 1, 7, 1),
+    ]
+    assert len(snap["games"]) == 2
+
+
+def test_e247_disk_path_matches_in_memory(
+    tmp_path: Path,
+) -> None:
+    """AC-4: the disk path produces byte-identical stat rows to the in-memory path.
+
+    Both paths load the same payload into freshly-migrated databases seeded in
+    the same order, so the integer team PKs align and the snapshots must be
+    equal table-for-table.
+    """
+    mem_db_path = tmp_path / "mem.db"
+    run_migrations(db_path=mem_db_path)
+    mem_db = sqlite3.connect(str(mem_db_path))
+    mem_db.execute("PRAGMA foreign_keys=ON;")
+    _e247_load_in_memory(mem_db)
+    mem_snap = _e247_snapshot(mem_db)
+    mem_db.close()
+
+    disk_db_path = tmp_path / "disk.db"
+    run_migrations(db_path=disk_db_path)
+    disk_db = sqlite3.connect(str(disk_db_path))
+    disk_db.execute("PRAGMA foreign_keys=ON;")
+    _e247_load_from_disk(disk_db, tmp_path)
+    disk_snap = _e247_snapshot(disk_db)
+    disk_db.close()
+
+    for table in mem_snap:
+        assert disk_snap[table] == mem_snap[table], (
+            f"disk vs in-memory mismatch in {table}"
+        )
+
+
+def test_e247_in_memory_empty_boxscores_skips_tail_fresh_db(
+    db: sqlite3.Connection,
+) -> None:
+    """E-247-01 F1: in-memory empty-boxscores SKIPS the post-boxscore tail
+    (dedup/recompute/commit), exactly as the pre-refactor early-return did.
+
+    Fresh-DB case: roster is still loaded, the run completes cleanly, and no
+    per-game / per-season / games stat rows exist (the tail neither ran nor was
+    needed).  The populated-DB sibling test below proves the tail is actually
+    *skipped* (not merely a no-op) on a non-empty database.
+    """
+    team_pk = _insert_team(db)
+    crawl_result = SimpleNamespace(
+        team_id=team_pk,
+        roster=[
+            {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
+        ],
+        games=[],          # no games
+        boxscores={},      # empty boxscores -> tail is skipped (F1 guard)
+    )
+
+    result = ScoutingLoader(db).load_team(crawl_result)
+
+    # Run completed cleanly: the single roster player is the only "loaded"
+    # unit; the boxscore stage contributed nothing (no games).
+    assert result.errors == 0
+    assert result.loaded == 1      # the one roster player; no boxscore games
+    assert result.redirect_map == {}
+
+    # Roster row still written (roster loading runs before the boxscore guard).
+    assert db.execute(
+        "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (team_pk,)
+    ).fetchone()[0] == 1
+
+    # No per-game or per-season stat rows exist.
+    for table in (
+        "player_game_batting",
+        "player_game_pitching",
+        "player_season_batting",
+        "player_season_pitching",
+        "games",
+    ):
+        count = db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE team_id = ?", (team_pk,)
+        ).fetchone()[0] if table != "games" else db.execute(
+            "SELECT COUNT(*) FROM games WHERE home_team_id = ? OR away_team_id = ?",
+            (team_pk, team_pk),
+        ).fetchone()[0]
+        assert count == 0, f"Expected no {table} rows on empty-boxscores load, got {count}"
+
+
+def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
+    db: sqlite3.Connection,
+) -> None:
+    """E-247-01 F1 (the proof CR flagged missing): a boxscoreless in-memory
+    refresh must NOT run the dedup/recompute/commit tail on a POPULATED db.
+
+    Reproduces a reachable out-of-sync state: a STALE ``boxscore_only`` season
+    aggregate (ab=99) alongside a per-game row that sums to a DIFFERENT value
+    (ab=4).  If the tail ran, ``canonical_recompute`` would DELETE the stale
+    aggregate and re-INSERT ab=4 -- so this test FAILS against the
+    unconditional-tail code and PASSES only when the empty-boxscore guard skips
+    the tail (matching the pre-refactor in-memory early-return).
+    """
+    team_pk = _insert_team(db)  # season_year=2025 -> DB season_id "2025"
+    season_id = _SEASON_ID
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'unknown', 2025)",
+        (season_id, season_id),
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES (?, 'John', 'Doe')",
+        (_PLAYER_1,),
+    )
+    # A completed game + a per-game batting row that sums to ab=4 (what a
+    # recompute WOULD produce).
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) "
+        "VALUES ('pop-g1', ?, '2025-04-01', 'completed', ?, ?)",
+        (season_id, team_pk, team_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('pop-g1', ?, ?, ?, 4, 2)",
+        (_PLAYER_1, team_pk, team_pk),
+    )
+    # A STALE boxscore_only season aggregate (ab=99) that disagrees with the
+    # per-game sum -- the row a recompute would overwrite.
+    db.execute(
+        """
+        INSERT INTO player_season_batting
+            (player_id, team_id, season_id, stat_completeness,
+             gp, games_tracked, pa, ab, h, singles, doubles, triples, hr,
+             rbi, r, bb, so, sb, tb, hbp, shf, cs, xbh)
+        VALUES (?, ?, ?, 'boxscore_only',
+                1, 1, 99, 99, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0)
+        """,
+        (_PLAYER_1, team_pk, season_id),
+    )
+    db.commit()
+
+    def _snapshot():
+        agg = db.execute(
+            "SELECT ab, h FROM player_season_batting "
+            "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+            (_PLAYER_1, team_pk, season_id),
+        ).fetchone()
+        pg = db.execute(
+            "SELECT game_id, player_id, ab, h FROM player_game_batting "
+            "WHERE team_id = ? ORDER BY game_id, player_id",
+            (team_pk,),
+        ).fetchall()
+        return agg, pg
+
+    before = _snapshot()
+    assert before[0] == (99, 50), "precondition: aggregate seeded stale"
+
+    # Boxscoreless in-memory refresh (re-scout returning 0 boxscores).
+    crawl_result = SimpleNamespace(
+        team_id=team_pk, roster=[], games=[], boxscores={},
+    )
+    ScoutingLoader(db).load_team(crawl_result)
+
+    after = _snapshot()
+    # Tail was skipped: the stale aggregate is untouched (NOT recomputed to ab=4)
+    # and the per-game rows are unchanged.
+    assert after[0] == (99, 50), (
+        f"Expected stale aggregate untouched (tail skipped), got {after[0]}"
+    )
+    assert after[1] == before[1], "per-game rows must be unchanged"
+
+
+# ---------------------------------------------------------------------------
+# E-247-01 F2: disk-path malformed roster.json keeps errors=1
+# ---------------------------------------------------------------------------
+
+
+def test_e247_disk_malformed_roster_counts_error(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """F2: a PRESENT-but-malformed roster.json on the disk path yields errors=1.
+
+    Restores the pre-refactor ``_load_roster`` semantics, which returned
+    ``LoadResult(errors=1)`` for an unreadable / non-array roster file.
+    """
+    team_pk = _insert_team(db)
+    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
+    scouting_dir.mkdir(parents=True, exist_ok=True)
+    # Malformed JSON (not parseable).
+    (scouting_dir / "roster.json").write_text("{ this is not valid json", encoding="utf-8")
+    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
+
+    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    assert result.errors == 1, f"Expected errors=1 for malformed roster, got {result.errors}"
+    # Nothing was loaded from the bad roster.
+    assert db.execute(
+        "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (team_pk,)
+    ).fetchone()[0] == 0
+
+
+def test_e247_disk_non_array_roster_counts_error(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """F2: a PRESENT roster.json that is valid JSON but not an array -> errors=1."""
+    team_pk = _insert_team(db)
+    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
+    scouting_dir.mkdir(parents=True, exist_ok=True)
+    (scouting_dir / "roster.json").write_text('{"not": "a list"}', encoding="utf-8")
+    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
+
+    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    assert result.errors == 1, f"Expected errors=1 for non-array roster, got {result.errors}"
+
+
+def test_e247_disk_missing_roster_no_error(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """F2 guard against over-correction: a MISSING roster.json keeps errors=0.
+
+    The pre-refactor ``_load_roster_section`` "not found" branch returned an
+    empty, error-free result -- missing must NOT be conflated with malformed.
+    """
+    team_pk = _insert_team(db)
+    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
+    scouting_dir.mkdir(parents=True, exist_ok=True)
+    # No roster.json written.
+    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
+
+    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    assert result.errors == 0, f"Expected errors=0 for missing roster, got {result.errors}"

@@ -776,3 +776,69 @@ class TestDevUserAutoAssignment:
         assert user_row is not None
         assigned = _get_team_access_rows(db_path, user_row[0])
         assert len(assigned) > 0
+
+
+# ---------------------------------------------------------------------------
+# E-247-07 AC-1: shared _missing_table_503 handler
+# ---------------------------------------------------------------------------
+
+
+class TestMissingTable503:
+    """The 3 middleware OperationalError catch sites share one 503 handler."""
+
+    def test_no_such_table_returns_503_plaintext(self) -> None:
+        from starlette.responses import PlainTextResponse
+
+        from src.api.auth import _missing_table_503
+
+        exc = sqlite3.OperationalError("no such table: sessions")
+        resp = _missing_table_503(exc, "/admin/reports")
+        assert isinstance(resp, PlainTextResponse)
+        assert resp.status_code == 503
+        assert resp.body == b"Service temporarily unavailable"
+
+    def test_other_operational_error_is_reraised(self) -> None:
+        from src.api.auth import _missing_table_503
+
+        exc = sqlite3.OperationalError("database is locked")
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            _missing_table_503(exc, "/admin/reports")
+
+
+# ---------------------------------------------------------------------------
+# E-247-07 AC-4: unified APP_URL helper (single default baseball.localhost:8001)
+# ---------------------------------------------------------------------------
+
+
+class TestGetAppUrl:
+    """get_app_url is the single source for the report/magic-link base URL."""
+
+    def test_default_when_app_url_unset(self) -> None:
+        from src.api.helpers import get_app_url
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_URL", None)
+            assert get_app_url() == "http://baseball.localhost:8001"
+
+    def test_reads_app_url_when_set_and_strips_trailing_slash(self) -> None:
+        from src.api.helpers import get_app_url
+
+        with patch.dict(os.environ, {"APP_URL": "https://bbstats.ai/"}):
+            assert get_app_url() == "https://bbstats.ai"
+
+    def test_generator_wrapper_shares_the_unified_default(self) -> None:
+        # generator._get_base_url is a thin wrapper over get_app_url, so it
+        # resolves to the same unified default when APP_URL is unset.
+        #
+        # The OTHER two former APP_URL sites are driven end-to-end elsewhere
+        # (so reverting either to an inline read would fail a real test):
+        #   * routes/auth.py magic-link ->
+        #       tests/test_auth_routes.py::test_magic_link_uses_unified_default_when_app_url_unset
+        #   * reports_admin.py report links ->
+        #       tests/test_admin_reports.py (admin report-list render tests)
+        from src.api.helpers import get_app_url
+        from src.reports.generator import _get_base_url
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_URL", None)
+            assert _get_base_url() == get_app_url() == "http://baseball.localhost:8001"

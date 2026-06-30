@@ -187,97 +187,11 @@ def reconcile_game(
         summary.games_skipped_no_plays = 1
         return summary
 
-    # Load plays and play_events
-    plays_rows = conn.execute(
-        "SELECT id, play_order, inning, half, batting_team_id, batter_id, "
-        "pitcher_id, outcome, pitch_count, is_first_pitch_strike, "
-        "home_score, away_score, did_outs_change "
-        "FROM plays WHERE game_id = ? AND perspective_team_id = ? "
-        "ORDER BY play_order",
-        (game_id, chosen_perspective_id),
-    ).fetchall()
-
-    play_events_rows = conn.execute(
-        "SELECT pe.play_id, pe.event_order, pe.event_type, pe.pitch_result, pe.raw_template "
-        "FROM play_events pe "
-        "JOIN plays p ON pe.play_id = p.id "
-        "WHERE p.game_id = ? AND p.perspective_team_id = ? "
-        "ORDER BY pe.play_id, pe.event_order",
-        (game_id, chosen_perspective_id),
-    ).fetchall()
-
-    # Index play_events by play_id
-    events_by_play: dict[int, list[tuple]] = {}
-    for ev_row in play_events_rows:
-        play_id = ev_row[0]
-        events_by_play.setdefault(play_id, []).append(ev_row)
-
-    # Process both teams
-    discrepancies: list[_Discrepancy] = []
-
-    for team_id in (home_team_id, away_team_id):
-        is_home = team_id == home_team_id
-
-        # Pitcher signals: pitchers for this team pitch when the OTHER team bats
-        pitching_half = "top" if is_home else "bottom"
-        batting_half = "bottom" if is_home else "top"
-
-        # Load boxscore pitching data for this team (own perspective if available;
-        # otherwise the same chosen perspective the plays were loaded from)
-        pitching_rows = conn.execute(
-            "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
-            "total_strikes, bf, decision "
-            "FROM player_game_pitching "
-            "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
-            "ORDER BY id",
-            (game_id, team_id, chosen_perspective_id),
-        ).fetchall()
-
-        # Load boxscore batting data for this team
-        batting_rows = conn.execute(
-            "SELECT player_id, ab, r, h, bb, so, hbp "
-            "FROM player_game_batting "
-            "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? ",
-            (game_id, team_id, chosen_perspective_id),
-        ).fetchall()
-
-        # Get pitcher order from cached boxscore JSON
-        pitcher_order_from_json = _extract_pitcher_order(
-            conn, game_id, game_stream_id, season_id, team_id, is_home,
-            perspective_team_id=chosen_perspective_id,
-        )
-
-        # Team's plays when pitching (other team is batting)
-        team_pitching_plays = [
-            p for p in plays_rows if p[3] == pitching_half  # half column
-        ]
-        # Team's plays when batting
-        team_batting_plays = [
-            p for p in plays_rows if p[3] == batting_half
-        ]
-
-        # Run pitcher signal checks
-        _check_pitcher_signals(
-            pitching_rows, team_pitching_plays, events_by_play,
-            pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
-            discrepancies,
-        )
-
-        # Run batter signal checks
-        _check_batter_signals(
-            batting_rows, team_batting_plays, game_id, chosen_perspective_id,
-            team_id, discrepancies,
-        )
-
-        # Run game-level sanity checks
-        _check_game_level_signals(
-            pitching_rows, batting_rows, team_pitching_plays,
-            team_batting_plays, plays_rows,
-            game_id, chosen_perspective_id, team_id, is_home,
-            discrepancies,
-            game_home_score=game_home_score,
-            game_away_score=game_away_score,
-        )
+    # Initial detection pass (shared with the post-correction re-detection)
+    discrepancies = _detect_discrepancies(
+        conn, game_id, chosen_perspective_id, home_team_id, away_team_id,
+        game_stream_id, season_id, game_home_score, game_away_score,
+    )
 
     # In execute mode: capture pre-correction status per signal/team/player,
     # apply corrections, then re-detect to get post-correction signals
@@ -296,14 +210,9 @@ def reconcile_game(
             is_home = team_id == home_team_id
             pitching_half = "top" if is_home else "bottom"
 
-            pitching_rows = conn.execute(
-                "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
-                "total_strikes, bf, decision "
-                "FROM player_game_pitching "
-                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
-                "ORDER BY id",
-                (game_id, team_id, chosen_perspective_id),
-            ).fetchall()
+            pitching_rows = _load_pitching_rows(
+                conn, game_id, team_id, chosen_perspective_id,
+            )
 
             pitcher_order_from_json = _extract_pitcher_order(
                 conn, game_id, game_stream_id, season_id, team_id, is_home,
@@ -320,72 +229,11 @@ def reconcile_game(
 
         summary.total_plays_reassigned = total_reassigned
 
-        # Re-detect after correction: reload plays and rebuild discrepancies
-        discrepancies = []
-        plays_rows = conn.execute(
-            "SELECT id, play_order, inning, half, batting_team_id, batter_id, "
-            "pitcher_id, outcome, pitch_count, is_first_pitch_strike, "
-            "home_score, away_score, did_outs_change "
-            "FROM plays WHERE game_id = ? AND perspective_team_id = ? "
-            "ORDER BY play_order",
-            (game_id, chosen_perspective_id),
-        ).fetchall()
-
-        play_events_rows = conn.execute(
-            "SELECT pe.play_id, pe.event_order, pe.event_type, pe.pitch_result, pe.raw_template "
-            "FROM play_events pe JOIN plays p ON pe.play_id = p.id "
-            "WHERE p.game_id = ? AND p.perspective_team_id = ? "
-            "ORDER BY pe.play_id, pe.event_order",
-            (game_id, chosen_perspective_id),
-        ).fetchall()
-        events_by_play = {}
-        for ev_row in play_events_rows:
-            events_by_play.setdefault(ev_row[0], []).append(ev_row)
-
-        for team_id in (home_team_id, away_team_id):
-            is_home = team_id == home_team_id
-            pitching_half = "top" if is_home else "bottom"
-            batting_half = "bottom" if is_home else "top"
-
-            pitching_rows = conn.execute(
-                "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
-                "total_strikes, bf, decision "
-                "FROM player_game_pitching "
-                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
-                "ORDER BY id",
-                (game_id, team_id, chosen_perspective_id),
-            ).fetchall()
-            batting_rows = conn.execute(
-                "SELECT player_id, ab, r, h, bb, so, hbp "
-                "FROM player_game_batting "
-                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ?",
-                (game_id, team_id, chosen_perspective_id),
-            ).fetchall()
-            pitcher_order_from_json = _extract_pitcher_order(
-                conn, game_id, game_stream_id, season_id, team_id, is_home,
-                perspective_team_id=chosen_perspective_id,
-            )
-
-            team_pitching_plays = [p for p in plays_rows if p[3] == pitching_half]
-            team_batting_plays = [p for p in plays_rows if p[3] == batting_half]
-
-            _check_pitcher_signals(
-                pitching_rows, team_pitching_plays, events_by_play,
-                pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
-                discrepancies,
-            )
-            _check_batter_signals(
-                batting_rows, team_batting_plays, game_id, chosen_perspective_id,
-                team_id, discrepancies,
-            )
-            _check_game_level_signals(
-                pitching_rows, batting_rows, team_pitching_plays,
-                team_batting_plays, plays_rows, game_id,
-                chosen_perspective_id, team_id, is_home,
-                discrepancies,
-                game_home_score=game_home_score,
-                game_away_score=game_away_score,
-            )
+        # Re-detect after correction over the same shared detection function.
+        discrepancies = _detect_discrepancies(
+            conn, game_id, chosen_perspective_id, home_team_id, away_team_id,
+            game_stream_id, season_id, game_home_score, game_away_score,
+        )
 
         # Build correction_detail JSON for affected pitcher signals
         correction_detail_json = json.dumps(all_corrections) if all_corrections else None
@@ -501,6 +349,142 @@ def reconcile_all(
 
 
 # ---------------------------------------------------------------------------
+# Per-game discrepancy detection (shared by initial detection and the
+# post-correction re-detection so the dry-run and execute paths cannot
+# silently diverge)
+# ---------------------------------------------------------------------------
+
+
+def _load_pitching_rows(
+    conn: sqlite3.Connection,
+    game_id: str,
+    team_id: int,
+    perspective_team_id: int,
+) -> list[tuple]:
+    """Load boxscore pitching rows for one team/perspective in stable order.
+
+    Columns: player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches,
+    total_strikes, bf, decision.
+    """
+    return conn.execute(
+        "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
+        "total_strikes, bf, decision "
+        "FROM player_game_pitching "
+        "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
+        "ORDER BY id",
+        (game_id, team_id, perspective_team_id),
+    ).fetchall()
+
+
+def _detect_discrepancies(
+    conn: sqlite3.Connection,
+    game_id: str,
+    chosen_perspective_id: int,
+    home_team_id: int,
+    away_team_id: int,
+    game_stream_id: str | None,
+    season_id: str,
+    game_home_score: int | None,
+    game_away_score: int | None,
+) -> list[_Discrepancy]:
+    """Detect all per-game discrepancies for the chosen perspective.
+
+    Loads plays/play_events for ``chosen_perspective_id``, then runs the
+    pitcher, batter, and game-level signal checks for both teams.  This is
+    the single detection orchestration that both the dry-run path and the
+    execute path (detect -> correct -> detect) call, guaranteeing the two
+    modes cannot diverge.
+    """
+    # Load plays and play_events
+    plays_rows = conn.execute(
+        "SELECT id, play_order, inning, half, batting_team_id, batter_id, "
+        "pitcher_id, outcome, pitch_count, is_first_pitch_strike, "
+        "home_score, away_score, did_outs_change "
+        "FROM plays WHERE game_id = ? AND perspective_team_id = ? "
+        "ORDER BY play_order",
+        (game_id, chosen_perspective_id),
+    ).fetchall()
+
+    play_events_rows = conn.execute(
+        "SELECT pe.play_id, pe.event_order, pe.event_type, pe.pitch_result, pe.raw_template "
+        "FROM play_events pe "
+        "JOIN plays p ON pe.play_id = p.id "
+        "WHERE p.game_id = ? AND p.perspective_team_id = ? "
+        "ORDER BY pe.play_id, pe.event_order",
+        (game_id, chosen_perspective_id),
+    ).fetchall()
+
+    # Index play_events by play_id
+    events_by_play: dict[int, list[tuple]] = {}
+    for ev_row in play_events_rows:
+        events_by_play.setdefault(ev_row[0], []).append(ev_row)
+
+    # Process both teams
+    discrepancies: list[_Discrepancy] = []
+
+    for team_id in (home_team_id, away_team_id):
+        is_home = team_id == home_team_id
+
+        # Pitcher signals: pitchers for this team pitch when the OTHER team bats
+        pitching_half = "top" if is_home else "bottom"
+        batting_half = "bottom" if is_home else "top"
+
+        # Load boxscore pitching data for this team (own perspective if available;
+        # otherwise the same chosen perspective the plays were loaded from)
+        pitching_rows = _load_pitching_rows(
+            conn, game_id, team_id, chosen_perspective_id,
+        )
+
+        # Load boxscore batting data for this team
+        batting_rows = conn.execute(
+            "SELECT player_id, ab, r, h, bb, so, hbp "
+            "FROM player_game_batting "
+            "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? ",
+            (game_id, team_id, chosen_perspective_id),
+        ).fetchall()
+
+        # Get pitcher order from cached boxscore JSON
+        pitcher_order_from_json = _extract_pitcher_order(
+            conn, game_id, game_stream_id, season_id, team_id, is_home,
+            perspective_team_id=chosen_perspective_id,
+        )
+
+        # Team's plays when pitching (other team is batting)
+        team_pitching_plays = [
+            p for p in plays_rows if p[3] == pitching_half  # half column
+        ]
+        # Team's plays when batting
+        team_batting_plays = [
+            p for p in plays_rows if p[3] == batting_half
+        ]
+
+        # Run pitcher signal checks
+        _check_pitcher_signals(
+            pitching_rows, team_pitching_plays, events_by_play,
+            pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
+            discrepancies,
+        )
+
+        # Run batter signal checks
+        _check_batter_signals(
+            batting_rows, team_batting_plays, game_id, chosen_perspective_id,
+            team_id, discrepancies,
+        )
+
+        # Run game-level sanity checks
+        _check_game_level_signals(
+            pitching_rows, batting_rows, team_pitching_plays,
+            team_batting_plays, plays_rows,
+            game_id, chosen_perspective_id, team_id, is_home,
+            discrepancies,
+            game_home_score=game_home_score,
+            game_away_score=game_away_score,
+        )
+
+    return discrepancies
+
+
+# ---------------------------------------------------------------------------
 # Pitcher signal checks
 # ---------------------------------------------------------------------------
 
@@ -538,7 +522,9 @@ def _check_pitcher_signals(
             "decision": row[12],
         }
 
-    # Derive plays-side aggregates per pitcher
+    # Derive plays-side aggregates per pitcher in a single pass, accumulating
+    # both the play-level outcomes and the play_events-derived total strikes
+    # and wild pitches for each play.
     plays_pitchers: dict[str, dict[str, int]] = {}
     for play in pitching_plays:
         play_id, play_order, inning, half, batting_team_id, batter_id, pitcher_id = play[:7]
@@ -567,18 +553,8 @@ def _check_pitcher_signals(
         if did_outs_change:
             stats["outs"] += 1
 
-    # Count total strikes and wild pitches from play_events
-    for play in pitching_plays:
-        play_id = play[0]
-        pitcher_id = play[6]
-        if pitcher_id is None:
-            continue
-        events = events_by_play.get(play_id, [])
-        stats = plays_pitchers.setdefault(pitcher_id, {
-            "bf": 0, "so": 0, "bb": 0, "hbp": 0, "h": 0, "pitches": 0,
-            "outs": 0, "wp": 0, "total_strikes": 0,
-        })
-        for ev in events:
+        # Total strikes and wild pitches from this play's events
+        for ev in events_by_play.get(play_id, []):
             # ev: play_id, event_order, event_type, pitch_result, raw_template
             pitch_result = ev[3]
             raw_template = ev[4]

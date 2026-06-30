@@ -1101,3 +1101,78 @@ class TestScoutingSprayPerspectiveGate:
         assert result3.loaded == 2, (
             f"After deleting partial rows, both events should load: {result3}"
         )
+
+
+# ---------------------------------------------------------------------------
+# E-247-01: non-list-event drift resolution (AC-2 / AC-3)
+# ---------------------------------------------------------------------------
+#
+# The in-memory (_load_game_data) and disk (_load_game_file) paths previously
+# disagreed on a malformed (non-list) ``events`` value: the disk path logged a
+# WARNING, the in-memory path skipped silently.  Collapsing the twins unified
+# this to a single LOG-then-skip behavior in the shared core.  These tests pin
+# the chosen behavior on BOTH entry points.
+
+
+def _make_non_list_events_payload() -> dict:
+    """Player-stats payload whose ``events`` value is a dict, not a list."""
+    return {
+        "stream_id": "stream-001",
+        "player_stats": {},
+        "spray_chart_data": {
+            # Malformed: events must be a list; a dict here exercises the
+            # non-list guard in the shared core.
+            "offense": {_PLAYER_A: {"not": "a list"}},
+            "defense": {},
+        },
+    }
+
+
+def test_non_list_events_logs_warning_via_load_from_data(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-3: the in-memory path logs a WARNING (not a silent skip) on non-list events."""
+    own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+    opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+    _seed_season(db)
+    _seed_game(db, _GAME_ID, own_id, opp_id)
+
+    spray_data = {_GAME_ID: _make_non_list_events_payload()}
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        result = loader.load_from_data(spray_data, _PUBLIC_ID)
+
+    # Unified behavior: one skip, and a WARNING naming the player.
+    assert result.skipped == 1
+    assert result.loaded == 0
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "is not a list" in r.message and _PLAYER_A in r.message for r in warnings
+    ), "Expected a WARNING about the non-list events value"
+    assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 0
+
+
+def test_non_list_events_logs_warning_via_load_dir(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-2/AC-3: the disk path routes through the same core and logs the same WARNING."""
+    own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+    opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+    _seed_season(db)
+    _seed_game(db, _GAME_ID, own_id, opp_id)
+
+    _write_spray_file(
+        tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, _make_non_list_events_payload()
+    )
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    assert result.skipped == 1
+    assert result.loaded == 0
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "is not a list" in r.message and _PLAYER_A in r.message for r in warnings
+    ), "Expected a WARNING about the non-list events value"

@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -56,18 +55,13 @@ from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
+from src.gamechanger.url_parser import is_gc_uuid
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# UUID pattern: 8-4-4-4-12 hex digits with dashes (36 chars total)
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
 
 # Batting stats mapped from boxscore to DB columns.
 # Stats present in the main stats object (always):
@@ -815,8 +809,8 @@ class GameLoader:
             Tuple of ``(own_key, opp_key)``.  Either may be ``None`` if not found.
         """
         keys = list(raw.keys())
-        uuid_keys = [k for k in keys if _UUID_RE.match(k)]
-        slug_keys = [k for k in keys if not _UUID_RE.match(k)]
+        uuid_keys = [k for k in keys if is_gc_uuid(k)]
+        slug_keys = [k for k in keys if not is_gc_uuid(k)]
 
         own_key: str | None = slug_keys[0] if slug_keys else None
         opp_key: str | None = uuid_keys[0] if uuid_keys else None

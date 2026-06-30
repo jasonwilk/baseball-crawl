@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the duplicated "page through search results + filter by exact `public_id`" resolution loop — re-implemented in `generator._resolve_gc_uuid` (`generator.py:690`) and `opponents.resolve_own_team_gc_uuid` (`opponents.py:188`), each with its own `_SEARCH_MAX_PAGES = 5` constant — will exist as one shared helper `resolve_gc_uuid_by_public_id(client, name, public_id)`. Separately, the canonical-UUID regex (3 surviving byte-identical copies after E-246-01 deletes the 4th) will collapse to a single `is_gc_uuid(s)` helper in `url_parser.py`. The GC punctuation/Unicode-apostrophe quirk handling stays centralized in `search.py` and is NOT inlined into the new helper.

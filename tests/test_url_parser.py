@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.gamechanger.url_parser import TeamIdResult, parse_team_url
+from src.gamechanger.url_parser import (
+    TeamIdResult,
+    is_gc_uuid,
+    parse_team_url,
+)
 
 _VALID_UUID = "72bb77d8-54ca-42d2-8547-9da4880d0cb4"
 _VALID_PUBLIC_ID = "a1GFM9Ku0BbF"
@@ -162,3 +166,58 @@ class TestErrorCases:
         # 4-4-4-4-12 pattern (first group too short)
         with pytest.raises(ValueError):
             parse_team_url("72bb-54ca-42d2-8547-9da4880d0cb4")
+
+
+class TestIsGcUuid:
+    """E-247-03 AC-3: is_gc_uuid is the single canonical-UUID predicate.
+
+    Preserves the EXACT pattern (8-4-4-4-12 hex), re.IGNORECASE, and full
+    ``^...$`` anchoring of the three byte-identical ``_UUID_RE`` copies it
+    replaced (url_parser, opponents, game_loader).
+    """
+
+    def test_valid_lowercase_uuid(self) -> None:
+        assert is_gc_uuid(_VALID_UUID) is True
+
+    def test_valid_uppercase_uuid_case_insensitive(self) -> None:
+        # re.IGNORECASE: uppercase hex digits must still match.
+        assert is_gc_uuid(_VALID_UUID.upper()) is True
+
+    def test_public_id_slug_is_not_uuid(self) -> None:
+        assert is_gc_uuid(_VALID_PUBLIC_ID) is False
+
+    def test_full_string_anchored_rejects_embedded_uuid(self) -> None:
+        # ^...$ anchoring: leading/trailing junk must not match.
+        assert is_gc_uuid(f"x{_VALID_UUID}") is False
+        assert is_gc_uuid(f"{_VALID_UUID}/slug") is False
+        assert is_gc_uuid(f"  {_VALID_UUID}") is False
+
+    def test_wrong_group_lengths_rejected(self) -> None:
+        assert is_gc_uuid("72bb77d8-54ca-42d2-9da4880d0cb4") is False
+        assert is_gc_uuid("72bb-54ca-42d2-8547-9da4880d0cb4") is False
+
+    def test_non_hex_characters_rejected(self) -> None:
+        # 'g'/'z' are not hex digits.
+        assert is_gc_uuid("g2bb77d8-54ca-42d2-8547-9da4880d0cb4") is False
+
+    def test_empty_string_rejected(self) -> None:
+        assert is_gc_uuid("") is False
+
+
+class TestIsUuidPropertyDelegates:
+    """E-247-03 AC-3: the is_uuid property delegates to is_gc_uuid.
+
+    The value/id_type invariant holds (TeamIdResult is only built by
+    ``_classify``), so delegating is behavior-preserving: is_uuid agrees with
+    is_gc_uuid(value) for both classifications.
+    """
+
+    def test_uuid_result_is_uuid_true(self) -> None:
+        result = parse_team_url(_VALID_UUID)
+        assert result.is_uuid is True
+        assert result.is_uuid == is_gc_uuid(result.value)
+
+    def test_public_id_result_is_uuid_false(self) -> None:
+        result = parse_team_url(_VALID_PUBLIC_ID)
+        assert result.is_uuid is False
+        assert result.is_uuid == is_gc_uuid(result.value)

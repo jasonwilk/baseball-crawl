@@ -34,7 +34,6 @@ Routes:
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -49,6 +48,7 @@ from starlette.responses import Response
 
 from src.api.auth import user_is_admin
 from src.api.db import get_connection, list_reports_with_runs
+from src.api.helpers import get_app_url
 from src.gamechanger.url_parser import parse_team_url
 
 logger = logging.getLogger(__name__)
@@ -537,10 +537,11 @@ def _get_all_reports() -> list[dict[str, Any]]:
     ``error_message`` was already selected here.
     Run columns are NULL for legacy reports with no run row (LEFT join).
     """
-    from datetime import datetime, timezone
+    # Shared UTC-iso helper (E-247-05 AC-4) -- identical format to all callers.
+    from src.reports.generator import _utcnow_iso
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    base_url = os.environ.get("APP_URL", "http://localhost:8001").rstrip("/")
+    now = _utcnow_iso()
+    base_url = get_app_url()
     with closing(get_connection()) as conn:
         result = list_reports_with_runs(conn)
     for r in result:

@@ -7,6 +7,21 @@ and as importable Python functions for use in DB query functions.
 from __future__ import annotations
 
 import datetime
+import os
+
+_APP_URL_DEFAULT = "http://baseball.localhost:8001"
+
+
+def get_app_url() -> str:
+    """Return the base application URL from the environment.
+
+    Reads ``APP_URL``; falls back to ``http://baseball.localhost:8001`` (the
+    dev host the browser uses, keeping magic-link/report links coherent with
+    the WebAuthn origin).  Trailing slashes are stripped.  The single source
+    for report-link and magic-link base URLs (E-247-07 AC-4) -- production sets
+    ``APP_URL`` explicitly, so this default only affects local-dev links.
+    """
+    return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
 
 def ip_display(ip_outs: int | None) -> str:

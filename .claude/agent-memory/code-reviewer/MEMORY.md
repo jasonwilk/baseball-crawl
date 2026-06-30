@@ -7,6 +7,10 @@
 ## Removal-Epic Review Patterns
 - [Asset deletion: sweep ALL test reference mechanisms](route_deletion_test_sweep.md) — deleting a route/module/template breaks tests that import it, `client.get()` it (assert 200), OR read it by literal path in a parametrize list (FileNotFoundError); import sweeps miss forms 2+3. Never `| head` a completeness grep (E-239: Codex caught form 2 in 4b, Phase 5 gate caught form 3).
 
+## Refactor/Extraction Review Patterns
+- [Extraction scope gap = a CALLER's existing characterization suite](refactor_extraction_caller_test_scope.md) — when a story relocates a seam, the unrun test is usually a caller's pre-existing transport-mocked suite that directly exercises the changed function; grep tests/ for the changed function + module, flag any importer not in the run list as MUST FIX (it's often the committed pre-vs-post pin the HARD gate rests on). E-247-03: test_report_generator.py's ~17 _resolve_gc_uuid tests.
+- [Removing an early-return before a recompute/dedup tail: prove no-op on a POPULATED DB](recompute_tail_noop_populated_db.md) — a fresh-DB no-op test is necessary but NOT sufficient; canonical_recompute DELETE+re-INSERTs from ALL existing per-game rows and dedup can merge, so on a populated/out-of-sync DB (post-backfill stale aggregates, pre-existing dupes) the unconditional tail mutates data. Demand a populated-DB characterization test; under a stat HARD gate, restore the early-return. (E-247-01 F1, caught by Codex Phase 4b after I missed it.)
+
 ## Mandatory Review Checks (added after E-097 post-dev failures)
 
 ### SQL Dimension Audit (Bugs, Priority 2)

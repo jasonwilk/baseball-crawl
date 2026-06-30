@@ -170,28 +170,12 @@ def get_proxy_config(profile: str) -> str | None:
     Returns:
         The proxy URL string when enabled and valid, or ``None``.
     """
-    enabled = os.environ.get("PROXY_ENABLED", "").strip().lower()
-    if enabled != "true":
-        return None
-
-    url_var = f"PROXY_URL_{profile.upper()}"
-    url = os.environ.get(url_var, "").strip()
-
-    if not url:
-        logger.warning(
-            "PROXY_ENABLED is true but %s is not set",
-            url_var,
-        )
-        return None
-
-    if not (url.startswith("http://") or url.startswith("https://")):
-        logger.warning(
-            "PROXY_ENABLED is true but %s has an invalid scheme (must be http:// or https://)",
-            url_var,
-        )
-        return None
-
-    return url
+    # Delegate to the dict-based resolver against the live environment. The
+    # logic (PROXY_ENABLED gate, PROXY_URL_{profile} lookup, scheme validation,
+    # never-log-the-URL warnings) lives once in ``resolve_proxy_from_dict``;
+    # ``os.environ`` is a Mapping[str, str] consumed read-only. No session_id is
+    # passed, so the resolved URL is byte-identical to the prior inline logic.
+    return resolve_proxy_from_dict(dict(os.environ), profile)
 
 
 def _make_rate_limit_hook(

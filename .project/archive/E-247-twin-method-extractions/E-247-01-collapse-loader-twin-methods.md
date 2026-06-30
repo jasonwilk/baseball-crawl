@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the near-identical in-memory and disk loading paths in the scouting loader and scouting spray loader will share a single payload-processing core, with each disk variant reduced to a thin JSON-read+validate wrapper that delegates to it. This fixes the already-drifted spray copies.

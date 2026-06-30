@@ -713,3 +713,100 @@ def test_profile_check_result_default_client_key_none() -> None:
         # client_key_result NOT provided -- should default to None
     )
     assert result.client_key_result is None
+
+
+# ---------------------------------------------------------------------------
+# E-247-04 AC-2: check_single_profile delegates to run_api_check
+#
+# check_single_profile now maps run_api_check's ApiCheckResult onto its legacy
+# (exit_code, message) tuple. These tests pin the EXACT pre-consolidation output
+# strings for all six outcomes, so a green result proves the delegation is
+# byte-identical to the prior hand-rolled error ladder + inline display logic.
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSingleProfileDelegation:
+    """AC-2: byte-identical (exit_code, message) across all six outcomes."""
+
+    def _patch_client(
+        self, monkeypatch, *, construct_exc=None, get_exc=None, user=None
+    ) -> None:
+        from src.gamechanger import credentials as cred_mod
+
+        def factory(*args, **kwargs):
+            if construct_exc is not None:
+                raise construct_exc
+            client = MagicMock()
+            if get_exc is not None:
+                client.get.side_effect = get_exc
+            else:
+                client.get.return_value = user
+            return client
+
+        monkeypatch.setattr(cred_mod, "GameChangerClient", factory)
+
+    def test_missing_credentials_exit_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.client import ConfigurationError
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(
+            monkeypatch,
+            construct_exc=ConfigurationError("GAMECHANGER_REFRESH_TOKEN_WEB"),
+        )
+        assert check_single_profile("web") == (
+            2,
+            "Missing required credential(s): GAMECHANGER_REFRESH_TOKEN_WEB",
+        )
+
+    def test_forbidden_exit_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.client import ForbiddenError
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(monkeypatch, get_exc=ForbiddenError("403"))
+        assert check_single_profile("web") == (
+            1,
+            "Access denied -- credentials may be expired or revoked",
+        )
+
+    def test_expired_exit_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.client import CredentialExpiredError
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(monkeypatch, get_exc=CredentialExpiredError("401"))
+        assert check_single_profile("web") == (
+            1,
+            "Credentials expired -- refresh via proxy capture",
+        )
+
+    def test_network_error_exit_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(monkeypatch, get_exc=httpx.ConnectError("boom"))
+        assert check_single_profile("web") == (
+            1,
+            "Network error reaching GameChanger API: boom",
+        )
+
+    def test_unexpected_error_exit_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(monkeypatch, get_exc=RuntimeError("weird"))
+        assert check_single_profile("web") == (1, "Unexpected error: weird")
+
+    def test_success_with_name_exit_0(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.credentials import check_single_profile
+
+        self._patch_client(
+            monkeypatch, user={"first_name": "Jason", "last_name": "Smith"}
+        )
+        assert check_single_profile("web") == (0, "valid -- logged in as Jason Smith")
+
+    def test_success_without_name_exit_0(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.gamechanger.credentials import check_single_profile
+
+        # No first/last -> _extract_display_name returns the PII-safe fallback.
+        self._patch_client(monkeypatch, user={"email": "coach@example.com"})
+        assert check_single_profile("web") == (
+            0,
+            "valid -- logged in as (authenticated user)",
+        )

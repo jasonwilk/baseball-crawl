@@ -103,33 +103,138 @@ class ScoutingLoader:
 
         # In-memory flow (E-220-05).
         tid = team_id if team_id is not None else crawl_result.team_id
+        games_index = self._build_games_index_from_data(crawl_result.games)
+        opponent_name_index = self._build_opponent_name_index_from_data(crawl_result.games)
+        return self._load_team_core(
+            tid,
+            crawl_result.roster,
+            games_index,
+            opponent_name_index,
+            boxscores=crawl_result.boxscores,
+        )
 
+    def _load_team_from_disk(
+        self,
+        scouting_dir: Path,
+        team_id: int | None,
+        season_id: str | None,
+    ) -> LoadResult:
+        """Legacy disk-based load_team path (backwards compatibility).
+
+        Thin reader: reads roster.json and games.json into the same in-memory
+        structures the crawler produces, then delegates to the shared
+        :meth:`_load_team_core`, passing the on-disk ``boxscores/`` directory so
+        boxscores are read lazily per file (preserving the prior per-file
+        ``GameLoader.load_file`` error isolation).  This mirrors the established
+        ``plays_loader._load_game`` dual-input pattern, where the disk path is a
+        thin wrapper over a single in-memory payload core (E-247-01).
+        """
+        if team_id is None:
+            raise ValueError("team_id is required for disk-based load_team")
+
+        roster_data, roster_read_errors = self._read_roster_json(
+            scouting_dir / "roster.json"
+        )
+        games_path = scouting_dir / "games.json"
+        games_index = self._build_games_index(games_path)
+        opponent_name_index = self._build_opponent_name_index(games_path)
+        return self._load_team_core(
+            team_id,
+            roster_data,
+            games_index,
+            opponent_name_index,
+            boxscores_dir=scouting_dir / "boxscores",
+            extra_errors=roster_read_errors,
+        )
+
+    def _load_team_core(
+        self,
+        team_id: int,
+        roster_data: list[dict[str, Any]],
+        games_index: dict[str, GameSummaryEntry],
+        opponent_name_index: dict[str, str],
+        *,
+        boxscores: dict[str, dict[str, Any]] | None = None,
+        boxscores_dir: Path | None = None,
+        extra_errors: int = 0,
+    ) -> LoadResult:
+        """Shared orchestration core for the in-memory and disk load_team paths.
+
+        Both public entry points resolve their roster and game/opponent-name
+        indexes to plain in-memory structures and delegate here, so the ~80
+        lines of roster + boxscore + aggregate orchestration exist exactly once
+        (E-247-01).  Boxscores follow the ``plays_loader._load_game`` dual-input
+        pattern: the in-memory path passes a ``boxscores`` dict (loaded via
+        ``GameLoader.load_payload``); the disk path passes a ``boxscores_dir``
+        whose files are read lazily per game (loaded via ``GameLoader.load_file``,
+        preserving per-file read-error isolation).
+
+        Args:
+            team_id: INTEGER PK of the scouted team.
+            roster_data: Roster player dicts (empty list if none).
+            games_index: ``game_stream_id -> GameSummaryEntry`` mapping.
+            opponent_name_index: ``game_stream_id -> opponent name`` mapping.
+            boxscores: In-memory ``game_stream_id -> boxscore payload`` mapping.
+            boxscores_dir: Directory of ``{game_stream_id}.json`` boxscore files
+                (disk path).  Exactly one of ``boxscores`` / ``boxscores_dir``
+                is supplied.
+            extra_errors: Errors accrued before this core ran (e.g. a present-
+                but-malformed ``roster.json`` on the disk path).  Added to the
+                result so disk-path read failures stay counted exactly as the
+                pre-refactor ``_load_roster`` did.
+
+        Returns:
+            Aggregated ``LoadResult`` across roster and boxscore loading.
+        """
         # Derive the canonical DB season_id from team metadata (not the crawl path).
-        db_season_id, db_season_year = derive_season_id_for_team(self._db, tid)
+        db_season_id, db_season_year = derive_season_id_for_team(self._db, team_id)
         ensure_season_row(self._db, db_season_id)
 
-        total = self._load_roster_from_data(crawl_result.roster, tid, db_season_id)
+        total = self._load_roster_from_data(roster_data, team_id, db_season_id)
+        total.errors += extra_errors
 
         # Post-roster validation.
-        expected_count = sum(1 for p in crawl_result.roster if p.get("id"))
+        expected_count = sum(1 for p in roster_data if p.get("id"))
         if expected_count:
-            self._validate_roster_count(tid, db_season_id, expected_count)
+            self._validate_roster_count(team_id, db_season_id, expected_count)
 
-        if not crawl_result.boxscores:
-            logger.info("No boxscores in crawl result for team_id=%d; nothing to load.", tid)
+        # Empty-boxscore-source guard (E-247-01 F1): skip the whole post-boxscore
+        # tail (dedup / season-aggregate recompute / commit) when there is no
+        # boxscore source to process THIS invocation.  This is NOT an
+        # optimization -- ``canonical_recompute`` DELETEs+rebuilds the season
+        # aggregates and the dedup sweep can MERGE players, so on a populated DB
+        # a boxscoreless invocation would rewrite rows the pre-refactor early-
+        # returns left untouched.  Each path's prior guard is reproduced exactly:
+        #   - in-memory: skip when the boxscores dict is empty/falsy.
+        #   - disk: skip only when the boxscores DIRECTORY is absent (a present-
+        #     but-empty dir still ran the tail pre-refactor).
+        if boxscores_dir is not None:
+            has_boxscore_source = boxscores_dir.is_dir()
+        else:
+            has_boxscore_source = bool(boxscores)
+        if not has_boxscore_source:
+            if boxscores_dir is not None:
+                logger.info(
+                    "No boxscores directory at %s; nothing to load.", boxscores_dir
+                )
+            else:
+                logger.info(
+                    "No boxscores in crawl result for team_id=%d; nothing to load.",
+                    team_id,
+                )
             return total
 
         # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
-        team_ref = self._build_team_ref(tid)
+        team_ref = self._build_team_ref(team_id)
         game_loader = GameLoader(
             db=self._db,
             owned_team_ref=team_ref,
             created_team_ids=self._created_team_ids,
         )
-        games_index = self._build_games_index_from_data(crawl_result.games)
-        opponent_name_index = self._build_opponent_name_index_from_data(crawl_result.games)
-        bs_result = self._load_boxscores_from_data(
-            game_loader, games_index, crawl_result.boxscores,
+        bs_result = self._load_boxscores(
+            game_loader, games_index,
+            boxscores=boxscores,
+            boxscores_dir=boxscores_dir,
             opponent_name_index=opponent_name_index,
         )
         total.loaded += bs_result.loaded
@@ -143,21 +248,21 @@ class ScoutingLoader:
         total.redirect_map = game_loader.redirect_map
 
         # Post-boxscore validation: check for duplicate game rows.
-        self._check_duplicate_games(tid, db_season_id)
+        self._check_duplicate_games(team_id, db_season_id)
 
         # Hook 1: dedup sweep after boxscore loading, before aggregation.
         try:
             from src.db.player_dedup import dedup_team_players
 
             dedup_team_players(
-                self._db, tid, db_season_id,
+                self._db, team_id, db_season_id,
                 manage_transaction=False, recompute_aggregates=False,
             )
         except Exception:  # noqa: BLE001
             logger.error(
                 "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
                 "continuing with aggregation",
-                tid,
+                team_id,
                 db_season_id,
                 exc_info=True,
             )
@@ -165,80 +270,6 @@ class ScoutingLoader:
         # Canonical recompute runs exactly once per load (the embedded dedup
         # above suppresses its own recompute via recompute_aggregates=False),
         # committed atomically with the dedup sweep below.
-        self._compute_season_aggregates(tid, db_season_id)
-        self._db.commit()
-        logger.info(
-            "Scouting load complete for team_id=%d season=%s: loaded=%d skipped=%d errors=%d",
-            tid, db_season_id, total.loaded, total.skipped, total.errors,
-        )
-        return total
-
-    def _load_team_from_disk(
-        self,
-        scouting_dir: Path,
-        team_id: int | None,
-        season_id: str | None,
-    ) -> LoadResult:
-        """Legacy disk-based load_team path (backwards compatibility).
-
-        Reads games.json, roster.json, and boxscores/*.json files from disk.
-        """
-        if team_id is None:
-            raise ValueError("team_id is required for disk-based load_team")
-
-        db_season_id, db_season_year = derive_season_id_for_team(self._db, team_id)
-        ensure_season_row(self._db, db_season_id)
-
-        total = self._load_roster_section(scouting_dir, team_id, db_season_id)
-
-        roster_path = scouting_dir / "roster.json"
-        if roster_path.exists():
-            expected_count = self._count_roster_entries(roster_path)
-            if expected_count is not None:
-                self._validate_roster_count(team_id, db_season_id, expected_count)
-
-        boxscores_dir = scouting_dir / "boxscores"
-        if not boxscores_dir.is_dir():
-            logger.info("No boxscores directory at %s; nothing to load.", boxscores_dir)
-            return total
-
-        team_ref = self._build_team_ref(team_id)
-        game_loader = GameLoader(
-            db=self._db,
-            owned_team_ref=team_ref,
-            created_team_ids=self._created_team_ids,
-        )
-        games_path = scouting_dir / "games.json"
-        games_index = self._build_games_index(games_path)
-        opponent_name_index = self._build_opponent_name_index(games_path)
-        bs_result = self._load_boxscores(
-            game_loader, games_index, boxscores_dir,
-            opponent_name_index=opponent_name_index,
-        )
-        total.loaded += bs_result.loaded
-        total.skipped += bs_result.skipped
-        total.errors += bs_result.errors
-
-        # Expose the dedup redirect map produced by GameLoader THIS run (E-244
-        # TN-2); disk-flow parity with the in-memory load_team path above.
-        total.redirect_map = game_loader.redirect_map
-
-        self._check_duplicate_games(team_id, db_season_id)
-
-        try:
-            from src.db.player_dedup import dedup_team_players
-            dedup_team_players(
-                self._db, team_id, db_season_id,
-                manage_transaction=False, recompute_aggregates=False,
-            )
-        except Exception:  # noqa: BLE001
-            logger.error(
-                "Post-boxscore dedup sweep failed for team_id=%d season=%s; continuing with aggregation",
-                team_id, db_season_id, exc_info=True,
-            )
-
-        # Canonical recompute runs exactly once per load (the embedded dedup
-        # above suppresses its own recompute via recompute_aggregates=False).
         self._compute_season_aggregates(team_id, db_season_id)
         self._db.commit()
         logger.info(
@@ -246,6 +277,63 @@ class ScoutingLoader:
             team_id, db_season_id, total.loaded, total.skipped, total.errors,
         )
         return total
+
+    # ------------------------------------------------------------------
+    # Disk readers (thin JSON-read wrappers feeding _load_team_core)
+    # ------------------------------------------------------------------
+
+    def _read_json_list(self, path: Path) -> list[dict[str, Any]]:
+        """Read a JSON-array file into a list; return [] on missing/error/non-list.
+
+        Used for the games.json reads behind the index builders, which carry no
+        error count (the pre-refactor ``_build_games_index`` returned ``{}`` on a
+        malformed/missing file without an ``errors`` signal).  Roster reads, which
+        DID count a malformed file as ``errors=1``, go through
+        :meth:`_read_roster_json` instead -- do NOT route roster reads here.
+        """
+        if not path.exists():
+            logger.warning("%s not found; treating as empty.", path)
+            return []
+        try:
+            with path.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Failed to read %s: %s", path, exc)
+            return []
+        if not isinstance(raw, list):
+            logger.error("Expected JSON array in %s, got %s", path, type(raw).__name__)
+            return []
+        return raw
+
+    def _read_roster_json(self, roster_path: Path) -> tuple[list[dict[str, Any]], int]:
+        """Read the disk ``roster.json``, returning ``(roster_data, read_errors)``.
+
+        Reproduces the pre-refactor disk roster semantics exactly (E-247-01 F2):
+        - **missing** file -> ``([], 0)`` (the old ``_load_roster_section``
+          "not found" branch returned an empty, error-free ``LoadResult``).
+        - **present but malformed / non-array** -> ``([], 1)`` (the old
+          ``_load_roster`` returned ``LoadResult(errors=1)`` for a read failure or
+          a non-list payload).
+        - **valid array** -> ``(raw, 0)`` for the core to load.
+
+        ``read_errors`` is threaded into :meth:`_load_team_core` as
+        ``extra_errors`` so a malformed roster keeps its ``errors=1`` signal.
+        """
+        if not roster_path.exists():
+            logger.warning("roster.json not found at %s; skipping.", roster_path)
+            return [], 0
+        try:
+            with roster_path.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Failed to read %s: %s", roster_path, exc)
+            return [], 1
+        if not isinstance(raw, list):
+            logger.error(
+                "Expected JSON array in %s, got %s", roster_path, type(raw).__name__
+            )
+            return [], 1
+        return raw, 0
 
     def _build_team_ref(self, team_id: int) -> TeamRef:
         """Build a ``TeamRef`` by looking up the teams row for ``team_id``.
@@ -264,74 +352,17 @@ class ScoutingLoader:
         logger.warning("No teams row found for team_id=%d; TeamRef will have null identifiers.", team_id)
         return TeamRef(id=team_id)
 
-    def _load_roster_section(
-        self, scouting_dir: Path, team_id: int, season_id: str
-    ) -> LoadResult:
-        """Load the roster.json file if present; return a LoadResult.
-
-        Args:
-            scouting_dir: Base scouting directory.
-            team_id: INTEGER PK of the opponent team.
-            season_id: Season slug.
-
-        Returns:
-            ``LoadResult`` from roster loading, or an empty result if the file
-            is absent.
-        """
-        roster_path = scouting_dir / "roster.json"
-        if roster_path.exists():
-            return self._load_roster(roster_path, team_id, season_id)
-        logger.warning("roster.json not found at %s; skipping.", roster_path)
-        return LoadResult()
-
-    def _load_boxscores(
-        self,
-        game_loader: GameLoader,
-        games_index: dict,
-        boxscores_dir: Path,
-        opponent_name_index: dict[str, str] | None = None,
-    ) -> LoadResult:
-        """Load all boxscore files in ``boxscores_dir`` via ``game_loader``.
-
-        Args:
-            game_loader: Configured ``GameLoader`` for the scouted team.
-            games_index: Mapping of ``game_stream_id`` → ``GameSummaryEntry``.
-            boxscores_dir: Directory containing ``{game_stream_id}.json`` files.
-            opponent_name_index: Optional mapping of ``game_stream_id`` →
-                opponent team name.  When provided, real names are used for
-                opponent team rows instead of UUID placeholders.
-
-        Returns:
-            Aggregated ``LoadResult`` across all boxscore files.
-        """
-        name_index = opponent_name_index or {}
-        total = LoadResult()
-        for bs_path in sorted(boxscores_dir.glob("*.json")):
-            game_stream_id = bs_path.stem
-            summary = games_index.get(game_stream_id)
-            if summary is None:
-                logger.warning(
-                    "No games.json entry for game_stream_id=%s; skipping %s",
-                    game_stream_id, bs_path,
-                )
-                total.skipped += 1
-                continue
-            opponent_name = name_index.get(game_stream_id)
-            result = game_loader.load_file(bs_path, summary, opponent_name=opponent_name)
-            total.loaded += result.loaded
-            total.skipped += result.skipped
-            total.errors += result.errors
-        return total
-
     # ------------------------------------------------------------------
-    # Games index builder
+    # Games index builders (disk wrappers over the in-memory core)
     # ------------------------------------------------------------------
 
     def _build_opponent_name_index(self, games_path: Path) -> dict[str, str]:
         """Build a ``game_stream_id → opponent_team.name`` mapping from games.json.
 
-        Used to supply real opponent team names to ``GameLoader`` so team rows
-        are created with human-readable names instead of UUID placeholders.
+        Thin JSON-read+validate wrapper delegating to the in-memory
+        :meth:`_build_opponent_name_index_from_data` (E-247-01).  Used to supply
+        real opponent team names to ``GameLoader`` so team rows are created with
+        human-readable names instead of UUID placeholders.
 
         Args:
             games_path: Path to ``games.json`` (public games response).
@@ -340,65 +371,15 @@ class ScoutingLoader:
             Dict mapping ``game_stream_id`` (= the ``id`` field in games.json)
             to the opponent team display name.  Returns empty dict on error.
         """
-        if not games_path.exists():
-            return {}
-        try:
-            with games_path.open(encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to read %s for opponent name index: %s", games_path, exc)
-            return {}
-        if not isinstance(raw, list):
-            return {}
-
-        index: dict[str, str] = {}
-        for game in raw:
-            game_id = game.get("id")
-            opponent_team = game.get("opponent_team") or {}
-            name = opponent_team.get("name")
-            if game_id and name:
-                index[str(game_id)] = name
-        return index
+        return self._build_opponent_name_index_from_data(self._read_json_list(games_path))
 
     def _build_games_index(self, games_path: Path) -> dict[str, GameSummaryEntry]:
-        """Build a ``game_stream_id -> GameSummaryEntry`` mapping from games.json."""
-        if not games_path.exists():
-            logger.warning("games.json not found at %s; no game index built.", games_path)
-            return {}
-        try:
-            with games_path.open(encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.error("Failed to read %s: %s", games_path, exc)
-            return {}
-        if not isinstance(raw, list):
-            logger.error("Expected JSON array in %s, got %s", games_path, type(raw).__name__)
-            return {}
+        """Build a ``game_stream_id -> GameSummaryEntry`` mapping from games.json.
 
-        index: dict[str, GameSummaryEntry] = {}
-        for game in raw:
-            if game.get("game_status") != "completed":
-                continue
-            game_id = game.get("id")
-            if not game_id:
-                continue
-            score = game.get("score") or {}
-            start_ts = game.get("start_ts") or game.get("end_ts") or "1900-01-01T00:00:00Z"
-            entry = GameSummaryEntry(
-                event_id=str(game_id),
-                game_stream_id=str(game_id),
-                home_away=game.get("home_away"),
-                owning_team_score=int(score.get("team") or 0),
-                opponent_team_score=int(score.get("opponent_team") or 0),
-                opponent_id="",
-                last_scoring_update=str(start_ts),
-                start_time=game.get("start_ts"),
-                timezone=game.get("timezone"),
-            )
-            index[entry.game_stream_id] = entry
-
-        logger.info("Built games index: %d entries from %s", len(index), games_path)
-        return index
+        Thin JSON-read+validate wrapper delegating to the in-memory
+        :meth:`_build_games_index_from_data` (E-247-01).
+        """
+        return self._build_games_index_from_data(self._read_json_list(games_path))
 
     # ------------------------------------------------------------------
     # In-memory data methods (E-220-05)
@@ -475,22 +456,44 @@ class ScoutingLoader:
         logger.info("Roster loaded for team_id=%d: %d players, %d errors.", team_id, result.loaded, result.errors)
         return result
 
-    def _load_boxscores_from_data(
+    def _load_boxscores(
         self,
         game_loader: GameLoader,
         games_index: dict[str, GameSummaryEntry],
-        boxscores: dict[str, dict[str, Any]],
+        *,
+        boxscores: dict[str, dict[str, Any]] | None = None,
+        boxscores_dir: Path | None = None,
         opponent_name_index: dict[str, str] | None = None,
     ) -> LoadResult:
-        """Load boxscores from in-memory data via ``game_loader``.
+        """Load boxscores via ``game_loader`` from in-memory dicts or disk files.
 
-        Each in-memory boxscore dict is passed directly to
-        ``GameLoader.load_payload`` (no temp files); ``load_payload`` commits
-        per call exactly as ``load_file`` did.
+        Dual-input shared core (E-247-01) mirroring ``plays_loader._load_game``:
+
+        - In-memory path (``boxscores`` dict): each payload is passed directly to
+          ``GameLoader.load_payload`` -- no temp files.
+        - Disk path (``boxscores_dir``): each ``{game_stream_id}.json`` file is
+          read lazily by ``GameLoader.load_file``, so a single unreadable file is
+          isolated as one ``errors`` and does not abort the run.
+
+        Both entry points commit per game (``load_payload``/``load_file`` each
+        commit), so the only difference is dict-vs-file sourcing.  Exactly one of
+        ``boxscores`` / ``boxscores_dir`` is supplied; if neither yields entries
+        (empty dict, missing/empty directory) the loop is a no-op.
         """
         name_index = opponent_name_index or {}
         total = LoadResult()
-        for game_stream_id, boxscore_data in sorted(boxscores.items()):
+
+        # Normalize both sources to a sorted ``(game_stream_id, source)`` stream
+        # so the orchestration below is identical; ``source`` is a payload dict
+        # (in-memory) or a Path (disk).
+        if boxscores_dir is not None:
+            items: list[tuple[str, Any]] = [
+                (p.stem, p) for p in sorted(boxscores_dir.glob("*.json"))
+            ]
+        else:
+            items = sorted((boxscores or {}).items())
+
+        for game_stream_id, source in items:
             summary = games_index.get(game_stream_id)
             if summary is None:
                 logger.warning(
@@ -500,7 +503,10 @@ class ScoutingLoader:
                 total.skipped += 1
                 continue
             opponent_name = name_index.get(game_stream_id)
-            result = game_loader.load_payload(boxscore_data, summary, opponent_name=opponent_name)
+            if boxscores_dir is not None:
+                result = game_loader.load_file(source, summary, opponent_name=opponent_name)
+            else:
+                result = game_loader.load_payload(source, summary, opponent_name=opponent_name)
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
@@ -509,44 +515,6 @@ class ScoutingLoader:
     # ------------------------------------------------------------------
     # Roster loading
     # ------------------------------------------------------------------
-
-    def _load_roster(
-        self, roster_path: Path, team_id: int, season_id: str
-    ) -> LoadResult:
-        """Load players from a roster.json file into players and team_rosters."""
-        try:
-            with roster_path.open(encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.error("Failed to read %s: %s", roster_path, exc)
-            return LoadResult(errors=1)
-        if not isinstance(raw, list):
-            logger.error("Expected JSON array in %s, got %s", roster_path, type(raw).__name__)
-            return LoadResult(errors=1)
-
-        result = LoadResult()
-        for player in raw:
-            player_id = player.get("id")
-            if not player_id:
-                logger.warning("Roster entry missing 'id'; skipping. entry=%r", player)
-                result.skipped += 1
-                continue
-            ok = self._upsert_roster_player(
-                player_id=player_id,
-                first_name=str(player.get("first_name") or ""),
-                last_name=str(player.get("last_name") or ""),
-                team_id=team_id,
-                season_id=season_id,
-                jersey_number=player.get("number") or None,
-            )
-            if ok:
-                result.loaded += 1
-            else:
-                result.errors += 1
-
-        self._db.commit()
-        logger.info("Roster loaded for team_id=%d: %d players, %d errors.", team_id, result.loaded, result.errors)
-        return result
 
     def _upsert_roster_player(
         self,
@@ -630,22 +598,6 @@ class ScoutingLoader:
                 "team_id=%d, found %d in DB",
                 expected_count, team_id, actual,
             )
-
-    @staticmethod
-    def _count_roster_entries(roster_path: Path) -> int | None:
-        """Count valid player entries in a roster.json file.
-
-        Returns the count of entries with an ``id`` field, or ``None`` if the
-        file cannot be read.
-        """
-        try:
-            with roster_path.open(encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (json.JSONDecodeError, OSError):
-            return None
-        if not isinstance(raw, list):
-            return None
-        return sum(1 for p in raw if p.get("id"))
 
     # ------------------------------------------------------------------
     # Season aggregate computation

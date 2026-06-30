@@ -43,6 +43,35 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 
+def _decode_jwt_payload(token: str) -> dict | None:
+    """Decode a JWT's payload segment (base64url) into a dict, or ``None``.
+
+    The single base64url-decode helper shared by every JWT inspection site
+    (``credentials.decode_jwt_exp`` and :func:`_decode_jwt_type`).  No
+    signature verification is performed.  Missing, malformed, or non-object
+    payloads return ``None`` rather than raising.
+
+    SECURITY: never logs the decoded payload -- JWT payloads may contain PII
+    (email, user id) per ``.claude/rules/auth-module.md``.
+
+    Args:
+        token: Raw JWT string (``header.payload.signature``).
+
+    Returns:
+        The decoded payload as a ``dict``, or ``None`` if the token cannot be
+        decoded or the payload is not a JSON object.
+    """
+    try:
+        segment = token.split(".")[1]
+        # Pad the base64url segment to a multiple of 4, then decode.
+        padding = 4 - len(segment) % 4
+        segment += "=" * (padding % 4)
+        data = json.loads(base64.urlsafe_b64decode(segment))
+    except Exception:  # noqa: BLE001
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _decode_jwt_type(token: str) -> str | None:
     """Decode the JWT payload and return the ``type`` field, or None if absent.
 
@@ -58,17 +87,8 @@ def _decode_jwt_type(token: str) -> str | None:
         if the field is absent (refresh tokens have no ``type`` field) or the token
         cannot be decoded.
     """
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return None
-        # Base64url: replace URL-safe chars and add padding.
-        payload_b64 = parts[1].replace("-", "+").replace("_", "/")
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        payload = json.loads(base64.b64decode(payload_b64))
-        return payload.get("type")
-    except Exception:
-        return None
+    payload = _decode_jwt_payload(token)
+    return payload.get("type") if payload is not None else None
 
 def _non_token_credential_keys(profile: str) -> dict[str, str]:
     """Return the header -> env_key mapping for non-gc-token credential headers.
@@ -624,6 +644,24 @@ def _build_merged_lines(env_path: str, new_values: dict[str, str]) -> list[str]:
     return existing_lines
 
 
+def _reconstruct_env_dict(merged_lines: list[str]) -> dict[str, str]:
+    """Reconstruct the ``KEY=VALUE`` dict from rendered .env lines.
+
+    Comment lines (starting with ``#``) and blank lines are skipped.  The
+    single source for the merge-result reconstruction shared by
+    :func:`merge_env_file` and :func:`atomic_merge_env_file`.
+    """
+    merged: dict[str, str] = {}
+    for line in merged_lines:
+        stripped = line.rstrip("\n")
+        if stripped.startswith("#") or not stripped.strip():
+            continue
+        if "=" in stripped:
+            k, _, v = stripped.partition("=")
+            merged[k.strip()] = v
+    return merged
+
+
 def merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
     """Read an existing .env file, merge new values, write it back, and return the merged dict.
 
@@ -650,16 +688,7 @@ def merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
         fh.writelines(merged_lines)
 
     # Reconstruct merged dict for the caller (used for confirmation output).
-    merged: dict[str, str] = {}
-    for line in merged_lines:
-        stripped = line.rstrip("\n")
-        if stripped.startswith("#") or not stripped.strip():
-            continue
-        if "=" in stripped:
-            k, _, v = stripped.partition("=")
-            merged[k.strip()] = v
-
-    return merged
+    return _reconstruct_env_dict(merged_lines)
 
 
 def atomic_merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
@@ -706,13 +735,4 @@ def atomic_merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str
         raise
 
     # Reconstruct merged dict for the caller.
-    merged: dict[str, str] = {}
-    for line in merged_lines:
-        stripped = line.rstrip("\n")
-        if stripped.startswith("#") or not stripped.strip():
-            continue
-        if "=" in stripped:
-            k, _, v = stripped.partition("=")
-            merged[k.strip()] = v
-
-    return merged
+    return _reconstruct_env_dict(merged_lines)

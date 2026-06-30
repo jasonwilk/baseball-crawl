@@ -43,7 +43,7 @@ from src.gamechanger.opponent_ladder import (
 )
 from src.gamechanger.team_resolver import TeamProfile, resolve_team
 from src.gamechanger.url_parser import parse_team_url
-from src.reports.generator import GenerationResult, generate_report
+from src.reports.generator import GenerationResult, _utcnow_iso, generate_report
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +274,8 @@ def _prior_success(
     if expires_at is None:
         return False
     # Non-expired => the prior report is still serveable; skip regeneration.
-    return expires_at > datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Shared UTC-iso helper (E-247-05 AC-4) -- identical format to all callers.
+    return expires_at > _utcnow_iso()
 
 
 def _upsert_slot(conn: sqlite3.Connection, slot: SlotResult) -> None:

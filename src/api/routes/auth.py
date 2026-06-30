@@ -28,6 +28,7 @@ Schema notes (E-100 schema):
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import secrets
@@ -60,6 +61,7 @@ from src.api import passkey_challenges
 from src.api.auth import create_session, hash_token
 from src.api.db import get_connection
 from src.api.email import send_magic_link_email
+from src.api.helpers import get_app_url
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,6 @@ router = APIRouter(prefix="/auth")
 
 _SESSION_COOKIE_NAME = "session"
 _SESSION_MAX_AGE = 604800  # 7 days in seconds
-_APP_URL_DEFAULT = "http://baseball.localhost:8001"
 
 # Magic link rate-limit cooldown in seconds.
 _MAGIC_LINK_COOLDOWN_SECONDS = 60
@@ -81,15 +82,6 @@ _MAGIC_LINK_COOLDOWN_SECONDS = 60
 # module-global dicts, which were single-worker-only and lost on restart
 # mid-login. All workers share ``data/app.db`` (WAL on), so a challenge stored
 # by one worker is visible to whichever worker handles the verify request.
-
-
-def _get_app_url() -> str:
-    """Return the base application URL from the environment.
-
-    Returns:
-        APP_URL env var, or ``http://baseball.localhost:8001`` as default.
-    """
-    return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
 
 def _is_dev_mode() -> bool:
@@ -234,29 +226,17 @@ async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
     Returns:
         HTMLResponse with the login form, or a redirect to /admin/reports.
     """
-    # If session middleware already attached a user, redirect to the reports page.
-    user = getattr(request.state, "user", None)
-    if user:
+    # Already authenticated -> redirect to the reports page.
+    # _get_authenticated_user owns the cookie -> session -> user resolution
+    # (it checks middleware-attached state first, then validates the session
+    # cookie directly), so the "already logged in" check lives in one place.
+    # This is byte-identical to the former inline session-only check for every
+    # reachable input: the only divergence (a valid session whose user row is
+    # gone) is FK-prohibited -- sessions.user_id is NOT NULL REFERENCES
+    # users(id) with foreign_keys=ON and no CASCADE, and _delete_user removes
+    # sessions before users -- and would be fail-safe (login page) regardless.
+    if _get_authenticated_user(request):
         return RedirectResponse(url="/admin/reports", status_code=302)
-
-    # Also check cookie directly for the "already logged in" case.
-    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
-    if cookie_value:
-        session_id = hash_token(cookie_value)
-        try:
-            with closing(get_connection()) as conn:
-                cursor = conn.execute(
-                    """
-                    SELECT 1 FROM sessions
-                    WHERE session_id = ?
-                      AND expires_at > datetime('now')
-                    """,
-                    (session_id,),
-                )
-                if cursor.fetchone():
-                    return RedirectResponse(url="/admin/reports", status_code=302)
-        except sqlite3.Error:
-            pass  # Gracefully fall through to login page
 
     return templates.TemplateResponse(request, "auth/login.html", {})
 
@@ -332,7 +312,7 @@ async def post_login(
                     )
                     conn.commit()
 
-                    app_url = _get_app_url()
+                    app_url = get_app_url()
                     magic_link_url = f"{app_url}/auth/verify?token={raw_token}"
                     await send_magic_link_email(email, magic_link_url)
     except sqlite3.Error:
@@ -566,8 +546,7 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
                 challenge_b64,
             )
 
-    import json as _json
-    options_dict = _json.loads(options_to_json(registration_options))
+    options_dict = json.loads(options_to_json(registration_options))
     return templates.TemplateResponse(
         request,
         "auth/passkey_register.html",
@@ -727,7 +706,6 @@ async def get_passkey_login_options() -> JSONResponse:
             conn, passkey_challenges.KIND_LOGIN, challenge_b64, challenge_b64
         )
 
-    import json
     options_dict = json.loads(options_to_json(auth_options))
     return JSONResponse(options_dict)
 
@@ -811,22 +789,20 @@ async def post_passkey_login_verify(request: Request) -> JSONResponse | Redirect
     # WebAuthn library checks the challenge embedded in clientDataJSON against
     # expected_challenge, so the DB only gates live-and-unconsumed.
     verified_challenge: str | None = None
-    import base64 as _base64
-    import json as _json
 
     # Decode clientDataJSON to extract the challenge the browser used.
     # The lookup-key derivation below MUST stay byte-identical to the store-side
     # derivation in GET /passkey/login/options (b64encode of the raw challenge
     # bytes); see E-238-06 AC-6.
     try:
-        client_data = _json.loads(client_data_bytes.decode())
+        client_data = json.loads(client_data_bytes.decode())
         browser_challenge_b64 = client_data.get("challenge", "")
         # Normalize to standard base64 for lookup (webauthn may use base64url)
         padding = 4 - len(browser_challenge_b64) % 4
         if padding != 4:
             browser_challenge_b64 += "=" * padding
-        browser_challenge_bytes = _base64.urlsafe_b64decode(browser_challenge_b64)
-        lookup_key = _base64.b64encode(browser_challenge_bytes).decode()
+        browser_challenge_bytes = base64.urlsafe_b64decode(browser_challenge_b64)
+        lookup_key = base64.b64encode(browser_challenge_bytes).decode()
         with closing(get_connection()) as conn:
             if (
                 passkey_challenges.get_challenge(
@@ -845,7 +821,7 @@ async def post_passkey_login_verify(request: Request) -> JSONResponse | Redirect
             status_code=401,
         )
 
-    expected_challenge = _base64.b64decode(verified_challenge)
+    expected_challenge = base64.b64decode(verified_challenge)
 
     # Verify the assertion.
     try:

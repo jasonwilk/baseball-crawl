@@ -9,24 +9,59 @@ from __future__ import annotations
 
 import pytest
 
+from src.api.helpers import format_date
 from src.reports.renderer import (
     _enrich_pitchers_workload,
-    _format_short_date,
     render_report,
 )
 
 
 # ---------------------------------------------------------------------------
-# _format_short_date
+# Rest-display date formatting (E-247-06: renderer now uses the shared
+# api.helpers.format_date; _format_short_date was removed as a duplicate).
+# These pin the same outputs the removed helper produced for valid ISO dates.
 # ---------------------------------------------------------------------------
+
+
+def _removed_format_short_date(iso_date: str) -> str:
+    """Verbatim reproduction of the removed renderer._format_short_date.
+
+    Used only to PROVE format_date is byte-identical for the reachable input
+    domain (valid ISO dates -- the call site passes MAX(game_date), guarded by
+    truthiness, so it is always a valid ``YYYY-MM-DD`` string).
+    """
+    import datetime as _dt
+
+    try:
+        d = _dt.datetime.strptime(iso_date, "%Y-%m-%d")
+        return f"{d.strftime('%b')} {d.day}"
+    except (ValueError, TypeError):
+        return iso_date
 
 
 class TestFormatShortDate:
     def test_formats_date(self) -> None:
-        assert _format_short_date("2025-04-26") == "Apr 26"
+        assert format_date("2025-04-26") == "Apr 26"
 
     def test_single_digit_day(self) -> None:
-        assert _format_short_date("2025-03-05") == "Mar 5"
+        assert format_date("2025-03-05") == "Mar 5"
+
+    def test_byte_identical_to_removed_helper_over_valid_dates(self) -> None:
+        """AC-3: format_date == the removed _format_short_date for every valid
+        ISO date (all months, single/double-digit days, leap day, year bounds)."""
+        import datetime as _dt
+
+        d = _dt.date(2024, 1, 1)  # 2024 is a leap year -> exercises Feb 29
+        end = _dt.date(2025, 12, 31)
+        checked = 0
+        while d <= end:
+            iso = d.isoformat()
+            assert format_date(iso) == _removed_format_short_date(iso), (
+                f"date formatter diverged on {iso}"
+            )
+            d += _dt.timedelta(days=1)
+            checked += 1
+        assert checked == 731  # 2024 (366) + 2025 (365)
 
 
 # ---------------------------------------------------------------------------

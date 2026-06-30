@@ -16,8 +16,6 @@ Two APIs are exposed:
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -34,6 +32,7 @@ from src.gamechanger.client import (
     GameChangerClient,
     _required_keys,
 )
+from src.gamechanger.credential_parser import _decode_jwt_payload
 from src.gamechanger.signing import build_signature_headers
 from src.http.proxy_check import ProxyCheckResult, check_proxy_routing, get_direct_ip
 from src.http.session import resolve_proxy_from_dict
@@ -62,12 +61,10 @@ def decode_jwt_exp(token: str) -> int | None:
         The ``exp`` Unix timestamp integer, or ``None`` if the token cannot
         be decoded (malformed, truncated, or missing the ``exp`` claim).
     """
+    payload = _decode_jwt_payload(token)
+    if payload is None:
+        return None
     try:
-        payload_segment = token.split(".")[1]
-        # Add padding so length is a multiple of 4.
-        padding = 4 - len(payload_segment) % 4
-        payload_segment += "=" * (padding % 4)
-        payload = json.loads(base64.urlsafe_b64decode(payload_segment))
         return int(payload["exp"])
     except Exception:  # noqa: BLE001
         return None
@@ -431,26 +428,19 @@ def check_single_profile(profile: str) -> tuple[int, str]:
         - 1: credentials expired, revoked, or network error
         - 2: required credentials missing from .env
     """
-    try:
-        client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile=profile)
-    except ConfigurationError as exc:
-        return (2, f"Missing required credential(s): {exc}")
-
-    try:
-        user = client.get("/me/user", accept=_ME_USER_ACCEPT)
-    except ForbiddenError:
-        return (1, "Access denied -- credentials may be expired or revoked")
-    except CredentialExpiredError:
-        return (1, "Credentials expired -- refresh via proxy capture")
-    except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        return (1, f"Network error reaching GameChanger API: {exc}")
-    except Exception as exc:  # noqa: BLE001
-        return (1, f"Unexpected error: {exc}")
-
-    first = (user.get("first_name") or "").strip()
-    last = (user.get("last_name") or "").strip()
-    display = f"{first} {last}".strip() if (first and last) else "(authenticated user)"
-    return (0, f"valid -- logged in as {display}")
+    # Delegate the GET /me/user network call and error ladder to
+    # ``run_api_check`` (which also owns the ``_extract_display_name`` logic),
+    # then map its structured result onto this function's legacy tuple shape.
+    # The two non-passthrough messages below preserve check_single_profile's
+    # historical phrasing exactly (byte-identical to the pre-consolidation
+    # output) -- only the wording differs from run_api_check, not the outcome.
+    result = run_api_check(profile)
+    if result.exit_code == 0:
+        return (0, f"valid -- logged in as {result.display_name}")
+    if result.exit_code == 2:
+        detail = result.message.removeprefix("Missing credentials: ")
+        return (2, f"Missing required credential(s): {detail}")
+    return (result.exit_code, result.message)
 
 
 def check_credentials(profile: str | None = None) -> tuple[int, str]:

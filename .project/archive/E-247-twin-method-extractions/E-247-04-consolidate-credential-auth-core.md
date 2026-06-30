@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, four duplicated blocks in the GC credential/auth core — the .env line-reconstruction loop, the profile-check error ladder, the JWT base64url decode, and the proxy-config resolution — will each be expressed once. These are credential-bearing/never-log paths where silent drift is most dangerous.

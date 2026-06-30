@@ -343,9 +343,12 @@ def test_resolve_own_team_gc_uuid_happy_path(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("MBA Top Dogg Gold 14U", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name",
-        lambda client, name, *, start_at_page=0: [
+    # Mock at client.post_json (not search_teams_by_name): the resolution loop
+    # relocated into search.py (E-247-03), so mocking the transport keeps this
+    # test agnostic to where the search call is made.
+    client = MagicMock()
+    client.post_json.return_value = {
+        "hits": [
             _search_hit(
                 name="Some Other Team",
                 public_id="other-slug",
@@ -356,10 +359,8 @@ def test_resolve_own_team_gc_uuid_happy_path(
                 public_id=public_id,
                 team_id=gc_uuid,
             ),
-        ],
-    )
-
-    client = MagicMock()
+        ]
+    }
     result = resolve_own_team_gc_uuid(client, public_id)
 
     assert result == gc_uuid
@@ -389,36 +390,36 @@ def test_resolve_own_team_gc_uuid_pages_until_match_on_later_page(
             for i in range(25)
         ]
 
-    pages = {
-        0: full_page_of_others(0),
-        1: full_page_of_others(1),
-        2: [
-            _search_hit(
-                name="Common Name",
-                public_id=public_id,  # the exact match, on page 2
-                team_id=gc_uuid,
-            )
-        ],
-    }
-    calls: list[int] = []
-
-    def paged_search(client, name, *, start_at_page=0):
-        calls.append(start_at_page)
-        return pages.get(start_at_page, [])
+    pages = [
+        {"hits": full_page_of_others(0)},
+        {"hits": full_page_of_others(1)},
+        {
+            "hits": [
+                _search_hit(
+                    name="Common Name",
+                    public_id=public_id,  # the exact match, on page 2
+                    team_id=gc_uuid,
+                )
+            ]
+        },
+    ]
 
     monkeypatch.setattr(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Common Name", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name", paged_search
-    )
+    client = MagicMock()
+    client.post_json.side_effect = pages
 
-    result = resolve_own_team_gc_uuid(MagicMock(), public_id)
+    result = resolve_own_team_gc_uuid(client, public_id)
 
     assert result == gc_uuid
-    # Paged through 0, 1, 2 (stopped at the page-2 match).
-    assert calls == [0, 1, 2]
+    # Paged through start_at_page 0, 1, 2 (stopped at the page-2 match).
+    pages_requested = [
+        c.kwargs["params"]["start_at_page"]
+        for c in client.post_json.call_args_list
+    ]
+    assert pages_requested == [0, 1, 2]
 
 
 def test_resolve_own_team_gc_uuid_stops_on_partial_page(
@@ -426,28 +427,24 @@ def test_resolve_own_team_gc_uuid_stops_on_partial_page(
 ) -> None:
     """A partial first page (< page_size, no match) short-circuits -- no further
     pages are fetched (mirrors the sibling resolver's short-circuit)."""
-    calls: list[int] = []
-
-    def paged_search(client, name, *, start_at_page=0):
-        calls.append(start_at_page)
-        # 2 hits (< 25) with no matching public_id -> no more pages.
-        return [
-            _search_hit(name="X", public_id="nope-a", team_id="a"),
-            _search_hit(name="X", public_id="nope-b", team_id="b"),
-        ]
-
     monkeypatch.setattr(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Clean Name", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name", paged_search
-    )
+    client = MagicMock()
+    # 2 hits (< 25) with no matching public_id -> no more pages.
+    client.post_json.return_value = {
+        "hits": [
+            _search_hit(name="X", public_id="nope-a", team_id="a"),
+            _search_hit(name="X", public_id="nope-b", team_id="b"),
+        ]
+    }
 
-    result = resolve_own_team_gc_uuid(MagicMock(), "dD9PtF0YbKad")
+    result = resolve_own_team_gc_uuid(client, "dD9PtF0YbKad")
 
     assert result is None
-    assert calls == [0]  # short-circuited after the partial first page
+    # Short-circuited after the partial first page (one /search call).
+    assert client.post_json.call_count == 1
 
 
 def test_resolve_own_team_gc_uuid_passes_real_name_not_slug(
@@ -455,33 +452,29 @@ def test_resolve_own_team_gc_uuid_passes_real_name_not_slug(
 ) -> None:
     """The resolver must search with the team's real NAME, never the slug."""
     public_id = "dD9PtF0YbKad"
-    captured: dict[str, str] = {}
 
     monkeypatch.setattr(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Real Team Name", public_id=pid),
     )
 
-    def fake_search(
-        client: Any, name: str, *, start_at_page: int = 0
-    ) -> list[dict[str, Any]]:
-        captured["name"] = name
-        return [
+    client = MagicMock()
+    client.post_json.return_value = {
+        "hits": [
             _search_hit(
                 name="Real Team Name",
                 public_id=public_id,
                 team_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             )
         ]
+    }
 
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name", fake_search
-    )
+    resolve_own_team_gc_uuid(client, public_id)
 
-    resolve_own_team_gc_uuid(MagicMock(), public_id)
-
-    assert captured["name"] == "Real Team Name"
-    assert captured["name"] != public_id
+    # The /search body must carry the team's real NAME, never the slug.
+    searched_name = client.post_json.call_args.kwargs["body"]["name"]
+    assert searched_name == "Real Team Name"
+    assert searched_name != public_id
 
 
 def test_resolve_own_team_gc_uuid_no_public_id_match_returns_none(
@@ -493,18 +486,18 @@ def test_resolve_own_team_gc_uuid_no_public_id_match_returns_none(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Team", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name",
-        lambda client, name, *, start_at_page=0: [
+    client = MagicMock()
+    client.post_json.return_value = {
+        "hits": [
             _search_hit(
                 name="Team",
                 public_id="different-slug",
                 team_id="11111111-1111-1111-1111-111111111111",
             )
-        ],
-    )
+        ]
+    }
 
-    assert resolve_own_team_gc_uuid(MagicMock(), public_id) is None
+    assert resolve_own_team_gc_uuid(client, public_id) is None
 
 
 def test_resolve_own_team_gc_uuid_non_uuid_id_returns_none(
@@ -516,18 +509,18 @@ def test_resolve_own_team_gc_uuid_non_uuid_id_returns_none(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Team", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name",
-        lambda client, name, *, start_at_page=0: [
+    client = MagicMock()
+    client.post_json.return_value = {
+        "hits": [
             _search_hit(
                 name="Team",
                 public_id=public_id,
                 team_id="not-a-uuid",
             )
-        ],
-    )
+        ]
+    }
 
-    assert resolve_own_team_gc_uuid(MagicMock(), public_id) is None
+    assert resolve_own_team_gc_uuid(client, public_id) is None
 
 
 def test_resolve_own_team_gc_uuid_profile_fetch_fails_returns_none(
@@ -541,21 +534,11 @@ def test_resolve_own_team_gc_uuid_profile_fetch_fails_returns_none(
     monkeypatch.setattr(
         "src.gamechanger.crawlers.opponents.resolve_team", boom
     )
-    # search must not even be called when the profile fetch fails.
-    called = {"search": False}
+    # search must not even be issued when the profile fetch fails.
+    client = MagicMock()
 
-    def fake_search(
-        client: Any, name: str, *, start_at_page: int = 0
-    ) -> list[dict[str, Any]]:
-        called["search"] = True
-        return []
-
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name", fake_search
-    )
-
-    assert resolve_own_team_gc_uuid(MagicMock(), "dD9PtF0YbKad") is None
-    assert called["search"] is False
+    assert resolve_own_team_gc_uuid(client, "dD9PtF0YbKad") is None
+    assert client.post_json.call_count == 0
 
 
 def test_resolve_own_team_gc_uuid_empty_hits_returns_none(
@@ -565,12 +548,10 @@ def test_resolve_own_team_gc_uuid_empty_hits_returns_none(
         "src.gamechanger.crawlers.opponents.resolve_team",
         lambda pid: _profile("Team", public_id=pid),
     )
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name",
-        lambda client, name, *, start_at_page=0: [],
-    )
+    client = MagicMock()
+    client.post_json.return_value = {"hits": []}
 
-    assert resolve_own_team_gc_uuid(MagicMock(), "dD9PtF0YbKad") is None
+    assert resolve_own_team_gc_uuid(client, "dD9PtF0YbKad") is None
 
 
 def test_resolve_own_team_gc_uuid_propagates_credential_expired(
@@ -581,14 +562,60 @@ def test_resolve_own_team_gc_uuid_propagates_credential_expired(
         lambda pid: _profile("Team", public_id=pid),
     )
 
-    def boom(
-        client: Any, name: str, *, start_at_page: int = 0
-    ) -> list[dict[str, Any]]:
-        raise CredentialExpiredError("token expired")
-
-    monkeypatch.setattr(
-        "src.gamechanger.crawlers.opponents.search_teams_by_name", boom
-    )
+    client = MagicMock()
+    client.post_json.side_effect = CredentialExpiredError("token expired")
 
     with pytest.raises(CredentialExpiredError):
-        resolve_own_team_gc_uuid(MagicMock(), "dD9PtF0YbKad")
+        resolve_own_team_gc_uuid(client, "dD9PtF0YbKad")
+
+
+def test_both_resolver_paths_resolve_same_gc_uuid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """E-247-03 AC-5: the report-generator path and the own-team opponent path
+    resolve the SAME gc_uuid from the same search fixture.
+
+    Both now delegate to the shared ``resolve_gc_uuid_by_public_id`` loop. The
+    fixture forces a page-0-full / match-on-page-1 scenario so the shared
+    pagination is exercised on both paths. Mocking at ``client.post_json``
+    keeps the assertion agnostic to where the search call is issued.
+    """
+    from src.reports.generator import _resolve_gc_uuid
+
+    public_id = "target-slug"
+    gc_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    team_name = "Target Team"
+
+    def fixture_pages() -> list[dict[str, Any]]:
+        # Page 0: 25 non-matching hits (full page -> keep paging).
+        page0 = [
+            _search_hit(
+                name="Common",
+                public_id=f"other-{i}",
+                team_id=f"{i:08d}-1111-1111-1111-111111111111",
+            )
+            for i in range(25)
+        ]
+        # Page 1: the exact public_id match.
+        page1 = [
+            _search_hit(name=team_name, public_id=public_id, team_id=gc_uuid)
+        ]
+        return [{"hits": page0}, {"hits": page1}]
+
+    # Generator path: team_name is supplied directly.
+    gen_client = MagicMock()
+    gen_client.post_json.side_effect = fixture_pages()
+    gen_result = _resolve_gc_uuid(gen_client, team_name, public_id)
+
+    # Opponent path: the real name is fetched via resolve_team first.
+    monkeypatch.setattr(
+        "src.gamechanger.crawlers.opponents.resolve_team",
+        lambda pid: _profile(team_name, public_id=pid),
+    )
+    opp_client = MagicMock()
+    opp_client.post_json.side_effect = fixture_pages()
+    opp_result = resolve_own_team_gc_uuid(opp_client, public_id)
+
+    assert gen_result == gc_uuid
+    assert opp_result == gc_uuid
+    assert gen_result == opp_result

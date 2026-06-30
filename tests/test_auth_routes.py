@@ -29,6 +29,7 @@ Run with:
 
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
 import sys
@@ -272,6 +273,38 @@ class TestLoginPageRenders:
         assert "/dashboard" not in response.headers["location"]
 
 
+class TestGetLoginDelegation:
+    """E-247-07 AC-2: get_login delegates the 'already logged in' check to
+    _get_authenticated_user (the single cookie->session->user resolution)."""
+
+    def test_redirects_when_authenticated_user_present(self, db: Path) -> None:
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth._get_authenticated_user",
+                return_value={"id": 1, "email": "x@example.com"},
+            ) as mock_auth:
+                with TestClient(
+                    app, follow_redirects=False, cookies=_CSRF_COOKIES
+                ) as client:
+                    response = client.get("/auth/login")
+        assert response.status_code == 302
+        assert "/admin/reports" in response.headers["location"]
+        mock_auth.assert_called_once()
+
+    def test_renders_login_page_when_not_authenticated(self, db: Path) -> None:
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth._get_authenticated_user",
+                return_value=None,
+            ) as mock_auth:
+                with TestClient(
+                    app, follow_redirects=False, cookies=_CSRF_COOKIES
+                ) as client:
+                    response = client.get("/auth/login")
+        assert response.status_code == 200
+        mock_auth.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # POST /auth/login tests (AC-17b, AC-17c)
 # ---------------------------------------------------------------------------
@@ -373,6 +406,31 @@ class TestPostLogin:
         token_part = url_arg.split("token=")[-1]
         # token_urlsafe(32) produces 43 characters
         assert len(token_part) == 43
+
+    def test_magic_link_uses_unified_default_when_app_url_unset(self, db: Path) -> None:
+        """E-247-07 AC-4: with APP_URL unset, the magic-link base URL resolves
+        through get_app_url() to the unified default http://baseball.localhost:8001.
+
+        Real teeth on the routes/auth.py read site: it drives the magic-link
+        path end-to-end and pins the unified unset-default (which restores this
+        site's pre-epic baseball.localhost host, coherent with the WebAuthn
+        origin). Reverting it to an inline read with a different default fails here.
+        """
+        email = "unsetdefault@example.com"
+        _insert_user(db, email)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            os.environ.pop("APP_URL", None)
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
+
+        url_arg = mock_send.call_args[0][1]
+        assert url_arg.startswith("http://baseball.localhost:8001/auth/verify?token=")
 
 
 # ---------------------------------------------------------------------------

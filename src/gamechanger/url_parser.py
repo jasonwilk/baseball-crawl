@@ -30,6 +30,19 @@ _UUID_RE = re.compile(
 )
 
 
+def is_gc_uuid(s: str) -> bool:
+    """Return ``True`` if ``s`` is a canonical GameChanger ``gc_uuid``.
+
+    The single source of the canonical-UUID predicate (8-4-4-4-12 hex, dashes,
+    case-insensitive, full-string anchored). E-247-03 collapsed the
+    byte-identical ``_UUID_RE`` copies in this module, ``opponents.py``, and
+    ``game_loader.py`` into this helper. ``game_loader``'s own-vs-opponent
+    boxscore-key classification depends on the EXACT anchoring/IGNORECASE, so
+    the pattern must not drift.
+    """
+    return bool(_UUID_RE.match(s))
+
+
 @dataclass(frozen=True)
 class TeamIdResult:
     """Result of parsing a GameChanger team identifier.
@@ -45,7 +58,7 @@ class TeamIdResult:
     @property
     def is_uuid(self) -> bool:
         """Return True if this result holds a UUID."""
-        return self.id_type == "uuid"
+        return is_gc_uuid(self.value)
 
     @property
     def is_public_id(self) -> bool:
@@ -110,7 +123,7 @@ def _classify(candidate: str) -> TeamIdResult:
     Raises:
         ValueError: If the candidate matches neither format.
     """
-    if _UUID_RE.match(candidate):
+    if is_gc_uuid(candidate):
         return TeamIdResult(value=candidate, id_type="uuid")
     if _PUBLIC_ID_RE.match(candidate):
         return TeamIdResult(value=candidate, id_type="public_id")

@@ -4,7 +4,7 @@
 [E-247: Twin-Method & Duplicated-Block Extractions](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the ~100-line per-game discrepancy-detection block in the reconciliation engine — currently reproduced verbatim for the initial detection and the post-correction re-detection — will exist once as a single detection function that both passes call. This guarantees the dry-run and execute modes cannot silently diverge.

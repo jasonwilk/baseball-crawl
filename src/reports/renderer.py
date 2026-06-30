@@ -102,6 +102,22 @@ def _compute_pa(player: dict) -> int:
     )
 
 
+def _total_bases(player: dict) -> int:
+    """Compute total bases from a batter's line: ``h + 2B + 2*3B + 3*HR``.
+
+    ``h`` is total hits (singles included), so each extra-base hit adds only
+    the bases beyond the single already counted in ``h`` -- algebraically
+    identical to ``1*1B + 2*2B + 3*3B + 4*HR`` and to the equivalent
+    ``h - 2B - 3B - HR + 2*2B + 3*3B + 4*HR`` form previously inlined at the
+    call sites.  Missing components coerce to 0.
+    """
+    h = player.get("h") or 0
+    doubles = player.get("doubles") or 0
+    triples = player.get("triples") or 0
+    hr = player.get("hr") or 0
+    return h + doubles + 2 * triples + 3 * hr
+
+
 def _percentile_rank(value: float, values: list[float]) -> float:
     """Compute the percentile rank of ``value`` within ``values``.
 
@@ -192,15 +208,7 @@ def _compute_batting_heat(batting: list[dict]) -> None:
         h = p.get("h") or 0
         bb = p.get("bb") or 0
         hbp = p.get("hbp") or 0
-        tb = (
-            h
-            - (p.get("doubles") or 0)
-            - (p.get("triples") or 0)
-            - (p.get("hr") or 0)
-            + (p.get("doubles") or 0) * 2
-            + (p.get("triples") or 0) * 3
-            + (p.get("hr") or 0) * 4
-        )
+        tb = _total_bases(p)
         p["_avg_raw"] = _safe_div(h, ab)
         p["_obp_raw"] = _safe_div(h + bb + hbp, pa)
         p["_slg_raw"] = _safe_div(tb, ab)
@@ -355,15 +363,7 @@ def _compute_key_players(
         bb = top_batter.get("bb") or 0
         hbp = top_batter.get("hbp") or 0
         ab = top_batter.get("ab") or 0
-        tb = (
-            h
-            - (top_batter.get("doubles") or 0)
-            - (top_batter.get("triples") or 0)
-            - (top_batter.get("hr") or 0)
-            + (top_batter.get("doubles") or 0) * 2
-            + (top_batter.get("triples") or 0) * 3
-            + (top_batter.get("hr") or 0) * 4
-        )
+        tb = _total_bases(top_batter)
         obp_val = _safe_div(h + bb + hbp, pa)
         slg_val = _safe_div(tb, ab)
         top_batter = {
@@ -415,17 +415,12 @@ def _build_spray_player_stats(
             bb = batter.get("bb") or 0
             hbp = batter.get("hbp") or 0
             shf = batter.get("shf") or 0
-            doubles = batter.get("doubles") or 0
-            triples = batter.get("triples") or 0
-            hr = batter.get("hr") or 0
             pa = batter.get("_pa", 0)
             jersey_number = batter.get("jersey_number")
 
             avg = format_baseball_stat(h, ab)
             obp = format_baseball_stat(h + bb + hbp, ab + bb + hbp + shf)
-            slg = format_baseball_stat(
-                h + doubles + 2 * triples + 3 * hr, ab,
-            )
+            slg = format_baseball_stat(_total_bases(batter), ab)
         else:
             avg = "-"
             obp = "-"
@@ -486,17 +481,6 @@ def _format_plays_batting(batting: list[dict]) -> None:
         b["_pitches_per_pa"] = _format_rate(b.get("pitches_per_pa"))
 
 
-def _format_short_date(iso_date: str) -> str:
-    """Format an ISO date as ``'Mar 28'`` for print/PDF fallback."""
-    import datetime as _dt
-
-    try:
-        d = _dt.datetime.strptime(iso_date, "%Y-%m-%d")
-        return f"{d.strftime('%b')} {d.day}"
-    except (ValueError, TypeError):
-        return iso_date
-
-
 def _enrich_pitchers_workload(
     pitching: list[dict],
     workload: dict[str, dict],
@@ -524,7 +508,7 @@ def _enrich_pitchers_workload(
         # Server-rendered date (PDF/print fallback)
         if last_date:
             pitcher["_rest_date"] = last_date
-            pitcher["_rest_display"] = _format_short_date(last_date)
+            pitcher["_rest_display"] = format_date(last_date)
         else:
             pitcher["_rest_date"] = ""
             pitcher["_rest_display"] = "\u2014"

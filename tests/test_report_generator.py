@@ -4159,3 +4159,172 @@ class TestCleanupExpiredReports:
         assert result.success is False
         # Proves generation ran past the swallowed cleanup error to the parser.
         assert "UUID" in (result.error_message or "")
+
+
+# ---------------------------------------------------------------------------
+# E-247-05: plays-scope consolidation -- golden characterization (HARD GATE)
+# ---------------------------------------------------------------------------
+#
+# The three _query_plays_* functions share one scope builder (_plays_scope).
+# These queries produce stat DENOMINATORS (charted-PA, perspective scoping,
+# season scope), so any scope-branch divergence is silent stat corruption.
+# This pins the exact result sets for BOTH scopes -- game_ids-IN and
+# season-JOIN -- on a dataset crafted to exercise every scope dimension:
+#   - charted vs un-charted PAs (pitch_count 0 vs >0): charted-PA denominators
+#   - two perspectives on the same plays: perspective_team_id scoping
+#   - a NULL pitcher row: pitcher_id IS NOT NULL filter
+#   - g3 = an off-team season game: the home/away restriction (pitching/FPS/
+#     coverage exclude it) vs the batting_team_id scope (batting includes it),
+#     which is exactly the divergence the two scope flavors must preserve.
+#
+# Cross-source equivalence to the pre-refactor queries (each of the three, in
+# all scopes) was additionally proven byte-identical via an importlib pre-vs-post
+# diff during development (E-247-05 AC-2).
+
+_PLAYS_SCOPE_SEASON = "2025"
+
+
+def _seed_plays_scope_dataset(db):
+    """Build the representative plays dataset; return the scouted team id."""
+    team = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) "
+        "VALUES ('T', 'tracked', 1, 2025)"
+    ).lastrowid
+    other = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) "
+        "VALUES ('O', 'tracked', 1, 2025)"
+    ).lastrowid
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'unknown', 2025)",
+        (_PLAYS_SCOPE_SEASON, _PLAYS_SCOPE_SEASON),
+    )
+    for pid in ("pitA", "pitB", "batA", "batB"):
+        db.execute(
+            "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'F', 'L')",
+            (pid,),
+        )
+    for pid in ("pitA", "pitB"):  # team_rosters drives the FPS roster JOIN
+        db.execute(
+            "INSERT INTO team_rosters (player_id, team_id, season_id) VALUES (?, ?, ?)",
+            (pid, team, _PLAYS_SCOPE_SEASON),
+        )
+    # g1/g2 are the team's own games; g3 is an off-team season game.
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('g1', ?, '2025-04-01', ?, ?, 'completed')",
+        (_PLAYS_SCOPE_SEASON, team, other),
+    )
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('g2', ?, '2025-04-02', ?, ?, 'completed')",
+        (_PLAYS_SCOPE_SEASON, other, team),
+    )
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('g3', ?, '2025-04-03', ?, ?, 'completed')",
+        (_PLAYS_SCOPE_SEASON, other, other),
+    )
+    # (game, order, batter, pitcher, batting_team, perspective, pc, fps, qab)
+    rows = [
+        ("g1", 1, "batA", "pitA", team, team, 3, 1, 1),
+        ("g1", 2, "batA", "pitA", team, team, 0, 0, 1),    # un-charted PA
+        ("g1", 3, "batB", "pitB", other, team, 5, 0, 0),
+        ("g1", 4, "batB", None, other, team, 2, 0, 1),     # NULL pitcher
+        ("g2", 1, "batA", "pitB", team, team, 4, 1, 0),
+        ("g2", 2, "batB", "pitA", other, team, 0, 0, 1),   # un-charted PA
+        ("g1", 5, "batA", "pitA", team, other, 9, 1, 1),   # other perspective
+        ("g2", 3, "batA", "pitB", team, other, 9, 1, 1),   # other perspective
+        ("g3", 1, "batA", "pitA", team, team, 7, 1, 1),    # off-team season game
+    ]
+    for g, o, b, p, bt, persp, pc, fps, qab in rows:
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, batter_id, pitcher_id, outcome, pitch_count, "
+            "is_first_pitch_strike, is_qab, perspective_team_id) "
+            "VALUES (?, ?, 1, 'top', ?, ?, ?, ?, 'x', ?, ?, ?, ?)",
+            (g, o, _PLAYS_SCOPE_SEASON, bt, b, p, pc, fps, qab, persp),
+        )
+    db.commit()
+    return team
+
+
+def test_plays_scope_golden_game_ids_scope(db):
+    """AC-2: pinned result sets for the game_ids-IN scope (exact games g1+g2)."""
+    from src.reports.generator import (
+        _query_plays_batting_stats,
+        _query_plays_pitching_stats,
+        _query_plays_team_stats,
+    )
+
+    team = _seed_plays_scope_dataset(db)
+    gids = ["g1", "g2"]
+
+    assert _query_plays_pitching_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=gids) == {
+        "pitA": {"fps_pct": 1.0, "pitches_per_bf": 3.0},
+        "pitB": {"fps_pct": 0.5, "pitches_per_bf": 4.5},
+    }
+    assert _query_plays_batting_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=gids) == {
+        "batA": {"qab_pct": 2 / 3, "pitches_per_pa": 3.5},
+    }
+    assert _query_plays_team_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=gids) == {
+        "team_fps_pct": 2 / 3,
+        "team_pitches_per_pa": 3.5,
+        "team_qab_pct": 2 / 3,
+        "has_plays_data": True,
+        "plays_game_count": 2,
+        "pitch_charted_game_count": 2,
+    }
+
+
+def test_plays_scope_golden_season_scope(db):
+    """AC-2: pinned result sets for the season-JOIN scope (game_ids=None).
+
+    Differs from the game_ids scope by g3: batting (batting_team_id-scoped)
+    includes it, while pitching/FPS/coverage (home/away-restricted) exclude it
+    -- the exact scope divergence the builder must preserve.
+    """
+    from src.reports.generator import (
+        _query_plays_batting_stats,
+        _query_plays_pitching_stats,
+        _query_plays_team_stats,
+    )
+
+    team = _seed_plays_scope_dataset(db)
+
+    # Pitching/FPS/coverage exclude g3 (not the team's own game) -> same as game_ids.
+    assert _query_plays_pitching_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=None) == {
+        "pitA": {"fps_pct": 1.0, "pitches_per_bf": 3.0},
+        "pitB": {"fps_pct": 0.5, "pitches_per_bf": 4.5},
+    }
+    # Batting includes g3 (batA batted for the team) -> denominators grow.
+    assert _query_plays_batting_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=None) == {
+        "batA": {"qab_pct": 0.75, "pitches_per_pa": 14 / 3},
+    }
+    assert _query_plays_team_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=None) == {
+        "team_fps_pct": 2 / 3,
+        "team_pitches_per_pa": 14 / 3,
+        "team_qab_pct": 0.75,
+        "has_plays_data": True,
+        "plays_game_count": 2,
+        "pitch_charted_game_count": 2,
+    }
+
+
+def test_plays_scope_empty_game_ids_returns_empty(db):
+    """AC-2: empty game_ids short-circuits to empty/zero results (guard preserved)."""
+    from src.reports.generator import (
+        _EMPTY_PLAYS_TEAM,
+        _query_plays_batting_stats,
+        _query_plays_pitching_stats,
+        _query_plays_team_stats,
+    )
+
+    team = _seed_plays_scope_dataset(db)
+
+    assert _query_plays_pitching_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=[]) == {}
+    assert _query_plays_batting_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=[]) == {}
+    team_empty = _query_plays_team_stats(db, team, _PLAYS_SCOPE_SEASON, game_ids=[])
+    assert team_empty == _EMPTY_PLAYS_TEAM
+    # AC-3: the empty payload is a fresh copy, not the shared constant object.
+    assert team_empty is not _EMPTY_PLAYS_TEAM

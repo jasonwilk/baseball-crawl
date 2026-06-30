@@ -40,14 +40,14 @@ Usage::
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
 from src.gamechanger.client import GameChangerClient
 from src.gamechanger.exceptions import GameChangerAPIError, TeamNotFoundError
-from src.gamechanger.search import search_teams_by_name
+from src.gamechanger.search import resolve_gc_uuid_by_public_id
 from src.gamechanger.team_resolver import resolve_team
+from src.gamechanger.url_parser import is_gc_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -55,19 +55,6 @@ logger = logging.getLogger(__name__)
 # paginated (page size ~50): a multi-season team REQUIRES pagination, so this
 # crawler follows the x-next-page cursor via client.get_paginated() (AC-5).
 OPPONENTS_ACCEPT = "application/vnd.gc.com.opponent_team:list+json; version=0.0.0"
-
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
-# POST /search pagination, mirroring the sibling own-team resolver
-# (src/reports/generator.py::_resolve_gc_uuid): a common team name's exact
-# public_id match can land on a later page, so page until a match or a partial
-# page. Same page size (25) and cap (5 pages = 125 results) as the sibling.
-_SEARCH_PAGE_SIZE = 25
-_SEARCH_MAX_PAGES = 5
-_NAME_PUNCTUATION_RE = re.compile(r"[^\w ]")
 
 # Sentinel distinguishing "key absent" from "key present but null". The
 # opponents endpoint OMITS progenitor_team_id on manual-entry opponents (it is
@@ -231,42 +218,28 @@ def resolve_own_team_gc_uuid(
         name,
     )
 
-    # Page through POST /search (the exact public_id match can land on a later
-    # page for a common team name), mirroring the sibling resolver in
-    # generator.py::_resolve_gc_uuid: return on a match, short-circuit on a
-    # partial page (< page size = no more results), and stop after a page-0
-    # empty for a punctuation-"dirty" name (the search helper already exhausted
-    # its raw + normalized attempts, so further pages just repeat them).
-    name_is_dirty = bool(_NAME_PUNCTUATION_RE.search(name))
-    for page in range(_SEARCH_MAX_PAGES):
-        hits = search_teams_by_name(client, name, start_at_page=page)
-        for hit in hits:
-            result = hit.get("result") if isinstance(hit, dict) else None
-            if not isinstance(result, dict):
-                continue
-            if result.get("public_id") != public_id:
-                continue
-            gc_uuid = result.get("id")
-            if isinstance(gc_uuid, str) and _UUID_RE.match(gc_uuid):
-                logger.debug(
-                    "Own-team resolver: public_id=%s -> gc_uuid=%s (page %d)",
-                    public_id,
-                    gc_uuid,
-                    page,
-                )
-                return gc_uuid
-            logger.warning(
-                "Own-team resolver: public_id=%s matched a hit but its id %r "
-                "is not a valid UUID",
+    # Page through POST /search via the shared resolution loop (the exact
+    # public_id match can land on a later page for a common team name). Unlike
+    # the report-generator sibling, the own-team path validates the FIRST
+    # match's id with the canonical UUID predicate and returns None on a
+    # match-but-invalid id (it never consumes a second match). The shared loop
+    # owns the pagination caps and the partial-page / dirty-name short-circuits.
+    for page, gc_uuid in resolve_gc_uuid_by_public_id(client, name, public_id):
+        if isinstance(gc_uuid, str) and is_gc_uuid(gc_uuid):
+            logger.debug(
+                "Own-team resolver: public_id=%s -> gc_uuid=%s (page %d)",
                 public_id,
                 gc_uuid,
+                page,
             )
-            return None
-
-        if page == 0 and not hits and name_is_dirty:
-            break
-        if len(hits) < _SEARCH_PAGE_SIZE:
-            break
+            return gc_uuid
+        logger.warning(
+            "Own-team resolver: public_id=%s matched a hit but its id %r "
+            "is not a valid UUID",
+            public_id,
+            gc_uuid,
+        )
+        return None
 
     logger.warning(
         "Own-team resolver: no search hit matched public_id=%s (name=%r)",

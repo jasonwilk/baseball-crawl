@@ -1007,6 +1007,57 @@ def test_detect_team_keys_uuid_only_gc_uuid_none(db: sqlite3.Connection) -> None
 
 
 # ---------------------------------------------------------------------------
+# E-247-03 AC-4: HARD GATE -- boxscore key classification must stay
+# byte-identical after _UUID_RE was swapped for is_gc_uuid. A botched anchor or
+# a dropped IGNORECASE flag would flip own-vs-opponent classification and pull
+# the wrong team's boxscore. This pins the uuid_keys/slug_keys split (which
+# drives own_key/opp_key) over a representative key set, calling the real
+# _detect_team_keys so it exercises whichever predicate the source uses.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw_keys, expected_own, expected_opp",
+    [
+        # Canonical lowercase UUID opponent + public_id slug own key.
+        (
+            ["y24fFdnr3RAN", "16d38cf9-4f73-438c-83e4-1c28fbb23628"],
+            "y24fFdnr3RAN",
+            "16d38cf9-4f73-438c-83e4-1c28fbb23628",
+        ),
+        # Uppercase UUID must still classify as a UUID (re.IGNORECASE): if the
+        # flag were dropped, this opponent key would be misread as the slug.
+        (
+            ["y24fFdnr3RAN", "16D38CF9-4F73-438C-83E4-1C28FBB23628"],
+            "y24fFdnr3RAN",
+            "16D38CF9-4F73-438C-83E4-1C28FBB23628",
+        ),
+        # A dashed-but-non-canonical key (wrong group lengths) is NOT a UUID and
+        # must be classified as the slug/own key -- full ^...$ anchoring.
+        (
+            ["team-uuid-jv-001", "16d38cf9-4f73-438c-83e4-1c28fbb23628"],
+            "team-uuid-jv-001",
+            "16d38cf9-4f73-438c-83e4-1c28fbb23628",
+        ),
+    ],
+)
+def test_detect_team_keys_classification_byte_identical(
+    db: sqlite3.Connection,
+    raw_keys: list[str],
+    expected_own: str,
+    expected_opp: str,
+) -> None:
+    """AC-4: own/opponent key split is driven only by the UUID predicate."""
+    loader = _make_loader(db)
+    raw = {k: {} for k in raw_keys}
+
+    own_key, opp_key = loader._detect_team_keys(raw)
+
+    assert own_key == expected_own
+    assert opp_key == expected_opp
+
+
+# ---------------------------------------------------------------------------
 # E-117-01: Extended stat coverage (AC-8 through AC-11)
 # ---------------------------------------------------------------------------
 

@@ -18,8 +18,6 @@ Public API::
 from __future__ import annotations
 
 import logging
-import os
-import re
 import secrets
 import sqlite3
 from contextlib import closing
@@ -35,6 +33,7 @@ from src.api.db import (
     get_pitching_workload,
     list_reports_with_runs,
 )
+from src.api.helpers import get_app_url
 from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
@@ -46,7 +45,7 @@ from src.gamechanger.loaders import (
 from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
-from src.gamechanger.search import search_teams_by_name
+from src.gamechanger.search import resolve_gc_uuid_by_public_id
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.reconciliation.engine import reconcile_game
@@ -62,10 +61,7 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
-_APP_URL_DEFAULT = "http://localhost:8001"
 _PLAYS_ACCEPT = "application/vnd.gc.com.event_plays+json; version=0.0.0"
-
-_NAME_PUNCTUATION_RE = re.compile(r"[^\w ]")
 
 
 @dataclass
@@ -222,8 +218,8 @@ def _accumulate_recon_counts(out: _ReconCounts, summary: object) -> None:
 
 
 def _get_base_url() -> str:
-    """Return the base URL for public report links."""
-    return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
+    """Return the base URL for public report links (shared APP_URL helper)."""
+    return get_app_url()
 
 
 def _utcnow_iso() -> str:
@@ -683,10 +679,6 @@ def _query_spray_charts(
     return result
 
 
-_SEARCH_PAGE_SIZE = 25
-_SEARCH_MAX_PAGES = 5
-
-
 def _resolve_gc_uuid(
     client: GameChangerClient,
     team_name: str,
@@ -694,40 +686,29 @@ def _resolve_gc_uuid(
 ) -> str | None:
     """Resolve a team's gc_uuid via POST /search + public_id filtering.
 
-    Searches for the team by name and filters results for an exact
-    ``public_id`` match.  Paginates through up to 5 pages (125 results)
-    using the ``start_at_page`` parameter.  Returns immediately when a
-    match is found, or short-circuits when a page returns fewer than 25
-    hits (indicating no more pages).
+    Delegates the paginated public_id-match loop to
+    :func:`~src.gamechanger.search.resolve_gc_uuid_by_public_id` (the shared
+    seam), returning the first *truthy* matched id without UUID re-validation
+    (a falsy id is skipped and paging continues).  Pagination caps, the
+    partial-page short-circuit, and the dirty-name page-0 short-circuit all
+    live in that helper.
 
     ``CredentialExpiredError`` propagates.  All other exceptions are
     caught and logged as warnings (resolution failure is non-fatal).
     """
-    name_is_dirty = bool(_NAME_PUNCTUATION_RE.search(team_name))
     try:
-        for page in range(_SEARCH_MAX_PAGES):
-            hits = search_teams_by_name(client, team_name, start_at_page=page)
-            for hit in hits:
-                r = hit.get("result", {})
-                if r.get("public_id") == public_id:
-                    gc_uuid = r.get("id")
-                    if gc_uuid:
-                        logger.info(
-                            "Resolved gc_uuid=%s for public_id=%s via search "
-                            "(page %d).",
-                            gc_uuid,
-                            public_id,
-                            page,
-                        )
-                        return gc_uuid
-            # AC-1a: Page-0 with a dirty name returning empty hits means the
-            # helper already exhausted both raw and normalized attempts;
-            # paginating further would just repeat the same lookups.
-            if page == 0 and not hits and name_is_dirty:
-                break
-            # Short-circuit: partial page means no more results
-            if len(hits) < _SEARCH_PAGE_SIZE:
-                break
+        for page, gc_uuid in resolve_gc_uuid_by_public_id(
+            client, team_name, public_id
+        ):
+            if gc_uuid:
+                logger.info(
+                    "Resolved gc_uuid=%s for public_id=%s via search "
+                    "(page %d).",
+                    gc_uuid,
+                    public_id,
+                    page,
+                )
+                return gc_uuid
         logger.info(
             "POST /search returned no hit matching public_id=%s; "
             "spray charts unavailable.",
@@ -1039,6 +1020,67 @@ def _crawl_and_load_plays(
         return []
 
 
+# Empty-result payload for ``_query_plays_team_stats`` -- returned when there
+# are no scoped games or no plays data.  Single source so the two early-return
+# sites cannot drift (E-247-05 AC-3).  Callers return a copy: the caller may
+# mutate the returned dict, so each call must get a fresh dict.
+_EMPTY_PLAYS_TEAM: dict = {
+    "team_fps_pct": None,
+    "team_pitches_per_pa": None,
+    "team_qab_pct": None,
+    "has_plays_data": False,
+    "plays_game_count": 0,
+    "pitch_charted_game_count": 0,
+}
+
+
+def _plays_scope(
+    team_id: int,
+    season_id: str,
+    game_ids: list[str] | None,
+    *,
+    restrict_team_games: bool,
+) -> tuple[str, str, list]:
+    """Build the one varying piece of the three ``_query_plays_*`` queries.
+
+    The plays queries are identical except for how they restrict the ``plays``
+    set to a report's games (E-247-05 AC-1).  Two scopes:
+
+    - **game_ids-IN** (``game_ids`` is a non-empty list): ``p.game_id IN (...)``
+      with no ``games`` JOIN -- the id list already restricts the games (E-211
+      exact scoping).
+    - **season-JOIN** (``game_ids`` is ``None``): ``JOIN games g`` and filter
+      ``g.season_id = ?``, plus -- when ``restrict_team_games`` -- the team's
+      own games via ``(g.home_team_id = ? OR g.away_team_id = ?)``.
+
+    ``restrict_team_games`` is ``True`` for the perspective/pitcher queries that
+    bound to the team's own games via home/away, and ``False`` for the
+    batting-side queries that bound via ``batting_team_id`` in the caller's own
+    predicates (so the season scope is ``g.season_id = ?`` alone; the IN scope
+    never needs home/away either).
+
+    Returns ``(games_join_sql, scope_where_sql, scope_params)``.  Callers
+    compose ``SELECT ... FROM plays p {games_join_sql} {own JOINs} WHERE
+    {scope_where_sql} {own predicates} {GROUP BY}`` and bind params in the order
+    the ``?`` appear: any params from JOINs injected before the WHERE, then
+    ``scope_params``, then the caller's trailing-predicate params.
+
+    The empty-``game_ids`` case (which would yield an invalid ``IN ()``) is
+    guarded by each caller BEFORE calling this builder, exactly as the prior
+    code did -- so this builder is only reached with a non-empty list or ``None``.
+    """
+    if game_ids is not None:
+        placeholders = ",".join("?" for _ in game_ids)
+        return "", f"p.game_id IN ({placeholders})", list(game_ids)
+
+    where = "g.season_id = ?"
+    params: list = [season_id]
+    if restrict_team_games:
+        where += " AND (g.home_team_id = ? OR g.away_team_id = ?)"
+        params += [team_id, team_id]
+    return "JOIN games g ON g.game_id = p.game_id", where, params
+
+
 def _query_plays_pitching_stats(
     conn: sqlite3.Connection,
     team_id: int,
@@ -1058,45 +1100,28 @@ def _query_plays_pitching_stats(
     numerators (``is_first_pitch_strike`` sum, ``pitch_count`` sum) are already
     zero for un-charted PAs, so gating only the denominator is the whole fix.
     """
-    if game_ids is not None:
-        if not game_ids:
-            return {}
-        placeholders = ",".join("?" for _ in game_ids)
-        rows = conn.execute(
-            f"""
-            SELECT
-                p.pitcher_id,
-                SUM(p.is_first_pitch_strike) AS fps_sum,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS fps_denom,
-                SUM(p.pitch_count) AS total_pitches,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS total_bf
-            FROM plays p
-            WHERE p.game_id IN ({placeholders})
-              AND p.perspective_team_id = ?
-              AND p.pitcher_id IS NOT NULL
-            GROUP BY p.pitcher_id
-            """,
-            [*game_ids, team_id],
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT
-                p.pitcher_id,
-                SUM(p.is_first_pitch_strike) AS fps_sum,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS fps_denom,
-                SUM(p.pitch_count) AS total_pitches,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS total_bf
-            FROM plays p
-            JOIN games g ON g.game_id = p.game_id
-            WHERE g.season_id = ?
-              AND (g.home_team_id = ? OR g.away_team_id = ?)
-              AND p.perspective_team_id = ?
-              AND p.pitcher_id IS NOT NULL
-            GROUP BY p.pitcher_id
-            """,
-            (season_id, team_id, team_id, team_id),
-        ).fetchall()
+    if game_ids is not None and not game_ids:
+        return {}
+    games_join, scope_where, scope_params = _plays_scope(
+        team_id, season_id, game_ids, restrict_team_games=True,
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+            p.pitcher_id,
+            SUM(p.is_first_pitch_strike) AS fps_sum,
+            SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS fps_denom,
+            SUM(p.pitch_count) AS total_pitches,
+            SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS total_bf
+        FROM plays p
+        {games_join}
+        WHERE {scope_where}
+          AND p.perspective_team_id = ?
+          AND p.pitcher_id IS NOT NULL
+        GROUP BY p.pitcher_id
+        """,
+        [*scope_params, team_id],
+    ).fetchall()
 
     result: dict[str, dict] = {}
     for row in rows:
@@ -1132,44 +1157,28 @@ def _query_plays_batting_stats(
     - P-PA counts only CHARTED PAs (``pitch_count > 0``) so un-charted PAs do
       not dilute the rate.
     """
-    if game_ids is not None:
-        if not game_ids:
-            return {}
-        placeholders = ",".join("?" for _ in game_ids)
-        rows = conn.execute(
-            f"""
-            SELECT
-                p.batter_id,
-                SUM(p.is_qab) AS qab_sum,
-                SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_pa,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
-            FROM plays p
-            WHERE p.game_id IN ({placeholders})
-              AND p.batting_team_id = ?
-              AND p.perspective_team_id = ?
-            GROUP BY p.batter_id
-            """,
-            [*game_ids, team_id, team_id],
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT
-                p.batter_id,
-                SUM(p.is_qab) AS qab_sum,
-                SUM(p.pitch_count) AS total_pitches,
-                COUNT(*) AS total_pa,
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
-            FROM plays p
-            JOIN games g ON g.game_id = p.game_id
-            WHERE g.season_id = ?
-              AND p.batting_team_id = ?
-              AND p.perspective_team_id = ?
-            GROUP BY p.batter_id
-            """,
-            (season_id, team_id, team_id),
-        ).fetchall()
+    if game_ids is not None and not game_ids:
+        return {}
+    games_join, scope_where, scope_params = _plays_scope(
+        team_id, season_id, game_ids, restrict_team_games=False,
+    )
+    rows = conn.execute(
+        f"""
+        SELECT
+            p.batter_id,
+            SUM(p.is_qab) AS qab_sum,
+            SUM(p.pitch_count) AS total_pitches,
+            COUNT(*) AS total_pa,
+            SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
+        FROM plays p
+        {games_join}
+        WHERE {scope_where}
+          AND p.batting_team_id = ?
+          AND p.perspective_team_id = ?
+        GROUP BY p.batter_id
+        """,
+        [*scope_params, team_id, team_id],
+    ).fetchall()
 
     result: dict[str, dict] = {}
     for row in rows:
@@ -1210,129 +1219,75 @@ def _query_plays_team_stats(
     """
     # Two perspective-scoped coverage counts in one pass:
     #   K = games with any plays rows; N = games with >=1 charted PA.
-    if game_ids is not None:
-        if not game_ids:
-            return {
-                "team_fps_pct": None,
-                "team_pitches_per_pa": None,
-                "team_qab_pct": None,
-                "has_plays_data": False,
-                "plays_game_count": 0,
-                "pitch_charted_game_count": 0,
-            }
-        placeholders = ",".join("?" for _ in game_ids)
-        row = conn.execute(
-            f"""
-            SELECT
-                COUNT(DISTINCT p.game_id),
-                COUNT(DISTINCT CASE WHEN p.pitch_count > 0 THEN p.game_id END)
-            FROM plays p
-            WHERE p.game_id IN ({placeholders})
-              AND p.perspective_team_id = ?
-            """,
-            [*game_ids, team_id],
-        ).fetchone()
-    else:
-        row = conn.execute(
-            """
-            SELECT
-                COUNT(DISTINCT p.game_id),
-                COUNT(DISTINCT CASE WHEN p.pitch_count > 0 THEN p.game_id END)
-            FROM plays p
-            JOIN games g ON g.game_id = p.game_id
-            WHERE g.season_id = ?
-              AND (g.home_team_id = ? OR g.away_team_id = ?)
-              AND p.perspective_team_id = ?
-            """,
-            (season_id, team_id, team_id, team_id),
-        ).fetchone()
+    if game_ids is not None and not game_ids:
+        return dict(_EMPTY_PLAYS_TEAM)
+    cov_join, cov_where, cov_params = _plays_scope(
+        team_id, season_id, game_ids, restrict_team_games=True,
+    )
+    row = conn.execute(
+        f"""
+        SELECT
+            COUNT(DISTINCT p.game_id),
+            COUNT(DISTINCT CASE WHEN p.pitch_count > 0 THEN p.game_id END)
+        FROM plays p
+        {cov_join}
+        WHERE {cov_where}
+          AND p.perspective_team_id = ?
+        """,
+        [*cov_params, team_id],
+    ).fetchone()
     plays_game_count = row[0] if row else 0
     pitch_charted_game_count = row[1] if row else 0
     has_plays_data = plays_game_count > 0
 
     if not has_plays_data:
-        return {
-            "team_fps_pct": None,
-            "team_pitches_per_pa": None,
-            "team_qab_pct": None,
-            "has_plays_data": False,
-            "plays_game_count": 0,
-            "pitch_charted_game_count": 0,
-        }
+        return dict(_EMPTY_PLAYS_TEAM)
 
     # Team FPS%: pitchers for this team (matched via roster). Denominator is
     # CHARTED BF only (pitch_count > 0) per TN-5.
-    if game_ids is not None:
-        fps_row = conn.execute(
-            f"""
-            SELECT
-                SUM(p.is_first_pitch_strike),
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END)
-            FROM plays p
-            JOIN team_rosters tr ON tr.player_id = p.pitcher_id
-                AND tr.team_id = ?
-                AND tr.season_id = ?
-            WHERE p.game_id IN ({placeholders})
-              AND p.perspective_team_id = ?
-              AND p.pitcher_id IS NOT NULL
-            """,
-            [team_id, season_id, *game_ids, team_id],
-        ).fetchone()
-    else:
-        fps_row = conn.execute(
-            """
-            SELECT
-                SUM(p.is_first_pitch_strike),
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END)
-            FROM plays p
-            JOIN games g ON g.game_id = p.game_id
-            JOIN team_rosters tr ON tr.player_id = p.pitcher_id
-                AND tr.team_id = ?
-                AND tr.season_id = ?
-            WHERE g.season_id = ?
-              AND (g.home_team_id = ? OR g.away_team_id = ?)
-              AND p.perspective_team_id = ?
-              AND p.pitcher_id IS NOT NULL
-            """,
-            (team_id, season_id, season_id, team_id, team_id, team_id),
-        ).fetchone()
+    fps_join, fps_where, fps_params = _plays_scope(
+        team_id, season_id, game_ids, restrict_team_games=True,
+    )
+    fps_row = conn.execute(
+        f"""
+        SELECT
+            SUM(p.is_first_pitch_strike),
+            SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END)
+        FROM plays p
+        {fps_join}
+        JOIN team_rosters tr ON tr.player_id = p.pitcher_id
+            AND tr.team_id = ?
+            AND tr.season_id = ?
+        WHERE {fps_where}
+          AND p.perspective_team_id = ?
+          AND p.pitcher_id IS NOT NULL
+        """,
+        [team_id, season_id, *fps_params, team_id],
+    ).fetchone()
     fps_sum = fps_row[0] if fps_row and fps_row[0] else 0
     fps_denom = fps_row[1] if fps_row and fps_row[1] else 0
     team_fps_pct = (fps_sum / fps_denom) if fps_denom > 0 else None
 
     # Team batting side: P/PA uses the CHARTED-PA denominator (TN-5); QAB% uses
     # the ALL-PA denominator (TN-5 -- every PA is a QAB opportunity).
-    if game_ids is not None:
-        ppa_row = conn.execute(
-            f"""
-            SELECT
-                SUM(p.pitch_count),
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END),
-                SUM(p.is_qab),
-                COUNT(*)
-            FROM plays p
-            WHERE p.game_id IN ({placeholders})
-              AND p.batting_team_id = ?
-              AND p.perspective_team_id = ?
-            """,
-            [*game_ids, team_id, team_id],
-        ).fetchone()
-    else:
-        ppa_row = conn.execute(
-            """
-            SELECT
-                SUM(p.pitch_count),
-                SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END),
-                SUM(p.is_qab),
-                COUNT(*)
-            FROM plays p
-            JOIN games g ON g.game_id = p.game_id
-            WHERE g.season_id = ?
-              AND p.batting_team_id = ?
-              AND p.perspective_team_id = ?
-            """,
-            (season_id, team_id, team_id),
-        ).fetchone()
+    ppa_join, ppa_where, ppa_params = _plays_scope(
+        team_id, season_id, game_ids, restrict_team_games=False,
+    )
+    ppa_row = conn.execute(
+        f"""
+        SELECT
+            SUM(p.pitch_count),
+            SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END),
+            SUM(p.is_qab),
+            COUNT(*)
+        FROM plays p
+        {ppa_join}
+        WHERE {ppa_where}
+          AND p.batting_team_id = ?
+          AND p.perspective_team_id = ?
+        """,
+        [*ppa_params, team_id, team_id],
+    ).fetchone()
     total_pitches = ppa_row[0] if ppa_row and ppa_row[0] else 0
     charted_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
     qab_sum = ppa_row[2] if ppa_row and ppa_row[2] else 0

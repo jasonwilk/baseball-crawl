@@ -13,7 +13,9 @@ from typing import Any
 
 import pytest
 
-from src.reports.renderer import render_report
+import itertools
+
+from src.reports.renderer import _total_bases, render_report
 from src.reports.starter_prediction import StarterPrediction
 
 
@@ -629,3 +631,70 @@ class TestShowPredictedStarterFalse:
         assert "Most Likely Arms" in html
         assert "Ace Smith" in html
         assert "starter-rest-table" in html
+
+
+# ---------------------------------------------------------------------------
+# E-247-06 AC-1: total-bases formula equality (HARD GATE)
+#
+# Three call sites inlined total bases two ways:
+#   formula 1 (sites A,B): h - 2B - 3B - HR + 2*2B + 3*3B + 4*HR
+#   formula 2 (site C):    h + 2B + 2*3B + 3*HR
+# These tests PROVE the two are equal to each other AND to the single
+# _total_bases helper across an exhaustive grid of edge inputs -- including
+# None, zero, negative, and every doubles/triples/hr combination -- before
+# the collapse is trusted.
+# ---------------------------------------------------------------------------
+
+
+def _formula_1(h, doubles, triples, hr):
+    """Pre-consolidation formula at sites A and B (renderer.py)."""
+    h = h or 0
+    return (
+        h
+        - (doubles or 0)
+        - (triples or 0)
+        - (hr or 0)
+        + (doubles or 0) * 2
+        + (triples or 0) * 3
+        + (hr or 0) * 4
+    )
+
+
+def _formula_2(h, doubles, triples, hr):
+    """Pre-consolidation formula at site C (renderer.py)."""
+    return (h or 0) + (doubles or 0) + 2 * (triples or 0) + 3 * (hr or 0)
+
+
+class TestTotalBasesFormulaEquality:
+    """AC-1: the two inlined TB formulas and _total_bases agree everywhere."""
+
+    def test_three_formulas_identical_over_edge_grid(self) -> None:
+        # Include None (missing field), 0, negatives, and multi-base values so
+        # every spot where the two formulas could diverge is exercised.
+        components = [None, 0, 1, 2, 3, 5, -1]
+        checked = 0
+        for h, doubles, triples, hr in itertools.product(components, repeat=4):
+            player = {"h": h, "doubles": doubles, "triples": triples, "hr": hr}
+            f1 = _formula_1(h, doubles, triples, hr)
+            f2 = _formula_2(h, doubles, triples, hr)
+            helper = _total_bases(player)
+            assert f1 == f2 == helper, (
+                f"TB divergence at h={h} 2B={doubles} 3B={triples} HR={hr}: "
+                f"formula_1={f1} formula_2={f2} _total_bases={helper}"
+            )
+            checked += 1
+        assert checked == len(components) ** 4  # 2401 combinations
+
+    def test_total_bases_matches_canonical_definition(self) -> None:
+        # Canonical: 1*1B + 2*2B + 3*3B + 4*HR, where 1B = h - 2B - 3B - HR.
+        for h, doubles, triples, hr in [(4, 1, 1, 1), (10, 3, 0, 2), (0, 0, 0, 0), (3, 3, 0, 0)]:
+            singles = h - doubles - triples - hr
+            canonical = singles + 2 * doubles + 3 * triples + 4 * hr
+            assert _total_bases(
+                {"h": h, "doubles": doubles, "triples": triples, "hr": hr}
+            ) == canonical
+
+    def test_missing_keys_coerce_to_zero(self) -> None:
+        assert _total_bases({}) == 0
+        assert _total_bases({"h": 2}) == 2  # 2 singles
+        assert _total_bases({"h": 1, "hr": 1}) == 4  # a lone HR (h counts it)

@@ -1005,6 +1005,37 @@ def _compute_rotation_likelihoods(
 # ── Main engine ─────────────────────────────────────────────────────────
 
 
+def _find_k9_alternative(
+    candidates: list[dict[str, Any]],
+    top: dict[str, Any],
+    pitcher_profiles: dict[str, dict],
+    roles: dict[str, str],
+    excluded: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return the first candidate that beats the top arm's K/9 by the delta.
+
+    Walks ``candidates[1:]`` and returns the first starter-capable
+    (``primary_starter``/``spot_starter``), non-excluded candidate whose
+    ``season_k9`` exceeds the top candidate's by more than
+    ``_K9_ALTERNATIVE_DELTA``, or ``None`` if none qualifies.  Shared by the
+    high- and moderate-confidence branches of
+    :func:`compute_starter_prediction` so the alternative-search criteria
+    cannot drift between them.
+    """
+    top_k9 = pitcher_profiles[top["player_id"]].get("season_k9") or 0
+    for cand in candidates[1:]:
+        cand_pid = cand["player_id"]
+        cand_role = roles.get(cand_pid, "reliever")
+        if cand_role not in ("primary_starter", "spot_starter"):
+            continue
+        if cand_pid in excluded:
+            continue
+        cand_k9 = pitcher_profiles[cand_pid].get("season_k9") or 0
+        if cand_k9 - top_k9 > _K9_ALTERNATIVE_DELTA:
+            return cand
+    return None
+
+
 def compute_starter_prediction(
     pitcher_profiles: dict[str, dict],
     pitching_history: list[dict],
@@ -1198,41 +1229,24 @@ def compute_starter_prediction(
             confidence = "high"
             predicted_starter = top
 
-            # Check moderate trigger: rested starter with K/9 > 2.0 higher
-            top_pid = top["player_id"]
-            top_k9 = pitcher_profiles[top_pid].get("season_k9") or 0
-            for cand in candidates[1:]:
-                cand_pid = cand["player_id"]
-                cand_role = roles.get(cand_pid, "reliever")
-                if cand_role not in ("primary_starter", "spot_starter"):
-                    continue
-                if cand_pid in excluded:
-                    continue
-                cand_k9 = pitcher_profiles[cand_pid].get("season_k9") or 0
-                if cand_k9 - top_k9 > _K9_ALTERNATIVE_DELTA:
-                    confidence = "moderate"
-                    alternative = cand
-                    break
+            # Check moderate trigger: rested starter with K/9 > 2.0 higher.
+            # A qualifying alternative downgrades confidence to moderate.
+            alt = _find_k9_alternative(
+                candidates, top, pitcher_profiles, roles, excluded,
+            )
+            if alt is not None:
+                confidence = "moderate"
+                alternative = alt
         else:
             # Check moderate: clear rotation pick but close
             if rotation_pattern != "committee":
                 confidence = "moderate"
                 predicted_starter = top
 
-                # K/9 alternative check
-                top_pid = top["player_id"]
-                top_k9 = pitcher_profiles[top_pid].get("season_k9") or 0
-                for cand in candidates[1:]:
-                    cand_pid = cand["player_id"]
-                    cand_role = roles.get(cand_pid, "reliever")
-                    if cand_role not in ("primary_starter", "spot_starter"):
-                        continue
-                    if cand_pid in excluded:
-                        continue
-                    cand_k9 = pitcher_profiles[cand_pid].get("season_k9") or 0
-                    if cand_k9 - top_k9 > _K9_ALTERNATIVE_DELTA:
-                        alternative = cand
-                        break
+                # K/9 alternative check (confidence is already moderate here).
+                alternative = _find_k9_alternative(
+                    candidates, top, pitcher_profiles, roles, excluded,
+                )
                 if alternative is None:
                     alternative = second
             else:
