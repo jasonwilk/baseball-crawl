@@ -4,7 +4,7 @@
 [E-249: Player-Dedup Stale-Worklist Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, same-team player deduplication will group detected prefix pairs into per-roster connected components, collapse every unambiguous component (a single terminal NAME — including equal-named same-human duplicates) to one canonical player, and refuse every fork (≥2 terminals with distinct names) — leaving it unmerged with a WARN log. The stale-worklist `PlayerMergeError` cascade is gone, and the fix introduces no new cross-merge mode — fork-shaped ambiguity is refused rather than guessed (the pre-existing strict-prefix linear-chain limitation, e.g. "Alex"⊂"Alexa", is unchanged and deferred to Tier 2 / IDEA-089). This is the core fix in `src/db/player_dedup.py`, consumed by the load path (`dedup_team_players`); the CLI delegation is E-249-02.

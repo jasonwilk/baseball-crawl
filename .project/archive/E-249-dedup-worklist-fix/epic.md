@@ -1,7 +1,7 @@
 # E-249: Player-Dedup Stale-Worklist Fix (connected-components, no-cross-merge)
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -51,8 +51,8 @@ This is a CONFIRMED bug fix, not a feature. Two experts converged on the scope (
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-249-01 | Connected-components dedup with fork refusal (core fix + fixture suite) | TODO | None | - |
-| E-249-02 | CLI delegation to shared planner + refused-fork WARN surfacing | TODO | E-249-01 | - |
+| E-249-01 | Connected-components dedup with fork refusal (core fix + fixture suite) | DONE | None | data-engineer |
+| E-249-02 | CLI delegation to shared planner + refused-fork WARN surfacing | DONE | E-249-01 | software-engineer |
 
 ## Dispatch Team
 - data-engineer
@@ -104,8 +104,33 @@ Characterization/behavioral tests must encode the component shapes below with `g
 - 2026-06-30: **Data-engineering spec review incorporated.** DE (root-cause author) found one must-fix spec defect: the original TN-1 fork definition (terminal = non-strict-prefix; fork = ≥2 mutually-non-prefix terminals) misclassified identical-name two-UUID duplicate pairs (`{Jon, Jon}` — the bread-and-butter cross-perspective duplicate) as forks → would REFUSE a pair that currently collapses, regressing the symptom. TN-1 reworded to decide forks on terminals with **DISTINCT names** (equal-named maximal members collapse via the existing tiebreak); added regression-guard fixtures `{Jon, Jon}` and `{Jon, Jon, Jonathan}` (TN-6 (d)/(e), E-249-01 AC-3). Also folded in two footgun clarifications: TN-5.3 (per-component atomicity requires the executor to own the transaction and call `merge_player_pair(manage_transaction=False)` — `True` self-commits and can't nest under an outer BEGIN; only the CLI path changes) and TN-2 (`_select_canonical_player` is pairwise — "extend per component" means an N-way reducer, not a drop-in call). DE confirmed the rest faithful: connected-components-into-single-canonical structurally eliminates the stale-reference cascade and preserves no-cross-merge; E-237 provenance, per-merge mechanics, perspective scoping, recompute ownership, and the single-shared-planner all correctly carried over.
 - 2026-06-30: **Operator follow-up (post-merge, not a story):** after this epic merges, re-run dedup against the production DB and inspect the `team_id=196` residuals to confirm the error cascade is gone and to count how many refused-fork residuals remain (input to validating IDEA-089). Requires credentials + live DB (unavailable in an epic worktree). Mirrors the E-245 operator-follow-up precedent.
 - 2026-06-30: **Codex spec review (iter 1) incorporated + set READY.** Codex found 3 findings, all ACCEPTED: F-A (P1, internal over-claim — the positive coaching guarantee/Goals/E-249-01 Description promised "no stat line ever contains another player's stats" while Non-Goals disclose the pre-existing strict-prefix "Alex"⊂"Alexa" linear-chain merge still happens; reworded to the honest "closes the silent ambiguous-initial mis-merge / introduces no NEW cross-merge mode" with the residual disclosed — coach approved the bench-facing wording); F-B (P2 — TN-5.3's executor-owns-the-transaction / `manage_transaction=False` constraint had not propagated to E-249-02; added AC-6 + Technical Approach line + a no-nested-transaction test); F-C (P2 — E-249-02 test scope broadened to the full CLI import surface per testing.md, since `src/cli/__init__.py` imports `data` at module load + the subprocess convention tests). Post-incorporation consistency sweep clean.
+- 2026-06-30: **Both stories implemented + review chain complete.** E-249-01 (data-engineer): connected-components core fix in `src/db/player_dedup.py` — shared planner `plan_player_dedup` + `execute_collapse`, the DISTINCT-terminal-NAME fork-refusal rule (TN-1), N-way per-component canonical reducer (TN-2), one WARN per refused fork (TN-3), executor-owned per-component transaction (TN-5.3), preserved E-237 provenance / per-merge mechanics / perspective scoping / recompute ownership; full TN-6 fixture suite incl. identical-name collapse regression guards, no-cascade, no-cross-merge, and a populated stale-disagreeing aggregate test. E-249-02 (software-engineer): `bb data dedup-players` rewritten as a thin presentation layer over the shared planner (no inline `find_duplicate_players` + merge loop), refused-fork surfacing in both dry-run and execute, recompute-commit fix (the old CLI never committed the recompute, so aggregates rolled back on close), and non-zero exit on merge failure. PM AC-verified all 8 (E-249-01) + 6 (E-249-02) ACs PASS; CR APPROVED both stories.
+- 2026-06-30: **Phase 4b Codex finding (P1, FIXED).** The planner originally grouped connected components by `team_id` ONLY, so the unscoped `bb data dedup-players` could union prefix-pairs across seasons. Codex reproduced it: 2025 `{Jo, John}` + 2026 `{Jo, Jon}` on the same team unioned into ONE component and refused a single John/Jon fork instead of performing two per-season collapses. Remediated by partitioning components per `(team_id, season_id)`: `find_duplicate_players` now carries `season_id` and returns a co-rostered pair once per season; `plan_player_dedup` groups by `(team_id, season_id)`; identical cross-season collapses are deduped. Detection signal + canonical tiebreak unchanged. New tests pin it (`TestCrossSeasonPartition` + a CLI unscoped test). The load path is unaffected — it always passes a concrete `season_id`. (P2 missing-test corollary resolved by the same remediation.)
+- 2026-06-30: **KNOWN LIMITATION (documented per explicit user decision — "document + close"; NOT fixed, NOT captured as an idea).** On an unscoped `bb data dedup-players --execute` over a DB holding 2+ seasons of the SAME team where the SAME duplicate `player_id` is claimed by DIFFERENT canonicals across seasons, execution would merge+delete that row in the first season's collapse and then hit a caught `PlayerMergeError` on the next, committing one guessed cross-season-ambiguous resolution. This is UNREACHABLE on the live single-season (2026) DB, the load path is immune (always season-scoped), and cross-season identity is an explicit epic Non-Goal. Surfaced by CR during the Phase 4b remediation verify; per the user, recorded as a known limitation only.
+- 2026-06-30: **Operator follow-up still owed (post-merge, not a story).** Re-run `bb data dedup-players` against the production DB and inspect the `team_id=196` residuals to confirm the cascade is gone and count remaining refused-fork residuals (input to validating IDEA-089). Requires credentials + live DB (unavailable in an epic worktree).
+- 2026-06-30: **Closure assessments (main-session responsibility, recorded by PM).**
+  - **Documentation assessment — TRIGGER FIRES.** `docs/admin/operations.md` (`bb data dedup-players` subsection) goes stale on three operator-visible changes: refused-fork surfacing (dry-run preview + execute WARN), non-zero exit on merge failure, and the now-persisted recompute. docs-writer dispatched to refresh before archive.
+  - **Context-layer assessment — 4 of 6 triggers fire (2, 3, 5, 6); claude-architect dispatched to codify before archive.** Per-trigger verdicts:
+    1. New convention/pattern/constraint — **NO** (the shared planner `plan_player_dedup`/`execute_collapse` follows the existing canonical-seam pattern, not a new convention).
+    2. Architectural decision with ongoing implications — **YES** (the connected-components + fork-refusal "refuse-don't-guess" dedup model; the per-`(team_id, season_id)` component-partition invariant).
+    3. Footgun/failure mode/boundary discovered — **YES** (per-component transaction ownership: the executor owns the txn and calls `merge_player_pair(manage_transaction=False)`; the cross-season component-union footgun from keying components by `team_id` alone; the CLI default-isolation connection rolling back uncommitted recompute DML without an explicit commit; the documented cross-season-execute limitation).
+    4. Agent behavior/routing/coordination — **NO**.
+    5. Domain knowledge for future agent decisions — **YES** (the dedup component model + the cross-season known limitation; overlaps triggers 2/3).
+    6. New CLI command/workflow/procedure — **YES** (`bb data dedup-players` behavior changed materially: fork-refusal + refused-fork surfacing in dry-run and WARN on execute, non-zero exit on failure, season-partitioned components).
 
-### Review Scorecard
+### Post-Dev Review Scorecard
+| Review Pass | Findings | Fixed | Dismissed | Documented |
+|---|---|---|---|---|
+| Per-story CR — E-249-01 | 1 | 1 | 0 | 0 |
+| Per-story CR — E-249-02 | 2 | 2 | 0 | 0 |
+| CR integration review (Phase 4a) | 0 | 0 | 0 | 0 |
+| Codex code review (Phase 4b) | 2 | 2 | 0 | 0 |
+| CR (Phase 4b remediation verify) | 1 | 0 | 0 | 1 |
+| **Total** | **6** | **5** | **0** | **1** |
+
+Disposition note: E-249-01's CR finding was a round-1 SHOULD FIX (savepoint-name collision hardening; round-2 clean). E-249-02's two were a round-1 cross-module underscore-private seam (`_execute_collapse` promoted to public `execute_collapse`) and a round-2 cosmetic mangled-test-name collateral from that rename. The Phase 4a integration review's lone carryover was a stale duplicate of an already-resolved item (reconciled to zero open). The single "Documented" finding is the cross-season-execute known limitation above — a third disposition (neither fixed nor dismissed) per the explicit user decision to document and close. Zero findings dismissed across all post-dev passes.
+
+### Spec-Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iter 1 — CR spec audit | 1 | 1 | 0 |

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,10 @@ class DuplicatePlayerPair:
         duplicate_last_name: Last name of the duplicate player.
         team_id: The team where both players appear on the roster.
         team_name: Display name of the team.
+        season_id: The season whose roster pairs these two players. A pair that
+            co-rosters in multiple seasons is returned once PER season, so that
+            connected-component grouping can partition by (team_id, season_id)
+            and never union prefix-pairs across different-season rosters.
         reason: Human-readable explanation of why they matched.
         has_overlapping_games: True if both player_ids appear in game
             stats for at least one common game_id.
@@ -47,8 +52,78 @@ class DuplicatePlayerPair:
     duplicate_last_name: str
     team_id: int
     team_name: str
+    season_id: str
     reason: str
     has_overlapping_games: bool
+
+
+# ---------------------------------------------------------------------------
+# E-249: connected-components planning shapes (TN-4)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PlayerRef:
+    """A bare reference to a component member (no merge orientation)."""
+
+    player_id: str
+    first_name: str
+    last_name: str
+
+
+@dataclass
+class CollapseDuplicate:
+    """A non-canonical member of a single-terminal-name component.
+
+    ``has_overlapping_games`` is the same-game co-occurrence signal between
+    this member and the component canonical (carried through for the CLI's
+    confidence display; Tier 1 does not act on it).
+    """
+
+    player_id: str
+    first_name: str
+    last_name: str
+    has_overlapping_games: bool
+
+
+@dataclass
+class CollapsePlan:
+    """A single-terminal-name component that collapses into one canonical player.
+
+    Every ``duplicates`` member is merged directly into ``canonical_player_id``
+    (TN-1 collapse rule); the canonical is chosen by the per-component N-way
+    reducer (TN-2).
+    """
+
+    canonical_player_id: str
+    canonical_first_name: str
+    canonical_last_name: str
+    team_id: int
+    team_name: str
+    duplicates: list[CollapseDuplicate] = field(default_factory=list)
+
+
+@dataclass
+class RefusedFork:
+    """A component refused as a fork (≥2 terminals with DISTINCT names, TN-1).
+
+    Left entirely unmerged; surfaced via a single WARN log per component (TN-3).
+    ``terminal_names`` are the distinct (case-insensitively unequal) maximal
+    names that make the stub assignment ambiguous.
+    """
+
+    team_id: int
+    team_name: str
+    members: list[PlayerRef] = field(default_factory=list)
+    terminal_names: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DedupPlan:
+    """The full dedup plan for a scope: collapses to execute + forks to refuse."""
+
+    collapses: list[CollapsePlan] = field(default_factory=list)
+    refused_forks: list[RefusedFork] = field(default_factory=list)
 
 
 def find_duplicate_players(
@@ -69,8 +144,11 @@ def find_duplicate_players(
     - Ties: more total stat rows wins
     - Still tied: alphabetically lower player_id wins
 
-    Results are deduplicated to unique (canonical, duplicate) pairs -- if a
-    pair appears across multiple seasons on the same team, it is returned once.
+    Results are deduplicated to unique (canonical, duplicate, team, season)
+    rows -- a pair that co-rosters in multiple seasons on the same team is
+    returned once PER season (each carrying its ``season_id``), so component
+    grouping can partition by (team_id, season_id) and never union prefix-pairs
+    across different-season rosters.
 
     Args:
         db: An open sqlite3.Connection.
@@ -110,7 +188,8 @@ def find_duplicate_players(
             p2.first_name,
             p2.last_name,
             tr1.team_id,
-            t.name AS team_name
+            t.name AS team_name,
+            tr1.season_id
         FROM team_rosters tr1
         JOIN team_rosters tr2
             ON  tr1.team_id = tr2.team_id
@@ -155,19 +234,23 @@ def find_duplicate_players(
     pairs_to_check = [(row[0], row[3], row[6]) for row in rows]  # pid1, pid2, team_id
     overlap_map = _check_game_overlaps(db, pairs_to_check)
 
-    # Build results with canonical selection, deduplicating across seasons
-    seen_pairs: set[tuple[str, str]] = set()
+    # Build results with canonical selection.  The dedup key INCLUDES season_id
+    # so a pair that co-rosters in multiple seasons is emitted once PER season:
+    # connected-component grouping must partition by (team_id, season_id) and
+    # must NOT union prefix-pairs across different-season rosters (a player can
+    # be a prefix-duplicate of DIFFERENT teammates in different seasons).
+    seen_pairs: set[tuple[str, str, int, str]] = set()
     results: list[DuplicatePlayerPair] = []
 
     for row in rows:
-        pid1, fname1, lname1, pid2, fname2, lname2, tid, tname = row
+        pid1, fname1, lname1, pid2, fname2, lname2, tid, tname, row_season_id = row
 
         canonical_pid, dup_pid, canonical_fname, dup_fname = _select_canonical_player(
             pid1, fname1, pid2, fname2, stat_counts
         )
 
-        # Deduplicate: same (canonical, duplicate) pair on same team
-        pair_key = (canonical_pid, dup_pid, tid)
+        # Deduplicate: same (canonical, duplicate) pair on same team AND season.
+        pair_key = (canonical_pid, dup_pid, tid, row_season_id)
         if pair_key in seen_pairs:
             continue
         seen_pairs.add(pair_key)
@@ -189,6 +272,7 @@ def find_duplicate_players(
                 duplicate_last_name=lname2,
                 team_id=tid,
                 team_name=tname,
+                season_id=row_season_id,
                 reason=reason,
                 has_overlapping_games=has_overlap,
             )
@@ -229,6 +313,28 @@ def _select_canonical_player(
                 return pid1, pid2, fname1, fname2
             else:
                 return pid2, pid1, fname2, fname1
+
+
+def _select_component_canonical(
+    members: list[tuple[str, str, str]],
+    stat_counts: dict[str, int],
+) -> tuple[str, str, str]:
+    """Pick the canonical member of a component (N-way TN-2 reducer).
+
+    Applies the SAME precedence as the pairwise ``_select_canonical_player``
+    across ALL component members at once (NOT a pairwise call): longer
+    first_name wins -> more total stat rows wins -> alphabetically lower
+    ``player_id`` wins.  ``members`` are ``(player_id, first_name, last_name)``
+    tuples.  Returns the winning member tuple.
+    """
+    # Rank ascending by (-len, -stat_count, player_id) and take the head:
+    # longest name first; among equal-length names, more stat rows; finally
+    # the alphabetically lower player_id.  This is exactly the pairwise
+    # precedence generalized to N members.
+    return sorted(
+        members,
+        key=lambda m: (-len(m[1]), -stat_counts.get(m[0], 0), m[0]),
+    )[0]
 
 
 def _count_stat_rows(
@@ -773,6 +879,245 @@ def _delete_or_repoint_season_rows(
 
 
 # ---------------------------------------------------------------------------
+# E-249: connected-components dedup planning (TN-1, TN-2, TN-4)
+# ---------------------------------------------------------------------------
+
+
+def _connected_components(
+    adjacency: dict[str, set[str]],
+) -> list[list[str]]:
+    """Group an undirected adjacency map into connected components.
+
+    Vertices are ``player_id`` strings; every detected prefix pair contributes
+    an edge.  Iteration is sorted for deterministic component order/contents.
+    """
+    seen: set[str] = set()
+    components: list[list[str]] = []
+    for start in sorted(adjacency):
+        if start in seen:
+            continue
+        stack = [start]
+        component: list[str] = []
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            component.append(node)
+            stack.extend(sorted(adjacency[node] - seen))
+        components.append(sorted(component))
+    return components
+
+
+def _terminal_names(
+    members: list[tuple[str, str, str]],
+) -> dict[str, str]:
+    """Return the DISTINCT terminal names of a component (TN-1).
+
+    A *terminal* is a member whose first_name is NOT a strict prefix of any
+    other member's first_name (case-insensitive) -- i.e. a maximal name under
+    the prefix partial order.  The fork/collapse decision keys on the number of
+    distinct terminal NAMES (case-insensitively unequal), NOT the count of
+    terminal ``player_id``s: equal-named maximal members (the bread-and-butter
+    cross-perspective duplicate, e.g. ``{Jon, Jon}``) collapse to a SINGLE
+    terminal name and must not be misclassified as a fork.
+
+    ``members`` are ``(player_id, first_name, last_name)`` tuples.  Returns a
+    ``{lowercased_name: display_name}`` map of the distinct terminal names; its
+    length is the fork test (``>= 2`` -> fork).
+    """
+    distinct: dict[str, str] = {}
+    for _pid, first, _last in members:
+        lower = first.lower()
+        is_terminal = True
+        for _opid, other_first, _olast in members:
+            other_lower = other_first.lower()
+            # Strict prefix: the other name extends this one (longer + startswith).
+            if len(other_lower) > len(lower) and other_lower.startswith(lower):
+                is_terminal = False
+                break
+        if is_terminal:
+            distinct.setdefault(lower, first)
+    return distinct
+
+
+def plan_player_dedup(
+    db: sqlite3.Connection,
+    team_id: int | None = None,
+    season_id: str | None = None,
+) -> DedupPlan:
+    """Group detected prefix pairs into per-roster connected components and
+    classify each as a collapse (single terminal name) or a refused fork
+    (>=2 distinct terminal names), per TN-1.
+
+    This is the single shared planning unit (TN-4) consumed by BOTH the load
+    path (``dedup_team_players``) and the ``bb data dedup-players`` CLI.  It
+    does not mutate any data -- it only reads the detection signal (via
+    ``find_duplicate_players``, unchanged) and returns a ``DedupPlan``.
+
+    Components are partitioned per **(team_id, season_id)** roster (TN-1):
+    edges only join players who co-roster in the SAME season, so an unscoped
+    run (``season_id=None``) processes each (team, season) roster independently
+    and never unions a player's different-season prefix-pairs into one
+    cross-season component.  The per-component canonical is chosen by the N-way
+    TN-2 reducer (``_select_component_canonical``).
+    """
+    pairs = find_duplicate_players(db, team_id=team_id, season_id=season_id)
+    if not pairs:
+        return DedupPlan()
+
+    # Graph state derived from the oriented detection pairs, partitioned by the
+    # (team_id, season_id) roster.  We only need the undirected edges + each
+    # member's (global) name; canonical orientation is re-derived per component.
+    team_names: dict[int, str] = {}
+    names: dict[str, tuple[str, str]] = {}
+    # (team_id, season_id) -> {player_id: set(neighbor_player_id)}
+    adjacency: dict[tuple[int, str], dict[str, set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    # Overlap is team- + perspective-scoped game co-occurrence (season-agnostic).
+    overlap: dict[tuple[int, str, str], bool] = {}
+
+    for pair in pairs:
+        tid = pair.team_id
+        partition = (tid, pair.season_id)
+        team_names[tid] = pair.team_name
+        names[pair.canonical_player_id] = (
+            pair.canonical_first_name,
+            pair.canonical_last_name,
+        )
+        names[pair.duplicate_player_id] = (
+            pair.duplicate_first_name,
+            pair.duplicate_last_name,
+        )
+        adjacency[partition][pair.canonical_player_id].add(pair.duplicate_player_id)
+        adjacency[partition][pair.duplicate_player_id].add(pair.canonical_player_id)
+        lo = min(pair.canonical_player_id, pair.duplicate_player_id)
+        hi = max(pair.canonical_player_id, pair.duplicate_player_id)
+        overlap[(tid, lo, hi)] = pair.has_overlapping_games
+
+    stat_counts = _count_stat_rows(db, set(names))
+
+    plan = DedupPlan()
+    # An unscoped run partitions per season, so a duplicate pair that recurs on
+    # multiple seasons' rosters yields the IDENTICAL collapse once per season.
+    # Collapse those identical plans to a single merge so execution does not
+    # re-delete an already-merged player (a benign-but-noisy caught error).
+    # Collapses that share a duplicate but pick DIFFERENT canonicals across
+    # seasons (the genuinely cross-season-conflicting case) are NOT identical
+    # and are deliberately kept as separate collapses.
+    seen_collapse_keys: set[tuple[str, tuple[str, ...]]] = set()
+    for tid, _season in sorted(adjacency):
+        partition = (tid, _season)
+        for component in _connected_components(adjacency[partition]):
+            members = [(pid, names[pid][0], names[pid][1]) for pid in component]
+            distinct_terminals = _terminal_names(members)
+
+            if len(distinct_terminals) >= 2:
+                plan.refused_forks.append(
+                    RefusedFork(
+                        team_id=tid,
+                        team_name=team_names[tid],
+                        members=[PlayerRef(pid, f, ln) for pid, f, ln in members],
+                        terminal_names=sorted(distinct_terminals.values()),
+                    )
+                )
+                continue
+
+            can_pid, can_first, can_last = _select_component_canonical(
+                members, stat_counts
+            )
+            duplicates: list[CollapseDuplicate] = []
+            for pid, first, last in members:
+                if pid == can_pid:
+                    continue
+                lo = min(pid, can_pid)
+                hi = max(pid, can_pid)
+                duplicates.append(
+                    CollapseDuplicate(
+                        player_id=pid,
+                        first_name=first,
+                        last_name=last,
+                        has_overlapping_games=overlap.get((tid, lo, hi), False),
+                    )
+                )
+            collapse_key = (
+                can_pid,
+                tuple(sorted(d.player_id for d in duplicates)),
+            )
+            if collapse_key in seen_collapse_keys:
+                continue
+            seen_collapse_keys.add(collapse_key)
+
+            plan.collapses.append(
+                CollapsePlan(
+                    canonical_player_id=can_pid,
+                    canonical_first_name=can_first,
+                    canonical_last_name=can_last,
+                    team_id=tid,
+                    team_name=team_names[tid],
+                    duplicates=duplicates,
+                )
+            )
+
+    return plan
+
+
+def execute_collapse(
+    db: sqlite3.Connection,
+    collapse: CollapsePlan,
+    *,
+    manage_transaction: bool,
+) -> set[tuple[str, int, str]]:
+    """Merge every duplicate of one component into its canonical, atomically.
+
+    TN-5.3: per-component atomicity requires the EXECUTOR to own the
+    transaction/savepoint and call ``merge_player_pair(manage_transaction=False)``
+    (its inner SAVEPOINTs nest fine).  When ``manage_transaction`` is True the
+    caller has no open transaction, so we wrap the component in
+    ``BEGIN IMMEDIATE``/``COMMIT``; when False (load path, inside ScoutingLoader's
+    open transaction) we wrap it in a single component-level SAVEPOINT.  A
+    failure rolls back the WHOLE component (all-or-nothing) and re-raises.
+    """
+    affected: set[tuple[str, int, str]] = set()
+    # Collision-safe savepoint name: derive from the FULL canonical_player_id
+    # (not just an 8-char prefix, which two UUIDs could share), sanitizing every
+    # non-alphanumeric char to '_' so the result is a valid SQLite identifier.
+    # The constant "dedup_comp_" prefix guarantees it never starts with a digit.
+    sanitized = "".join(
+        c if c.isalnum() else "_" for c in collapse.canonical_player_id
+    )
+    savepoint = "dedup_comp_" + sanitized
+
+    if manage_transaction:
+        db.execute("BEGIN IMMEDIATE")
+    else:
+        db.execute(f"SAVEPOINT {savepoint}")
+
+    try:
+        for dup in collapse.duplicates:
+            affected |= merge_player_pair(
+                db,
+                collapse.canonical_player_id,
+                dup.player_id,
+                manage_transaction=False,
+            )
+        if manage_transaction:
+            db.execute("COMMIT")
+        else:
+            db.execute(f"RELEASE {savepoint}")
+    except Exception:
+        if manage_transaction:
+            db.execute("ROLLBACK")
+        else:
+            db.execute(f"ROLLBACK TO {savepoint}")
+            db.execute(f"RELEASE {savepoint}")
+        raise
+
+    return affected
+
+
+# ---------------------------------------------------------------------------
 # Season aggregate recomputation (TN-5)
 # ---------------------------------------------------------------------------
 
@@ -787,21 +1132,31 @@ def dedup_team_players(
 ) -> int:
     """Detect and merge same-team duplicate players for one (team, season).
 
-    Calls ``find_duplicate_players()`` scoped to the given team and season,
-    then ``merge_player_pair()`` for each detected pair.  Recomputes season
-    aggregates for any affected (player, team, season) tuples.
+    Builds the connected-components plan via ``plan_player_dedup()`` (the shared
+    TN-4 planning unit), collapses every single-terminal-name component to one
+    canonical player (each component merged atomically -- TN-5.3), and REFUSES
+    every fork (>=2 distinct terminal names), leaving it unmerged with one WARN
+    log per refused component (TN-1, TN-3).  Recomputes season aggregates for
+    any affected (player, team, season) tuples unless suppressed.
 
-    Errors on individual pairs are logged and skipped -- partial dedup is
-    acceptable (AC-7).
+    Because the plan groups whole components and merges each duplicate directly
+    into the component canonical, the stale-worklist ``PlayerMergeError`` cascade
+    is gone: no redundant edge ever references an already-deleted player (AC-4).
+
+    Errors collapsing an individual component are logged and skipped -- partial
+    dedup is acceptable and self-healing on re-run.
 
     Args:
         db: An open sqlite3.Connection with PRAGMA foreign_keys = ON.
         team_id: INTEGER PK of the team to dedup.
         season_id: Season slug to scope the detection query.
-        manage_transaction: Passed through to ``merge_player_pair()``.
-            Use ``False`` when the caller already has an open transaction
-            (Hook 1 inside ScoutingLoader), ``True`` when the caller owns
-            the connection (Hook 2 in orchestrators).
+        manage_transaction: When ``True`` (the caller owns the connection with
+            no open transaction -- Hook 2 orchestrators / the CLI), each
+            component is wrapped in its own ``BEGIN IMMEDIATE``/``COMMIT``.  When
+            ``False`` (the caller already has an open transaction -- Hook 1
+            inside ScoutingLoader), each component is wrapped in a SAVEPOINT.
+            Either way the per-merge primitive runs with
+            ``manage_transaction=False`` so the executor owns atomicity (TN-5.3).
         recompute_aggregates: When ``True`` (default -- the standalone
             ``bb data dedup-players`` CLI caller), recompute season aggregates for the
             affected scopes after merging.  The two embedded load-path dedup
@@ -812,11 +1167,11 @@ def dedup_team_players(
             not the same concern as recompute-ownership.
 
     Returns:
-        Number of pairs successfully merged.
+        Number of duplicate players successfully merged away.
     """
-    pairs = find_duplicate_players(db, team_id=team_id, season_id=season_id)
+    plan = plan_player_dedup(db, team_id=team_id, season_id=season_id)
 
-    if not pairs:
+    if not plan.collapses and not plan.refused_forks:
         logger.info(
             "dedup_team_players: 0 duplicates found for team_id=%d season=%s",
             team_id,
@@ -824,32 +1179,41 @@ def dedup_team_players(
         )
         return 0
 
+    # TN-3: one WARN line per refused fork, naming the team and conflicting
+    # terminal names so an operator can review (Tier 1 is log-only).
+    for fork in plan.refused_forks:
+        logger.warning(
+            "dedup_team_players: refused ambiguous fork on team %r (team_id=%d): "
+            "shared stub maps to distinct names %s; leaving all %d member(s) unmerged",
+            fork.team_name,
+            fork.team_id,
+            ", ".join(fork.terminal_names),
+            len(fork.members),
+        )
+
     merged = 0
     all_affected: set[tuple[str, int, str]] = set()
 
-    for pair in pairs:
+    for collapse in plan.collapses:
         try:
-            affected = merge_player_pair(
-                db,
-                pair.canonical_player_id,
-                pair.duplicate_player_id,
-                manage_transaction=manage_transaction,
+            affected = execute_collapse(
+                db, collapse, manage_transaction=manage_transaction
             )
             all_affected.update(affected)
-            merged += 1
+            merged += len(collapse.duplicates)
             logger.info(
-                "dedup_team_players: merged %s into %s (team_id=%d season=%s)",
-                pair.duplicate_player_id,
-                pair.canonical_player_id,
+                "dedup_team_players: collapsed component into %s (%d member(s)) "
+                "team_id=%d season=%s",
+                collapse.canonical_player_id,
+                len(collapse.duplicates),
                 team_id,
                 season_id,
             )
         except Exception:  # noqa: BLE001
             logger.error(
-                "dedup_team_players: failed to merge %s into %s (team_id=%d); "
-                "continuing with remaining pairs",
-                pair.duplicate_player_id,
-                pair.canonical_player_id,
+                "dedup_team_players: failed to collapse component into %s "
+                "(team_id=%d); continuing with remaining components",
+                collapse.canonical_player_id,
                 team_id,
                 exc_info=True,
             )
@@ -860,8 +1224,10 @@ def dedup_team_players(
         recompute_affected_seasons(db, all_affected)
 
     logger.info(
-        "dedup_team_players: %d pair(s) merged for team_id=%d season=%s",
+        "dedup_team_players: %d duplicate(s) merged, %d fork(s) refused for "
+        "team_id=%d season=%s",
         merged,
+        len(plan.refused_forks),
         team_id,
         season_id,
     )

@@ -4,7 +4,7 @@
 [E-249: Player-Dedup Stale-Worklist Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb data dedup-players` will route through the same shared component-planning unit as the load path instead of re-inlining its own `find_duplicate_players` + merge loop. The CLI dry-run preview surfaces refused forks alongside the planned collapses, and the execute path emits the same WARN log per refused fork. This removes the duplicated, separately-buggy CLI merge loop ("de-dup the dedup") so the fix lives in exactly one place.

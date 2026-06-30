@@ -117,12 +117,22 @@ The command exits 0 only when zero self-games remain after the run. A non-zero e
 
 ### Deduplicating Player Entries (`bb data dedup-players`)
 
-`bb data dedup-players` detects and merges same-team duplicate player entries caused by cross-perspective UUID mismatch. Use `--dry-run` (default) to preview, then `--execute` to apply. Recomputes season aggregates after merge.
+*Last updated: 2026-06-30 | Source: E-249 (connected-component dedup + fork refusal)*
+
+`bb data dedup-players` detects and merges same-team duplicate player entries caused by cross-perspective UUID mismatch. It groups candidates into connected components and collapses unambiguous ones, but **refuses ambiguous forks** -- leaving them unmerged for manual review rather than silently mis-merging. Use `--dry-run` (default) to preview, then `--execute` to apply.
 
 ```bash
 bb data dedup-players          # dry run
 bb data dedup-players --execute  # apply merges
 ```
+
+Optional scope filters: `--team-id` and `--season-id` narrow detection to a single team or season.
+
+**Refused forks (review after every run).** A "fork" is a connected component where a short stub name (e.g. "O") prefix-matches two or more *different* fuller names (e.g. "Oliver" and "Owen"). These components are intentionally left unmerged -- every member survives with no data changed. Refused forks appear in the dry-run preview table and in the `--execute` summary output. On `--execute`, the command also emits one WARN-level log line per refused fork naming the team and the conflicting names. Check the dry-run output or application logs for refused forks after each run; these are the duplicates that need a manual judgment call before they can be resolved.
+
+**Non-zero exit on failure.** If any component merge fails during `--execute`, the command prints the error and exits non-zero. A zero exit on execute means every collapsible component succeeded (refused forks are not failures -- they are intentional deferrals). Check the exit code in any scripted context.
+
+**Season aggregates are committed.** After all merges complete, `--execute` recomputes and commits season aggregates for every affected team/season scope. The commit is explicit -- aggregates are not silently discarded on connection close.
 
 ### Reconciliation Pipeline (`bb data reconcile`)
 

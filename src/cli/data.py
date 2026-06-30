@@ -85,12 +85,18 @@ def dedup_players(
 ) -> None:
     """Detect and merge duplicate players on the same team.
 
-    Default is dry-run: prints detected pairs and per-table row counts
-    without modifying any data. Use --execute to perform the merges.
+    Default is dry-run: prints the planned component collapses, refused forks,
+    and per-table row counts without modifying any data. Use --execute to
+    perform the merges.
+
+    This command is a thin presentation layer over the shared planning unit
+    ``plan_player_dedup`` (E-249, TN-4) -- the same connected-components +
+    fork-refusal logic the load path consumes. It contains NO parallel inline
+    detection/merge loop.
     """
     from src.db.player_dedup import (
-        find_duplicate_players,
-        merge_player_pair,
+        execute_collapse,
+        plan_player_dedup,
         preview_player_merge,
         recompute_affected_seasons,
     )
@@ -102,90 +108,148 @@ def dedup_players(
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
+        # Build the shared component plan (TN-4): single-terminal-name
+        # components to collapse + ambiguous forks to refuse.
         try:
-            pairs = find_duplicate_players(conn, team_id=team_id, season_id=season_id)
+            plan = plan_player_dedup(conn, team_id=team_id, season_id=season_id)
         except Exception as exc:
             typer.echo(f"Error finding duplicate players: {exc}", err=True)
             raise SystemExit(1) from exc
 
-        if not pairs:
+        if not plan.collapses and not plan.refused_forks:
             typer.echo("No duplicate players found.")
             raise SystemExit(0)
 
         mode = "DRY RUN" if is_dry_run else "EXECUTE"
-        team_ids_seen: set[int] = set()
+        total_merges = sum(len(c.duplicates) for c in plan.collapses)
+        team_ids_seen = {c.team_id for c in plan.collapses} | {
+            f.team_id for f in plan.refused_forks
+        }
 
-        typer.echo(f"[{mode}] Found {len(pairs)} duplicate pair(s).\n")
+        typer.echo(
+            f"[{mode}] {len(plan.collapses)} collapsible component(s) "
+            f"({total_merges} merge(s)), {len(plan.refused_forks)} refused fork(s).\n"
+        )
 
-        typer.echo(f"{'Canonical':<30s} {'Duplicate':<30s} {'Team':<30s} {'Confidence':<12s} Reason")
-        typer.echo("-" * 120)
-
-        for pair in pairs:
-            team_ids_seen.add(pair.team_id)
-            canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
-            duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
-            confidence = "high" if pair.has_overlapping_games else "low"
+        if plan.collapses:
             typer.echo(
-                f"{canonical_name:<30s} {duplicate_name:<30s} {pair.team_name:<30s} "
-                f"{confidence:<12s} {pair.reason}"
+                f"{'Canonical':<30s} {'Duplicate':<30s} {'Team':<30s} {'Confidence':<12s}"
             )
+            typer.echo("-" * 105)
+            for collapse in plan.collapses:
+                canonical_name = (
+                    f"{collapse.canonical_first_name} {collapse.canonical_last_name}"
+                )
+                for dup in collapse.duplicates:
+                    duplicate_name = f"{dup.first_name} {dup.last_name}"
+                    confidence = "high" if dup.has_overlapping_games else "low"
+                    typer.echo(
+                        f"{canonical_name:<30s} {duplicate_name:<30s} "
+                        f"{collapse.team_name:<30s} {confidence:<12s}"
+                    )
+
+        # TN-3: refused forks are surfaced in the preview on BOTH dry-run and
+        # execute so the operator sees them before/while acting; the execute
+        # path additionally emits one WARN log line per refused component below.
+        if plan.refused_forks:
+            typer.echo("\nRefused forks (ambiguous -- left unmerged, review manually):")
+            for fork in plan.refused_forks:
+                names = ", ".join(fork.terminal_names)
+                typer.echo(
+                    f"  team {fork.team_name!r} (team_id={fork.team_id}): "
+                    f"conflicting names {names} "
+                    f"({len(fork.members)} member(s) left unmerged)"
+                )
 
         if is_dry_run:
-            # Show per-table preview for each pair
-            typer.echo("\nPer-pair row counts:")
-            for pair in pairs:
-                preview = preview_player_merge(
-                    conn, pair.canonical_player_id, pair.duplicate_player_id
+            # Per-duplicate preview of the rows each merge would touch.
+            typer.echo("\nPer-duplicate row counts:")
+            for collapse in plan.collapses:
+                canonical_name = (
+                    f"{collapse.canonical_first_name} {collapse.canonical_last_name}"
                 )
-                canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
-                duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
-                if preview.table_counts:
-                    tables_str = ", ".join(
-                        f"{t}={n}" for t, n in sorted(preview.table_counts.items())
+                for dup in collapse.duplicates:
+                    preview = preview_player_merge(
+                        conn, collapse.canonical_player_id, dup.player_id
                     )
-                    typer.echo(f"  {duplicate_name} -> {canonical_name}: {tables_str}")
-                else:
-                    typer.echo(f"  {duplicate_name} -> {canonical_name}: (no rows)")
+                    duplicate_name = f"{dup.first_name} {dup.last_name}"
+                    if preview.table_counts:
+                        tables_str = ", ".join(
+                            f"{t}={n}" for t, n in sorted(preview.table_counts.items())
+                        )
+                        typer.echo(f"  {duplicate_name} -> {canonical_name}: {tables_str}")
+                    else:
+                        typer.echo(f"  {duplicate_name} -> {canonical_name}: (no rows)")
 
             typer.echo("")
-            typer.echo(f"Found {len(pairs)} duplicate pair(s) across {len(team_ids_seen)} team(s).")
-        else:
-            # Execute merges
-            merged = 0
-            failed = 0
-            all_affected: set[tuple[str, int, str]] = set()
-
-            typer.echo("")
-            for pair in pairs:
-                canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
-                duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
-                try:
-                    affected = merge_player_pair(
-                        conn,
-                        pair.canonical_player_id,
-                        pair.duplicate_player_id,
-                    )
-                    all_affected.update(affected)
-                    typer.echo(f"  MERGED {duplicate_name} -> {canonical_name}")
-                    merged += 1
-                except Exception as exc:
-                    typer.echo(
-                        f"  ERROR {duplicate_name} -> {canonical_name}: {exc}"
-                    )
-                    failed += 1
-
-            # Recompute season aggregates
-            if all_affected:
-                typer.echo(f"\nRecomputing season aggregates for {len(all_affected)} tuple(s)...")
-                recompute_affected_seasons(conn, all_affected)
-                typer.echo("Season aggregates recomputed.")
-
             typer.echo(
-                f"\nSummary: {len(pairs)} pair(s) detected, "
-                f"{merged} merged, {failed} failed."
+                f"Found {total_merges} merge(s) across {len(team_ids_seen)} team(s); "
+                f"{len(plan.refused_forks)} fork(s) refused."
+            )
+            raise SystemExit(0)
+
+        # --- execute -----------------------------------------------------
+        # TN-3: one WARN line per refused component, naming the team and the
+        # conflicting terminal names (mirrors the load path's dedup_team_players).
+        for fork in plan.refused_forks:
+            logger.warning(
+                "dedup-players: refused ambiguous fork on team %r (team_id=%d): "
+                "shared stub maps to distinct names %s; leaving all %d member(s) unmerged",
+                fork.team_name,
+                fork.team_id,
+                ", ".join(fork.terminal_names),
+                len(fork.members),
             )
 
-    raise SystemExit(0)
+        merged = 0
+        failed = 0
+        all_affected: set[tuple[str, int, str]] = set()
+
+        typer.echo("")
+        for collapse in plan.collapses:
+            canonical_name = (
+                f"{collapse.canonical_first_name} {collapse.canonical_last_name}"
+            )
+            try:
+                # TN-5.3: the component executor OWNS the per-component
+                # transaction (BEGIN IMMEDIATE/COMMIT) and runs each inner merge
+                # with manage_transaction=False -- a single transaction per
+                # component, all-or-nothing. Do NOT call merge_player_pair
+                # directly (its manage_transaction=True default self-commits per
+                # merge and cannot nest under the component transaction).
+                affected = execute_collapse(conn, collapse, manage_transaction=True)
+                all_affected.update(affected)
+                merged += len(collapse.duplicates)
+                for dup in collapse.duplicates:
+                    duplicate_name = f"{dup.first_name} {dup.last_name}"
+                    typer.echo(f"  MERGED {duplicate_name} -> {canonical_name}")
+            except Exception as exc:  # noqa: BLE001 -- per-component isolation
+                failed += len(collapse.duplicates)
+                typer.echo(
+                    f"  ERROR collapsing component into {canonical_name}: {exc}"
+                )
+
+        # TN-5.4: the CLI owns its recompute. Recompute season aggregates for
+        # all affected scopes, then COMMIT -- the CLI owns its connection, and
+        # the recompute DML runs OUTSIDE the per-component transactions, so
+        # without an explicit commit it would be rolled back on close.
+        if all_affected:
+            typer.echo(
+                f"\nRecomputing season aggregates for {len(all_affected)} tuple(s)..."
+            )
+            recompute_affected_seasons(conn, all_affected)
+            conn.commit()
+            typer.echo("Season aggregates recomputed.")
+
+        typer.echo(
+            f"\nSummary: {total_merges} merge(s) detected, "
+            f"{merged} merged, {failed} failed, "
+            f"{len(plan.refused_forks)} fork(s) refused."
+        )
+
+    # AC-5: surface execute-time merge failures as a non-zero exit so the
+    # operator is not given a misleading success.
+    raise SystemExit(0 if failed == 0 else 1)
 
 
 # ---------------------------------------------------------------------------

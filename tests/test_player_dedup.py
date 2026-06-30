@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import pytest
@@ -10,8 +11,10 @@ from src.db.player_dedup import (
     DuplicatePlayerPair,
     PlayerMergeError,
     _select_canonical_player,
+    dedup_team_players,
     find_duplicate_players,
     merge_player_pair,
+    plan_player_dedup,
     preview_player_merge,
     recompute_affected_seasons,
 )
@@ -247,10 +250,13 @@ class TestCanonicalSelection:
 
 
 class TestSeasonDedup:
-    def test_pair_across_multiple_seasons_returned_once(
+    def test_pair_across_multiple_seasons_returned_per_season(
         self, db: sqlite3.Connection
     ) -> None:
-        """Same pair on same team across two seasons -> one result."""
+        """The SAME pair on two seasons' rosters is returned once PER season
+        (each carrying its season_id), so component grouping can partition by
+        (team_id, season_id).  The planner then collapses the two IDENTICAL
+        per-season collapses back into a single merge."""
         _seed_team(db, 1, "LSB Varsity")
         _seed_player(db, "p-oliver", "Oliver", "Holbein")
         _seed_player(db, "p-o", "O", "Holbein")
@@ -260,7 +266,19 @@ class TestSeasonDedup:
         _seed_roster(db, 1, "p-o", "2026")
 
         pairs = find_duplicate_players(db)
-        assert len(pairs) == 1
+        assert len(pairs) == 2
+        assert {p.season_id for p in pairs} == {"2025", "2026"}
+        # The detection orientation is identical in both seasons.
+        assert {(p.canonical_player_id, p.duplicate_player_id) for p in pairs} == {
+            ("p-oliver", "p-o")
+        }
+
+        # Planner-level: the two identical per-season collapses dedup to one.
+        plan = plan_player_dedup(db)
+        assert len(plan.refused_forks) == 0
+        assert len(plan.collapses) == 1
+        assert plan.collapses[0].canonical_player_id == "p-oliver"
+        assert [d.player_id for d in plan.collapses[0].duplicates] == ["p-o"]
 
 
 # ---------------------------------------------------------------------------
@@ -1609,4 +1627,377 @@ class TestMergeCrossPerspectiveRowsPreserved:
         assert len(rows) == 1, f"expected 1 row (canonical wins), got {len(rows)}"
         # Canonical wins on tie: (4, 2)
         assert rows[0] == (4, 2), f"expected canonical (4, 2), got {rows[0]}"
+
+
+# ===========================================================================
+# E-249-01: connected-components dedup with fork refusal (TN-6 fixture suite)
+# ===========================================================================
+
+
+def _player_ids(db: sqlite3.Connection) -> set[str]:
+    """All surviving player_ids."""
+    return {r[0] for r in db.execute("SELECT player_id FROM players").fetchall()}
+
+
+class TestComponentCollapse:
+    """TN-6 (a)/(e): single-terminal-NAME components fully collapse (AC-1)."""
+
+    def test_total_chain_collapses_to_one_canonical(
+        self, db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """TN-6 (a): O subset Oli subset Oliver -> one canonical (Oliver),
+        combined stats, and NO PlayerMergeError cascade (AC-1, AC-4)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-o", "O", "Holbein")
+        _seed_player(db, "p-oli", "Oli", "Holbein")
+        _seed_player(db, "p-oliver", "Oliver", "Holbein")
+        for pid in ("p-o", "p-oli", "p-oliver"):
+            _seed_roster(db, 1, pid, "2026")
+
+        # Distinct games -> combined batting line is 3+4+2 = 9 AB, 1+2+1 = 4 H.
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game(db, "g2", "2026", 1)
+        _seed_game(db, "g3", "2026", 1)
+        _seed_game_batting(db, "g1", "p-o", 1, ab=3, h=1)
+        _seed_game_batting(db, "g2", "p-oli", 1, ab=4, h=2)
+        _seed_game_batting(db, "g3", "p-oliver", 1, ab=2, h=1)
+
+        with caplog.at_level(logging.ERROR, logger="src.db.player_dedup"):
+            merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        # AC-4: zero merge errors logged (no stale-worklist cascade).
+        assert not [
+            r for r in caplog.records if r.levelno >= logging.ERROR
+        ], "no PlayerMergeError cascade should be logged"
+
+        # Two duplicates merged into the single canonical.
+        assert merged == 2
+        assert _player_ids(db) == {"p-oliver"}
+
+        row = db.execute(
+            "SELECT ab, h FROM player_season_batting "
+            "WHERE player_id = 'p-oliver' AND team_id = 1 AND season_id = '2026'"
+        ).fetchone()
+        assert row == (9, 4), f"combined batting line wrong: {row}"
+
+    def test_equal_named_under_longer_terminal_collapses(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """TN-6 (e): {Jon, Jon, Jonathan} -> both Jons are strict prefixes of
+        Jonathan -> single terminal name -> all three collapse (AC-1)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jon-a", "Jon", "Reyes")
+        _seed_player(db, "p-jon-b", "Jon", "Reyes")
+        _seed_player(db, "p-jonathan", "Jonathan", "Reyes")
+        for pid in ("p-jon-a", "p-jon-b", "p-jonathan"):
+            _seed_roster(db, 1, pid, "2026")
+
+        merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 2
+        assert _player_ids(db) == {"p-jonathan"}, (
+            "Jonathan is the sole terminal name; both Jons collapse into it"
+        )
+
+
+class TestSingleStubCollapse:
+    """TN-6 (b clean case): a two-member single-stub pair collapses (AC-1)."""
+
+    def test_single_stub_pair_collapses(self, db: sqlite3.Connection) -> None:
+        """Jo -> John, no third member -> single terminal -> collapses."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jo", "Jo", "Adams")
+        _seed_player(db, "p-john", "John", "Adams")
+        _seed_roster(db, 1, "p-jo", "2026")
+        _seed_roster(db, 1, "p-john", "2026")
+
+        merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 1
+        assert _player_ids(db) == {"p-john"}
+
+
+class TestIdenticalNameCollapse:
+    """TN-6 (d): the Finding-1 regression guard -- equal-named maximal members
+    (same first+last under two UUIDs) COLLAPSE, they are NOT a fork (AC-3).
+
+    This FAILS if the fork rule keys on terminal *count* rather than terminal
+    *distinct names*: both Jons are non-strict-prefix "terminals" but share ONE
+    terminal name, so the component must collapse via the existing tiebreak.
+    """
+
+    def test_identical_name_pair_collapses(self, db: sqlite3.Connection) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jon-a", "Jon", "Reyes")
+        _seed_player(db, "p-jon-b", "Jon", "Reyes")
+        _seed_roster(db, 1, "p-jon-a", "2026")
+        _seed_roster(db, 1, "p-jon-b", "2026")
+
+        # Give p-jon-b more stat rows so the equal-length tiebreak picks it.
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game(db, "g2", "2026", 1)
+        _seed_game_batting(db, "g1", "p-jon-b", 1, ab=4, h=2)
+        _seed_game_batting(db, "g2", "p-jon-b", 1, ab=3, h=1)
+        _seed_game(db, "g3", "2026", 1)
+        _seed_game_batting(db, "g3", "p-jon-a", 1, ab=2, h=1)
+
+        plan = plan_player_dedup(db, team_id=1, season_id="2026")
+        assert len(plan.refused_forks) == 0, "{Jon, Jon} must NOT be a fork"
+        assert len(plan.collapses) == 1
+        # Tiebreak: equal length -> more stat rows wins -> p-jon-b is canonical.
+        assert plan.collapses[0].canonical_player_id == "p-jon-b"
+
+        merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+        assert merged == 1
+        assert _player_ids(db) == {"p-jon-b"}
+
+
+class TestForkRefusal:
+    """TN-6 (b)/(c): forks (>=2 distinct terminal names) are REFUSED (AC-2)."""
+
+    def test_jo_john_jon_fork_refused(
+        self, db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """TN-6 (b): Jo -> John + Jo -> Jon -> John and Jon are distinct-named
+        terminals -> REFUSED; all three members survive; one WARN (AC-2, AC-5)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jo", "Jo", "Pratt")
+        _seed_player(db, "p-john", "John", "Pratt")
+        _seed_player(db, "p-jon", "Jon", "Pratt")
+        for pid in ("p-jo", "p-john", "p-jon"):
+            _seed_roster(db, 1, pid, "2026")
+        # No same-game co-occurrence between John and Jon (consistent with a
+        # possible same-human fork) -- Tier 1 refuses regardless.
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game(db, "g2", "2026", 1)
+        _seed_game_batting(db, "g1", "p-john", 1, ab=3, h=1)
+        _seed_game_batting(db, "g2", "p-jon", 1, ab=2, h=1)
+
+        with caplog.at_level(logging.WARNING, logger="src.db.player_dedup"):
+            merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 0, "a refused fork merges nothing"
+        assert _player_ids(db) == {"p-jo", "p-john", "p-jon"}, (
+            "every member of a refused fork survives as a distinct row"
+        )
+
+        # AC-5: exactly one WARN per refused component, naming the team and the
+        # conflicting terminal names.
+        warns = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "refused" in r.getMessage()
+        ]
+        assert len(warns) == 1, f"expected exactly one WARN, got {len(warns)}"
+        msg = warns[0].getMessage()
+        assert "LSB Varsity" in msg
+        assert "John" in msg and "Jon" in msg
+
+    def test_stub_to_two_distinct_refused_no_cross_merge(
+        self, db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """TN-6 (c): O -> Oliver + O -> Owen -> REFUSED; the two distinct-human
+        terminals stay separate (the no-cross-merge assertion, AC-2).
+
+        Co-occurrence baked in: Oliver and Owen play in the SAME game (the
+        signal that they are TWO humans), making the distinction explicit even
+        though Tier 1 refuses on the structural fork rule alone.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-o", "O", "Yang")
+        _seed_player(db, "p-oliver", "Oliver", "Yang")
+        _seed_player(db, "p-owen", "Owen", "Yang")
+        for pid in ("p-o", "p-oliver", "p-owen"):
+            _seed_roster(db, 1, pid, "2026")
+        # Two-human signal: Oliver and Owen both appear in g1.
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game_batting(db, "g1", "p-oliver", 1, ab=4, h=2)
+        _seed_game_batting(db, "g1", "p-owen", 1, ab=3, h=1)
+
+        with caplog.at_level(logging.WARNING, logger="src.db.player_dedup"):
+            merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 0
+        # No-cross-merge: Oliver and Owen remain DISTINCT players rows (and the
+        # shared stub O survives too, since the whole component is refused).
+        assert _player_ids(db) == {"p-o", "p-oliver", "p-owen"}
+        assert db.execute(
+            "SELECT COUNT(*) FROM players WHERE first_name IN ('Oliver', 'Owen')"
+        ).fetchone()[0] == 2
+
+        plan = plan_player_dedup(db, team_id=1, season_id="2026")
+        assert len(plan.collapses) == 0
+        assert len(plan.refused_forks) == 1
+        assert sorted(plan.refused_forks[0].terminal_names) == ["Oliver", "Owen"]
+
+
+class TestComponentMixedProvenance:
+    """AC-6: a member full/supplemented row survives a multi-member collapse."""
+
+    def test_member_full_row_survives_chain_collapse(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """A 3-member chain where the MIDDLE member owns an authoritative 'full'
+        season row -> after collapse the full row is re-pointed to canonical,
+        never downgraded to a boxscore sum (TN-5.1)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-o", "O", "Cruz")
+        _seed_player(db, "p-oli", "Oli", "Cruz")
+        _seed_player(db, "p-oliver", "Oliver", "Cruz")
+        for pid in ("p-o", "p-oli", "p-oliver"):
+            _seed_roster(db, 1, pid, "2026")
+        _seed_game(db, "g1", "2026", 1)
+
+        # The middle member owns a member 'full' batting row (ab=99) AND a
+        # per-game boxscore row the recompute could downgrade it to.
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-oli', 1, '2026', 'full', 30, 30, 99, 40)"
+        )
+        _seed_game_batting(db, "g1", "p-oli", 1, ab=3, h=1)
+        db.commit()
+
+        dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert _player_ids(db) == {"p-oliver"}
+        bat = db.execute(
+            "SELECT player_id, stat_completeness, ab, h FROM player_season_batting "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+        assert bat == [("p-oliver", "full", 99, 40)], (
+            f"member full row downgraded/lost or not re-pointed: {bat}"
+        )
+
+
+class TestAggregateParityAfterDedup:
+    """AC-7 / TN-6: the aggregate test has teeth -- seed a POPULATED state whose
+    stored aggregate DISAGREES with the per-game sum, then assert the post-dedup
+    recompute yields the correct COMBINED line (not the stale stored value)."""
+
+    def test_stale_aggregate_recomputed_to_combined_line(
+        self, db: sqlite3.Connection
+    ) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-o", "O", "Diaz")
+        _seed_player(db, "p-oliver", "Oliver", "Diaz")
+        _seed_roster(db, 1, "p-o", "2026")
+        _seed_roster(db, 1, "p-oliver", "2026")
+
+        # Per-game rows sum to ab=7, h=3.
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game(db, "g2", "2026", 1)
+        _seed_game_batting(db, "g1", "p-o", 1, ab=3, h=1)
+        _seed_game_batting(db, "g2", "p-oliver", 1, ab=4, h=2)
+
+        # Deliberately WRONG stored boxscore_only aggregate (ab=1, h=0) on the
+        # canonical -- if the recompute did not run (or read stale), the test
+        # would see these wrong values instead of the combined per-game sum.
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-oliver', 1, '2026', 'boxscore_only', 1, 1, 1, 0)"
+        )
+        db.commit()
+
+        dedup_team_players(
+            db, 1, "2026", manage_transaction=True, recompute_aggregates=True
+        )
+
+        rows = db.execute(
+            "SELECT player_id, ab, h FROM player_season_batting "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+        assert rows == [("p-oliver", 7, 3)], (
+            f"post-dedup aggregate should be the combined per-game line, got {rows}"
+        )
+
+
+class TestDedupPlanShape:
+    """Unit-level checks on plan_player_dedup's returned shape (for E-249-02)."""
+
+    def test_plan_separates_collapses_and_forks(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """A roster with a chain (collapse) AND a fork (refuse) on the same team
+        yields one of each in the plan, keyed correctly."""
+        _seed_team(db, 1, "LSB Varsity")
+        # Collapse component: Sam subset Samuel (last name Webb).
+        _seed_player(db, "p-sam", "Sam", "Webb")
+        _seed_player(db, "p-samuel", "Samuel", "Webb")
+        # Fork component: A -> Aaron + A -> Abel (last name Vance).
+        _seed_player(db, "p-a", "A", "Vance")
+        _seed_player(db, "p-aaron", "Aaron", "Vance")
+        _seed_player(db, "p-abel", "Abel", "Vance")
+        for pid in ("p-sam", "p-samuel", "p-a", "p-aaron", "p-abel"):
+            _seed_roster(db, 1, pid, "2026")
+
+        plan = plan_player_dedup(db, team_id=1, season_id="2026")
+
+        assert len(plan.collapses) == 1
+        collapse = plan.collapses[0]
+        assert collapse.canonical_player_id == "p-samuel"
+        assert [d.player_id for d in collapse.duplicates] == ["p-sam"]
+
+        assert len(plan.refused_forks) == 1
+        fork = plan.refused_forks[0]
+        assert sorted(fork.terminal_names) == ["Aaron", "Abel"]
+        assert {m.player_id for m in fork.members} == {"p-a", "p-aaron", "p-abel"}
+
+
+class TestCrossSeasonPartition:
+    """Phase-4b P1 regression: components MUST partition per (team_id,
+    season_id).  An unscoped run must NOT union a player's different-season
+    prefix-pairs into one cross-season fork.
+
+    Codex's exact repro: the SAME ``p-jo`` row is on the 2025 roster {Jo, John}
+    and the 2026 roster {Jo, Jon}.  Before the fix, the unscoped planner unioned
+    {Jo, John, Jon} into ONE component and refused it as a fork (['John','Jon']),
+    merging nothing.  After the fix it yields TWO independent collapses and ZERO
+    forks.
+    """
+
+    def _seed_codex_shape(self, db: sqlite3.Connection) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jo", "Jo", "Pratt")
+        _seed_player(db, "p-john", "John", "Pratt")
+        _seed_player(db, "p-jon", "Jon", "Pratt")
+        # Same p-jo row rostered in BOTH seasons; John only 2025, Jon only 2026.
+        _seed_roster(db, 1, "p-jo", "2025")
+        _seed_roster(db, 1, "p-john", "2025")
+        _seed_roster(db, 1, "p-jo", "2026")
+        _seed_roster(db, 1, "p-jon", "2026")
+
+    def test_unscoped_plan_yields_two_collapses_zero_forks(
+        self, db: sqlite3.Connection
+    ) -> None:
+        self._seed_codex_shape(db)
+
+        plan = plan_player_dedup(db, team_id=1)  # unscoped season
+
+        assert len(plan.refused_forks) == 0, (
+            "the cross-season fork must be gone -- 2025 and 2026 are independent"
+        )
+        assert len(plan.collapses) == 2
+        by_canonical = {
+            c.canonical_player_id: [d.player_id for d in c.duplicates]
+            for c in plan.collapses
+        }
+        assert by_canonical == {"p-john": ["p-jo"], "p-jon": ["p-jo"]}, (
+            "Jo collapses into John (2025) AND into Jon (2026), independently"
+        )
+
+    def test_each_season_scoped_plan_collapses_independently(
+        self, db: sqlite3.Connection
+    ) -> None:
+        self._seed_codex_shape(db)
+
+        plan_2025 = plan_player_dedup(db, team_id=1, season_id="2025")
+        assert len(plan_2025.refused_forks) == 0
+        assert len(plan_2025.collapses) == 1
+        assert plan_2025.collapses[0].canonical_player_id == "p-john"
+
+        plan_2026 = plan_player_dedup(db, team_id=1, season_id="2026")
+        assert len(plan_2026.refused_forks) == 0
+        assert len(plan_2026.collapses) == 1
+        assert plan_2026.collapses[0].canonical_player_id == "p-jon"
 

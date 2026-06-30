@@ -10,16 +10,113 @@ the surviving CLI surface and the dedup-players error path.
 
 from __future__ import annotations
 
+import inspect
+import logging
 import os
 import re
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from src.cli import app
+from tests.conftest import load_real_schema
 
 runner = CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# Real-DB seed helpers for the dedup-players delegation tests (E-249-02).
+#
+# The CLI opens its OWN connection (sqlite3.connect) against the --db path, so
+# these tests seed an on-disk temp DB, invoke the command against it, then
+# re-open the file to assert the persisted result (proving the merge AND the
+# recompute commit survive the command's connection close).
+# ---------------------------------------------------------------------------
+
+_AWAY_PLACEHOLDER_TEAM_ID = 9999
+
+
+def _make_db_file(tmp_path: Path) -> Path:
+    """Create an on-disk DB with the production schema + a placeholder away team."""
+    db_file = tmp_path / "dedup.db"
+    conn = sqlite3.connect(str(db_file))
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO teams (id, name, membership_type) "
+        "VALUES (?, 'Away Placeholder', 'tracked')",
+        (_AWAY_PLACEHOLDER_TEAM_ID,),
+    )
+    conn.commit()
+    conn.close()
+    return db_file
+
+
+def _seed_team(conn: sqlite3.Connection, team_id: int, name: str) -> None:
+    conn.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, 'member')",
+        (team_id, name),
+    )
+
+
+def _seed_player(conn: sqlite3.Connection, pid: str, first: str, last: str) -> None:
+    conn.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+        (pid, first, last),
+    )
+
+
+def _seed_roster(conn: sqlite3.Connection, team_id: int, pid: str, season: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'spring-hs', 2026)",
+        (season, season),
+    )
+    conn.execute(
+        "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
+        (team_id, pid, season),
+    )
+
+
+def _seed_game(conn: sqlite3.Connection, game_id: str, season: str, team_id: int) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'spring-hs', 2026)",
+        (season, season),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO games "
+        "(game_id, season_id, game_date, home_team_id, away_team_id) "
+        "VALUES (?, ?, '2026-04-01', ?, ?)",
+        (game_id, season, team_id, _AWAY_PLACEHOLDER_TEAM_ID),
+    )
+
+
+def _seed_game_batting(
+    conn: sqlite3.Connection,
+    game_id: str,
+    pid: str,
+    team_id: int,
+    *,
+    ab: int = 0,
+    h: int = 0,
+) -> None:
+    conn.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, perspective_team_id, stat_completeness, ab, h) "
+        "VALUES (?, ?, ?, ?, 'boxscore_only', ?, ?)",
+        (game_id, pid, team_id, team_id, ab, h),
+    )
+
+
+def _surviving_player_ids(db_file: Path) -> set[str]:
+    conn = sqlite3.connect(str(db_file))
+    try:
+        return {r[0] for r in conn.execute("SELECT player_id FROM players").fetchall()}
+    finally:
+        conn.close()
 
 
 def _backfill_summary() -> dict[str, int]:
@@ -99,6 +196,316 @@ def test_dedup_players_error_path() -> None:
     assert result.exit_code != 0
     assert "Error finding duplicate players" in result.output
     assert "table missing" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb data dedup-players -- E-249-02: delegation to the shared planner
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_players_delegates_to_shared_planner() -> None:
+    """AC-1: the command routes through plan_player_dedup with the CLI scope,
+    and contains NO parallel inline find_duplicate_players + merge loop."""
+    from src.db.player_dedup import DedupPlan
+
+    mock_conn = MagicMock()
+    with patch("src.cli.data.sqlite3.connect", return_value=mock_conn):
+        with patch(
+            "src.db.player_dedup.plan_player_dedup",
+            return_value=DedupPlan(),
+        ) as mock_plan:
+            result = runner.invoke(
+                app,
+                ["data", "dedup-players", "--team-id", "7", "--season-id", "2026"],
+            )
+
+    assert result.exit_code == 0
+    assert "No duplicate players found." in result.output
+    mock_plan.assert_called_once()
+    assert mock_plan.call_args.kwargs == {"team_id": 7, "season_id": "2026"}
+
+    # No-inline-loop guard: the CLI must not re-call the detection/merge
+    # primitives directly -- it delegates to the shared planner + executor.
+    import src.cli.data as cli_data_mod
+
+    src = inspect.getsource(cli_data_mod)
+    assert "merge_player_pair(" not in src
+    assert "find_duplicate_players(" not in src
+    assert "plan_player_dedup(" in src
+    assert "execute_collapse(" in src
+
+
+def test_dedup_players_execute_collapses_and_refuses_fork(tmp_path: Path) -> None:
+    """AC-2: a single-terminal component collapses (one canonical) while a fork
+    on the same team is left unmerged with every member surviving -- identical
+    collapse/refuse behavior to the load path."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    # Collapse component: Sam subset Samuel.
+    _seed_player(conn, "p-sam", "Sam", "Webb")
+    _seed_player(conn, "p-samuel", "Samuel", "Webb")
+    # Fork component: O -> Oliver + O -> Owen (distinct terminals).
+    _seed_player(conn, "p-o", "O", "Yang")
+    _seed_player(conn, "p-oliver", "Oliver", "Yang")
+    _seed_player(conn, "p-owen", "Owen", "Yang")
+    for pid in ("p-sam", "p-samuel", "p-o", "p-oliver", "p-owen"):
+        _seed_roster(conn, 1, pid, "2026")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(
+        app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    # Collapse: Sam merged into Samuel. Fork: all three members survive.
+    assert _surviving_player_ids(db_file) == {
+        "p-samuel",
+        "p-o",
+        "p-oliver",
+        "p-owen",
+    }
+    assert "MERGED Sam Webb -> Samuel Webb" in result.output
+    assert "refused fork" in result.output.lower()
+
+
+def test_dedup_players_unscoped_partitions_per_season(tmp_path: Path) -> None:
+    """Phase-4b P1 regression (CLI unscoped): a player who is a prefix-duplicate
+    of DIFFERENT teammates in different seasons must NOT be unioned into one
+    cross-season fork.  Codex's exact shape: same p-jo on 2025 {Jo, John} and
+    2026 {Jo, Jon}.  An unscoped dry-run yields TWO collapses and ZERO refused
+    forks (never the cross-season ['John','Jon'] fork), and mutates nothing."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-jo", "Jo", "Pratt")
+    _seed_player(conn, "p-john", "John", "Pratt")
+    _seed_player(conn, "p-jon", "Jon", "Pratt")
+    _seed_roster(conn, 1, "p-jo", "2025")
+    _seed_roster(conn, 1, "p-john", "2025")
+    _seed_roster(conn, 1, "p-jo", "2026")
+    _seed_roster(conn, 1, "p-jon", "2026")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "2 collapsible component(s)" in result.output
+    assert "0 refused fork(s)" in result.output
+    # The cross-season fork must never be surfaced.
+    assert "Refused forks (ambiguous" not in result.output
+    # Both independent collapses are previewed.
+    assert "Jo Pratt" in result.output
+    assert "John Pratt" in result.output and "Jon Pratt" in result.output
+    # Dry-run mutates nothing.
+    assert _surviving_player_ids(db_file) == {"p-jo", "p-john", "p-jon"}
+
+
+def test_dedup_players_dry_run_surfaces_refused_fork(tmp_path: Path) -> None:
+    """AC-3 (dry-run): the preview lists the refused fork (team + conflicting
+    terminal names) and changes NO data."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-o", "O", "Yang")
+    _seed_player(conn, "p-oliver", "Oliver", "Yang")
+    _seed_player(conn, "p-owen", "Owen", "Yang")
+    for pid in ("p-o", "p-oliver", "p-owen"):
+        _seed_roster(conn, 1, pid, "2026")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "Refused forks" in result.output
+    assert "LSB Varsity" in result.output
+    assert "Oliver" in result.output and "Owen" in result.output
+    # Dry-run mutates nothing.
+    assert _surviving_player_ids(db_file) == {"p-o", "p-oliver", "p-owen"}
+
+
+def test_dedup_players_execute_warns_per_refused_fork(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-3 (execute): exactly one WARN-level log line per refused component,
+    naming the team and the conflicting terminal names."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-o", "O", "Yang")
+    _seed_player(conn, "p-oliver", "Oliver", "Yang")
+    _seed_player(conn, "p-owen", "Owen", "Yang")
+    for pid in ("p-o", "p-oliver", "p-owen"):
+        _seed_roster(conn, 1, pid, "2026")
+    conn.commit()
+    conn.close()
+
+    with caplog.at_level(logging.WARNING, logger="src.cli.data"):
+        result = runner.invoke(
+            app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+        )
+
+    assert result.exit_code == 0, result.output
+    warns = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "refused" in r.getMessage()
+    ]
+    assert len(warns) == 1, f"expected exactly one WARN, got {len(warns)}"
+    msg = warns[0].getMessage()
+    assert "LSB Varsity" in msg
+    assert "Oliver" in msg and "Owen" in msg
+
+
+def test_dedup_players_execute_recomputes_and_persists_aggregate(
+    tmp_path: Path,
+) -> None:
+    """AC-4: after a CLI collapse the season aggregate is recomputed (and the
+    recompute is COMMITTED -- it survives the connection close) to the combined
+    per-game line, matching what `verify-aggregates` would assert.
+
+    The stored boxscore_only aggregate is deliberately seeded WRONG, so the test
+    has teeth: a missing/rolled-back recompute would leave the stale value.
+    """
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-o", "O", "Diaz")
+    _seed_player(conn, "p-oliver", "Oliver", "Diaz")
+    _seed_roster(conn, 1, "p-o", "2026")
+    _seed_roster(conn, 1, "p-oliver", "2026")
+    # Per-game rows sum to ab=7, h=3.
+    _seed_game(conn, "g1", "2026", 1)
+    _seed_game(conn, "g2", "2026", 1)
+    _seed_game_batting(conn, "g1", "p-o", 1, ab=3, h=1)
+    _seed_game_batting(conn, "g2", "p-oliver", 1, ab=4, h=2)
+    # Deliberately STALE stored aggregate on the canonical (ab=1, h=0).
+    conn.execute(
+        "INSERT INTO player_season_batting "
+        "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+        "VALUES ('p-oliver', 1, '2026', 'boxscore_only', 1, 1, 1, 0)"
+    )
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(
+        app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Season aggregates recomputed." in result.output
+
+    verify = sqlite3.connect(str(db_file))
+    try:
+        rows = verify.execute(
+            "SELECT player_id, ab, h FROM player_season_batting "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+    finally:
+        verify.close()
+    assert rows == [("p-oliver", 7, 3)], (
+        f"recompute should persist the combined per-game line, got {rows}"
+    )
+
+
+def test_dedup_players_execute_merge_failure_nonzero_exit(tmp_path: Path) -> None:
+    """AC-5: a merge that raises during execute is surfaced (reported AND
+    non-zero exit) -- never a misleading success."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-sam", "Sam", "Webb")
+    _seed_player(conn, "p-samuel", "Samuel", "Webb")
+    _seed_roster(conn, 1, "p-sam", "2026")
+    _seed_roster(conn, 1, "p-samuel", "2026")
+    conn.commit()
+    conn.close()
+
+    with patch(
+        "src.db.player_dedup.execute_collapse",
+        side_effect=RuntimeError("merge boom"),
+    ):
+        result = runner.invoke(
+            app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+        )
+
+    assert result.exit_code != 0
+    assert "ERROR collapsing component into Samuel Webb" in result.output
+    assert "merge boom" in result.output
+    # Not a misleading success: nothing was recomputed, both players survive.
+    assert "Season aggregates recomputed." not in result.output
+    assert _surviving_player_ids(db_file) == {"p-sam", "p-samuel"}
+
+
+class _RecordingConn:
+    """Proxy over a real sqlite3.Connection that records executed SQL text.
+
+    Only ``execute`` is wrapped (to capture transaction-control statements);
+    every other attribute -- including ``close``/``commit`` invoked by the
+    command's ``closing(...)`` block -- delegates to the real connection.
+    """
+
+    def __init__(self, real: sqlite3.Connection, sql_log: list[str]) -> None:
+        self._real = real
+        self._sql_log = sql_log
+
+    def execute(self, sql: str, *args: object, **kwargs: object) -> object:
+        self._sql_log.append(sql)
+        return self._real.execute(sql, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+def test_dedup_players_execute_single_transaction_per_component(
+    tmp_path: Path,
+) -> None:
+    """AC-6: a multi-member component is collapsed under ONE transaction owned by
+    the executor (a single BEGIN IMMEDIATE), with the inner per-member merges
+    running on SAVEPOINTs (manage_transaction=False) -- no nested-transaction
+    error. A bare merge_player_pair(manage_transaction=True) would either raise
+    a nested-BEGIN error or lose per-component atomicity."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    # 3-member chain -> single component, 2 inner merges.
+    _seed_player(conn, "p-o", "O", "Holbein")
+    _seed_player(conn, "p-oli", "Oli", "Holbein")
+    _seed_player(conn, "p-oliver", "Oliver", "Holbein")
+    for pid in ("p-o", "p-oli", "p-oliver"):
+        _seed_roster(conn, 1, pid, "2026")
+    conn.commit()
+    conn.close()
+
+    sql_log: list[str] = []
+    real = sqlite3.connect(str(db_file))
+    recording = _RecordingConn(real, sql_log)
+    with patch("src.cli.data.sqlite3.connect", return_value=recording):
+        result = runner.invoke(
+            app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+        )
+
+    # No nested-transaction error: the command completed and collapsed the chain.
+    assert result.exit_code == 0, result.output
+    assert _surviving_player_ids(db_file) == {"p-oliver"}
+
+    # Exactly one explicit BEGIN IMMEDIATE for the single component; the two
+    # inner merges used SAVEPOINTs (NOT their own BEGIN), and no component-level
+    # SAVEPOINT (that path is manage_transaction=False, not used by the CLI).
+    begins = [s for s in sql_log if s.strip().upper().startswith("BEGIN IMMEDIATE")]
+    assert len(begins) == 1, f"expected one component transaction, got {begins}"
+    inner_savepoints = [
+        s for s in sql_log if s.strip().upper().startswith("SAVEPOINT MERGE_")
+    ]
+    assert len(inner_savepoints) == 2, (
+        f"expected two inner-merge savepoints, got {inner_savepoints}"
+    )
+    assert not [
+        s for s in sql_log if "DEDUP_COMP_" in s.strip().upper()
+    ], "CLI must use BEGIN IMMEDIATE per component, not a component-level SAVEPOINT"
 
 
 # ---------------------------------------------------------------------------
