@@ -3,12 +3,13 @@
 This is an INDEX. Detailed per-epic history lives in [archived-epics.md](archived-epics.md); reusable patterns in [lessons-learned.md](lessons-learned.md); ideas in `/.project/ideas/README.md`. Keep this file lean (< 17KB) — move detail to topic files, one line per entry here.
 
 ## Numbering State
-- **Next available epic number: E-250** (E-249 created 2026-06-30, player-dedup stale-worklist fix)
-- **Next available idea number: IDEA-091** (IDEA-090 created 2026-06-30, codex review-script modernization)
+- **Next available epic number: E-251** (E-250 created + set READY 2026-07-03, root cross-season/multi-season de-scope)
+- **Next available idea number: IDEA-093** (IDEA-091 + IDEA-092 created 2026-07-03 during E-250 planning)
 - Memory numbers go STALE and have caused real collisions (E-229, IDEA-071). Before assigning ANY epic/story/idea number, ALWAYS glob the live dirs: `ls /epics/` `ls /.project/archive/` `ls /.project/ideas/`. Trust the filesystem, not these counters.
 
 ## Active Epics
 Only READY/ACTIVE epics. Full details in the epic file under `/epics/`.
+- **E-250** (READY): Root Cross-Season/Multi-Season De-Scope — 7 stories. Rip remaining cross-season MACHINERY at the root; KEEP season_id as single-season partition key (user decision). 01 dedup-CLI corner (auto-derive season, required arg); 02 migration 008 drops `gc_athlete_profile_id`+`team_opponents` table+`seasons.season_type` (+ ALL season_type fixtures/reads atomic w/ the NOT NULL drop = green-gate) + team_opponents guard removal (2 surviving guards); 03 Class-1 compound-slug fixture normalization (~5 files); 04 context-layer prose (CA); 05 docs (architecture+roadmap+operations); 06 api-doc softening (7 files, cross-TEAM-in-season KEEP); 07 archive E-104. Deps acyclic 01→02→03; 07→04,05. Cleared iteration-1 holistic (DE/SE/CA/api-scout) + CR audit + Codex 8/8 P2 + 3/3 concurrences. Ideas filed: IDEA-091 (programs/min-years leftovers), IDEA-092 (DE agent-def Core-Entities staleness). Dispatch NOT yet authorized.
 - **E-072** (READY): Proxy Session Ingestion Skill
 - **E-073** (READY): API Documentation Validation Sweep
 - **E-104** (READY): Athlete Profile Endpoint Probe

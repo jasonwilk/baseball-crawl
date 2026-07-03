@@ -6,6 +6,7 @@
 
 ## Removal-Epic Review Patterns
 - [Asset deletion: sweep ALL test reference mechanisms](route_deletion_test_sweep.md) — deleting a route/module/template breaks tests that import it, `client.get()` it (assert 200), OR read it by literal path in a parametrize list (FileNotFoundError); import sweeps miss forms 2+3. Never `| head` a completeness grep (E-239: Codex caught form 2 in 4b, Phase 5 gate caught form 3).
+- [Spec audit: a column-DROP story asserting full-suite-green can't defer fixture cleanup](spec_audit_column_drop_fixture_atomicity.md) — a dropped column breaks all its INSERT fixtures atomically; if cleanup is assigned downstream while the drop story asserts pytest-green, that's a MUST-FIX scope/dependency finding. Grep `tests/` (incl. fixtures/*.sql) for the dropped element and count files (E-250: season_type in 29 files + 2 SQL fixtures).
 
 ## Refactor/Extraction Review Patterns
 - [Extraction scope gap = a CALLER's existing characterization suite](refactor_extraction_caller_test_scope.md) — when a story relocates a seam, the unrun test is usually a caller's pre-existing transport-mocked suite that directly exercises the changed function; grep tests/ for the changed function + module, flag any importer not in the run list as MUST FIX (it's often the committed pre-vs-post pin the HARD gate rests on). E-247-03: test_report_generator.py's ~17 _resolve_gc_uuid tests.
