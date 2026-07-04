@@ -1,4 +1,4 @@
-# E-251-05: Skill/context prose corrections (codex-review 4a/4b, plan glob, filesystem-context, context-fundamentals)
+# E-251-05: Skill/context prose corrections (codex-review closure→Phase 5, plan glob, filesystem-context, context-fundamentals)
 
 ## Epic
 [E-251: Dispatch-Machinery Repair](../E-251-dispatch-machinery-repair/epic.md)
@@ -7,7 +7,7 @@
 `TODO`
 
 ## Description
-After this story is complete, four stale-prose / citation defects in the skill and context-fundamentals files are corrected: the codex-review skill references Phase 4a/4b in the right order, the plan skill's artifact-staging step stages file-form research artifacts, filesystem-context no longer teaches the obsolete PM-dispatches-implementers model, and context-fundamentals no longer cites a nonexistent CLAUDE.md "Workflow" section.
+After this story is complete, four stale-prose / citation defects in the skill and context-fundamentals files are corrected: the codex-review skill's closure step routes to Phase 5 (not a re-entry into or reordering of Phase 4a/4b), the plan skill's artifact-staging step stages file-form research artifacts, filesystem-context no longer teaches the obsolete PM-dispatches-implementers model, and context-fundamentals no longer cites a nonexistent CLAUDE.md "Workflow" section.
 
 ## Context
 These are four independent audit findings (§2 LOW "Context layer" + MEDIUM) that misdirect agents following the skills literally: an inverted phase reference sends the codex-review closure step to the wrong phase, a trailing-slash glob silently drops file-form research artifacts from the READY staging commit, a stale dispatch-model description contradicts the current main-session-spawns model, and a dangling citation points at a CLAUDE.md section that does not exist. Per epic TN-6.

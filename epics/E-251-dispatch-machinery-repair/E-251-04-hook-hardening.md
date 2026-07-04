@@ -31,8 +31,8 @@ Per epic TN-5. Three localized edits across `worktree-guard.sh`, the commit-inte
 
 ## Files to Create or Modify
 - `.claude/hooks/worktree-guard.sh` — path normalization before guard comparison
-- `.claude/hooks/epic-archive-check.sh` — commit-interception `git -C` coverage (and any companion commit-interception hook CA identifies)
-- `.claude/hooks/pii-check.sh` — distinguish scanner infra failure from PII detection in reporting
+- `.claude/hooks/epic-archive-check.sh` — commit-interception `git -C` coverage (carries the same `git\s+commit` interception regex as pii-check.sh)
+- `.claude/hooks/pii-check.sh` — commit-interception `git -C` coverage (same regex as epic-archive-check.sh) AND distinguish scanner infra failure from PII detection in reporting
 
 ## Agent Hint
 claude-architect

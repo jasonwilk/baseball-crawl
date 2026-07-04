@@ -7,7 +7,7 @@
 `TODO`
 
 ## Description
-After this story is complete, the implement skill's two broken closure-sequence resets work for epics that ADD files. The red-suite recovery reset and the operator-abort reset both use an undo that correctly reverses a patch containing newly-created files, and the abort path no longer destroys staged-but-uncommitted ancillary edits (vision-signals / ideas / PM memory). The prose describing each reset accurately reflects what it does.
+After this story is complete, the implement skill's two broken closure-sequence resets work for epics that ADD files. The red-suite recovery reset and the operator-abort reset both use an undo that correctly reverses a patch containing newly-created files, and the abort path no longer destroys the staged-but-uncommitted Step 7a ancillary edits (vision-signals / ideas). The abort explicitly REVERSES the sub-step-7 PM-memory Active→Archived edit rather than preserving it — leaving it while the patch is reversed would strand PM memory saying "Archived" against an ACTIVE epic (see AC-2). The prose describing each reset accurately reflects what it does.
 
 ## Context
 This is audit finding **F-H5** (HIGH) plus the paired abort-path destruction defect (audit §2 MEDIUM "Implement skill closure resets"). Both live in `.claude/skills/implement/SKILL.md`'s closure sequence and are the same class of bug: a reset built on `git checkout -- .`, which only restores TRACKED files to HEAD and therefore (a) leaves patch-created untracked files behind and (b) reverts legitimately-staged ancillary edits. Per epic TN-2, the audit verified the fix. These defects break closure recovery for any epic that adds a file — which includes E-250 (adds migration 008) — so they must be fixed before dispatch.

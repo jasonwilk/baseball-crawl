@@ -20,7 +20,7 @@ Every fix below was pre-specified and adversarially verified in the audit. This 
 - Route SE/DE/api-scout dispatch stories to their named agents so specialist definitions, checklists, model/effort frontmatter, and memory load during dispatch.
 - Remove the software-engineer.md self-contradiction on story-status ownership.
 - Harden the hooks: worktree-guard path normalization, commit-interception `git -C` coverage, and honest pii-check failure labeling.
-- Correct stale skill/context prose: codex-review Phase 4a/4b inversion, plan-skill artifact-staging glob, filesystem-context dispatch model, context-fundamentals phantom citation.
+- Correct stale skill/context prose: codex-review closure step routing to Phase 5 (currently misdirected at a Phase 4a/4b re-entry), plan-skill artifact-staging glob, filesystem-context dispatch model, context-fundamentals phantom citation.
 
 ## Non-Goals
 - Any change to `src/`, `tests/`, `migrations/`, `scripts/`, or `docs/` — all fixes live under `.claude/**`.
@@ -33,7 +33,7 @@ Every fix below was pre-specified and adversarially verified in the audit. This 
 - `.claude/rules/agent-routing.md`'s Agent Selection table routes the Python-implementation, DB-schema, and API-exploration rows to `software-engineer`, `data-engineer`, and `api-scout` respectively (not bare `general-purpose`).
 - `.claude/agents/software-engineer.md` contains no instruction to update story statuses; it is internally consistent with the never-own-statuses rule stated elsewhere in the same file and in the agent ecosystem.
 - `worktree-guard.sh` normalizes paths so a double-slash form cannot bypass the guard in either mode; the commit-interception logic covers `git -C` invocation forms; `pii-check.sh` distinguishes a scanner infrastructure failure from an actual PII detection in its reporting.
-- The codex-review skill's closure step references Phase 4a/4b in the correct order; the plan skill's artifact-staging step stages file-form research artifacts; filesystem-context no longer teaches the obsolete PM-dispatches-implementers model; context-fundamentals no longer cites a nonexistent CLAUDE.md "Workflow" section.
+- The codex-review skill's closure step routes control to Phase 5 (closure) after the Codex pass — not a re-entry into or reordering of Phase 4a/4b; the plan skill's artifact-staging step stages file-form research artifacts; filesystem-context no longer teaches the obsolete PM-dispatches-implementers model; context-fundamentals no longer cites a nonexistent CLAUDE.md "Workflow" section.
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
@@ -42,7 +42,7 @@ Every fix below was pre-specified and adversarially verified in the audit. This 
 | E-251-02 | Route SE/DE/api-scout dispatch stories by name (F-H4) | TODO | None | - |
 | E-251-03 | Remove software-engineer.md status-ownership contradiction | TODO | None | - |
 | E-251-04 | Hook hardening: worktree-guard normalization, commit-regex gaps, pii-check labeling | TODO | None | - |
-| E-251-05 | Skill/context prose corrections (codex-review 4a/4b, plan glob, filesystem-context, context-fundamentals) | TODO | None | - |
+| E-251-05 | Skill/context prose corrections (codex-review closure→Phase 5, plan glob, filesystem-context, context-fundamentals) | TODO | None | - |
 
 ## Dispatch Team
 - claude-architect
