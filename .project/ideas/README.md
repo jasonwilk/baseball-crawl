@@ -74,11 +74,11 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | PROMOTED | 2026-03-28 -- delivered by E-173 |
 | [IDEA-054](IDEA-054-worktree-guard-cross-contamination.md) | Worktree Guard Should Prevent Cross-Epic Contamination | CANDIDATE | 2026-06-26 |
 | [IDEA-055](IDEA-055-auto-sync-and-experience-polish.md) | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 |
-| [IDEA-056](IDEA-056-search-fallback-team-return-bug.md) | Fix _search_fallb
+| [IDEA-056](IDEA-056-search-fallback-team-return-bug.md) | Fix _search_fallback_team Return Type Bug | CANDIDATE | 2026-06-27 |
 | [IDEA-057](IDEA-057-report-flow-orphan-team-stubs.md) | Report Flow Orphan Team Stubs | PROMOTED | 2026-03-29 -- promoted to E-188 |
 | [IDEA-058](IDEA-058-pyproject-dependency-management.md) | Proper Python Dependency Management via pyproject.toml | PROMOTED | 2026-03-29 -- promoted to E-190 |
 | [IDEA-059](IDEA-059-opponent-flow-spray-gaps.md) | Opponent Flow Spray Chart and Display Gaps | PROMOTED | 2026-03-29 -- promoted to E-189 |
-| [IDEA-060](IDEA-060-flow-testing-and-validation.md) | Comprehensive Flow Testing and Validation | CANDIDATE | 2026-06-27 |ack_team Return Type Bug | CANDIDATE | 2026-06-27 |
+| [IDEA-060](IDEA-060-flow-testing-and-validation.md) | Comprehensive Flow Testing and Validation | CANDIDATE | 2026-06-27 |
 | [IDEA-061](IDEA-061-season-id-from-team-context.md) | Derive season_id from Team Context, Not Filesystem Path | PROMOTED | 2026-06-30 | → E-197 |
 | [IDEA-062](IDEA-062-plays-boxscore-reconciliation.md) | Plays-vs-Boxscore Reconciliation Engine | PROMOTED | 2026-04-01 |
 | [IDEA-063](IDEA-063-dump-game-skill.md) | /dump-game Diagnostic Skill | CANDIDATE | 2026-04-02 |

@@ -1,7 +1,7 @@
 # E-211: Fix Opponent-Perspective UUID Contamination
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Stop opponent-perspective UUIDs from leaking into the `teams.gc_uuid` column and causing duplicate players and missing spray charts in standalone reports. The GameChanger API returns different UUIDs for the same team depending on the caller's perspective (own-team vs opponent); three pipeline paths currently store the wrong-perspective UUID as `gc_uuid`, which poisons downstream code that trusts it.
@@ -107,6 +107,7 @@ GC boxscore responses are asymmetric: own team = `public_id` slug (short alphanu
 ## History
 - 2026-04-03: Created. SE and DE consulted on contamination vectors, fix approach, and data cleanup strategy.
 - 2026-04-03: Set to READY after three review passes (24 findings, 14 accepted, 10 dismissed). All accepted findings incorporated with consistency sweeps.
+- 2026-07-04: Status corrected to COMPLETED. The epic was dispatched and archived with all three stories DONE, but the epic Status token was left at `ACTIVE` at closure (a closure-status bug). Flipped to COMPLETED per the 2026-07-03 platform audit (§5 quick win). No scope or content change — closure-status correction only.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
