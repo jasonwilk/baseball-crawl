@@ -23,7 +23,7 @@ Recently completed epics are one-line-indexed in [archived-epics.md](archived-ep
 - Reports are the SOLE coaching surface (generate report for a GC `public_id` + share link). Dashboard / member-sync / tracked-opponent surfaces were REMOVED in E-239 (ROADMAP D2, −59k lines). Admin surface = `src/api/routes/reports_admin.py`.
 - Forward feature shipped: morning-of-game scheduled reports (E-240, `bb report morning-run`).
 - Permanent non-goals: cross-team player identity, multi-season rollups, longitudinal tracking.
-- `docs/ROADMAP.md` is authoritative on scope (slices A–E all COMPLETED: A=E-234, B=E-235, B2=E-236, C=E-237, D1=E-238, D2=E-239, E=E-240). `docs/VISION.md` + `docs/vision-signals.md` still describe the OLD multi-surface vision and await a "curate the vision" session (PM strongly recommends one — large unprocessed signal backlog, last curated 2026-03-13).
+- `docs/ROADMAP.md` is authoritative on scope (slices A–E all COMPLETED: A=E-234, B=E-235, B2=E-236, C=E-237, D1=E-238, D2=E-239, E=E-240). `docs/VISION.md` + `docs/vision-signals.md` were **curated 2026-07-05** and now reflect the reports-first reframe: VISION rewritten (Layers 3/4/5 replaced with Scouting Reports + tools-hub; Explicit Non-Goals added barring cross-season/cross-team machinery; multi-program *reach* kept PROMINENT per Jason's D2 but scoped single-season/any-public_id only, NOT longitudinal). 29 signals cleared, 15 kept parked. §3 roster-review/context-budget/memory-lifecycle rationales captured for CE-5 — see [project_ce5_curation_handoff.md](project_ce5_curation_handoff.md).
 
 ## Project Context
 - baseball-crawl — GameChanger API → SQLite → coaching scouting reports for Lincoln Standing Bear HS.
@@ -81,3 +81,4 @@ Canonical list: `/.project/ideas/README.md`. Notable recent / promotable:
 - [feedback_acceptance_command_surface_scope.md](feedback_acceptance_command_surface_scope.md) — dispatch failure inside an AC's named command/file is in-scope
 - [feedback_clean_reread_before_defect.md](feedback_clean_reread_before_defect.md) — clean re-read + quote literal text before reporting any AC defect
 - [feedback_dont_rationalize_weak_assertions.md](feedback_dont_rationalize_weak_assertions.md) — apply the delete-the-behavior teeth test; don't rationalize a no-teeth assertion
+- [project_ce5_curation_handoff.md](project_ce5_curation_handoff.md) — 2026-07-05 curation §3 rationales (roster refocus, context budget, memory lifecycle) for CE-5 claude-architect to codify

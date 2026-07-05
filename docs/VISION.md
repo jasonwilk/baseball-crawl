@@ -2,91 +2,89 @@
 
 ## The One-Liner
 
-Give baseball coaches a competitive advantage that most programs don't have: data-driven scouting, lineup decisions, and player development -- powered by the same information every GameChanger user can already see, organized so it's actually useful. Lincoln Standing Bear High School is the first program. It won't be the last.
+Give baseball coaches a competitive advantage that most programs don't have: data-driven opponent scouting, delivered as a fresh report the morning of the game -- powered by the same information every GameChanger user can already see, organized so it's actually useful. Lincoln Standing Bear High School is the first program. It won't be the last: the report tool serves any coach with a team on GameChanger, one season at a time.
 
 ## The Problem
 
-High school baseball coaching decisions are made on gut feel, memory, and whatever a coach can scribble in a notebook between innings. The data exists -- every game scored on GameChanger produces box scores, pitch counts, spray charts, play-by-play logs -- but no one has time to open 120 box scores across four teams, copy the numbers into a spreadsheet, cross-reference opponents, and spot patterns.
+High school baseball coaching decisions are made on gut feel, memory, and whatever a coach can scribble in a notebook between innings. The data exists -- every game scored on GameChanger produces box scores, pitch counts, spray charts, play-by-play logs -- but no one has time to open an opponent's 30 box scores, copy the numbers into a spreadsheet, and spot the patterns before Friday's game.
 
 The information is there. The labor to extract it is not.
 
 ## The Insight
 
-We are not inventing new analytics. We are not building a proprietary model or reverse-engineering hidden data. We are automating what a diligent coach with unlimited time could do by hand: open every box score, record every stat, compare every matchup, and track every player's development across seasons and levels.
+We are not inventing new analytics. We are not building a proprietary model or reverse-engineering hidden data. We are automating what a diligent coach with unlimited time could do by hand: open every one of an opponent's box scores, record every stat, and compile a scouting picture -- for this season, this opponent, this game.
 
-The competitive advantage is not the data -- it's having the data organized, current, and queryable when the coaching staff needs it.
+The competitive advantage is not the data -- it's having the data organized, current, and delivered when the coaching staff needs it: the morning of the game, in a report they can read on the bench.
 
 ## What This Looks Like When It's Working
 
-**Before a game**, Coach Martinez pulls up tomorrow's opponent on the dashboard. She sees their typical lineup, who's been hot in the last five games, their probable starter's K/9 and walk rate, and how her hitters have fared against this team in prior meetings. She adjusts the batting order -- moving a patient hitter with a high walk rate to the top of the order against a wild pitcher, and slotting the power hitter into the 4-hole against a starter who gives up hard contact.
+**The morning of a game**, Coach Martinez opens a link in her inbox: a fresh scouting report on tonight's opponent, generated automatically a few hours earlier. She sees their probable starter's K/9 and walk rate, their recent form, which hitters have been hot, and where they tend to put the ball in play. She adjusts the batting order -- moving a patient hitter with a high walk rate to the top against a wild pitcher, and slotting the power hitter into the 4-hole against a starter who gives up hard contact.
 
-**During the season**, Coach Davis tracks his freshman pitchers' development. He can see that Jake's strikeout rate has climbed from 5.2 K/9 in his first five starts to 7.8 in his last five, while his walk rate has stayed steady. The numbers confirm what his eyes are telling him -- Jake is ready for tougher competition.
+**On the bench**, the report is a clean, self-contained page -- no login, no app to learn, just a shared link that opens on any phone. Everything the staff needs to prep for this opponent is on one screen, and it was current as of that morning's data.
 
-**Across seasons**, the coaching staff watches players progress from freshman ball through JV, varsity, and into legion summer ball. A player who struggled as a sophomore but showed steady improvement becomes a confident junior-year starter. The data tells the story of development that memory alone cannot track.
+**Across a season**, the coaching staff builds a rhythm: every game gets its report, every report sharpens the next decision. Small edges -- the right reliever for a platoon matchup, one hitter moved up a spot, knowing the opponent's cleanup hitter can't handle breaking balls -- add up over thirty games.
+
+Each report is one team's *current* body of work, generated fresh. The system does the season's worth of manual box-score labor so the coach can spend the morning coaching.
 
 ## The Layers
 
 The system is built in layers, each one valuable on its own but more powerful together.
 
 ### Layer 1: Data Extraction
-Automated crawling of GameChanger's API to pull team rosters, season stats, game schedules, box scores, and (eventually) pitch-by-pitch play data and spray charts. Raw data is stored faithfully before any transformation. Crawls are idempotent -- re-running never duplicates data.
+Automated crawling of GameChanger's API to pull an opponent's rosters, game schedules, box scores, pitch-by-pitch play data, and spray charts. Raw data is fetched fresh at generation time; play templates are persisted as a repair source. Crawls are idempotent -- re-running never duplicates data.
 
 ### Layer 2: Structured Database
-A queryable SQLite database that organizes the raw data into tables designed for coaching questions: batting splits, pitching matchups, game-by-game trends, opponent tendencies. The schema reflects the metrics that matter for decisions (OBP, K/9, BB/9, home/away splits, platoon splits), not just what the API happens to return.
+A queryable SQLite database that organizes the raw data into tables designed for coaching questions: batting lines, pitching matchups, game-by-game rows, opponent tendencies. The schema reflects the metrics that matter for decisions (OBP, K/9, BB/9, first-pitch-strike %, QAB), and it stores every stat GameChanger tracks -- populated by direct API pull or compiled from play-by-play -- so a stat is never missing when a coach wants it. The scope is one team, one season at a time.
 
-### Layer 3: Coaching Dashboard
-A server-rendered web application where coaches can pull up scouting reports, player stats, opponent analysis, and game prep information without touching a spreadsheet or asking Jason to run a query. Simple, fast, focused on the questions coaches actually ask.
+### Layer 3: Scouting Reports
+The sole coaching surface. `bb report generate <gc_url>` (or the admin action) runs an in-memory pipeline that crawls an opponent, loads and reconciles the data, and renders a frozen, self-contained HTML report served publicly at a shareable link -- no login for viewers, no app to learn. Reports degrade gracefully: a missing spray chart or partial play data never fails the report, and the report tells the coach how complete it is (games covered, plays data, spray availability). The forward feature is **morning-of-game scheduled delivery**: a cron-invoked run that generates each LSB team's next-opponent report before dawn and emails coaches the link.
 
-The primary frame is one coach, one team, one season. A coach opens the dashboard and lands on their team's current season -- that's the world they live in. Own-team improvement comes first: how are my players developing, where are the weak spots, who's trending up. Opponent scouting is the second priority: what should I know about Friday's opponent. Both matter, but "how do we get better" always comes before "how do we exploit their weaknesses."
-
-Historical context is available but tapers naturally. Early in a Legion season, the HS numbers from the same players fill in the picture -- most of the roster carried over. As the current season's games accumulate, that team's own data takes over. The system does not hard-wall seasons; it lets recency do the work.
-
-### Layer 4: Longitudinal Intelligence
-Player tracking across seasons, teams, and levels. Development arcs over time. Trend detection -- who's improving, who's regressing, who's streaking. The kind of institutional memory that a coaching staff accumulates over years, but structured so it doesn't walk out the door when an assistant coach moves on.
+The serving surface is evolving from an admin panel into a **collection of tools**. Scouting reports are the first tool; a GC stats aggregator and a report deep-dive are on the horizon (see The Horizon). The auth model has two axes: logging in gates **discoverability** (logged-in users see the tool list in nav) and **privileged actions** (generate, delete, manage) -- but not **basic access**: a report link opens for anyone who has it, logged in or not. Tools are a coach's workspace, not an access wall.
 
 ## Scope and Scale
 
-The system serves any coach with a team on GameChanger. Lincoln Standing Bear High School is the first user and the proving ground, but the target state includes Legion summer ball, USSSA youth, and travel ball programs. A 9U USSSA coach has one team through one season -- and the system works for that coach the same way it works for a varsity coach with four years of history.
+The report tool serves any coach with a team on GameChanger. Lincoln Standing Bear High School (Freshman, JV, Varsity, Reserve) is the first user and the proving ground, but the reach extends to Legion summer ball, USSSA youth, and travel programs -- any team scored on GameChanger, addressed by its `public_id`. A 9U USSSA coach gets a scouting report the same way a varsity coach does.
+
+**The reach is single-season, any-team -- not multi-season.** "Serves any program" means the tool works for any team's *current* season, one report at a time. It does **not** mean tracking a player or team across seasons, blending programs, or building longitudinal history -- those remain explicit non-goals (see below). Multi-program breadth and multi-season depth are different things: we pursue the breadth and deliberately decline the depth.
 
 **What this means concretely:**
 
-- **Teams**: Lincoln HS (Freshman, JV, Varsity, Reserve), Legion summer ball, USSSA travel teams -- any team scored on GameChanger.
-- **Per team**: 12-15 players, ~30 games per season.
-- **Seasons are sequential, not parallel.** HS ends, Legion starts. The roster carries over ~80%. The system tracks players across these transitions, but each season is its own context.
-- **Operator**: Jason manages the system. Coaches consume the dashboards.
-- **Growth model**: Add teams by onboarding them, not by deploying new infrastructure.
+- **Teams**: Lincoln HS (Freshman, JV, Varsity, Reserve) is the operator's own program; any GameChanger team can be scouted by `public_id`.
+- **Per report**: one opponent, one season, ~30 games, 12-15 players.
+- **Each season is its own context.** There is no cross-season rollup and no roster carry-over tracking. A report is a snapshot of one team's season.
+- **Operator**: Jason runs the system and generates reports; coaches consume the shared links.
+- **Growth model**: Add coverage by generating more reports, not by deploying new infrastructure.
 
-The scale stays small even as teams are added. SQLite is the right database. Docker Compose on a home server is the right deployment. Cloudflare Tunnel is the right network layer. There is no need for cloud infrastructure, horizontal scaling, or microservices. The system should be simple enough that one person can operate it, maintain it, and explain it -- whether it serves one team or twenty.
+The scale stays small even as more teams are scouted. SQLite is the right database. Docker Compose on a home server is the right deployment. Cloudflare Tunnel is the right network layer. There is no need for cloud infrastructure, horizontal scaling, or microservices. The system should be simple enough that one person can operate it, maintain it, and explain it.
 
 ## What We Don't Do
 
 - **We don't access hidden data.** Every piece of information comes from GameChanger's normal UI or API -- the same data any parent in the stands can see.
 - **We don't build proprietary models.** The stats we track (OBP, K/9, BABIP, FIP) are well-established baseball metrics. We compute them; we don't invent them.
 - **We don't over-engineer.** A script is better than a pipeline. A dict is better than a class. One file is better than a framework. Complexity is added only when a real problem demands it.
-- **We don't design for scale we'll never need.** A handful of programs, a few hundred games a season, a few dozen players per program. The system should reflect that.
+- **We don't design for scale we'll never need.** A handful of reports a week, a few dozen players per report. The system should reflect that.
 
-### Layer 5: Conversational Intelligence
+### Explicit Non-Goals
 
-An LLM-powered chat agent embedded in the dashboard. Not a generic baseball chatbot -- a context-aware analyst whose knowledge shifts based on where the coach is in the application.
+These were built once, removed (E-239), and must not be rebuilt. The multi-program *reach* above does not license any of them:
 
-- **On a game page**, the coach asks "What should I watch for against Lincoln East tomorrow?" or "Why did we struggle against their #3 pitcher last time?" The agent draws on matchup history, recent form, and pitching stats to answer.
-- **On the schedule page**, the coach asks "Predict the next ten game outcomes" and gets projections grounded in the data the system has collected -- not hallucinated optimism.
-- **On a player page**, the coach asks about tendencies: "What's his first-strike percentage?" or "Does he chase breaking balls away?" The agent reaches into pitch-by-pitch and play-by-play data to surface patterns the numbers reveal.
-- **On a team page**, the coach asks "Who's the normal closer?" or "How does the lineup change against lefties?" The agent reads lineup history and usage patterns.
-
-The context is the key. The same question gets a different answer depending on whether the coach is looking at a player, a game, a team, or a matchup. The agent is tuned for baseball coaching and strategy -- it picks up on nuances in the statistics that a coach might not have time to dig for manually.
-
-**Audience**: Head coaches and assistants first. Players are a future possibility that would bring different expectations for language, depth, and permissions.
+- **Cross-team player identity.** No athlete-profile population, no tracking one player across programs, no cross-program blending of a player's record. Per-team identity is sufficient for a scouting report.
+- **Cross-season / multi-season / longitudinal anything.** No multi-season rollups, no season-over-season comparison, no longitudinal player or team tracking, no recency-tapering across seasons. This applies all the way down to the machinery: cross-season `season_id` partitioning and season-selection logic are not part of the report core. A report needs a season only as a within-report game filter -- year-only / current scope is the correct, complete window, never a "degraded" one. (The one legitimate home for multi-season logic is the offline GC stats aggregator tool -- see The Horizon -- which is explicitly separate from the report core.) **Operator carve-out:** pointing the tool at *whichever season the operator wants* is a desired action, not cross-season machinery. Year-filtered team search, season disambiguation when a `public_id` spans multiple seasons, and generating a report on any season's `public_id` are all fine -- the report that comes out is still a single-season snapshot. What is barred is rollup, tracking, or blending *across* seasons *within one artifact*. "Let me scout last year's version of this team" (a separate single-season report) is fine; "track this team across seasons" (one artifact spanning years) is not.
+- **Member-team season-management product.** No dashboard browsing, roster/season stat pages, or schedule UI. The schedule *data* need (for morning-of-game delivery) is met by the authenticated schedule endpoint, public games as fallback.
+- **Tracked/followed-opponent management as a product surface.** Reports are generated on demand or on schedule for whoever is next; no standing opponent-registry UI.
+- **Multi-user team-scoped permissions.** One operator generates; coaches consume public links.
+- **Distributed job infrastructure** (Redis/Celery) and in-process schedulers. Host cron invoking a CLI is the ceiling until reality demands more.
 
 ## The Horizon
 
-The immediate goal is a working data pipeline and a coaching dashboard that coaches actually use for game prep. Beyond that, the system grows based on real needs:
+The immediate product is the report and its morning-of-game delivery. Beyond that, the system grows based on real needs:
 
-- **Pitch-by-pitch analysis** -- when coaches want to study at-bat sequences, contact quality, and pitcher tendencies at a deeper level
-- **Spray charts and defensive positioning** -- when coaches want to see where opponents hit the ball and adjust their defense accordingly
-- **Automated scheduling** -- when manual crawl runs become tedious and data freshness matters daily during the season
-- **Multi-season trend views** -- when enough data accumulates to tell meaningful development stories across years
-- **Conversational intelligence** -- when the dashboard and data are rich enough to make an LLM analyst genuinely useful rather than a gimmick
+- **Coach email as a summary, not just a link** -- the key numbers (top two pitchers, OBP, steal rate) in the email body for a quick pre-game glance without clicking through.
+- **A tools hub** -- the serving surface as a collection of coach-facing tools rather than an admin panel, with the two-axis auth model above.
+- **GC stats aggregator** -- an offline tool that ingests CSVs exported from multiple GameChanger seasons and combines them, including merging two teams with mostly the same roster into one stat set. This is deliberately multi-season and lives *outside* the single-season report core -- the one place multi-season logic belongs.
+- **Report deep-dive** -- take a generated scouting report and have an LLM conversation about it (mechanism TBD). A narrow, report-grounded analyst, not a general chatbot.
+- **Pitch-type / pitch-selection surfacing** -- GameChanger includes pitch type when a scorekeeper charts it; we persist it now (it's free) and surface pitch mix and sequencing in reports once it proves prevalent enough among scouted opponents.
+- **Pitch-by-pitch depth and defensive positioning** -- deeper at-bat-sequence and spray/positioning analysis, when coaches want to study contact quality and adjust their defense.
 
 Each of these arrives when the pain is real, not before.
 
@@ -100,6 +98,6 @@ We are honest about the limit. Quick-scored games, abandoned at-bats, and ordina
 
 ## The Measure of Success
 
-This system is working when a coach opens the dashboard before a game, finds what they need in under a minute, and makes a better decision because of it. Not a revolutionary decision -- maybe just moving a hitter up one spot in the order, or choosing the right reliever for a platoon matchup, or knowing that the opponent's cleanup hitter can't hit breaking balls on the road.
+This system is working when a coach opens the report link before a game, finds what they need in under a minute, and makes a better decision because of it. Not a revolutionary decision -- maybe just moving a hitter up one spot in the order, or choosing the right reliever for a platoon matchup, or knowing that the opponent's cleanup hitter can't hit breaking balls on the road.
 
 Small edges, consistently applied, across a 30-game season. That's the vision.
