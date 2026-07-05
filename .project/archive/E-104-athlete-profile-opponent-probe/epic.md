@@ -1,7 +1,7 @@
 # E-104: Athlete Profile Endpoint Probe -- Opponent Player Access
 
 ## Status
-`READY`
+`ABANDONED`
 
 ## Overview
 Probe the four athlete-profile endpoints to determine whether they work for opponent players (not just own-team family/guardian-linked players). This is the linchpin question for cross-team player identity: can we go from a boxscore `player_id` to an `athlete_profile_id` and retrieve career stats for any player in GameChanger?
@@ -93,3 +93,4 @@ The api-scout should use the web profile (`gc-token` + `gc-device-id` from `.env
 
 ## History
 - 2026-03-13: Created. Motivated by vision review session discovery of cross-team player identity via `athlete_profile_id`. E-100 adding the column; this epic determines how to populate it.
+- 2026-07-05: ABANDONED (E-250-07). Cross-team player identity is a permanent non-goal under the reports-first reframe (CLAUDE.md, `docs/ROADMAP.md`). E-250-02 dropped this epic's schema anchor, `players.gc_athlete_profile_id`, via migration 008 — the column this probe existed to learn how to populate no longer exists. `docs/ROADMAP.md:205` already directed closing this idea/epic. No probe work was performed; the direction is closed rather than deferred. Archived to `/.project/archive/`.

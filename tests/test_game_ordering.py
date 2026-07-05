@@ -27,8 +27,8 @@ def db() -> sqlite3.Connection:
     # Seed the FK parents the games fixture needs: one season, two teams.
     # The 'lsb-hs' program row is seeded by the migration itself.
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES "
-        "('s1', '2025 Spring HS', 'spring-hs', 2025)"
+        "INSERT INTO seasons (season_id, name, year) VALUES "
+        "('s1', '2025 Spring HS', 2025)"
     )
     conn.executemany(
         "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, ?)",

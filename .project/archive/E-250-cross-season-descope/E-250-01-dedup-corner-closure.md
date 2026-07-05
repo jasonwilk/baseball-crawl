@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb data dedup-players` will auto-derive its `season_id` scope from the data (with an explicit `--season-id` override), and a cross-season merge will be unreachable by construction: `season_id` will be a required (non-`Optional`) argument on both `plan_player_dedup` and `find_duplicate_players`, so `season_id=None` cannot flow into the planner. This closes the one remaining E-249 corner where an unscoped CLI run could union prefix-pairs across seasons.

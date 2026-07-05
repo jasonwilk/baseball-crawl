@@ -31,11 +31,11 @@ When a heavily-called canonical function needs to return MORE (provenance, fallb
 
 ## Canonical Team Deletion (Detail)
 
-`src/reports/generator.py` provides two consolidated deletion paths via common helpers `_delete_game_scoped_data()` and `_delete_team_scoped_data()`: (1) `cascade_delete_team()` -- aggressive, deletes all games involving the team, used by report-deletion cleanup; (2) `cleanup_orphan_teams()` -- safe, only deletes games where the team is the sole participant, used during report generation to clean temporary data. `is_team_eligible_for_cleanup()` enforces 4 guard conditions (not member, not tracked opponent, no public_id, no gc_uuid) before any cascade.
+`src/reports/generator.py` provides two consolidated deletion paths via common helpers `_delete_game_scoped_data()` and `_delete_team_scoped_data()`: (1) `cascade_delete_team()` -- aggressive, deletes all games involving the team, used by report-deletion cleanup; (2) `cleanup_orphan_teams()` -- safe, only deletes games where the team is the sole participant, used during report generation to clean temporary data. `is_team_eligible_for_cleanup()` enforces 2 guard conditions (Guard 1: `is_active = 0`; Guard 2: no other `reports` row references the team) before any cascade.
 
 ## Season_id Derivation (Detail)
 
-`derive_season_id_for_team(db, team_id)` in `src/gamechanger/loaders/__init__.py` returns `tuple[str, int | None]` -- `(season_id, season_year)`. The `season_id` is YEAR-ONLY: the team's `teams.season_year` as a string (e.g. `'2026'`), or the current year when `season_year` is NULL (`season_id = str(season_year or datetime.now().year)`). This **current-year fallback is the load-bearing kernel and SURVIVES** -- a missing `season_year` still yields a usable year-only `season_id`. **REMOVED (E-241)**: the `program_type` → suffix mapping (`hs` → `spring-hs`, `usssa` → `summer-usssa`, `legion` → `summer-legion`) and the `season_fallback` telemetry flag/chain -- there are no compound slugs and no fallback telemetry anymore; derivation is purely year-based. `ensure_season_row(db, season_id)` is the consolidated function (always writes `season_type='default'`) replacing all private `_ensure_season_row()` methods.
+`derive_season_id_for_team(db, team_id)` in `src/gamechanger/loaders/__init__.py` returns `tuple[str, int | None]` -- `(season_id, season_year)`. The `season_id` is YEAR-ONLY: the team's `teams.season_year` as a string (e.g. `'2026'`), or the current year when `season_year` is NULL (`season_id = str(season_year or datetime.now().year)`). This **current-year fallback is the load-bearing kernel and SURVIVES** -- a missing `season_year` still yields a usable year-only `season_id`. **REMOVED (E-241)**: the `program_type` → suffix mapping (`hs` → `spring-hs`, `usssa` → `summer-usssa`, `legion` → `summer-legion`) and the `season_fallback` telemetry flag/chain -- there are no compound slugs and no fallback telemetry anymore; derivation is purely year-based. `ensure_season_row(db, season_id)` is the SOLE season-writer path -- E-250-02 folded the scouting crawler's private `_ensure_season_row` into it, so it now truly replaces all private `_ensure_season_row()` methods. (The `seasons.season_type` column was dropped in E-250-02, so there is no longer a `season_type` value to write.)
 
 ## Filesystem vs DB Season_id Decoupling
 
@@ -63,7 +63,7 @@ The filesystem path (`data/raw/{season}/scouting/{public_id}/`) organizes cached
 
 **Serving and lifecycle conventions** (migrated from the retired `scouting-data-flows.md`):
 - The serving route `/reports/{slug}` requires NO authentication. It MUST NOT query stats tables or render Jinja2 templates at serve time -- only a `reports`-table lookup plus a file read of the frozen HTML snapshot from disk.
-- Reports have NO `team_opponents` dependency; generation takes any GC `public_id` directly (`bb report generate` or the `/admin/reports` UI).
+- Reports have no opponent-registry dependency; generation takes any GC `public_id` directly (`bb report generate` or the `/admin/reports` UI).
 - Reports are ephemeral: 14-day expiry, no versioning, no update-in-place. `cleanup_expired_reports()` unlinks expired HTML files (keeps the `reports` row, nulls `report_path`).
 - **Naming convention**: "standalone report" or "generated report" = an artifact produced by this package. (The former dashboard "opponent flow" and its "scouting report" naming were removed in E-239.)
 

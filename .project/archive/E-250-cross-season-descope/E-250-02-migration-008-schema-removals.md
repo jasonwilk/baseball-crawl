@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three pieces of dead cross-season/identity schema are gone from the database and from every `src/` reference: the `players.gc_athlete_profile_id` column (the E-104 cross-team identity anchor, never written or read), the whole `team_opponents` table (write-orphaned since E-239), and the `seasons.season_type` column (write-only constant `'default'`, the exact column behind the two-writers-must-agree footgun). Migration 008 performs the DROPs following the layered 006 pattern, and all code that inserted into or read from these is removed.

@@ -63,16 +63,16 @@ def _seed_team(db, name="Test Tigers", public_id="abc123"):
     return cursor.lastrowid
 
 
-def _seed_season(db, season_id="2026-spring-hs"):
+def _seed_season(db, season_id="2026"):
     db.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'spring', 2026)",
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026)",
         (season_id, season_id),
     )
     db.commit()
 
 
-def _seed_scouting_run(db, team_id=1, season_id="2026-spring-hs"):
+def _seed_scouting_run(db, team_id=1, season_id="2026"):
     db.execute(
         "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
         "VALUES (?, ?, 'full', '2026-03-28T00:00:00Z', 'completed')",
@@ -142,7 +142,7 @@ class TestNoCompletedGamesExplicitOutcome:
         mock_crawler = MagicMock()
         # Zero completed games, zero errors -- the no-games trigger.
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs",
+            team_id=1, season_id="2026",
             games_crawled=0, errors=0, games=[], boxscores={},
         )
         mock_loader = MagicMock()
@@ -212,7 +212,7 @@ class TestNoCompletedGamesExplicitOutcome:
         mock_crawler = MagicMock()
         # M = 2 completed games on the schedule, but zero loaded with data (N=0).
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs",
+            team_id=1, season_id="2026",
             games_crawled=2, errors=0,
             games=[{"game_status": "completed"}, {"game_status": "completed"}],
             boxscores={},
@@ -286,7 +286,7 @@ class TestNoCompletedGamesExplicitOutcome:
         mock_crawler = MagicMock()
         # Zero completed games with data -> the no-games gate fires.
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs",
+            team_id=1, season_id="2026",
             games_crawled=0, errors=0, games=[], boxscores={},
         )
 
@@ -368,8 +368,8 @@ class TestPublicProfileFetchFailure:
         # E-235 Phase 4b HIGH-1, N requires a player_game_batting/pitching row,
         # so a bare games row alone is NOT "with data".
         db.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2026', '2026', 'default', 2026) ON CONFLICT(season_id) DO NOTHING"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2026', '2026', 2026) ON CONFLICT(season_id) DO NOTHING"
         )
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
@@ -394,7 +394,7 @@ class TestPublicProfileFetchFailure:
 
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs",
+            team_id=1, season_id="2026",
             games_crawled=5, errors=0, games=[], boxscores={},
         )
         mock_loader = MagicMock()

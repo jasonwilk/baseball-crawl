@@ -96,8 +96,8 @@ def _insert_team(conn: sqlite3.Connection, team_id: str, name: str) -> int:
 def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
     """Insert a minimal season row."""
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, f"Season {season_id}", "spring-hs", 2025),
+        "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, f"Season {season_id}", 2025),
     )
     conn.commit()
 
@@ -170,8 +170,8 @@ class TestMigration007ScoutingRuns:
     def test_first_fetched_set_by_default(self, migrated_db: sqlite3.Connection) -> None:
         """first_fetched is populated automatically via DEFAULT on insert (AC-1, AC-7)."""
         team_id = _insert_team(migrated_db, "team-001", "Opponent A")
-        _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
+        _insert_scouting_run(migrated_db, team_id, "2025")
 
         cursor = migrated_db.execute(
             "SELECT first_fetched FROM scouting_runs WHERE team_id = ?",
@@ -184,8 +184,8 @@ class TestMigration007ScoutingRuns:
     def test_last_checked_set_by_default(self, migrated_db: sqlite3.Connection) -> None:
         """last_checked is populated automatically via DEFAULT on insert (AC-1, AC-7)."""
         team_id = _insert_team(migrated_db, "team-002", "Opponent B")
-        _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
+        _insert_scouting_run(migrated_db, team_id, "2025")
 
         cursor = migrated_db.execute(
             "SELECT last_checked FROM scouting_runs WHERE team_id = ?",
@@ -198,21 +198,21 @@ class TestMigration007ScoutingRuns:
     def test_unique_constraint_enforced(self, migrated_db: sqlite3.Connection) -> None:
         """Inserting a duplicate (team_id, season_id, run_type) raises IntegrityError (AC-4)."""
         team_id = _insert_team(migrated_db, "team-003", "Opponent C")
-        _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs", run_type="boxscores")
+        _insert_season(migrated_db, "2025")
+        _insert_scouting_run(migrated_db, team_id, "2025", run_type="boxscores")
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
                 "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at) "
                 "VALUES (?, ?, ?, ?)",
-                (team_id, "2025-spring-hs", "boxscores", "2026-03-12T11:00:00Z"),
+                (team_id, "2025", "boxscores", "2026-03-12T11:00:00Z"),
             )
             migrated_db.commit()
 
     def test_on_conflict_preserves_first_fetched(self, migrated_db: sqlite3.Connection) -> None:
         """ON CONFLICT DO UPDATE updates last_checked without overwriting first_fetched (AC-4)."""
         team_id = _insert_team(migrated_db, "team-004", "Opponent D")
-        _insert_season(migrated_db, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
 
         original_first_fetched = "2026-01-01T10:00:00.000Z"
         migrated_db.execute(
@@ -221,7 +221,7 @@ class TestMigration007ScoutingRuns:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 team_id,
-                "2025-spring-hs",
+                "2025",
                 "full",
                 "2026-01-01T10:00:00Z",
                 "completed",
@@ -243,7 +243,7 @@ class TestMigration007ScoutingRuns:
             "status       = excluded.status",
             (
                 team_id,
-                "2025-spring-hs",
+                "2025",
                 "full",
                 "2026-03-12T12:00:00Z",
                 "running",
@@ -269,8 +269,8 @@ class TestMigration007ScoutingRuns:
     def test_completed_at_is_nullable(self, migrated_db: sqlite3.Connection) -> None:
         """completed_at defaults to NULL (run is in progress until explicitly set)."""
         team_id = _insert_team(migrated_db, "team-005", "Opponent E")
-        _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
+        _insert_scouting_run(migrated_db, team_id, "2025")
 
         cursor = migrated_db.execute(
             "SELECT completed_at FROM scouting_runs WHERE team_id = ?",
@@ -283,22 +283,22 @@ class TestMigration007ScoutingRuns:
     def test_status_check_constraint_rejects_invalid(self, migrated_db: sqlite3.Connection) -> None:
         """Inserting a status value not in ('pending','running','completed','failed') raises."""
         team_id = _insert_team(migrated_db, "team-006", "Opponent F")
-        _insert_season(migrated_db, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
                 "INSERT INTO scouting_runs "
                 "(team_id, season_id, run_type, started_at, status) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (team_id, "2025-spring-hs", "full", "2026-03-12T10:00:00Z", "bad_status"),
+                (team_id, "2025", "full", "2026-03-12T10:00:00Z", "bad_status"),
             )
             migrated_db.commit()
 
     def test_nullable_count_columns(self, migrated_db: sqlite3.Connection) -> None:
         """games_found, games_crawled, and players_found are nullable."""
         team_id = _insert_team(migrated_db, "team-007", "Opponent G")
-        _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
+        _insert_season(migrated_db, "2025")
+        _insert_scouting_run(migrated_db, team_id, "2025")
 
         cursor = migrated_db.execute(
             "SELECT games_found, games_crawled, players_found FROM scouting_runs "

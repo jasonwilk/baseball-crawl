@@ -26,6 +26,9 @@ import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -51,6 +54,9 @@ def schema_db() -> sqlite3.Connection:
 
     sql = _MIGRATION_FILE.read_text(encoding="utf-8")
     conn.executescript(sql)
+    # E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+    # players.gc_athlete_profile_id -- apply it so the schema matches the tests.
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
 
     yield conn
@@ -99,7 +105,6 @@ _EXPECTED_TABLES = {
     "seasons",
     "players",
     "teams",
-    "team_opponents",
     "team_rosters",
     "games",
     "player_game_batting",
@@ -277,27 +282,26 @@ class TestSeasonsTable:
         """Can insert a seasons row and retrieve it."""
         schema_db.execute(
             """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES ('2026-spring-hs', 'Spring 2026 High School', 'spring-hs', 2026);
+            INSERT INTO seasons (season_id, name, year)
+            VALUES ('2026', 'Spring 2026 High School', 2026);
             """
         )
         row = schema_db.execute(
-            "SELECT season_id, name, season_type, year FROM seasons WHERE season_id = '2026-spring-hs';"
+            "SELECT season_id, name, year FROM seasons WHERE season_id = '2026';"
         ).fetchone()
         assert row is not None
-        assert row[0] == "2026-spring-hs"
+        assert row[0] == "2026"
         assert row[1] == "Spring 2026 High School"
-        assert row[2] == "spring-hs"
-        assert row[3] == 2026
+        assert row[2] == 2026
 
     def test_seasons_created_at_defaults(self, schema_db: sqlite3.Connection) -> None:
         """created_at is populated automatically when not specified."""
         schema_db.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2025-spring-hs', 'Spring 2025 High School', 'spring-hs', 2025);"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2025', 'Spring 2025 High School', 2025);"
         )
         row = schema_db.execute(
-            "SELECT created_at FROM seasons WHERE season_id = '2025-spring-hs';"
+            "SELECT created_at FROM seasons WHERE season_id = '2025';"
         ).fetchone()
         assert row is not None
         assert row[0] is not None
@@ -313,8 +317,8 @@ class TestForeignKeyEnforcement:
 
     def _insert_season(self, conn: sqlite3.Connection) -> None:
         conn.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026);"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2026', 'Spring 2026 HS', 2026);"
         )
 
     def _insert_team(self, conn: sqlite3.Connection, membership_type: str = "member") -> int:
@@ -352,7 +356,7 @@ class TestForeignKeyEnforcement:
         team_id = self._insert_team(schema_db)
         self._insert_player(schema_db)
         schema_db.execute(
-            "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, 'p-001', '2026-spring-hs');",
+            "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, 'p-001', '2026');",
             (team_id,),
         )
         count = schema_db.execute("SELECT COUNT(*) FROM team_rosters;").fetchone()[0]
@@ -380,7 +384,7 @@ class TestForeignKeyEnforcement:
         away_id = self._insert_team(schema_db, "tracked")
         schema_db.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
-            "VALUES ('g-001', '2026-spring-hs', '2026-03-15', ?, ?);",
+            "VALUES ('g-001', '2026', '2026-03-15', ?, ?);",
             (home_id, away_id),
         )
         count = schema_db.execute("SELECT COUNT(*) FROM games;").fetchone()[0]

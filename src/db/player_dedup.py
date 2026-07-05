@@ -129,7 +129,8 @@ class DedupPlan:
 def find_duplicate_players(
     db: sqlite3.Connection,
     team_id: int | None = None,
-    season_id: str | None = None,
+    *,
+    season_id: str,
 ) -> list[DuplicatePlayerPair]:
     """Find same-team duplicate player pairs using prefix-matching detection.
 
@@ -153,24 +154,27 @@ def find_duplicate_players(
     Args:
         db: An open sqlite3.Connection.
         team_id: Optional -- scope results to this team only.
-        season_id: Optional -- scope results to this season only.
+        season_id: Required (keyword-only) -- scope results to this single
+            season.  Detection is ALWAYS season-scoped: a ``None`` season is no
+            longer a representable input (E-250-01), so an unscoped run that
+            could union prefix-pairs across seasons is unreachable by
+            construction.  The CLI derives this from the data; the load path
+            passes the concrete loaded season.
 
     Returns:
         List of DuplicatePlayerPair, one per unique (canonical, duplicate) pair.
     """
-    # Build WHERE clause for optional filters
+    # Build WHERE clause.  season_id is a required scope (always filtered);
+    # team_id is an optional additional filter.
     filters = []
     params: list[object] = []
     if team_id is not None:
         filters.append("tr1.team_id = ?")
         params.append(team_id)
-    if season_id is not None:
-        filters.append("tr1.season_id = ?")
-        params.append(season_id)
+    filters.append("tr1.season_id = ?")
+    params.append(season_id)
 
-    where_clause = ""
-    if filters:
-        where_clause = "AND " + " AND ".join(filters)
+    where_clause = "AND " + " AND ".join(filters)
 
     # The query finds pairs where both players are on the same team roster
     # in the same season, have matching last names (case-insensitive), and
@@ -944,7 +948,8 @@ def _terminal_names(
 def plan_player_dedup(
     db: sqlite3.Connection,
     team_id: int | None = None,
-    season_id: str | None = None,
+    *,
+    season_id: str,
 ) -> DedupPlan:
     """Group detected prefix pairs into per-roster connected components and
     classify each as a collapse (single terminal name) or a refused fork
@@ -955,12 +960,13 @@ def plan_player_dedup(
     does not mutate any data -- it only reads the detection signal (via
     ``find_duplicate_players``, unchanged) and returns a ``DedupPlan``.
 
-    Components are partitioned per **(team_id, season_id)** roster (TN-1):
-    edges only join players who co-roster in the SAME season, so an unscoped
-    run (``season_id=None``) processes each (team, season) roster independently
-    and never unions a player's different-season prefix-pairs into one
-    cross-season component.  The per-component canonical is chosen by the N-way
-    TN-2 reducer (``_select_component_canonical``).
+    ``season_id`` is required (keyword-only, E-250-01): a ``None`` season can no
+    longer flow into the planner, so a cross-season merge is unreachable by
+    construction.  Components are still partitioned per **(team_id, season_id)**
+    roster (TN-1): edges only join players who co-roster in the SAME season, so
+    an unscoped-``team_id`` run within one season processes each team's roster
+    independently.  The per-component canonical is chosen by the N-way TN-2
+    reducer (``_select_component_canonical``).
     """
     pairs = find_duplicate_players(db, team_id=team_id, season_id=season_id)
     if not pairs:
@@ -999,13 +1005,17 @@ def plan_player_dedup(
     stat_counts = _count_stat_rows(db, set(names))
 
     plan = DedupPlan()
-    # An unscoped run partitions per season, so a duplicate pair that recurs on
-    # multiple seasons' rosters yields the IDENTICAL collapse once per season.
-    # Collapse those identical plans to a single merge so execution does not
-    # re-delete an already-merged player (a benign-but-noisy caught error).
-    # Collapses that share a duplicate but pick DIFFERENT canonicals across
-    # seasons (the genuinely cross-season-conflicting case) are NOT identical
-    # and are deliberately kept as separate collapses.
+    # The collapse_key below is (canonical_player_id, sorted duplicate_player_ids)
+    # and deliberately EXCLUDES team_id.  So this guard dedups an IDENTICAL
+    # collapse that recurs across TEAMS within one season -- not only across
+    # seasons: an unscoped-``team_id`` run (season fixed) processes each team's
+    # roster as its own (team, season) partition, so a player who co-rosters on
+    # two teams and produces the same canonical+duplicates set yields that
+    # collapse once per partition.  Collapsing those identical plans to a single
+    # merge keeps execution from re-deleting an already-merged player (a
+    # benign-but-noisy caught error).  Collapses that share a duplicate but pick
+    # DIFFERENT canonicals (the genuinely conflicting case) are NOT identical and
+    # are deliberately kept as separate collapses.
     seen_collapse_keys: set[tuple[str, tuple[str, ...]]] = set()
     for tid, _season in sorted(adjacency):
         partition = (tid, _season)

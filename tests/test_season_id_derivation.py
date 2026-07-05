@@ -140,16 +140,16 @@ class TestDeriveSeasonIdForTeam:
 
 
 class TestEnsureSeasonRow:
-    """AC-2: ensure_season_row writes a year-only season row (season_type
-    always ``'default'``)."""
+    """ensure_season_row writes a year-only season row (E-250 dropped the
+    ``season_type`` column)."""
 
     def test_year_only_format(self, db: sqlite3.Connection) -> None:
         ensure_season_row(db, "2026")
         row = db.execute(
-            "SELECT season_id, name, season_type, year FROM seasons WHERE season_id = ?",
+            "SELECT season_id, name, year FROM seasons WHERE season_id = ?",
             ("2026",),
         ).fetchone()
-        assert row == ("2026", "2026", "default", 2026)
+        assert row == ("2026", "2026", 2026)
 
     def test_idempotent(self, db: sqlite3.Connection) -> None:
         """Calling twice does not raise or duplicate."""
@@ -163,10 +163,28 @@ class TestEnsureSeasonRow:
     def test_does_not_overwrite_existing(self, db: sqlite3.Connection) -> None:
         """INSERT OR IGNORE preserves the original row."""
         db.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) VALUES ('2026', 'Custom Name', 'custom', 2026)"
+            "INSERT INTO seasons (season_id, name, year) VALUES ('2026', 'Custom Name', 2026)"
         )
         ensure_season_row(db, "2026")
         row = db.execute(
-            "SELECT name, season_type FROM seasons WHERE season_id = '2026'"
+            "SELECT name, year FROM seasons WHERE season_id = '2026'"
         ).fetchone()
-        assert row == ("Custom Name", "custom")
+        assert row == ("Custom Name", 2026)
+
+    def test_raises_on_non_numeric_season_id(self, db: sqlite3.Connection) -> None:
+        """E-250 (AC-6): fail-loud on a non-numeric season_id.
+
+        The defensive .split()/.isdigit() parse was removed; ``int(season_id)``
+        now raises rather than silently coercing to year 0.
+        """
+        with pytest.raises(ValueError):
+            ensure_season_row(db, "old-season")
+
+    def test_raises_on_compound_slug_season_id(self, db: sqlite3.Connection) -> None:
+        """E-250 (AC-6): fail-loud on a compound (cross-season) slug.
+
+        A de-scoped ``YYYY-<suffix>`` slug is a caller bug, not something to
+        silently derive a year from -- ``int('2026-spring-hs')`` raises.
+        """
+        with pytest.raises(ValueError):
+            ensure_season_row(db, "2026-spring-hs")

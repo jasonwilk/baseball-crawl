@@ -57,8 +57,8 @@ def db(tmp_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, 'Y2026', 'default', 2026)",
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES (?, 'Y2026', 2026)",
         (_SEASON_ID,),
     )
     # Own (scouted) team: id=1, has a public_id so the corrective CLI could

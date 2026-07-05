@@ -28,14 +28,20 @@ from src.gamechanger.types import TeamRef
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+# players.gc_athlete_profile_id -- apply it so the schema matches the fixtures.
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 
 def _create_schema(db: sqlite3.Connection) -> None:
     """Create the full schema from the migration file and seed test data."""
     db.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    db.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     db.executescript(
         """
-        INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES ('2025', 'Spring 2025', 'default', 2025);
+        INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES ('2025', 'Spring 2025', 2025);
         INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES ('lsb-hs', 'LSB HS', 'hs');
         INSERT OR IGNORE INTO teams (id, name, gc_uuid, public_id, membership_type, season_year, program_id)
             VALUES (1, 'Own Team', 'own-uuid-1234', 'OwnTeamSlug', 'member', 2025, 'lsb-hs');

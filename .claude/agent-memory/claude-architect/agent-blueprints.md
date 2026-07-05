@@ -75,8 +75,8 @@ memory: project
 
 **Key system prompt elements**:
 - SQLite (host-mounted, WAL mode) for all environments
-- Core entities: Team, Player, PlayerTeamSeason, Game, Lineup, PlateAppearance, PitchingAppearance
-- Player identity across teams is the hard problem (same player on multiple teams)
+- Core entities: Team, Player, Game, Lineup, PlateAppearance, PitchingAppearance
+- Player identity is scoped per team-season; no cross-team or cross-season identity (explicit Non-Goal, E-250)
 - Store events (plate appearances), compute aggregates on read
 - Idempotent ingestion with raw response audit trail
 - Opponent data is first-class (same schema as own team)

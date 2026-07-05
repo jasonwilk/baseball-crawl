@@ -108,6 +108,40 @@ def dedup_players(
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
+        # E-250-01: season_id is a required scope on the planner -- an unscoped
+        # (season_id=None) run that could union prefix-pairs across seasons is
+        # no longer representable. When --season-id is not given, derive it from
+        # the data: read the distinct season_id set from team_rosters (scoped to
+        # --team-id when present, per AC-11) and apply the 0/1/2+ rule.
+        #   0 seasons -> nothing to dedup, exit 0
+        #   1 season  -> use it (zero-UX-change on the live one-season DB)
+        #   2+ seasons -> error listing the seasons; require explicit --season-id
+        if season_id is None:
+            if team_id is not None:
+                season_rows = conn.execute(
+                    "SELECT DISTINCT season_id FROM team_rosters "
+                    "WHERE team_id = ? ORDER BY season_id",
+                    (team_id,),
+                ).fetchall()
+            else:
+                season_rows = conn.execute(
+                    "SELECT DISTINCT season_id FROM team_rosters ORDER BY season_id"
+                ).fetchall()
+            seasons = [row[0] for row in season_rows]
+
+            if not seasons:
+                typer.echo("No roster seasons found; nothing to dedup.")
+                raise SystemExit(0)
+            if len(seasons) > 1:
+                typer.echo(
+                    "Multiple seasons present: "
+                    f"{', '.join(seasons)}. "
+                    "Re-run with --season-id to select one.",
+                    err=True,
+                )
+                raise SystemExit(1)
+            season_id = seasons[0]
+
         # Build the shared component plan (TN-4): single-terminal-name
         # components to collapse + ambiguous forks to refuse.
         try:

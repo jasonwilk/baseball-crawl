@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the athlete-profile API docs — and the associated `/me/*` docs that carry cross-season/longitudinal coaching-relevance verdicts (e.g. `get-me-archived-teams.md`, `get-me-associated-players.md`) — no longer frame their coaching relevance as high-value longitudinal / multi-season / cross-season capability. The endpoint SCHEMAS (request/response shapes, field descriptions, auth requirements) are KEPT intact — only the coaching-relevance framing that presents cross-season identity/longitudinal tracking as a live product direction is softened to neutral. Cross-TEAM-in-current-season framing (e.g. `/me/schedule`, org-level rows) is a KEEP and is explicitly fenced off (AC-3, AC-5).

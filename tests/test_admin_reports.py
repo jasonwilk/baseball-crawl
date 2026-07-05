@@ -340,10 +340,10 @@ def _seed_full_team_data(db_path: Path, team_id: int) -> dict:
     """Insert a full set of dependent data for a team. Returns metadata dict."""
     conn = _get_conn(db_path)
 
-    season_id = "2026-spring-hs"
+    season_id = "2026"
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, 'Spring 2026 HS', 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, 'Spring 2026 HS', 2026)",
         (season_id,),
     )
 
@@ -459,59 +459,12 @@ class TestCascadeDeleteOnReportDeletion:
         assert _count_rows(db_path, "scouting_runs", "team_id = ?", (team_id,)) == 0
         assert _count_rows(db_path, "play_events") == 0
 
-    def test_ac2_preserved_when_tracked_via_team_opponents(self, setup):
-        """Team with team_opponents rows: data preserved on report delete."""
-        db_path, client = setup
-        team_id = _insert_team_for_cascade(db_path, is_active=0)
-        _seed_full_team_data(db_path, team_id)
-        report_id = _insert_report(db_path, team_id, slug="guard-opp")
-
-        conn = _get_conn(db_path)
-        other_team = conn.execute(
-            "INSERT INTO teams (name, membership_type, is_active) VALUES ('Other', 'member', 1)"
-        ).lastrowid
-        conn.execute(
-            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-            (other_team, team_id),
-        )
-        conn.commit()
-        conn.close()
-
-        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
-
-        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
-        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
-
     def test_ac3_preserved_when_is_active(self, setup):
         """Active team: data preserved on report delete."""
         db_path, client = setup
         team_id = _insert_team_for_cascade(db_path, is_active=1)
         _seed_full_team_data(db_path, team_id)
         report_id = _insert_report(db_path, team_id, slug="guard-active")
-
-        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
-
-        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
-        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
-
-    def test_ac4_preserved_when_shared_games_with_tracked_team(self, setup):
-        """Shared games with a tracked team: data preserved."""
-        db_path, client = setup
-        team_id = _insert_team_for_cascade(db_path, is_active=0)
-        data = _seed_full_team_data(db_path, team_id)
-        report_id = _insert_report(db_path, team_id, slug="guard-shared")
-
-        # Make the opponent team a tracked team
-        conn = _get_conn(db_path)
-        tracked_team = conn.execute(
-            "INSERT INTO teams (name, membership_type, is_active) VALUES ('Tracked', 'member', 1)"
-        ).lastrowid
-        conn.execute(
-            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-            (tracked_team, data["opp_id"]),
-        )
-        conn.commit()
-        conn.close()
 
         client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
 
@@ -820,8 +773,8 @@ class TestRunRecordSurfacing:
         # season_id_used FK-references seasons(season_id).
         _conn = _get_conn(db_path)
         _conn.execute(
-            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026)"
+            "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+            "VALUES ('2026', 'Spring 2026 HS', 2026)"
         )
         _conn.commit()
         _conn.close()
@@ -834,7 +787,7 @@ class TestRunRecordSurfacing:
             plays_games_covered=8, reconciliation_status="completed",
             discrepancies_found=3, discrepancies_corrected=2,
             completed_games=12, completed_games_with_data=11,
-            season_id_used="2026-spring-hs",
+            season_id_used="2026",
             identity_match_method="name_only",
         )
 

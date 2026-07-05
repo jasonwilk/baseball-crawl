@@ -41,7 +41,7 @@ def db() -> sqlite3.Connection:
 # Constants
 # ---------------------------------------------------------------------------
 
-_SEASON_ID = "2025-spring-hs"
+_SEASON_ID = "2025"
 _TEAM_ID = 1
 _OTHER_TEAM_ID = 2
 _PITCHER_1 = "pitcher-aaa-001"
@@ -62,8 +62,8 @@ def _seed_data(db: sqlite3.Connection) -> None:
         (_OTHER_TEAM_ID,),
     )
     db.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, '2025 Spring HS', 'spring-hs', 2025)",
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES (?, '2025 Spring HS', 2025)",
         (_SEASON_ID,),
     )
     db.execute("INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'P', '1')", (_PITCHER_1,))

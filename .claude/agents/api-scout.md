@@ -104,7 +104,7 @@ docs/api/
     ...
 ```
 
-When documenting a new endpoint, create a file in `docs/api/endpoints/` following the naming convention `{method}-{path-segments}.md` and add a row to `docs/api/README.md`. See the `.claude/rules/api-docs.md` rule for the full frontmatter schema, body template, and tag vocabulary.
+When documenting a new endpoint, create a file in `docs/api/endpoints/` following the naming convention `{method}-{path-segments}.md` and add a row to `docs/api/README.md`. See the `.claude/rules/api-docs.md` rule for the full frontmatter schema, body template, tag vocabulary, and the factual-record fidelity standard (factual endpoint documentation is never degraded for product-scope reasons -- only our own coaching-relevance/value verdicts are softenable).
 
 ## Discovery Methodology
 
@@ -123,6 +123,7 @@ When exploring a new area of the API:
 3. **Never update the API spec based on a single anomalous observation.** Note the anomaly, flag it for re-verification, and document the sample size. An endpoint is not "stable" until confirmed across at least 3 successful calls.
 4. **Never make parallel or concurrent requests to the same endpoint during exploration.** Sequential requests with jitter -- one at a time, with reasonable delays between calls.
 5. **Never document an endpoint without a discovery date.** Every entry in the spec must be dated so staleness can be assessed.
+6. **Never degrade the factual API record for product-scope reasons.** Factual endpoint documentation (params, response shapes, field descriptions, observed capabilities) is KEEP-always; only our own coaching-relevance/value verdicts are softenable when de-scoping, and product-scope framing ("de-scoped non-goal per ROADMAP") belongs in `docs/ROADMAP.md` / `docs/VISION.md`, never in a behavior doc. See the Fidelity section in `.claude/rules/api-docs.md`.
 
 ## Error Handling
 

@@ -466,24 +466,24 @@ def test_aggregate_isolated_per_season(
 ) -> None:
     """Aggregates for one season do not include game rows from another season.
 
-    Sets up two seasons ("2025-spring" and "2026-spring") with different stats
-    for the same player, then verifies that running aggregation for "2026-spring"
-    produces only "2026-spring" data in player_season_batting and
+    Sets up two seasons ("2025" and "2026") with different stats
+    for the same player, then verifies that running aggregation for "2026"
+    produces only "2026" data in player_season_batting and
     player_season_pitching.
     """
-    season_a = "2025-spring"
-    season_b = "2026-spring"
+    season_a = "2025"
+    season_b = "2026"
     game_a = "game-season-a-001"
     game_b = "game-season-b-001"
 
     # -- Seed required FK rows --------------------------------------------------
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_a, "Spring 2025", "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_a, "Spring 2025", 2025),
     )
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_b, "Spring 2026", "spring-hs", 2026),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_b, "Spring 2026", 2026),
     )
     # Own team (member) and opponent team (tracked).
     own_pk = db.execute(
@@ -538,41 +538,42 @@ def test_aggregate_isolated_per_season(
     )
     db.commit()
 
-    # -- Run aggregation for 2026-spring only (INTEGER PK) --------------------
+    # -- Run aggregation for 2026 only (INTEGER PK) --------------------
     loader._compute_season_aggregates(own_pk, season_b)
     db.commit()
 
-    # -- AC-1: batting aggregate for 2026-spring contains only 2026 game data --
+    # -- AC-1: batting aggregate for 2026 contains only 2026 game data --
+    # (season_b == "2026"; season_a == "2025" rows must be excluded)
     bat_row = db.execute(
         "SELECT ab, h, doubles FROM player_season_batting "
         "WHERE player_id = ? AND team_id = ? AND season_id = ?",
         (_PLAYER_1, own_pk, season_b),
     ).fetchone()
-    assert bat_row is not None, "Expected player_season_batting row for 2026-spring"
+    assert bat_row is not None, "Expected player_season_batting row for 2026"
     assert bat_row[0] == 4, f"Expected ab=4 (2026 only), got {bat_row[0]}"
     assert bat_row[1] == 3, f"Expected h=3 (2026 only), got {bat_row[1]}"
     assert bat_row[2] == 1, f"Expected doubles=1 (2026 only), got {bat_row[2]}"
 
-    # -- AC-2: pitching aggregate for 2026-spring contains only 2026 game data -
+    # -- AC-2: pitching aggregate for 2026 contains only 2026 game data -
     pitch_row = db.execute(
         "SELECT ip_outs, er FROM player_season_pitching "
         "WHERE player_id = ? AND team_id = ? AND season_id = ?",
         (_PLAYER_1, own_pk, season_b),
     ).fetchone()
-    assert pitch_row is not None, "Expected player_season_pitching row for 2026-spring"
+    assert pitch_row is not None, "Expected player_season_pitching row for 2026"
     assert pitch_row[0] == 6, f"Expected ip_outs=6 (2026 only), got {pitch_row[0]}"
     assert pitch_row[1] == 1, f"Expected er=1 (2026 only), got {pitch_row[1]}"
 
-    # No 2025-spring rows should have been inserted.
+    # No 2025 rows should have been inserted.
     bat_2025 = db.execute(
         "SELECT COUNT(*) FROM player_season_batting WHERE season_id = ?", (season_a,)
     ).fetchone()[0]
-    assert bat_2025 == 0, f"Expected 0 rows for 2025-spring, got {bat_2025}"
+    assert bat_2025 == 0, f"Expected 0 rows for 2025, got {bat_2025}"
 
     pitch_2025 = db.execute(
         "SELECT COUNT(*) FROM player_season_pitching WHERE season_id = ?", (season_a,)
     ).fetchone()[0]
-    assert pitch_2025 == 0, f"Expected 0 rows for 2025-spring, got {pitch_2025}"
+    assert pitch_2025 == 0, f"Expected 0 rows for 2025, got {pitch_2025}"
 
 
 def test_aggregate_isolated_per_team(
@@ -593,9 +594,9 @@ def test_aggregate_isolated_per_team(
 
     # -- Seed required FK rows -------------------------------------------------
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (season_id, "Spring 2025 Iso", "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (season_id, "Spring 2025 Iso", 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
@@ -705,8 +706,8 @@ def _seed_fk_rows(
 ) -> tuple[int, int]:
     """Seed seasons, teams, players, and a game row; return (team_pk, opp_pk)."""
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "unknown", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     team_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
@@ -746,8 +747,8 @@ def test_batting_aggregates_include_new_columns(
     game_2 = "game-bat-agg-002"
 
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "unknown", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
@@ -810,8 +811,8 @@ def test_batting_aggregate_shf_sums_when_present(
     game_2 = "game-bat-shf-002"
 
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "unknown", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
@@ -872,8 +873,8 @@ def test_pitching_aggregates_include_new_columns(
     game_1 = "game-pitch-agg-001"
 
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "unknown", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
@@ -955,8 +956,8 @@ def test_aggregate_idempotent_with_updated_game_data(
     game_id = "game-idem-new-001"
 
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "unknown", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
@@ -1341,8 +1342,8 @@ def test_pitching_aggregates_compute_gs_from_appearance_order(
     """AC-1: _compute_season_aggregates counts appearance_order=1 as GS."""
     season_id = "2025-gs-test"
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
@@ -1428,8 +1429,8 @@ def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
     """GS should be NULL (not 0) when all appearance_order values are NULL (pre-backfill)."""
     season_id = "2025-gs-null"
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     own_pk = db.execute(
         "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
@@ -1485,7 +1486,7 @@ def test_batting_aggregates_filter_by_perspective(
 
     # Insert season and game prerequisites.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
         (season_id, season_id),
     )
     db.execute(
@@ -1535,7 +1536,7 @@ def test_pitching_aggregates_filter_by_perspective(
     other_pk = _insert_team(db, public_id="team-d-slug", gc_uuid="team-d-uuid", name="Team D")
 
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
         (season_id, season_id),
     )
     db.execute(
@@ -1857,8 +1858,8 @@ def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
     team_pk = _insert_team(db)  # season_year=2025 -> DB season_id "2025"
     season_id = _SEASON_ID
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2025)",
         (season_id, season_id),
     )
     db.execute(

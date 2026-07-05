@@ -38,8 +38,6 @@ see_also:
 
 Returns the list of archived (prior season) teams the authenticated user was associated with. Schema is identical to `GET /me/teams` response objects.
 
-**Coaching relevance: HIGH.** Gives access to historical season team objects for multi-season longitudinal analysis.
-
 ```
 GET https://api.team-manager.gc.com/me/archived-teams
 ```

@@ -53,6 +53,7 @@ from src.gamechanger.client import (
     GameChangerClient,
 )
 from src.gamechanger.crawlers import CrawlResult
+from src.gamechanger.loaders import ensure_season_row
 
 logger = logging.getLogger(__name__)
 
@@ -351,22 +352,14 @@ class ScoutingCrawler:
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for the year-only ``season_id``.
 
-        Writes ``season_type='default'`` to match the canonical
-        ``ensure_season_row`` (src/gamechanger/loaders/__init__.py). The live
-        report path runs ``scout_team()`` (this writer) BEFORE the canonical
-        helper, and both use ``ON CONFLICT(season_id) DO NOTHING``, so whichever
-        runs first wins -- they MUST agree on ``season_type`` or the persisted
-        metadata drifts from the year-only ``'default'`` contract.
+        Delegates to the canonical ``ensure_season_row``
+        (src/gamechanger/loaders/__init__.py) so the crawler holds no private
+        season-row INSERT. Both the live report path and the canonical helper
+        thus write through one seam, eliminating the two-writer drift that this
+        method's own INSERT used to risk. Inherits the canonical helper's
+        fail-loud contract: a non-numeric ``season_id`` raises via ``int()``.
         """
-        year = int(season_id) if season_id.isdigit() else 0
-        self._db.execute(
-            """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'default', ?)
-            ON CONFLICT(season_id) DO NOTHING
-            """,
-            (season_id, season_id, year),
-        )
+        ensure_season_row(self._db, season_id)
 
     def _upsert_run_start(
         self,

@@ -36,7 +36,7 @@ Design SQLite schemas that serve the coaching analytics use cases defined by the
 
 - Normalize first. Denormalize only for proven performance needs backed by measured query times.
 - Event-level data (plate appearances, pitching appearances) is the source of truth. Aggregate tables (e.g., season batting/pitching stats) are valid when query-time computation from events is impractical -- but they must be rebuildable from the underlying event data.
-- Player identity across teams is the hard problem -- the same player may appear on Freshman, JV, Varsity, Legion, and travel ball rosters across seasons. The `PlayerTeamSeason` junction table handles this.
+- Player identity is scoped per team-season: there is no cross-team or cross-season player-identity linkage (an explicit Non-Goal). Same-team duplicate player entries within a season are collapsed by the dedup pass.
 - Opponent data is first-class: same schema structure as own-team data.
 - Use clear, baseball-conventional column names. A coach reading a column list should recognize the terms.
 
@@ -64,7 +64,7 @@ Design the transformation layer between raw API responses and the normalized sch
 
 Design indexes and query patterns that serve the coaching analytics use cases:
 
-- The primary query patterns are: player stats by season, opponent scouting reports, head-to-head matchup lookups, and longitudinal player development across seasons.
+- The primary query patterns are: player stats by season, opponent scouting reports, and head-to-head matchup lookups.
 - Create indexes for the query patterns that will actually run. Do not speculatively index every column.
 - For new tables, justify indexes by known query patterns from story ACs or coaching requirements. For existing tables, use `EXPLAIN QUERY PLAN` evidence before adding indexes.
 - Use covering indexes where a query can be satisfied entirely from the index.
@@ -108,8 +108,7 @@ The following entity model serves the coaching analytics use cases:
 | Entity | Purpose |
 |--------|---------|
 | `Team` | A team identity (LSB Varsity, opponent teams) |
-| `Player` | A unique person (cross-team, cross-season identity) |
-| `PlayerTeamSeason` | Junction: which player was on which team in which season |
+| `Player` | A person on a roster (identity scoped per team-season; no cross-team or cross-season linkage) |
 | `Game` | A single game event (date, opponent, location, result) |
 | `Lineup` | A player's position in a game lineup (batting order, fielding position) |
 | `PlateAppearance` | A single plate appearance event (outcome, counts, matchup context) |

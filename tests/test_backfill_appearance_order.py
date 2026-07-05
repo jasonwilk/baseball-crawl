@@ -24,6 +24,11 @@ from src.gamechanger.loaders.backfill import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+# players.gc_athlete_profile_id -- apply it so the schema matches the fixtures.
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 
 @pytest.fixture()
@@ -34,6 +39,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -76,8 +82,8 @@ def _insert_game(
     away_team_id: int = 1,
 ) -> None:
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, season_id, "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, season_id, 2025),
     )
     db.execute(
         "INSERT INTO games (game_id, season_id, game_date, status, game_stream_id, home_team_id, away_team_id) "

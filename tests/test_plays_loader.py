@@ -31,7 +31,7 @@ from src.gamechanger.types import TeamRef
 # Constants
 # ---------------------------------------------------------------------------
 
-_SEASON_ID = "2026-spring-hs"
+_SEASON_ID = "2026"
 _GC_UUID = "aaaabbbb-cccc-dddd-eeee-ffff00000001"
 _PUBLIC_ID = "lsb-varsity"
 _GAME_ID_1 = "game-event-id-001"
@@ -98,9 +98,9 @@ def loader(db: sqlite3.Connection, team_ref: TeamRef) -> PlaysLoader:
 def _insert_season(db: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
     """Insert a season row required by FK constraints."""
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (season_id, "Spring 2026 HS", "spring-hs", 2026),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (season_id, "Spring 2026 HS", 2026),
     )
     db.commit()
 
@@ -773,17 +773,17 @@ def test_plays_scoped_to_correct_game_across_seasons(
     hardcoded value) and that plays from two different seasons do not
     cross-contaminate.
     """
-    season_1 = "2025-spring-hs"
-    season_2 = "2026-spring-hs"
+    season_1 = "2025"
+    season_2 = "2026"
 
     # Insert both seasons.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_1, "Spring 2025", "spring-hs", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_1, "Spring 2025", 2025),
     )
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_2, "Spring 2026", "spring-hs", 2026),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_2, "Spring 2026", 2026),
     )
 
     # Insert games in different seasons.

@@ -76,9 +76,9 @@ PRAGMA foreign_keys = ON;
 -- Seasons (2026 is in-scope; 2025 carries the
 -- cross-season out-of-scope rows)
 -- ---------------------------------------------------------------------------
-INSERT INTO seasons (season_id, name, season_type, year) VALUES
-    ('2026', 'Spring 2026 High School', 'default', 2026),
-    ('2025', 'Summer 2025 Legion',      'default', 2025);
+INSERT INTO seasons (season_id, name, year) VALUES
+    ('2026', 'Spring 2026 High School', 2026),
+    ('2025', 'Summer 2025 Legion',      2025);
 
 -- ---------------------------------------------------------------------------
 -- Teams (gc_uuid acts as a stable symbolic name for FK subquery lookups)

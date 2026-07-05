@@ -165,7 +165,6 @@ class TestRunMigrations:
             "seasons",
             "players",
             "teams",
-            "team_opponents",
             "team_rosters",
             "games",
             "player_game_batting",
@@ -918,6 +917,13 @@ class TestE220UpgradeGuard:
             -- the E-220 guard runs; it is not one of the perspective-checked
             -- tables, so its shape is otherwise immaterial here.
             CREATE TABLE play_events (id INTEGER PRIMARY KEY);
+            -- players/seasons/team_opponents must exist so pending migration
+            -- 008 (drop gc_athlete_profile_id / season_type / team_opponents)
+            -- applies cleanly before the E-220 guard runs; not perspective-
+            -- checked tables, so their shape is otherwise immaterial here.
+            CREATE TABLE players (player_id TEXT PRIMARY KEY, gc_athlete_profile_id TEXT);
+            CREATE TABLE seasons (season_id TEXT PRIMARY KEY, season_type TEXT NOT NULL);
+            CREATE TABLE team_opponents (id INTEGER PRIMARY KEY);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
@@ -949,6 +955,13 @@ class TestE220UpgradeGuard:
             -- play_events must exist so pending additive migration 007 applies
             -- before the E-220 guard runs (see sibling test for rationale).
             CREATE TABLE play_events (id INTEGER PRIMARY KEY);
+            -- players/seasons/team_opponents must exist so pending migration
+            -- 008 (drop gc_athlete_profile_id / season_type / team_opponents)
+            -- applies cleanly before the E-220 guard runs; not perspective-
+            -- checked tables, so their shape is otherwise immaterial here.
+            CREATE TABLE players (player_id TEXT PRIMARY KEY, gc_athlete_profile_id TEXT);
+            CREATE TABLE seasons (season_id TEXT PRIMARY KEY, season_type TEXT NOT NULL);
+            CREATE TABLE team_opponents (id INTEGER PRIMARY KEY);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )

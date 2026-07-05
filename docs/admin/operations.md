@@ -496,20 +496,22 @@ Click **Delete** on any report row in the admin Reports page. A confirmation dia
 
 **What happens when you delete a report** depends on whether the associated team has other data in the system:
 
-When all four conditions below are true, deletion is a **full cascade** -- the report, the HTML file, and the team row plus all its associated data are removed in a single transaction:
+When both conditions below are true, deletion is a **full cascade** -- the report, the HTML file, and the team row plus all its associated data are removed in a single transaction:
 
 | Condition | What it checks |
 |-----------|---------------|
 | Team is not active (`is_active = 0`) | Active teams are never auto-deleted |
-| No `team_opponents` links | Team is not linked as an opponent to any of your tracked teams |
 | No other reports reference this team | This was the only report for this team |
-| No shared games with tracked teams | No game rows in the DB link this team to a member team |
 
-If **any** condition fails, deletion is a **report-only** operation: only the report row and the `data/reports/` HTML file are removed. The team and its stats remain in the database.
+If **either** condition fails, deletion is a **report-only** operation: only the report row and the `data/reports/` HTML file are removed. The team and its stats remain in the database.
 
-This behavior is automatic -- no operator decision is required. The system applies the guard conditions and does the right thing.
+This behavior is automatic -- no operator decision is required. The system applies these two guard conditions on every delete.
 
-**Typical use case**: A report generated for a tournament team that is not on your schedule will usually satisfy all four conditions. Deleting the report cleans up the team data completely. A report generated for a team that is linked via `team_opponents` will only remove the report file -- the scouting data stays.
+**Typical use case**: A report generated for a tournament team that is not on your schedule will usually satisfy both conditions. Deleting the report cleans up the team data completely. A report generated for a team that another active report still references will only remove the report file -- the scouting data stays.
+
+These two guards check exactly what their names say (team inactivity and no other referencing report) -- they are not a complete guarantee against deleting a team whose games are shared with another team's data.
+
+**CAUTION -- shared-game teams are not yet fully protected.** The cascade has no guard against deleting a team whose games are shared with another tracked team's data (a shared-game/live-reports eligibility check is planned but not yet implemented -- tracked in CE-3/E-253). Until that guard lands, do not delete reports for a team you know shares games with another team in the system; verify manually first if you are unsure.
 
 ### Verifying Scouting Aggregate Integrity (`bb report verify-aggregates`)
 
@@ -870,4 +872,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-29 | Source: E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-07-05 | Source: E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

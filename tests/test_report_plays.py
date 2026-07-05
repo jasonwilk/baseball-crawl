@@ -34,6 +34,9 @@ _MIGRATIONS = [
     # E-245-01: play_events.pitch_type / pitch_speed_mph columns (the plays
     # loader writes these, so the schema fixture must include them).
     _PROJECT_ROOT / "migrations" / "007_play_events_pitch_columns.sql",
+    # E-250-02: drops seasons.season_type, team_opponents, and
+    # players.gc_athlete_profile_id so the schema matches the season fixtures.
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql",
 ]
 
 
@@ -55,7 +58,7 @@ def db() -> sqlite3.Connection:
 # Constants
 # ---------------------------------------------------------------------------
 
-_SEASON_ID = "2026-spring-hs"
+_SEASON_ID = "2026"
 _TEAM_ID = 1
 _OPP_TEAM_ID = 2
 _GAME_ID_1 = "game-001"
@@ -69,8 +72,8 @@ _BATTER_Y = "batter-y-001"
 def _seed_base(conn: sqlite3.Connection) -> None:
     """Insert base rows: seasons, teams, players, games, roster."""
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "Spring 2026 HS", "spring-hs", 2026),
+        "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (_SEASON_ID, "Spring 2026 HS", 2026),
     )
     conn.execute(
         "INSERT INTO teams (id, name, membership_type, is_active) VALUES (?, ?, 'tracked', 1)",
@@ -447,11 +450,11 @@ class TestMultiSeasonScoping:
     ) -> None:
         """Plays from a different season are not included."""
         _seed_base(db)
-        other_season = "2025-spring-hs"
+        other_season = "2025"
         conn = db
         conn.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-            (other_season, "Spring 2025 HS", "spring-hs", 2025),
+            "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+            (other_season, "Spring 2025 HS", 2025),
         )
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
@@ -481,11 +484,11 @@ class TestMultiSeasonScoping:
     ) -> None:
         """Batting query only returns plays from the specified season."""
         _seed_base(db)
-        other_season = "2025-spring-hs"
+        other_season = "2025"
         conn = db
         conn.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-            (other_season, "Spring 2025 HS", "spring-hs", 2025),
+            "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+            (other_season, "Spring 2025 HS", 2025),
         )
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "

@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, no test fixture or source docstring seeds or describes a cross-season `season_id` shape: Class-1 compound-slug DB `season_id` literals are normalized to year-only, and the one `plays_parser` docstring that hardcodes a compound slug is corrected. Filesystem disk-slug literals (Class-3) and opaque isolation tokens (Class-2) are deliberately left intact. The single-season isolation/exclusion fixtures keep two distinct years (2025 and 2026) to keep proving exclusion. (The `season_type`-INSERT fixtures were already removed in E-250-02, atomically with the column drop — they are NOT this story's concern.)

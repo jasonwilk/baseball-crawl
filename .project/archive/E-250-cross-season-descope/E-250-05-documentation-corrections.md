@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the human-facing docs reflect the schema and guard removals in E-250-02: the `team_opponents` row is gone from the architecture doc, the roadmap no longer instructs readers to "leave the column inert" for `gc_athlete_profile_id` (now dropped), and the operations runbook's delete-report cascade documents only the two surviving eligibility guards.

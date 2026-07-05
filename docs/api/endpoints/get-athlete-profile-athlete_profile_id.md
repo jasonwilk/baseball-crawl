@@ -92,8 +92,6 @@ Accept: application/vnd.gc.com.athlete_profile+json; version=0.0.0
 }
 ```
 
-**Note:** The `graduation_year` field enables multi-season longitudinal tracking even when team names change.
-
-**Coaching relevance: MEDIUM.** Provides a stable cross-team identity for tracked players. The `graduation_year` enables class-year-based cohort analysis.
+**Note:** `graduation_year` is a stable per-profile attribute that does not change when a player's team names change.
 
 **Discovered:** 2026-03-11. Session: 2026-03-11_034739 (web).

@@ -51,9 +51,9 @@
 -- ---------------------------------------------------------------------------
 -- Seasons
 -- ---------------------------------------------------------------------------
-INSERT INTO seasons (season_id, name, season_type, year, start_date, end_date) VALUES
-    ('2026', 'Spring 2026 High School', 'default', 2026, '2026-03-01', '2026-06-01'),
-    ('2025', 'Summer 2025 Legion',      'default', 2025, '2025-06-15', '2025-08-15');
+INSERT INTO seasons (season_id, name, year, start_date, end_date) VALUES
+    ('2026', 'Spring 2026 High School', 2026, '2026-03-01', '2026-06-01'),
+    ('2025', 'Summer 2025 Legion',      2025, '2025-06-15', '2025-08-15');
 
 -- ---------------------------------------------------------------------------
 -- Teams

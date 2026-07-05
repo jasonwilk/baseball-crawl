@@ -50,7 +50,7 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 |--------|------|--------|------|-------------|
 | GET | [/me/advertising/metadata](endpoints/get-me-advertising-metadata.md) | CONFIRMED | req | Advertising ppid and targeting metadata (PII) |
 | GET | [/me/archived-teams](endpoints/get-me-archived-teams.md) | CONFIRMED | req | Past-season teams for the authenticated user |
-| GET | [/me/associated-players](endpoints/get-me-associated-players.md) | CONFIRMED | req | All player records across all teams -- key for longitudinal tracking |
+| GET | [/me/associated-players](endpoints/get-me-associated-players.md) | CONFIRMED | req | All player records across all teams the user is associated with |
 | GET | [/me/external-calendar-sync-url/team/{team_id}](endpoints/get-me-external-calendar-sync-url-team-team_id.md) | OBSERVED | req | iCal/Google Calendar subscription URL for a team |
 | GET | [/me/organizations](endpoints/get-me-organizations.md) | CONFIRMED | req | Organizations the user belongs to (requires pagination params) |
 | GET | [/me/permissions](endpoints/get-me-permissions.md) | CONFIRMED | req | Permissions for a specific entity (requires entityId + entityType params) |
@@ -186,7 +186,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/athlete-profile/{athlete_profile_id}](endpoints/get-athlete-profile-athlete_profile_id.md) | OBSERVED | req | Athlete profile metadata: name, handle, graduation year, positions |
-| GET | [/athlete-profile/{athlete_profile_id}/career-stats](endpoints/get-athlete-profile-athlete_profile_id-career-stats.md) | OBSERVED | req | Cross-team career stats (31KB, longitudinal player tracking across all seasons) |
+| GET | [/athlete-profile/{athlete_profile_id}/career-stats](endpoints/get-athlete-profile-athlete_profile_id-career-stats.md) | OBSERVED | req | Cross-team career stats across all seasons, one entry per team season (31KB) |
 | GET | [/athlete-profile/{athlete_profile_id}/career-stats-association](endpoints/get-athlete-profile-athlete_profile_id-career-stats-association.md) | OBSERVED | req | Maps athlete profile to all player_ids across teams (lightweight ID map) |
 | GET | [/athlete-profile/{athlete_profile_id}/players](endpoints/get-athlete-profile-athlete_profile_id-players.md) | OBSERVED | req | Player identities linked to athlete profile across teams (team name, jersey, games played) |
 

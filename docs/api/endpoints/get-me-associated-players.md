@@ -33,9 +33,7 @@ see_also:
 
 **Status:** CONFIRMED LIVE -- 200 OK. 13 player records across 13 teams. Last verified: 2026-03-07.
 
-Returns all player records associated with the authenticated user across all teams and seasons. Primary endpoint for longitudinal player tracking -- seeing a player's UUID on each team they've played for.
-
-**Coaching relevance: HIGH.** Enables stat aggregation across seasons for tracked players.
+Returns all player records associated with the authenticated user across all teams and seasons -- a player's UUID on each team they've been associated with.
 
 ```
 GET https://api.team-manager.gc.com/me/associated-players

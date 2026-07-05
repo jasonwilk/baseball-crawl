@@ -2558,11 +2558,6 @@ def _delete_team_scoped_data(
         team_ids,
     )
     conn.execute(
-        f"DELETE FROM team_opponents WHERE our_team_id IN ({placeholders}) "
-        f"OR opponent_team_id IN ({placeholders})",
-        team_ids + team_ids,
-    )
-    conn.execute(
         f"DELETE FROM opponent_links WHERE our_team_id IN ({placeholders})",
         team_ids,
     )
@@ -2698,10 +2693,13 @@ def is_team_eligible_for_cleanup(
 
     Guard conditions (all must pass):
     1. ``is_active = 0``
-    2. No rows in ``team_opponents`` reference this team_id (either direction)
-    3. No other ``reports`` rows reference this team_id
-    4. No games involving this team also involve a tracked team (one that
-       appears in ``team_opponents``)
+    2. No other ``reports`` rows reference this team_id
+
+    These are the correct guards for the removed opponent-tracking registry
+    mechanism (E-250 dropped that table). They are NOT asserted to be complete
+    deletion-safety semantics: the shared-game/live-report eligibility guard
+    (a cascade could destroy a still-referenced report's plays) is owned
+    separately by CE-3/E-253, not by this function.
 
     Args:
         conn: Open SQLite connection.
@@ -2718,36 +2716,10 @@ def is_team_eligible_for_cleanup(
     if row[0] != 0:
         return False
 
-    # Guard 2: team_opponents (either direction)
-    row = conn.execute(
-        "SELECT 1 FROM team_opponents "
-        "WHERE our_team_id = ? OR opponent_team_id = ? LIMIT 1",
-        (team_id, team_id),
-    ).fetchone()
-    if row is not None:
-        return False
-
-    # Guard 3: other reports
+    # Guard 2: other reports
     row = conn.execute(
         "SELECT 1 FROM reports WHERE team_id = ? AND id != ? LIMIT 1",
         (team_id, exclude_report_id),
-    ).fetchone()
-    if row is not None:
-        return False
-
-    # Guard 4: shared games with tracked teams
-    row = conn.execute(
-        """
-        SELECT 1 FROM games g
-        WHERE (g.home_team_id = :tid OR g.away_team_id = :tid)
-          AND EXISTS (
-              SELECT 1 FROM team_opponents to2
-              WHERE to2.our_team_id IN (g.home_team_id, g.away_team_id)
-                 OR to2.opponent_team_id IN (g.home_team_id, g.away_team_id)
-          )
-        LIMIT 1
-        """,
-        {"tid": team_id},
     ).fetchone()
     if row is not None:
         return False

@@ -46,8 +46,8 @@
 | Entity | Purpose |
 |--------|---------|
 | `Team` | A team identity (LSB Varsity, opponent teams) |
-| `Player` | A unique person (cross-team, cross-season identity) |
-| `PlayerTeamSeason` | Junction: which player was on which team in which season |
+| `Player` | A unique person (single-season scope; cross-team identity is a permanent non-goal) |
+| `team_rosters` | Junction: which players are on a team in a season (single-season roster membership) |
 | `Game` | A single game event (date, opponent, location, result) |
 | `Lineup` | A player's position in a game lineup (batting order, fielding position) |
 | `PlateAppearance` | A single plate appearance event (outcome, counts, matchup context) |
@@ -55,7 +55,7 @@
 
 ### Key Design Decisions
 - Event-level data (plate appearances) is the source of truth; aggregate tables valid when query-time computation is impractical
-- Player identity across teams is the hard problem -- `PlayerTeamSeason` junction handles it
+- Cross-team player identity and multi-season rollups are permanent non-goals; `season_id` (year-only) is the single-season partition key. Roster membership lives in `team_rosters` (team_id, player_id, season_id)
 - Opponent data is first-class: same schema structure as own-team data
 - Normalize first; denormalize only for proven performance needs
 

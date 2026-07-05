@@ -5,7 +5,6 @@ Verifies AC-20 requirements:
 (a) migrations apply on fresh DB
 (b) programs table seeded correctly
 (c) teams table has correct columns and constraints
-(d) team_opponents constraints work
 (e) all stat table columns exist per the Complete Stat Column Reference
 (f) stat_completeness column on all four stat tables with correct CHECK constraints
 (g) games_tracked column on both season stat tables
@@ -105,10 +104,10 @@ def _insert_player(conn: sqlite3.Connection, player_id: str) -> None:
     conn.commit()
 
 
-def _insert_season(conn: sqlite3.Connection, season_id: str = "2026-spring-hs") -> None:
+def _insert_season(conn: sqlite3.Connection, season_id: str = "2026") -> None:
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
-        (season_id, f"Season {season_id}", "spring-hs", 2026),
+        "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
+        (season_id, f"Season {season_id}", 2026),
     )
     conn.commit()
 
@@ -143,10 +142,10 @@ class TestMigrationsApply:
         assert fresh_db.exists()
 
     def test_all_expected_tables_created(self, migrated_db: sqlite3.Connection) -> None:
-        """All 20 expected tables are present after migration."""
+        """All 19 expected tables are present after migration."""
         expected = {
             "programs", "teams", "seasons", "players",
-            "team_opponents", "team_rosters", "games",
+            "team_rosters", "games",
             "player_game_batting", "player_game_pitching",
             "player_season_batting", "player_season_pitching",
             "spray_charts", "opponent_links", "scouting_runs",
@@ -161,8 +160,8 @@ class TestMigrationsApply:
         """FK enforcement is active after migration -- verified by observing a violation."""
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
-                "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-                (9999, 8888),
+                "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
+                (9999, "nope", "nope"),
             )
             migrated_db.commit()
 
@@ -267,45 +266,6 @@ class TestTeamsTable:
         migrated_db.commit()
         count = migrated_db.execute("SELECT COUNT(*) FROM teams WHERE gc_uuid IS NULL;").fetchone()[0]
         assert count >= 3
-
-
-# ---------------------------------------------------------------------------
-# (d) AC-20: team_opponents constraints
-# ---------------------------------------------------------------------------
-
-
-class TestTeamOpponents:
-    """AC-20(d): team_opponents table constraints work."""
-
-    def test_table_exists(self, migrated_db: sqlite3.Connection) -> None:
-        """team_opponents table exists."""
-        assert "team_opponents" in _tables(migrated_db)
-
-    def test_unique_constraint(self, migrated_db: sqlite3.Connection) -> None:
-        """UNIQUE(our_team_id, opponent_team_id) prevents duplicate pairs."""
-        t1 = _insert_team(migrated_db, "Our Team", "member")
-        t2 = _insert_team(migrated_db, "Opponent", "tracked")
-        migrated_db.execute(
-            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-            (t1, t2),
-        )
-        migrated_db.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            migrated_db.execute(
-                "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-                (t1, t2),
-            )
-            migrated_db.commit()
-
-    def test_self_reference_check_constraint(self, migrated_db: sqlite3.Connection) -> None:
-        """CHECK(our_team_id != opponent_team_id) prevents self-pairing."""
-        t1 = _insert_team(migrated_db, "Self Team", "member")
-        with pytest.raises(sqlite3.IntegrityError):
-            migrated_db.execute(
-                "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
-                (t1, t1),
-            )
-            migrated_db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +431,7 @@ class TestStatCompletenessColumn:
         team_id = _insert_team(migrated_db, "Test Team")
         _insert_player(migrated_db, "P-TEST-01")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-TEST-01", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-TEST-01", "2026", team_id, team_id)
 
         # Insert without specifying stat_completeness
         migrated_db.execute(
@@ -494,7 +454,7 @@ class TestStatCompletenessColumn:
         team_id = _insert_team(migrated_db, "Test Team 2")
         _insert_player(migrated_db, "P-TEST-02")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-TEST-02", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-TEST-02", "2026", team_id, team_id)
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
@@ -561,7 +521,7 @@ class TestSprayChartsTable:
         team_id = _insert_team(migrated_db, "Spray Team")
         _insert_player(migrated_db, "P-SPRAY-01")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-SPRAY-01", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-SPRAY-01", "2026", team_id, team_id)
 
         # Valid values should insert cleanly
         migrated_db.execute(
@@ -576,7 +536,7 @@ class TestSprayChartsTable:
         team_id = _insert_team(migrated_db, "Spray Team 2")
         _insert_player(migrated_db, "P-SPRAY-02")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-SPRAY-02", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-SPRAY-02", "2026", team_id, team_id)
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
@@ -703,7 +663,7 @@ class TestStatTableUniqueConstraints:
         team_id = _insert_team(migrated_db, "Unique Test Team")
         _insert_player(migrated_db, "P-UNIQ-01")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-UNIQ-01", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-UNIQ-01", "2026", team_id, team_id)
 
         migrated_db.execute(
             "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab) "
@@ -725,7 +685,7 @@ class TestStatTableUniqueConstraints:
         team_id = _insert_team(migrated_db, "Unique Pitch Team")
         _insert_player(migrated_db, "P-UNIQ-02")
         _insert_season(migrated_db)
-        _insert_game(migrated_db, "G-UNIQ-02", "2026-spring-hs", team_id, team_id)
+        _insert_game(migrated_db, "G-UNIQ-02", "2026", team_id, team_id)
 
         migrated_db.execute(
             "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs) "
@@ -751,7 +711,7 @@ class TestStatTableUniqueConstraints:
         migrated_db.execute(
             "INSERT INTO player_season_batting (player_id, team_id, season_id, gp) "
             "VALUES (?, ?, ?, ?)",
-            ("P-UNIQ-03", team_id, "2026-spring-hs", 7),
+            ("P-UNIQ-03", team_id, "2026", 7),
         )
         migrated_db.commit()
 
@@ -759,7 +719,7 @@ class TestStatTableUniqueConstraints:
             migrated_db.execute(
                 "INSERT INTO player_season_batting (player_id, team_id, season_id, gp) "
                 "VALUES (?, ?, ?, ?)",
-                ("P-UNIQ-03", team_id, "2026-spring-hs", 8),
+                ("P-UNIQ-03", team_id, "2026", 8),
             )
             migrated_db.commit()
 
@@ -772,7 +732,7 @@ class TestStatTableUniqueConstraints:
         migrated_db.execute(
             "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher) "
             "VALUES (?, ?, ?, ?)",
-            ("P-UNIQ-04", team_id, "2026-spring-hs", 3),
+            ("P-UNIQ-04", team_id, "2026", 3),
         )
         migrated_db.commit()
 
@@ -780,7 +740,7 @@ class TestStatTableUniqueConstraints:
             migrated_db.execute(
                 "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher) "
                 "VALUES (?, ?, ?, ?)",
-                ("P-UNIQ-04", team_id, "2026-spring-hs", 4),
+                ("P-UNIQ-04", team_id, "2026", 4),
             )
             migrated_db.commit()
 
@@ -802,10 +762,13 @@ def test_games_has_game_stream_id(migrated_db: sqlite3.Connection) -> None:
 
 
 def test_players_enriched_columns(migrated_db: sqlite3.Connection) -> None:
-    """players table has bats, throws, gc_athlete_profile_id (AC-11)."""
+    """players table has bats, throws (E-250 dropped gc_athlete_profile_id)."""
     cols = _columns(migrated_db, "players")
-    for col in ("bats", "throws", "gc_athlete_profile_id"):
+    for col in ("bats", "throws"):
         assert col in cols, f"players.{col} missing"
+    assert "gc_athlete_profile_id" not in cols, (
+        "gc_athlete_profile_id should be dropped after migration 008"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -818,7 +781,7 @@ def test_ip_outs_stores_as_integer(migrated_db: sqlite3.Connection) -> None:
     team_id = _insert_team(migrated_db, "IP Test Team")
     _insert_player(migrated_db, "P-IP-01")
     _insert_season(migrated_db)
-    _insert_game(migrated_db, "G-IP-01", "2026-spring-hs", team_id, team_id)
+    _insert_game(migrated_db, "G-IP-01", "2026", team_id, team_id)
 
     # 6.2 IP = 20 outs
     migrated_db.execute(

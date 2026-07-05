@@ -200,21 +200,9 @@ Every team in the system -- both Lincoln member teams and tracked opponent teams
 
 **INTEGER PK rationale**: `teams.id` is an internal autoincrement integer. External GC identifiers (`gc_uuid`, `public_id`) live in their own columns with partial unique indexes (enforced via `WHERE ... IS NOT NULL`), allowing multiple NULL values while preventing duplicate non-null identifiers. This separates internal database identity from external API identifiers, which may not always be available -- opponents discovered by name have neither GC identifier until an admin pastes their URL. All FK references to teams use `teams(id)`.
 
-#### team_opponents
-
-A junction table that records which tracked opponent teams are associated with a given member team.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `our_team_id` | INTEGER FK | References `teams(id)` -- a member team |
-| `opponent_team_id` | INTEGER FK | References `teams(id)` -- a tracked opponent |
-| `first_seen_year` | INTEGER | Year the opponent relationship was first recorded (nullable) |
-
-A UNIQUE constraint on `(our_team_id, opponent_team_id)` prevents duplicate links.
-
 #### opponent_links
 
-Tracks the resolution state for each opponent entry from the GameChanger opponents endpoint. Where `team_opponents` links fully-resolved tracked teams, `opponent_links` records the intermediate resolution state -- from a raw GC opponents entry to a resolved `teams` row.
+Tracks the resolution state for each opponent entry from the GameChanger opponents endpoint. `opponent_links` records the intermediate resolution state -- from a raw GC opponents entry to a resolved `teams` row. (The `team_opponents` junction table that formerly linked fully-resolved tracked teams was dropped in migration 008 (E-250) -- it served the tracked-opponent flow removed in E-239 and had no remaining reader.)
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -229,7 +217,7 @@ Tracks the resolution state for each opponent entry from the GameChanger opponen
 | `is_hidden` | INTEGER | 1 = excluded from UI and scouting pipelines, 0 = visible |
 | `created_at` | TEXT | ISO 8601 timestamp when the row was created |
 
-A UNIQUE constraint on `(our_team_id, root_team_id)` prevents duplicate entries. The relationship to `team_opponents`: once an `opponent_links` row is resolved (`resolved_team_id` is set), the resolved team can be linked via `team_opponents` for full scouting workflow access.
+A UNIQUE constraint on `(our_team_id, root_team_id)` prevents duplicate entries. `opponent_links` is the morning-of-game scheduler's resolution ladder (E-240); it no longer feeds a downstream `team_opponents` link now that the tracked-opponent flow is removed.
 
 ## Admin Interface
 
@@ -267,4 +255,4 @@ Sub-navigation links the Reports and Users pages across all admin views.
 
 ---
 
-*Last updated: 2026-06-21 | Source: E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*
+*Last updated: 2026-07-05 | Source: E-250-05 (migration 008 dropped `team_opponents`; corrected `opponent_links` description to remove the dead downstream reference), E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*

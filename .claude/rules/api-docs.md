@@ -42,6 +42,18 @@ docs/api/
 - Accept headers, auth requirements, and status values in frontmatter must match live verification evidence.
 - All example JSON in endpoint files must use PII-safe placeholder values -- see the Example JSON Safety section below.
 
+## Fidelity: Factual Record vs. Product-Value Verdict
+
+An endpoint doc is an empirical record of **what the GameChanger API offers and how we know it behaves** -- request params, response shapes, field descriptions, and observed capabilities. That factual record is sacred: it MUST NEVER be degraded, pruned, or weakened for product-scope reasons. The API surface is worth knowing in full regardless of what our product currently consumes, and factual detail lost this way is expensive to re-discover.
+
+When de-scoping a product direction, the ONLY layer softenable in an API doc is **our own annotation layer** -- the coaching-relevance / product-VALUE verdicts (e.g. "Coaching relevance: HIGH ...") we layer on top of the facts. Remove or neutralize that verdict; do NOT degrade the factual record beneath it.
+
+- **Factual endpoint documentation = KEEP, always.** Never remove or weaken an established behavior, param, field, or capability. A line documenting a real capability (e.g. the `/search` `year` param finding the same team across seasons) is a schema/behavior fact, not a product verdict -- it stays even when the product direction it once served is dropped.
+- **Do NOT inject product scope into a behavior doc.** A "de-scoped non-goal per ROADMAP" note is a statement about US, not about how the API behaves -- it belongs in `docs/ROADMAP.md` / `docs/VISION.md`, never in an endpoint doc. When softening a verdict, prefer describing the behavior NEUTRALLY over swapping one editorial layer ("high coaching value") for another ("de-scoped non-goal").
+- **api-scout owns the factual-vs-verdict split.** Route API-doc de-scope edits through api-scout, the arbiter of what is fact vs. verdict.
+
+*Origin (E-250-06):* value verdicts in athlete-profile API docs were softened for the cross-season de-scope; a user-directed fidelity remediation then removed both the value verdicts AND the injected product-scope notes, while correctly LEAVING `get-search-opponent-import.md`'s factual note that `/search` with a `year` param finds a team across seasons -- a real endpoint capability, not a stale product verdict.
+
 ## File Naming Convention
 
 Endpoint files are named: `{method}-{path-segments-with-params-as-words}.md`

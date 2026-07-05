@@ -75,6 +75,4 @@ Accept: application/vnd.gc.com.athlete_profile_career_stats_association:list+jso
 
 **Note:** 9 player_id values observed for a single athlete profile spanning seasons from 2019 through 2025.
 
-**Coaching relevance: MEDIUM.** Use for building a player UUID index for cross-team joins. Lighter-weight alternative to `/career-stats` when only IDs are needed.
-
 **Discovered:** 2026-03-11. Session: 2026-03-11_034739 (web).

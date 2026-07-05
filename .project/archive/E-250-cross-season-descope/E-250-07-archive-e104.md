@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the still-READY athlete-profile identity-probe epic E-104 is marked ABANDONED (with reason) and archived from `/epics/` to `/.project/archive/`, closing the cross-team-identity direction that this epic's schema removals (E-250-02) foreclose.

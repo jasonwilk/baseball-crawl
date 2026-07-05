@@ -529,13 +529,13 @@ class TestCrawlConfigQuery:
 class TestSeasonsOrderedByYear:
     """Given the two-season fixture, return both seasons ordered by year.
 
-    E-241: the compound season_type taxonomy was removed; both fixture seasons
-    are now ``season_type='default'`` with year-only season_ids, so the prior
-    season-type-filtering tests are gone.
+    E-250: the ``season_type`` column was dropped (cross-season machinery
+    removed at the root); both fixture seasons carry year-only season_ids, so
+    the prior season-type-filtering tests are gone.
     """
 
     _QUERY_ALL_ORDERED = """
-        SELECT season_id, season_type, year
+        SELECT season_id, year
         FROM seasons
         ORDER BY year;
     """
@@ -544,7 +544,7 @@ class TestSeasonsOrderedByYear:
         """All seasons returned in year-ascending order: 2025, 2026."""
         rows = seeded_db.execute(self._QUERY_ALL_ORDERED).fetchall()
         assert len(rows) == 2
-        years = [r[2] for r in rows]
+        years = [r[1] for r in rows]
         assert years == sorted(years), f"Seasons not in year order: {years}"
         assert years[0] == 2025
         assert years[1] == 2026

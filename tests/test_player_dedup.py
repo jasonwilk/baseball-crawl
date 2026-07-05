@@ -54,8 +54,8 @@ def _seed_team(db: sqlite3.Connection, team_id: int, name: str) -> None:
 
 def _seed_season(db: sqlite3.Connection, season_id: str) -> None:
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026)",
         (season_id, season_id),
     )
 
@@ -156,7 +156,7 @@ class TestPrefixMatch:
         _seed_roster(db, 1, "p-oliver", "2026")
         _seed_roster(db, 1, "p-o", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
         assert pairs[0].canonical_player_id == "p-oliver"
         assert pairs[0].duplicate_player_id == "p-o"
@@ -177,7 +177,7 @@ class TestPrefixVsNonPrefix:
         _seed_roster(db, 1, "p-robert", "2026")
         _seed_roster(db, 1, "p-rob", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
         assert pairs[0].canonical_player_id == "p-robert"
         assert pairs[0].duplicate_player_id == "p-rob"
@@ -190,7 +190,7 @@ class TestPrefixVsNonPrefix:
         _seed_roster(db, 1, "p-mike", "2026")
         _seed_roster(db, 1, "p-mark", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 0
 
 
@@ -209,7 +209,7 @@ class TestDifferentTeams:
         _seed_roster(db, 1, "p-oliver", "2026")
         _seed_roster(db, 2, "p-o", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 0
 
 
@@ -245,43 +245,6 @@ class TestCanonicalSelection:
 
 
 # ---------------------------------------------------------------------------
-# Deduplication across seasons
-# ---------------------------------------------------------------------------
-
-
-class TestSeasonDedup:
-    def test_pair_across_multiple_seasons_returned_per_season(
-        self, db: sqlite3.Connection
-    ) -> None:
-        """The SAME pair on two seasons' rosters is returned once PER season
-        (each carrying its season_id), so component grouping can partition by
-        (team_id, season_id).  The planner then collapses the two IDENTICAL
-        per-season collapses back into a single merge."""
-        _seed_team(db, 1, "LSB Varsity")
-        _seed_player(db, "p-oliver", "Oliver", "Holbein")
-        _seed_player(db, "p-o", "O", "Holbein")
-        _seed_roster(db, 1, "p-oliver", "2025")
-        _seed_roster(db, 1, "p-o", "2025")
-        _seed_roster(db, 1, "p-oliver", "2026")
-        _seed_roster(db, 1, "p-o", "2026")
-
-        pairs = find_duplicate_players(db)
-        assert len(pairs) == 2
-        assert {p.season_id for p in pairs} == {"2025", "2026"}
-        # The detection orientation is identical in both seasons.
-        assert {(p.canonical_player_id, p.duplicate_player_id) for p in pairs} == {
-            ("p-oliver", "p-o")
-        }
-
-        # Planner-level: the two identical per-season collapses dedup to one.
-        plan = plan_player_dedup(db)
-        assert len(plan.refused_forks) == 0
-        assert len(plan.collapses) == 1
-        assert plan.collapses[0].canonical_player_id == "p-oliver"
-        assert [d.player_id for d in plan.collapses[0].duplicates] == ["p-o"]
-
-
-# ---------------------------------------------------------------------------
 # Scoping filters
 # ---------------------------------------------------------------------------
 
@@ -300,11 +263,11 @@ class TestFilters:
         _seed_roster(db, 2, "p-robert", "2026")
         _seed_roster(db, 2, "p-rob", "2026")
 
-        pairs_t1 = find_duplicate_players(db, team_id=1)
+        pairs_t1 = find_duplicate_players(db, team_id=1, season_id="2026")
         assert len(pairs_t1) == 1
         assert pairs_t1[0].canonical_last_name == "Holbein"
 
-        pairs_t2 = find_duplicate_players(db, team_id=2)
+        pairs_t2 = find_duplicate_players(db, team_id=2, season_id="2026")
         assert len(pairs_t2) == 1
         assert pairs_t2[0].canonical_last_name == "Jones"
 
@@ -344,7 +307,7 @@ class TestConfidenceIndicator:
         _seed_game_batting(db, "game-1", "p-oliver", 1)
         _seed_game_batting(db, "game-1", "p-o", 1)
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
         assert pairs[0].has_overlapping_games is True
 
@@ -363,7 +326,7 @@ class TestConfidenceIndicator:
         _seed_game_batting(db, "game-1", "p-oliver", 1)
         _seed_game_batting(db, "game-2", "p-o", 1)
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
         assert pairs[0].has_overlapping_games is False
 
@@ -382,7 +345,7 @@ class TestEdgeCases:
         _seed_roster(db, 1, "p-oliver", "2026")
         _seed_roster(db, 1, "p-empty", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 0
 
     def test_case_insensitive_match(self, db: sqlite3.Connection) -> None:
@@ -393,12 +356,12 @@ class TestEdgeCases:
         _seed_roster(db, 1, "p-oliver", "2026")
         _seed_roster(db, 1, "p-o", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
 
     def test_no_players_returns_empty(self, db: sqlite3.Connection) -> None:
         """Empty database returns empty list."""
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert pairs == []
 
     def test_exact_same_first_name_flagged(self, db: sqlite3.Connection) -> None:
@@ -410,7 +373,7 @@ class TestEdgeCases:
         _seed_roster(db, 1, "p-a", "2026")
         _seed_roster(db, 1, "p-b", "2026")
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
 
 
@@ -1481,7 +1444,7 @@ class TestCrossPerspectiveOverlapDetection:
         _seed_game_batting(db, "game-A", "p-oliver-t2", 2, ab=4, perspective_team_id=2)
         _seed_game_batting(db, "game-A", "p-o-t2", 2, ab=4, perspective_team_id=2)
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
 
         # Find the team-1 pair (p-oliver-t1 vs p-o-t1)
         team1_pair = next(
@@ -1524,7 +1487,7 @@ class TestCrossPerspectiveOverlapDetection:
         # p-oliver is in game-A but ONLY from team 2's perspective (foreign).
         _seed_game_batting(db, "game-A", "p-oliver", 1, ab=1, perspective_team_id=2)
 
-        pairs = find_duplicate_players(db)
+        pairs = find_duplicate_players(db, season_id="2026")
         assert len(pairs) == 1
         # Overlap detection should only count rows from the team's own
         # perspective.  p-oliver has NO own-perspective data for team 1 in
@@ -1943,61 +1906,4 @@ class TestDedupPlanShape:
         assert sorted(fork.terminal_names) == ["Aaron", "Abel"]
         assert {m.player_id for m in fork.members} == {"p-a", "p-aaron", "p-abel"}
 
-
-class TestCrossSeasonPartition:
-    """Phase-4b P1 regression: components MUST partition per (team_id,
-    season_id).  An unscoped run must NOT union a player's different-season
-    prefix-pairs into one cross-season fork.
-
-    Codex's exact repro: the SAME ``p-jo`` row is on the 2025 roster {Jo, John}
-    and the 2026 roster {Jo, Jon}.  Before the fix, the unscoped planner unioned
-    {Jo, John, Jon} into ONE component and refused it as a fork (['John','Jon']),
-    merging nothing.  After the fix it yields TWO independent collapses and ZERO
-    forks.
-    """
-
-    def _seed_codex_shape(self, db: sqlite3.Connection) -> None:
-        _seed_team(db, 1, "LSB Varsity")
-        _seed_player(db, "p-jo", "Jo", "Pratt")
-        _seed_player(db, "p-john", "John", "Pratt")
-        _seed_player(db, "p-jon", "Jon", "Pratt")
-        # Same p-jo row rostered in BOTH seasons; John only 2025, Jon only 2026.
-        _seed_roster(db, 1, "p-jo", "2025")
-        _seed_roster(db, 1, "p-john", "2025")
-        _seed_roster(db, 1, "p-jo", "2026")
-        _seed_roster(db, 1, "p-jon", "2026")
-
-    def test_unscoped_plan_yields_two_collapses_zero_forks(
-        self, db: sqlite3.Connection
-    ) -> None:
-        self._seed_codex_shape(db)
-
-        plan = plan_player_dedup(db, team_id=1)  # unscoped season
-
-        assert len(plan.refused_forks) == 0, (
-            "the cross-season fork must be gone -- 2025 and 2026 are independent"
-        )
-        assert len(plan.collapses) == 2
-        by_canonical = {
-            c.canonical_player_id: [d.player_id for d in c.duplicates]
-            for c in plan.collapses
-        }
-        assert by_canonical == {"p-john": ["p-jo"], "p-jon": ["p-jo"]}, (
-            "Jo collapses into John (2025) AND into Jon (2026), independently"
-        )
-
-    def test_each_season_scoped_plan_collapses_independently(
-        self, db: sqlite3.Connection
-    ) -> None:
-        self._seed_codex_shape(db)
-
-        plan_2025 = plan_player_dedup(db, team_id=1, season_id="2025")
-        assert len(plan_2025.refused_forks) == 0
-        assert len(plan_2025.collapses) == 1
-        assert plan_2025.collapses[0].canonical_player_id == "p-john"
-
-        plan_2026 = plan_player_dedup(db, team_id=1, season_id="2026")
-        assert len(plan_2026.refused_forks) == 0
-        assert len(plan_2026.collapses) == 1
-        assert plan_2026.collapses[0].canonical_player_id == "p-jon"
 

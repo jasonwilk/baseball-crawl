@@ -35,6 +35,11 @@ from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoad
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_001 = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+# players.gc_athlete_profile_id -- apply it so the schema matches the fixtures.
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 
 
@@ -45,6 +50,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_001.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -93,8 +99,8 @@ def _seed_team(
 
 def _seed_season(conn: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2025)",
         (season_id, season_id),
     )
     conn.commit()
@@ -711,8 +717,8 @@ def test_season_id_derived_from_team_metadata(
     crawl_season = "2024-fall-hs"
     # Team has season_year=2025 (default from _seed_team), so DB season_id = "2025".
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'default', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2025)",
         (_SEASON_ID, _SEASON_ID),
     )
     db.commit()

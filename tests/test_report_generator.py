@@ -82,9 +82,9 @@ def _seed_team(db, name="Test Tigers", public_id="abc123"):
     return cursor.lastrowid
 
 
-def _seed_season(db, season_id="2026-spring-hs"):
+def _seed_season(db, season_id="2026"):
     db.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'spring', 2026)",
+        "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, 2026)",
         (season_id, season_id),
     )
     db.commit()
@@ -98,7 +98,7 @@ def _seed_player(db, player_id="p1", first="John", last="Smith"):
     db.commit()
 
 
-def _seed_roster(db, team_id, player_id="p1", season_id="2026-spring-hs", jersey="12"):
+def _seed_roster(db, team_id, player_id="p1", season_id="2026", jersey="12"):
     db.execute(
         "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) VALUES (?, ?, ?, ?)",
         (team_id, player_id, season_id, jersey),
@@ -122,8 +122,8 @@ def _seed_completed_game(db, season_id="2026", team_id=1, game_id="seed-g1"):
     this helper also seeds one real batting line, making N>0 honest.
     """
     db.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'default', 2026) ON CONFLICT(season_id) DO NOTHING",
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026) ON CONFLICT(season_id) DO NOTHING",
         (season_id, season_id),
     )
     db.execute(
@@ -238,7 +238,7 @@ class TestGenerateReportE2E:
         # Seed a scouting_runs row so _query_season_id finds a season
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -256,7 +256,7 @@ class TestGenerateReportE2E:
         mock_client_cls.return_value = mock_client
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -323,7 +323,7 @@ class TestRunRecordPopulation:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         # A completed game in the derived season ('2026') keeps the no-games
@@ -358,7 +358,7 @@ class TestRunRecordPopulation:
         # M = 2 completed games on the schedule (3rd is scheduled, not counted).
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            team_id=1, season_id="2026", games_crawled=2,
             games=[
                 {"game_status": "completed"},
                 {"game_status": "completed"},
@@ -428,7 +428,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            team_id=1, season_id="2026", games_crawled=2,
             games=[{"game_status": "completed"}], boxscores={},
         )
         mock_loader = MagicMock()
@@ -483,7 +483,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            team_id=1, season_id="2026", games_crawled=2,
             games=[{"game_status": "completed"}], boxscores={"g1": {}},
         )
         mock_loader = MagicMock()
@@ -547,7 +547,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            team_id=1, season_id="2026", games_crawled=2,
             games=[{"game_status": "completed"}], boxscores={"g1": {}},
         )
         # Some rows loaded AND errors > 0 -> PARTIAL (not total failure).
@@ -602,7 +602,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            team_id=1, season_id="2026", games_crawled=1,
             games=[{"game_status": "completed"}], boxscores={"g1": {}},
         )
         # Sub-case A: just the game row counted, zero player rows, zero errors.
@@ -653,7 +653,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            team_id=1, season_id="2026", games_crawled=1,
             games=[{"game_status": "completed"}], boxscores={"g1": {}},
         )
         # Zero loaded AND errors>0 -> the load stage's OWN total-failure signal.
@@ -700,7 +700,7 @@ class TestRunRecordPopulation:
         mock_crawler = MagicMock()
         # Fatal: errors > 0 AND games_crawled == 0.
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=0, errors=1,
+            team_id=1, season_id="2026", games_crawled=0, errors=1,
             games=[], boxscores={},
         )
 
@@ -750,7 +750,7 @@ class TestRunRecordPopulation:
         mock_crawler = MagicMock()
         # M = 2 completed games on the schedule, but only 1 boxscore fetched.
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=1, errors=0,
+            team_id=1, season_id="2026", games_crawled=1, errors=0,
             games=[{"game_status": "completed"}, {"game_status": "completed"}],
             boxscores={"g1": {}},
         )
@@ -802,7 +802,7 @@ class TestRunRecordPopulation:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=2, errors=0,
+            team_id=1, season_id="2026", games_crawled=2, errors=0,
             games=[{"game_status": "completed"}, {"game_status": "completed"}],
             boxscores={"g1": {}, "g2": {}},
         )
@@ -859,7 +859,7 @@ class TestRunRecordPopulation:
         # All-blocked: M = 2 completed games, but every boxscore fetch blocked
         # (games_crawled == 0) and NO crawl-level error flag set (errors == 0).
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=0, errors=0,
+            team_id=1, season_id="2026", games_crawled=0, errors=0,
             games=[{"game_status": "completed"}, {"game_status": "completed"}],
             boxscores={},
         )
@@ -922,7 +922,7 @@ class TestPlaysStageAuthExpiry:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
 
@@ -938,7 +938,7 @@ class TestPlaysStageAuthExpiry:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -1165,7 +1165,7 @@ class TestListReportsWithRunsJoin:
             plays_games_covered=8, reconciliation_status="completed",
             discrepancies_found=3, discrepancies_corrected=2,
             completed_games=12, completed_games_with_data=11,
-            season_id_used="2026-spring-hs",
+            season_id_used="2026",
             identity_match_method="name_only",
             error_stage="load", error_message="run-level msg",
         )
@@ -1252,19 +1252,19 @@ class TestQueryHelpers:
         # Add games: 2 wins, 1 loss
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-20"),
+            ("g1", "2026", team_id, opp_id, 5, 3, "2026-03-20"),
         )
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", opp_id, team_id, 3, 7, "2026-03-21"),
+            ("g2", "2026", opp_id, team_id, 3, 7, "2026-03-21"),
         )
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g3", "2026-spring-hs", team_id, opp_id, 2, 4, "2026-03-22"),
+            ("g3", "2026", team_id, opp_id, 2, 4, "2026-03-22"),
         )
         db.commit()
 
-        record = _query_record(db, team_id, "2026-spring-hs")
+        record = _query_record(db, team_id, "2026")
         assert record is not None
         assert record["wins"] == 2
         assert record["losses"] == 1
@@ -1276,11 +1276,11 @@ class TestQueryHelpers:
         for i in range(7):
             db.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (f"g{i}", "2026-spring-hs", team_id, opp_id, 5 + i, 3, f"2026-03-{20+i:02d}"),
+                (f"g{i}", "2026", team_id, opp_id, 5 + i, 3, f"2026-03-{20+i:02d}"),
             )
         db.commit()
 
-        games = _query_recent_games(db, team_id, "2026-spring-hs", limit=5)
+        games = _query_recent_games(db, team_id, "2026", limit=5)
         assert len(games) == 5
         assert games[0]["result"] == "W"
 
@@ -1292,7 +1292,7 @@ class TestQueryHelpers:
         # g1: completed AND has a per-game stat row -> counted.
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-25"),
+            ("g1", "2026", team_id, opp_id, 5, 3, "2026-03-25"),
         )
         db.execute(
             "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
@@ -1304,11 +1304,11 @@ class TestQueryHelpers:
         # even though it is later (E-235 Phase 4b HIGH-1).
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", team_id, opp_id, 7, 2, "2026-03-28"),
+            ("g2", "2026", team_id, opp_id, 7, 2, "2026-03-28"),
         )
         db.commit()
 
-        date, count = _query_freshness(db, team_id, "2026-spring-hs")
+        date, count = _query_freshness(db, team_id, "2026")
         assert count == 1  # only g1 has stat data
         assert date == "2026-03-25"  # g2 (statless, later) excluded from MAX
 
@@ -1319,11 +1319,11 @@ class TestQueryHelpers:
         _seed_season(db)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-25"),
+            ("g1", "2026", team_id, opp_id, 5, 3, "2026-03-25"),
         )
         db.commit()
 
-        date, count = _query_freshness(db, team_id, "2026-spring-hs")
+        date, count = _query_freshness(db, team_id, "2026")
         assert count == 0
         assert date is None
 
@@ -1331,15 +1331,15 @@ class TestQueryHelpers:
         team_id = _seed_team(db)
         _seed_season(db)
         _seed_player(db, "p1", "Jane", "Doe")
-        _seed_roster(db, team_id, "p1", "2026-spring-hs", "7")
+        _seed_roster(db, team_id, "p1", "2026", "7")
         db.execute(
             "INSERT INTO player_season_batting (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026-spring-hs", 10, 30, 10, 2, 1, 1, 5, 3, 8, 2, 1, 0),
+            ("p1", team_id, "2026", 10, 30, 10, 2, 1, 1, 5, 3, 8, 2, 1, 0),
         )
         db.commit()
 
         db.row_factory = sqlite3.Row
-        batting = _query_batting(db, team_id, "2026-spring-hs")
+        batting = _query_batting(db, team_id, "2026")
         assert len(batting) == 1
         assert batting[0]["name"] == "Jane Doe"
         assert batting[0]["ab"] == 30
@@ -1349,15 +1349,15 @@ class TestQueryHelpers:
         team_id = _seed_team(db)
         _seed_season(db)
         _seed_player(db, "p2", "John", "Smith")
-        _seed_roster(db, team_id, "p2", "2026-spring-hs", "12")
+        _seed_roster(db, team_id, "p2", "2026", "12")
         db.execute(
             "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs, h, er, bb, so, pitches, total_strikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026-spring-hs", 5, 45, 20, 8, 10, 30, 300, 180),
+            ("p2", team_id, "2026", 5, 45, 20, 8, 10, 30, 300, 180),
         )
         db.commit()
 
         db.row_factory = sqlite3.Row
-        pitching = _query_pitching(db, team_id, "2026-spring-hs")
+        pitching = _query_pitching(db, team_id, "2026")
         assert len(pitching) == 1
         assert pitching[0]["name"] == "John Smith"
         # Rate fields should be computed
@@ -1376,10 +1376,10 @@ class TestQueryHelpers:
         team_id = _seed_team(db)
         _seed_season(db)
         _seed_player(db, "p1", "Jane", "Doe")
-        _seed_roster(db, team_id, "p1", "2026-spring-hs", "7")
+        _seed_roster(db, team_id, "p1", "2026", "7")
 
         db.row_factory = sqlite3.Row
-        roster = _query_roster(db, team_id, "2026-spring-hs")
+        roster = _query_roster(db, team_id, "2026")
         assert len(roster) == 1
         assert roster[0]["name"] == "Jane Doe"
         assert roster[0]["jersey_number"] == "7"
@@ -1450,10 +1450,10 @@ class TestCrawlAndLoadSpray:
 
         client = MagicMock()
 
-        _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
+        _crawl_and_load_spray(client, "abc123", "2026")
 
         mock_crawler.crawl_team.assert_called_once_with(
-            "abc123", season_id="2026-spring-hs", gc_uuid=None,
+            "abc123", season_id="2026", gc_uuid=None,
             games_data=None,
         )
         mock_loader.load_from_data.assert_called_once()
@@ -1488,7 +1488,7 @@ class TestCrawlAndLoadSpray:
         client = MagicMock()
 
         with pytest.raises(CredentialExpiredError):
-            _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
+            _crawl_and_load_spray(client, "abc123", "2026")
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.ScoutingSprayChartCrawler")
@@ -1516,7 +1516,7 @@ class TestCrawlAndLoadSpray:
         client = MagicMock()
 
         # Should NOT raise -- non-fatal
-        _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
+        _crawl_and_load_spray(client, "abc123", "2026")
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.ScoutingSprayChartCrawler")
@@ -1546,10 +1546,10 @@ class TestCrawlAndLoadSpray:
 
         client = MagicMock()
 
-        _crawl_and_load_spray(client, "abc123", "2026-spring-hs", gc_uuid="resolved-uuid")
+        _crawl_and_load_spray(client, "abc123", "2026", gc_uuid="resolved-uuid")
 
         mock_crawler.crawl_team.assert_called_once_with(
-            "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid",
+            "abc123", season_id="2026", gc_uuid="resolved-uuid",
             games_data=None,
         )
 
@@ -1565,7 +1565,7 @@ def _make_spray_gen():
     gen.report_id = 123
     gen.client = object()
     gen.public_id = "abc123"
-    gen.season_id = "2026-spring-hs"
+    gen.season_id = "2026"
     gen.resolved_gc_uuid = None
     gen.team_id = 1
 
@@ -1653,7 +1653,7 @@ class TestSprayInformationalCount:
 
     @staticmethod
     def _seed_spray_row(db, *, game_id, perspective_team_id, player_id,
-                        team_id=None, season_id="2026-spring-hs",
+                        team_id=None, season_id="2026",
                         chart_type="offensive"):
         # team_id defaults to perspective_team_id (the own-perspective case).
         # season_id + chart_type are now part of the count predicate (Phase 4b
@@ -1680,7 +1680,7 @@ class TestSprayInformationalCount:
         for gid in ("g1", "g2", "g3"):
             db.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, "
-                "away_team_id, game_date) VALUES (?, '2026-spring-hs', 1, 2, "
+                "away_team_id, game_date) VALUES (?, '2026', 1, 2, "
                 "'2026-04-01')",
                 (gid,),
             )
@@ -1726,7 +1726,7 @@ class TestSprayInformationalCount:
         mock_loader_cls.return_value = mock_loader
 
         outcome = _crawl_and_load_spray(
-            MagicMock(), "abc123", "2026-spring-hs", team_id=1,
+            MagicMock(), "abc123", "2026", team_id=1,
         )
 
         assert outcome.status == "completed"
@@ -1755,7 +1755,7 @@ class TestSprayInformationalCount:
         for gid in ("g4", "g5"):
             db.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, "
-                "away_team_id, game_date) VALUES (?, '2026-spring-hs', 1, 2, "
+                "away_team_id, game_date) VALUES (?, '2026', 1, 2, "
                 "'2026-04-02')",
                 (gid,),
             )
@@ -1768,7 +1768,7 @@ class TestSprayInformationalCount:
         # g5: own team/perspective, OFFENSIVE, but a DIFFERENT season -> excluded.
         self._seed_spray_row(
             db, game_id="g5", perspective_team_id=1, player_id="p1",
-            season_id="2025-spring-hs",
+            season_id="2025",
         )
 
         def _fresh_conn():
@@ -1787,7 +1787,7 @@ class TestSprayInformationalCount:
         mock_loader_cls.return_value = mock_loader
 
         outcome = _crawl_and_load_spray(
-            MagicMock(), "abc123", "2026-spring-hs", team_id=1,
+            MagicMock(), "abc123", "2026", team_id=1,
         )
 
         # Still exactly 2 -- the defensive row (g4) and the cross-season row (g5)
@@ -2078,12 +2078,12 @@ class TestResolveGcUuid:
             "VALUES ('Test Tigers', 'abc123', 'existing-uuid-999', 2026, 'member')"
         )
         conn_template.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2026-spring-hs', '2026 Spring HS', 'spring-hs', 2026)"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2026', '2026 Spring HS', 2026)"
         )
         conn_template.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         conn_template.commit()
         _seed_completed_game(conn_template)  # N>0 so the no-games gate does not fire
@@ -2101,7 +2101,7 @@ class TestResolveGcUuid:
 
         mock_client = MagicMock()
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2145,17 +2145,17 @@ class TestBattingSortOrder:
             "INSERT INTO player_season_batting "
             "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026-spring-hs", 10, 50, 15, 10, 2, 1),  # PA=63
+            ("p1", team_id, "2026", 10, 50, 15, 10, 2, 1),  # PA=63
         )
         db.execute(
             "INSERT INTO player_season_batting "
             "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026-spring-hs", 10, 20, 8, 3, 0, 0),  # PA=23
+            ("p2", team_id, "2026", 10, 20, 8, 3, 0, 0),  # PA=23
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        batting = _query_batting(db, team_id, "2026-spring-hs")
+        batting = _query_batting(db, team_id, "2026")
         assert len(batting) == 2
         assert batting[0]["name"] == "High PA"
         assert batting[1]["name"] == "Low PA"
@@ -2173,17 +2173,17 @@ class TestPitchingSortOrder:
             "INSERT INTO player_season_pitching "
             "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026-spring-hs", 8, 60, 5, 40, 10, 20, 400, 250),
+            ("p1", team_id, "2026", 8, 60, 5, 40, 10, 20, 400, 250),
         )
         db.execute(
             "INSERT INTO player_season_pitching "
             "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026-spring-hs", 5, 30, 3, 15, 8, 12, 200, 120),
+            ("p2", team_id, "2026", 5, 30, 3, 15, 8, 12, 200, 120),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        pitching = _query_pitching(db, team_id, "2026-spring-hs")
+        pitching = _query_pitching(db, team_id, "2026")
         assert len(pitching) == 2
         assert pitching[0]["name"] == "Ace Pitcher"  # 60 outs first
         assert pitching[1]["name"] == "Relief Pitcher"  # 30 outs second
@@ -2200,11 +2200,11 @@ class TestBattingCSColumn:
             "INSERT INTO player_season_batting "
             "(player_id, team_id, season_id, gp, ab, h, sb, cs) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026-spring-hs", 10, 30, 10, 5, 3),
+            ("p1", team_id, "2026", 10, 30, 10, 5, 3),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        batting = _query_batting(db, team_id, "2026-spring-hs")
+        batting = _query_batting(db, team_id, "2026")
         assert batting[0]["cs"] == 3
 
 
@@ -2218,11 +2218,11 @@ class TestRecentFormOpponentNames:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 7, 3, "2026-03-25"),
+            ("g1", "2026", team_id, opp_id, 7, 3, "2026-03-25"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        games = _query_recent_games(db, team_id, "2026")
         assert len(games) == 1
         assert games[0]["opponent_name"] == "Rival Team"
         assert games[0]["is_home"] is True
@@ -2234,11 +2234,11 @@ class TestRecentFormOpponentNames:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", opp_id, team_id, 3, 7, "2026-03-25"),
+            ("g1", "2026", opp_id, team_id, 3, 7, "2026-03-25"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        games = _query_recent_games(db, team_id, "2026")
         assert games[0]["opponent_name"] == "Away Rival"
         assert games[0]["is_home"] is False
 
@@ -2260,11 +2260,11 @@ class TestRecentFormOpponentNames:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 5, 2, "2026-03-25"),
+            ("g1", "2026", team_id, opp_id, 5, 2, "2026-03-25"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        games = _query_recent_games(db, team_id, "2026")
         assert games[0]["opponent_name"] == "Unknown"
 
 
@@ -2279,17 +2279,17 @@ class TestRunsAvg:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 7, 3, "2026-03-20"),
+            ("g1", "2026", team_id, opp_id, 7, 3, "2026-03-20"),
         )
         # Game 2: away, scored 5, allowed 2
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", opp_id, team_id, 2, 5, "2026-03-21"),
+            ("g2", "2026", opp_id, team_id, 2, 5, "2026-03-21"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        scored, allowed = _query_runs_avg(db, team_id, "2026")
         assert scored == 6.0   # (7 + 5) / 2
         assert allowed == 2.5  # (3 + 2) / 2
 
@@ -2297,7 +2297,7 @@ class TestRunsAvg:
         team_id = _seed_team(db)
         _seed_season(db)
         db.row_factory = sqlite3.Row
-        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        scored, allowed = _query_runs_avg(db, team_id, "2026")
         assert scored is None
         assert allowed is None
 
@@ -2306,33 +2306,33 @@ class TestRunsAvg:
         team_id = _seed_team(db, name="Target", public_id="target1")
         other_id = _seed_team(db, name="Other", public_id="other1")
         opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
-        _seed_season(db, season_id="2026-spring-hs")
+        _seed_season(db, season_id="2026")
         db.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2025-spring-hs', '2025-spring-hs', 'spring', 2025)"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2025', '2025', 2025)"
         )
         db.commit()
         # Target team, target season: scored 10, allowed 2
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, opp_id, 10, 2, "2026-03-20"),
+            ("g1", "2026", team_id, opp_id, 10, 2, "2026-03-20"),
         )
         # Other team, same season: scored 20, allowed 0 (should be excluded)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", other_id, opp_id, 20, 0, "2026-03-20"),
+            ("g2", "2026", other_id, opp_id, 20, 0, "2026-03-20"),
         )
         # Target team, wrong season: scored 30, allowed 1 (should be excluded)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g3", "2025-spring-hs", team_id, opp_id, 30, 1, "2025-03-20"),
+            ("g3", "2025", team_id, opp_id, 30, 1, "2025-03-20"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
-        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        scored, allowed = _query_runs_avg(db, team_id, "2026")
         assert scored == 10.0
         assert allowed == 2.0
 
@@ -2369,7 +2369,7 @@ class TestResolveGcUuidIntegration:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -2399,7 +2399,7 @@ class TestResolveGcUuidIntegration:
         }
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2603,7 +2603,7 @@ class TestCleanupOrphanTeams:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", subject_id, orphan_id, 5, 3, "2026-03-20"),
+            ("g1", "2026", subject_id, orphan_id, 5, 3, "2026-03-20"),
         )
         db.commit()
 
@@ -2621,23 +2621,23 @@ class TestCleanupOrphanTeams:
         # Spray chart for the game
         db.execute(
             "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, perspective_team_id, "
-            "chart_type, x, y) VALUES ('g1', ?, 'p2', '2026-spring-hs', ?, 'offensive', 0.5, 0.5)",
+            "chart_type, x, y) VALUES ('g1', ?, 'p2', '2026', ?, 'offensive', 0.5, 0.5)",
             (orphan_id, subject_id),
         )
         # Roster and season stats for orphan
         db.execute(
             "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
-            "VALUES (?, 'p2', '2026-spring-hs', '99')",
+            "VALUES (?, 'p2', '2026', '99')",
             (orphan_id,),
         )
         db.execute(
             "INSERT INTO player_season_batting (player_id, team_id, season_id, gp, ab, h) "
-            "VALUES ('p2', ?, '2026-spring-hs', 5, 20, 8)",
+            "VALUES ('p2', ?, '2026', 5, 20, 8)",
             (orphan_id,),
         )
         db.execute(
             "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs) "
-            "VALUES ('p2', ?, '2026-spring-hs', 2, 12)",
+            "VALUES ('p2', ?, '2026', 2, 12)",
             (orphan_id,),
         )
         # E-220 remediation: seed a game_perspectives row for the shared game.
@@ -2725,7 +2725,7 @@ class TestCleanupOrphanTeams:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", subject_id, orphan_id, 5, 3, "2026-03-20"),
+            ("g1", "2026", subject_id, orphan_id, 5, 3, "2026-03-20"),
         )
         db.execute(
             "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
@@ -2748,7 +2748,7 @@ class TestCleanupOrphanTeams:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g-orphan-only", "2026-spring-hs", orphan_id, orphan2_id, 1, 2, "2026-03-21"),
+            ("g-orphan-only", "2026", orphan_id, orphan2_id, 1, 2, "2026-03-21"),
         )
         db.execute(
             "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
@@ -2794,7 +2794,7 @@ class TestCleanupOrphanTeams:
         # Game between report team (1) and orphan -- shared game
         db.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, "
-            "away_team_id, status) VALUES ('g-shared', '2026-spring-hs', "
+            "away_team_id, status) VALUES ('g-shared', '2026', "
             "'2026-03-15', 1, ?, 'completed')",
             (orphan_id,),
         )
@@ -2802,7 +2802,7 @@ class TestCleanupOrphanTeams:
         db.execute(
             "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
             "batting_team_id, perspective_team_id, batter_id, pitcher_id) VALUES ('g-shared', 1, 1, "
-            "'top', '2026-spring-hs', 1, 1, 'p-shared', 'p-shared')"
+            "'top', '2026', 1, 1, 'p-shared', 'p-shared')"
         )
         db.commit()
 
@@ -2864,7 +2864,7 @@ class TestCrossPerspectiveScopedDelete:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g-cross", "2026-spring-hs", orphan_id, orphan2_id, 5, 3, "2026-04-01"),
+            ("g-cross", "2026", orphan_id, orphan2_id, 5, 3, "2026-04-01"),
         )
 
         # Orphan perspective rows (will be deleted)
@@ -2949,7 +2949,7 @@ class TestCrossPerspectiveScopedDelete:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g-shared", "2026-spring-hs", stub_id, tracked_id, 5, 3, "2026-04-01"),
+            ("g-shared", "2026", stub_id, tracked_id, 5, 3, "2026-04-01"),
         )
 
         # Stub perspective rows
@@ -3010,7 +3010,7 @@ class TestCrossPerspectiveScopedDelete:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "game_date) VALUES (?, ?, ?, ?, ?)",
-            ("g-survive", "2026-spring-hs", stub_id, tracked_id, "2026-04-01"),
+            ("g-survive", "2026", stub_id, tracked_id, "2026-04-01"),
         )
         db.execute(
             "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
@@ -3051,7 +3051,7 @@ class TestCrossPerspectiveScopedDelete:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "game_date) VALUES (?, ?, ?, ?, ?)",
-            ("g-solo", "2026-spring-hs", stub_id, stub_id, "2026-04-01"),
+            ("g-solo", "2026", stub_id, stub_id, "2026-04-01"),
         )
         db.execute(
             "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
@@ -3089,7 +3089,7 @@ class TestCrossPerspectiveScopedDelete:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "game_date) VALUES (?, ?, ?, ?, ?)",
-            ("g-multi", "2026-spring-hs", oa, ob, "2026-04-01"),
+            ("g-multi", "2026", oa, ob, "2026-04-01"),
         )
         # Rows from both orphan perspectives
         db.execute(
@@ -3154,7 +3154,7 @@ class TestCleanupNonFatal:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -3180,7 +3180,7 @@ class TestCleanupNonFatal:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
 
         # Make loader create an orphan team during load
@@ -3241,7 +3241,7 @@ class TestQueryBeforeCleanup:
         _seed_player(db, "p1", "Test", "Player")
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
 
@@ -3257,7 +3257,7 @@ class TestQueryBeforeCleanup:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
 
         # The real ScoutingLoader records every opponent stub it INSERTs into
@@ -3281,8 +3281,8 @@ class TestQueryBeforeCleanup:
             )
             opp_id = cursor.lastrowid
             conn.execute(
-                "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-                "VALUES ('2026', '2026', 'default', 2026)"
+                "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+                "VALUES ('2026', '2026', 2026)"
             )
             conn.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
@@ -3371,7 +3371,7 @@ class TestPublicIdBackfill:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -3399,7 +3399,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -3446,7 +3446,7 @@ class TestPublicIdBackfill:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -3473,7 +3473,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -3519,7 +3519,7 @@ class TestPublicIdBackfill:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -3541,7 +3541,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -3588,7 +3588,7 @@ class TestPublicIdBackfill:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         # Public API updates season_year to 2026 -> derived season '2026'.
@@ -3616,7 +3616,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -3671,7 +3671,7 @@ class TestPublicIdBackfill:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)  # N>0 so the no-games gate does not fire
@@ -3698,7 +3698,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -3846,7 +3846,7 @@ class TestQualityGatesFlags:
         _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
-            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+            "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
         _seed_completed_game(db)
@@ -3862,7 +3862,7 @@ class TestQualityGatesFlags:
         mock_client_cls.return_value = MagicMock()
         mock_crawler = MagicMock()
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
-            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            team_id=1, season_id="2026", games_crawled=1,
             games=[{"game_status": "completed"}], boxscores={},
         )
         from src.gamechanger.loaders import LoadResult
@@ -4195,8 +4195,8 @@ def _seed_plays_scope_dataset(db):
         "VALUES ('O', 'tracked', 1, 2025)"
     ).lastrowid
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2025)",
         (_PLAYS_SCOPE_SEASON, _PLAYS_SCOPE_SEASON),
     )
     for pid in ("pitA", "pitB", "batA", "batB"):

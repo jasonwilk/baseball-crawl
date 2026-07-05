@@ -19,7 +19,7 @@ Usage::
     plays = PlaysParser.parse_game(
         raw_json=response_dict,
         game_id="abc-123",
-        season_id="2026-spring-hs",
+        season_id="2026",
         home_team_id=1,
         away_team_id=2,
     )

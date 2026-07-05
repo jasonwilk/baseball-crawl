@@ -137,7 +137,7 @@ def _insert_team_with_public_id(conn: sqlite3.Connection, public_id: str) -> int
 def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
     """Ensure a seasons row exists."""
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025) "
+        "INSERT INTO seasons (season_id, name, year) VALUES (?, ?, 2025) "
         "ON CONFLICT DO NOTHING",
         (season_id, season_id),
     )
@@ -343,27 +343,24 @@ def test_scouting_run_created_with_completed_status(
     assert players_found == 2  # two players in _ROSTER_RESPONSE
 
 
-def test_scout_team_writes_year_only_default_season_row(
+def test_scout_team_writes_year_only_season_row(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
-    """E-241: the crawler creates the year-only season row with season_type
-    'default', matching the canonical ensure_season_row contract.
+    """E-250: the crawler creates the year-only season row by delegating to the
+    canonical ensure_season_row (its private season-row INSERT was folded away).
 
-    The live report path runs scout_team() (this writer) BEFORE the canonical
-    ensure_season_row, and both use ON CONFLICT DO NOTHING, so the crawler's
-    season_type is the one that persists for a scouted opponent. It must be
-    'default' (not 'unknown') or the persisted metadata drifts from the
-    year-only contract.
+    The live report path runs scout_team() (this writer) and the canonical
+    helper through one seam, so the persisted season row is always year-only.
     """
     _setup_client_happy_path(mock_client)
     crawler.scout_team(_PUBLIC_ID)
 
     # The completed game in _GAMES_RESPONSE is in 2025 -> year-only "2025".
     row = db.execute(
-        "SELECT season_type FROM seasons WHERE season_id = '2025'"
+        "SELECT season_id, year FROM seasons WHERE season_id = '2025'"
     ).fetchone()
     assert row is not None, "Crawler should create the year-only '2025' season row"
-    assert row[0] == "default", f"Expected season_type 'default', got {row[0]!r}"
+    assert row[1] == 2025
 
 
 def test_scouting_run_has_integer_team_id(
@@ -607,7 +604,7 @@ class TestUpdateRunLoadStatus:
     ) -> None:
         """AC-6: 'completed' status sets completed_at to a non-NULL timestamp."""
         team_id = _insert_team_with_public_id(db, "status-test-pub")
-        season_id = "2025-spring-hs"
+        season_id = "2025"
         _insert_season(db, season_id)
         _insert_scouting_run(
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
@@ -631,7 +628,7 @@ class TestUpdateRunLoadStatus:
     ) -> None:
         """AC-6: 'failed' status sets completed_at to NULL."""
         team_id = _insert_team_with_public_id(db, "status-fail-pub")
-        season_id = "2025-spring-hs"
+        season_id = "2025"
         _insert_season(db, season_id)
         _insert_scouting_run(
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
@@ -657,7 +654,7 @@ class TestUpdateRunLoadStatus:
         cannot inject SQL. The CHECK constraint rejects invalid statuses, but
         the parameterized query itself should handle arbitrary input safely."""
         team_id = _insert_team_with_public_id(db, "inject-test-pub")
-        season_id = "2025-spring-hs"
+        season_id = "2025"
         _insert_season(db, season_id)
         _insert_scouting_run(
             db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
@@ -677,7 +674,7 @@ class TestUpdateRunLoadStatus:
     ) -> None:
         """Verify last_checked is updated on status change."""
         team_id = _insert_team_with_public_id(db, "lastchk-test-pub")
-        season_id = "2025-spring-hs"
+        season_id = "2025"
         _insert_season(db, season_id)
         _insert_scouting_run(
             db, team_id, season_id, "running", "2020-01-01T00:00:00.000Z"

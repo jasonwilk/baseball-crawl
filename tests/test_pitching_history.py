@@ -11,11 +11,11 @@ from tests.conftest import load_real_schema
 
 
 def _seed_season_and_team(conn: sqlite3.Connection, *, team_id: int = 1,
-                          season_id: str = "2026-spring-hs") -> tuple[int, str]:
+                          season_id: str = "2026") -> tuple[int, str]:
     """Insert a season and team, return (team_id, season_id)."""
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026)",
         (season_id, season_id),
     )
     conn.execute(
@@ -27,7 +27,7 @@ def _seed_season_and_team(conn: sqlite3.Connection, *, team_id: int = 1,
 
 def _insert_player(conn: sqlite3.Connection, player_id: str,
                    first_name: str, last_name: str,
-                   *, team_id: int = 1, season_id: str = "2026-spring-hs",
+                   *, team_id: int = 1, season_id: str = "2026",
                    jersey_number: str | None = None) -> None:
     """Insert a player and roster entry."""
     conn.execute(
@@ -42,7 +42,7 @@ def _insert_player(conn: sqlite3.Connection, player_id: str,
 
 
 def _insert_game(conn: sqlite3.Connection, game_id: str, game_date: str,
-                 *, season_id: str = "2026-spring-hs", team_id: int = 1,
+                 *, season_id: str = "2026", team_id: int = 1,
                  start_time: str | None = None,
                  status: str = "completed") -> None:
     """Insert a game with team as home team."""
@@ -395,20 +395,20 @@ class TestEdgeCases:
 
     def test_multi_season_isolation(self, db):
         """Query for one season should not return data from another."""
-        team_id, _ = _seed_season_and_team(db, season_id="2026-spring-hs")
-        _seed_season_and_team(db, season_id="2025-spring-hs")
+        team_id, _ = _seed_season_and_team(db, season_id="2026")
+        _seed_season_and_team(db, season_id="2025")
         _insert_player(db, "ms1", "Multi", "Season")
 
-        _insert_game(db, "ms_g1", "2026-03-10", season_id="2026-spring-hs")
+        _insert_game(db, "ms_g1", "2026-03-10", season_id="2026")
         _insert_pitching_line(db, "ms_g1", "ms1", ip_outs=18, so=5,
                              appearance_order=1)
-        _insert_game(db, "ms_g2", "2025-03-10", season_id="2025-spring-hs")
+        _insert_game(db, "ms_g2", "2025-03-10", season_id="2025")
         _insert_pitching_line(db, "ms_g2", "ms1", ip_outs=15, so=4,
                              appearance_order=1)
         db.commit()
 
-        rows_2026 = get_pitching_history(team_id, "2026-spring-hs", db=db)
-        rows_2025 = get_pitching_history(team_id, "2025-spring-hs", db=db)
+        rows_2026 = get_pitching_history(team_id, "2026", db=db)
+        rows_2025 = get_pitching_history(team_id, "2025", db=db)
         assert len(rows_2026) == 1
         assert len(rows_2025) == 1
         assert rows_2026[0]["game_date"] == "2026-03-10"

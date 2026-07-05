@@ -63,10 +63,10 @@ def _insert_team(
     return cursor.lastrowid  # type: ignore[return-value]
 
 
-def _insert_season(conn: sqlite3.Connection, season_id: str = "2026-spring-hs") -> str:
+def _insert_season(conn: sqlite3.Connection, season_id: str = "2026") -> str:
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
-        " VALUES (?, 'Spring 2026 HS', 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year)"
+        " VALUES (?, 'Spring 2026 HS', 2026)",
         (season_id,),
     )
     conn.commit()

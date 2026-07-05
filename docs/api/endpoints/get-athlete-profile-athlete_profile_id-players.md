@@ -106,6 +106,4 @@ Accept: application/vnd.gc.com.athlete_profile_players:list+json; version=0.0.0
 
 **Note:** `is_archived: false` identifies current-season team memberships.
 
-**Coaching relevance: HIGH.** Best endpoint for building a career timeline view -- maps a player's identity across all team seasons with roster details. Use in conjunction with `career-stats` for the full longitudinal picture.
-
 **Discovered:** 2026-03-11. Session: 2026-03-11_034739 (web).

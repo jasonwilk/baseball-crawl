@@ -4,7 +4,7 @@
 [E-250: Root-Level Cross-Season / Multi-Season De-Scope](../E-250-cross-season-descope/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, no context-layer file (CLAUDE.md, rules, agent definitions) frames the project as supporting multi-season rollups, longitudinal tracking, or cross-team athlete identity as a live capability, and no reference to the non-existent `PlayerTeamSeason` table remains. The `bb data dedup-players` command sentence and the E-249 known-limitation note are updated to reflect the single-season-scoped behavior shipped in E-250-01/E-250-02.

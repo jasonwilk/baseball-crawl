@@ -70,8 +70,8 @@ def _seed_player(conn: sqlite3.Connection, pid: str, first: str, last: str) -> N
 
 def _seed_roster(conn: sqlite3.Connection, team_id: int, pid: str, season: str) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026)",
         (season, season),
     )
     conn.execute(
@@ -82,8 +82,8 @@ def _seed_roster(conn: sqlite3.Connection, team_id: int, pid: str, season: str) 
 
 def _seed_game(conn: sqlite3.Connection, game_id: str, season: str, team_id: int) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, 2026)",
         (season, season),
     )
     conn.execute(
@@ -186,6 +186,10 @@ def test_dedup_players_error_path() -> None:
     """dedup-players prints error and exits 1 when detection raises."""
     mock_conn = MagicMock()
     mock_conn.execute = MagicMock()
+    # E-250-01: the command derives its season from team_rosters before
+    # planning. Stub that derivation query to a single season so control
+    # reaches the planner (whose find_duplicate_players is the raising path).
+    mock_conn.execute.return_value.fetchall.return_value = [("2026",)]
     with patch("src.cli.data.sqlite3.connect", return_value=mock_conn):
         with patch(
             "src.db.player_dedup.find_duplicate_players",
@@ -270,37 +274,108 @@ def test_dedup_players_execute_collapses_and_refuses_fork(tmp_path: Path) -> Non
     assert "refused fork" in result.output.lower()
 
 
-def test_dedup_players_unscoped_partitions_per_season(tmp_path: Path) -> None:
-    """Phase-4b P1 regression (CLI unscoped): a player who is a prefix-duplicate
-    of DIFFERENT teammates in different seasons must NOT be unioned into one
-    cross-season fork.  Codex's exact shape: same p-jo on 2025 {Jo, John} and
-    2026 {Jo, Jon}.  An unscoped dry-run yields TWO collapses and ZERO refused
-    forks (never the cross-season ['John','Jon'] fork), and mutates nothing."""
+def test_dedup_players_single_season_auto_derives(tmp_path: Path) -> None:
+    """AC-1: on a one-season DB, an unscoped run (no --season-id) auto-derives
+    that season and produces IDENTICAL output to an explicit --season-id run
+    (zero-UX-change on the live one-season DB)."""
     db_file = _make_db_file(tmp_path)
     conn = sqlite3.connect(str(db_file))
     _seed_team(conn, 1, "LSB Varsity")
-    _seed_player(conn, "p-jo", "Jo", "Pratt")
-    _seed_player(conn, "p-john", "John", "Pratt")
-    _seed_player(conn, "p-jon", "Jon", "Pratt")
-    _seed_roster(conn, 1, "p-jo", "2025")
-    _seed_roster(conn, 1, "p-john", "2025")
-    _seed_roster(conn, 1, "p-jo", "2026")
-    _seed_roster(conn, 1, "p-jon", "2026")
+    _seed_player(conn, "p-sam", "Sam", "Webb")
+    _seed_player(conn, "p-samuel", "Samuel", "Webb")
+    _seed_roster(conn, 1, "p-sam", "2026")
+    _seed_roster(conn, 1, "p-samuel", "2026")
     conn.commit()
     conn.close()
+
+    derived = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
+    explicit = runner.invoke(
+        app, ["data", "dedup-players", "--season-id", "2026", "--db", str(db_file)]
+    )
+
+    assert derived.exit_code == 0, derived.output
+    assert explicit.exit_code == 0, explicit.output
+    # Zero-UX-change: derived-season dry-run output matches the explicit run.
+    assert derived.output == explicit.output
+    assert "1 collapsible component(s)" in derived.output
+    assert "Sam Webb" in derived.output and "Samuel Webb" in derived.output
+    # Dry-run mutates nothing.
+    assert _surviving_player_ids(db_file) == {"p-sam", "p-samuel"}
+
+
+def test_dedup_players_no_roster_seasons_exits_zero(tmp_path: Path) -> None:
+    """AC-2: a DB with zero distinct roster seasons exits 0 (nothing to do)
+    without error when --season-id is omitted."""
+    db_file = _make_db_file(tmp_path)  # only the away placeholder; no rosters
 
     result = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
 
     assert result.exit_code == 0, result.output
-    assert "2 collapsible component(s)" in result.output
-    assert "0 refused fork(s)" in result.output
-    # The cross-season fork must never be surfaced.
-    assert "Refused forks (ambiguous" not in result.output
-    # Both independent collapses are previewed.
-    assert "Jo Pratt" in result.output
-    assert "John Pratt" in result.output and "Jon Pratt" in result.output
-    # Dry-run mutates nothing.
-    assert _surviving_player_ids(db_file) == {"p-jo", "p-john", "p-jon"}
+    assert "nothing to dedup" in result.output.lower()
+
+
+def test_dedup_players_multi_season_without_season_id_errors(tmp_path: Path) -> None:
+    """AC-3: a DB with 2+ distinct roster seasons errors (listing the seasons)
+    and exits non-zero when --season-id is omitted; supplying --season-id
+    selects that season and proceeds."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-sam", "Sam", "Webb")
+    _seed_player(conn, "p-samuel", "Samuel", "Webb")
+    # The same collapse rostered on TWO distinct seasons -> 2 distinct seasons.
+    _seed_roster(conn, 1, "p-sam", "2025")
+    _seed_roster(conn, 1, "p-samuel", "2025")
+    _seed_roster(conn, 1, "p-sam", "2026")
+    _seed_roster(conn, 1, "p-samuel", "2026")
+    conn.commit()
+    conn.close()
+
+    # No --season-id -> error listing both seasons, non-zero, mutates nothing.
+    result = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
+    assert result.exit_code != 0
+    assert "2025" in result.output and "2026" in result.output
+    assert "--season-id" in result.output
+    assert _surviving_player_ids(db_file) == {"p-sam", "p-samuel"}
+
+    # Supplying --season-id selects that season and proceeds (dry-run, exit 0).
+    scoped = runner.invoke(
+        app, ["data", "dedup-players", "--season-id", "2026", "--db", str(db_file)]
+    )
+    assert scoped.exit_code == 0, scoped.output
+    assert "1 collapsible component(s)" in scoped.output
+
+
+def test_dedup_players_team_scoped_season_derivation(tmp_path: Path) -> None:
+    """AC-11: --team-id scopes the season derivation to that team's rosters.
+    Globally two seasons exist, but team 1 has only one -- so an unscoped-season
+    run with --team-id 1 auto-derives team 1's single season and proceeds."""
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_team(conn, 2, "LSB JV")
+    # Team 1 rosters only in 2026 (single season for this team).
+    _seed_player(conn, "p-sam", "Sam", "Webb")
+    _seed_player(conn, "p-samuel", "Samuel", "Webb")
+    _seed_roster(conn, 1, "p-sam", "2026")
+    _seed_roster(conn, 1, "p-samuel", "2026")
+    # Team 2 rosters in 2025 -> globally two distinct seasons exist.
+    _seed_player(conn, "p-bob", "Bob", "Ng")
+    _seed_player(conn, "p-bobby", "Bobby", "Ng")
+    _seed_roster(conn, 2, "p-bob", "2025")
+    _seed_roster(conn, 2, "p-bobby", "2025")
+    conn.commit()
+    conn.close()
+
+    # Globally ambiguous, but the team-1-scoped derivation resolves to 2026.
+    result = runner.invoke(
+        app, ["data", "dedup-players", "--team-id", "1", "--db", str(db_file)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "1 collapsible component(s)" in result.output
+    assert "Sam Webb" in result.output and "Samuel Webb" in result.output
+    # Team 2's 2025-only collapse is out of scope and must not appear.
+    assert "Bobby Ng" not in result.output
 
 
 def test_dedup_players_dry_run_surfaces_refused_fork(tmp_path: Path) -> None:

@@ -31,6 +31,12 @@ from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry as 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+# players.gc_athlete_profile_id. The fixture must apply it so the schema matches
+# the season INSERTs (which no longer supply season_type).
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 
 @pytest.fixture()
@@ -41,6 +47,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -1723,7 +1730,7 @@ def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) ->
 def _ensure_season(db: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
     """Insert a season row for FK satisfaction in load_file tests."""
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
         (season_id, season_id),
     )
     db.commit()
@@ -1999,9 +2006,9 @@ def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path:
 def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
     """Regression test: _upsert_game ON CONFLICT must update season_id.
 
-    1. Insert a game with season_id "old-season".
-    2. Upsert the same game_id with season_id "new-season".
-    3. Assert the row's season_id is "new-season".
+    1. Insert a game with season_id "2024".
+    2. Upsert the same game_id with season_id "2025".
+    3. Assert the row's season_id is "2025".
     """
     from src.gamechanger.loaders import ensure_season_row
     from src.gamechanger.types import TeamRef
@@ -2012,16 +2019,16 @@ def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
         "INSERT INTO teams (gc_uuid, name, membership_type, is_active) "
         "VALUES ('opp-uuid', 'Opponent', 'tracked', 1)",
     ).lastrowid
-    ensure_season_row(db, "old-season")
-    ensure_season_row(db, "new-season")
+    ensure_season_row(db, "2024")
+    ensure_season_row(db, "2025")
     db.commit()
 
     game_id = "evt-season-upsert-test"
     game_stream_id = "stream-season-upsert-test"
 
-    # Step 1: Create loader and insert game with "old-season"
+    # Step 1: Create loader and insert game with "2024"
     loader = GameLoader(db, owned_team_ref=TeamRef(id=pk, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
-    loader._season_id = "old-season"
+    loader._season_id = "2024"
     loader._upsert_game(
         game_id=game_id,
         game_date="2025-05-01",
@@ -2034,10 +2041,10 @@ def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
     db.commit()
 
     row = db.execute("SELECT season_id FROM games WHERE game_id = ?", (game_id,)).fetchone()
-    assert row[0] == "old-season"
+    assert row[0] == "2024"
 
-    # Step 2: Upsert same game with "new-season"
-    loader._season_id = "new-season"
+    # Step 2: Upsert same game with "2025"
+    loader._season_id = "2025"
     loader._upsert_game(
         game_id=game_id,
         game_date="2025-05-01",
@@ -2051,8 +2058,8 @@ def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
 
     # Step 3: Verify season_id was updated
     row = db.execute("SELECT season_id FROM games WHERE game_id = ?", (game_id,)).fetchone()
-    assert row[0] == "new-season", (
-        f"Expected season_id='new-season' after upsert, got '{row[0]}'"
+    assert row[0] == "2025", (
+        f"Expected season_id='2025' after upsert, got '{row[0]}'"
     )
 
 
@@ -2387,6 +2394,7 @@ def _fresh_db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
     return conn
 

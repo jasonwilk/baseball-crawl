@@ -21,8 +21,8 @@ from tests.conftest import load_real_schema
 def _seed_reference_rows(db: sqlite3.Connection) -> None:
     """Seed the minimal FK parents workload tests assume exist."""
     db.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES ('2025', '2025 Spring HS', 2025)"
     )
     db.executemany(
         "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, ?)",
@@ -46,7 +46,7 @@ def _insert_game(db: sqlite3.Connection, game_id: str, game_date: str) -> None:
         """
         INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id,
                            home_score, away_score, status)
-        VALUES (?, '2025-spring-hs', ?, 1, 2, 5, 3, 'completed')
+        VALUES (?, '2025', ?, 1, 2, 5, 3, 'completed')
         """,
         (game_id, game_date),
     )
@@ -77,7 +77,7 @@ def db() -> sqlite3.Connection:
 
 
 REFERENCE_DATE = "2025-04-26"
-SEASON_ID = "2025-spring-hs"
+SEASON_ID = "2025"
 
 
 # ---------------------------------------------------------------------------

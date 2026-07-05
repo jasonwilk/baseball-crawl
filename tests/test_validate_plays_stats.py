@@ -46,7 +46,7 @@ from scripts.validate_plays_stats import (
 # Constants
 # ---------------------------------------------------------------------------
 
-_SEASON_ID = "2026-spring-hs"
+_SEASON_ID = "2026"
 _GAME_ID_1 = "game-001"
 _GAME_ID_2 = "game-002"
 _GAME_ID_3 = "game-003"
@@ -80,8 +80,8 @@ def _seed_base_data(db: sqlite3.Connection) -> tuple[int, int]:
     """
     # Season
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, 'Spring 2026 HS', 'spring-hs', 2026)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, 'Spring 2026 HS', 2026)",
         (_SEASON_ID,),
     )
 

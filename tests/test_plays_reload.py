@@ -33,7 +33,7 @@ from src.gamechanger.loaders.plays_reload import (
     reload_game_plays,
 )
 
-_SEASON_ID = "2026-spring-hs"
+_SEASON_ID = "2026"
 _GAME_ID = "reload-game-001"
 _GAME_ID_2 = "reload-game-002"
 _BATTER = "ba11e100-0001-0001-0001-000000000001"
@@ -54,9 +54,9 @@ def db(tmp_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
 
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "Spring 2026 HS", "spring-hs", 2026),
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (_SEASON_ID, "Spring 2026 HS", 2026),
     )
     # Two distinct teams (home != away).
     conn.execute(

@@ -101,7 +101,7 @@ def _make_raw_json(plays: list[dict]) -> dict:
 
 
 _GAME_ID = "test-game-001"
-_SEASON_ID = "2026-spring-hs"
+_SEASON_ID = "2026"
 _HOME_TEAM_ID = 1
 _AWAY_TEAM_ID = 2
 

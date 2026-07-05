@@ -71,16 +71,17 @@ def derive_season_id_for_team(
 def ensure_season_row(db: sqlite3.Connection, season_id: str) -> None:
     """Ensure a ``seasons`` row exists for *season_id* (idempotent).
 
-    ``season_id`` is a year-only slug (e.g. ``'2026'``); the row is written
-    with ``season_type='default'``.
+    ``season_id`` MUST be a pure-year slug (e.g. ``'2026'``). A non-numeric or
+    compound value raises ``ValueError`` via ``int()`` -- cross-season season_id
+    forms were de-scoped, so a value that is not a bare year is a caller bug,
+    not something to silently coerce to year 0.
     """
-    year_str = season_id.split("-", 1)[0]
-    year = int(year_str) if year_str.isdigit() else 0
+    year = int(season_id)
 
     db.execute(
         """
-        INSERT INTO seasons (season_id, name, season_type, year)
-        VALUES (?, ?, 'default', ?)
+        INSERT INTO seasons (season_id, name, year)
+        VALUES (?, ?, ?)
         ON CONFLICT(season_id) DO NOTHING
         """,
         (season_id, season_id, year),

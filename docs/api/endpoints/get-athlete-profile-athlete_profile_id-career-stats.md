@@ -42,7 +42,7 @@ see_also:
 
 **Status:** OBSERVED -- HTTP 200 in web proxy session 2026-03-11. Schema based on observed data. ~31KB payload.
 
-Returns cross-team career statistics for an athlete profile. Each entry in `player_stats_data` represents one team season, containing both the team metadata and the full stat block for that season. This is the primary endpoint for longitudinal player stat tracking across all teams and seasons.
+Returns cross-team career statistics for an athlete profile. Each entry in `player_stats_data` represents one team season, containing both the team metadata and the full stat block for that season.
 
 ```
 GET https://api.team-manager.gc.com/athlete-profile/{athlete_profile_id}/career-stats
@@ -113,7 +113,5 @@ Observed fields include: `A`, `E`, `H`, `R`, `#P`, `1B`, `2B`, `3B`, `<3`, `AB`,
   ]
 }
 ```
-
-**Coaching relevance: HIGH.** The only single-call source for a player's full career stats across all teams and seasons. Key for multi-year player development analysis.
 
 **Discovered:** 2026-03-11. Session: 2026-03-11_034739 (web).

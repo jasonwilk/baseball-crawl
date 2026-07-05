@@ -1,0 +1,77 @@
+-- ===========================================================================
+-- Migration 008: drop cross-season/identity dead schema
+--   * players.gc_athlete_profile_id  (column)
+--   * team_opponents                 (whole table)
+--   * seasons.season_type            (column)
+-- ===========================================================================
+-- Epic E-250 (story E-250-02), Technical Notes TN-2/TN-3.
+--
+-- WHAT: Removes three pieces of dead cross-season/identity schema:
+--   1. ``players.gc_athlete_profile_id`` -- the E-104 cross-team identity
+--      anchor. Cross-team player identity was permanently de-scoped
+--      (reports-first reframe, docs/ROADMAP.md). The column was never written
+--      and never read.
+--   2. ``team_opponents`` -- the member-team/tracked-opponent registry.
+--      Write-orphaned since E-239 removed the member-sync and tracked-opponent
+--      surfaces; the table has been empty in live data ever since.
+--   3. ``seasons.season_type`` -- a write-only ``NOT NULL`` column that every
+--      writer set to the constant ``'default'``. Two independent writers had
+--      to agree on that constant (the "must agree on season_type" footgun
+--      behind E-241's drift); with cross-season machinery gone there is no
+--      season-type dimension left to record.
+--
+-- WHY:  E-250 rips the de-scoped cross-season/identity bones out at the root.
+--      The referencing code is stripped in the SAME story (E-250-02) and rides
+--      the same commit, because ``apply_migrations`` runs at startup: a read of
+--      any of these the instant it disappears would break the app.
+--      ``season_type`` in particular is ``NOT NULL`` with no usable default, so
+--      every INSERT that supplies it fails the instant the column drops and
+--      every INSERT that omits it fails while the column exists -- the fixture
+--      removal is therefore atomic with this drop (TN-3), not deferrable.
+--
+-- LAYERED PATTERN (follows 006_drop_season_fallback.sql): the
+--   ``001_initial_schema.sql`` CREATE TABLE DDL is intentionally left
+--   unchanged; this migration performs the DROPs. A fresh DB runs 001 -> 008
+--   and converges with a DB migrated up from an earlier point.
+--
+-- MECHANISM: direct ``ALTER TABLE ... DROP COLUMN`` for the two columns and a
+--   bare ``DROP TABLE`` for the table. Both columns are plain columns:
+--     * ``gc_athlete_profile_id`` -- plain ``TEXT`` (001:102), no index, FK,
+--       generated-column, or view dependency.
+--     * ``season_type`` -- plain ``TEXT NOT NULL`` (001:83), no index, FK,
+--       generated-column, or view dependency.
+--   Verified by grep across ``migrations/``: the only references are the
+--   CREATE TABLE column definitions themselves (no CREATE INDEX / CREATE VIEW /
+--   TRIGGER / generated column touches either). ``team_opponents`` is
+--   referenced by no other table (no ``REFERENCES team_opponents``), so
+--   ``DROP TABLE`` needs no child-FK teardown. SQLite's 3.35+ direct
+--   ``DROP COLUMN`` therefore applies -- NOT a 12-step table rebuild. The
+--   target/runtime SQLite is 3.45.1 (confirmed via
+--   ``python3 -c "import sqlite3; print(sqlite3.sqlite_version)"``), well past
+--   3.35, so direct DROP is the expected and used path.
+--
+--   Defensive fallback (documented only): were the runtime ever < 3.35, each
+--   column drop would need the 12-step table-rebuild
+--   (https://sqlite.org/lang_altertable.html#otheralter): PRAGMA
+--   foreign_keys=OFF; BEGIN; CREATE TABLE <new> without the column; INSERT
+--   INTO <new> SELECT <surviving cols> FROM <old>; DROP TABLE <old>; ALTER
+--   TABLE <new> RENAME TO <old>; recreate indexes/triggers/views; PRAGMA
+--   foreign_key_check; COMMIT; PRAGMA foreign_keys=ON. Not needed at 3.45.1.
+--
+-- NO season_id REWRITE: consistent with 006's reasoning, 008 performs no
+--   season_id normalization. Live data is already year-only, and both
+--   compound-slug producers were collapsed to year-only in E-241, so no
+--   compound season_id can be created. A DB-state-independent DROP is the
+--   correct default for a worktree with no ``data/`` access.
+--
+-- IDEMPOTENCY: the migration runner applies each file exactly once (tracked by
+--   filename in ``_migrations``). SQLite has no ``DROP COLUMN IF EXISTS`` /
+--   ``DROP TABLE`` guard for this shape, so bare DROPs are sufficient;
+--   re-running is prevented by the runner, not by the SQL.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE players DROP COLUMN gc_athlete_profile_id;
+
+DROP TABLE team_opponents;
+
+ALTER TABLE seasons DROP COLUMN season_type;

@@ -1,7 +1,7 @@
 # E-250: Root-Level Cross-Season / Multi-Season De-Scope
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Rip the remaining cross-season / multi-season MACHINERY out of the project at the root, rather than leaf-patching another symptom. The reports-first reframe (2026-06-12) and E-239 already de-scoped multi-season rollups, cross-team identity, and longitudinal tracking, but cross-season *logic* still runs through the core: the CLI's unscoped dedup corner, a write-orphaned identity column and table, a write-only `season_type` footgun, compound-slug fixtures, and stale multi-season prose across the context layer and docs. This epic removes that scaffolding while KEEPING `season_id` as the single-season partition key.
@@ -46,13 +46,13 @@ The scope was fully audited before planning (two independent passes plus a Fable
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-250-01 | Player-dedup cross-season-execute corner closure | TODO | None | - |
-| E-250-02 | Migration 008: drop identity/opponent/season_type schema + reference code + season_type fixtures | TODO | E-250-01 | - |
-| E-250-03 | Fixture compound-slug (Class-1) normalization + plays_parser docstring | TODO | E-250-02 | - |
-| E-250-04 | Context-layer prose de-scope | TODO | E-250-01, E-250-02, E-250-07 | - |
-| E-250-05 | Documentation corrections (architecture + roadmap + operations) | TODO | E-250-02, E-250-07 | - |
-| E-250-06 | API-doc athlete-profile framing softening | TODO | None | - |
-| E-250-07 | Archive E-104 as ABANDONED | TODO | None | - |
+| E-250-01 | Player-dedup cross-season-execute corner closure | DONE | None | - |
+| E-250-02 | Migration 008: drop identity/opponent/season_type schema + reference code + season_type fixtures | DONE | E-250-01 | - |
+| E-250-03 | Fixture compound-slug (Class-1) normalization + plays_parser docstring | DONE | E-250-02 | - |
+| E-250-04 | Context-layer prose de-scope | DONE | E-250-01, E-250-02, E-250-07 | - |
+| E-250-05 | Documentation corrections (architecture + roadmap + operations) | DONE | E-250-02, E-250-07 | - |
+| E-250-06 | API-doc athlete-profile framing softening | DONE | None | - |
+| E-250-07 | Archive E-104 as ABANDONED | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -119,4 +119,34 @@ Both E-250-02 (drops `season_type` + removes its ~29+2 fixtures) and E-250-03 (C
 ## History
 - 2026-07-03: Created (DRAFT). Scope pre-vetted by two audit passes + a Fable evaluation; structured into 7 stories by PM.
 - 2026-07-03: Set to READY. Cleared all review gates — iteration-1 holistic review (DE/SE/CA/api-scout), CR spec audit (F1-F4 + minors), and Codex Phase-4 spec review (8/8 P2 findings incorporated + 3/3 domain-expert concurrences: CA #1/#7, api-scout #2, DE #4/#5). No open findings at any severity; quality checklist passes; consistency sweeps clean. Dispatch NOT yet authorized — READY gate only.
+- 2026-07-05 (dispatch, in-flight note for CLOSURE context-layer assessment): During E-250-06 the user stated a DURABLE principle — **API endpoint docs must never be degraded for product-scope reasons**; they record what the API OFFERS (schemas, field descriptions, endpoint behavior/capabilities), and only OUR OWN coaching-relevance VALUE verdicts are softenable. This is a NEW convention/boundary (context-layer assessment triggers 1/3). At closure, dispatch claude-architect to codify "never degrade factual API-endpoint documentation; soften only our own value verdicts" into the API-doc rules / api-scout guidance. (Origin: the get-search-opponent-import.md:201 residual was correctly LEFT because it factually documents a real /search `year`-param capability — a KEEP, not a stale value verdict.) api-scout is separately re-auditing its E-250-06 diff against this principle.
 - 2026-07-04: Two surgical amendments from the 2026-07-03 platform audit (`PLATFORM-AUDIT.md`), applied while still READY (dispatch remains unauthorized). (a) **F-H1 (HIGH)**: TN-5 retracts its blessing of the surviving two-guard set as complete deletion-safety semantics and records that a shared-game / live-reports eligibility guard is REQUIRED — with that guard's implementation owned by CE-3, not E-250-02; E-250-02 AC-7 wording softened to "the correct guards for the removed `team_opponents` mechanism" (removal here does not create/worsen F-H1: the removed guards were empty-table no-ops). User accepted the interim risk (2026-07-04) with an operator hold — no report deletions until CE-3/E-253 lands the guard; the guard implementation stays in E-253, NOT added to E-250-02. (b) **Scouting `_ensure_season_row` fold (audit §2 MEDIUM)**: added TN-9 + E-250-02 AC-11 folding the scouting crawler's private season-row INSERT (`scouting.py:~351`) into the canonical `ensure_season_row` seam, since E-250-02 already edits both INSERT sites; this subsumes the scouting.py portion of AC-4 and makes the arch-subsystems.md "consolidation complete" claim true (that prose fix is E-250-04's). Story count unchanged (7); Success Criteria unchanged. No re-review requested — amendments are additive constraints, not scope expansions.
+- 2026-07-05: **Dispatched and completed.** All 7 stories serially executed, AC-verified by PM, and gated by code review (context-layer/PM-owned stories self-verified). Status flips to COMPLETED at the closure staging step (Step 8 sub-step 3) once the full-suite-green gate passes; the closure bookkeeping below is authored ahead of that flip per protocol.
+
+  **What was accomplished** (root single-season de-scope; `season_id` KEPT as the single-season partition key throughout):
+  - **E-250-01**: `bb data dedup-players` is now season-scoped — `season_id` is required + auto-derived (sole season when one exists; no-op on zero; explicit `--season-id` required at 2+); `season_id=None` is unrepresentable in `plan_player_dedup`/`find_duplicate_players`. No multi-season execute loop (design lock honored).
+  - **E-250-02**: migration 008 drops `players.gc_athlete_profile_id`, the whole `team_opponents` table, and `seasons.season_type` (direct `ALTER … DROP COLUMN` on SQLite 3.45.1, layered on 001); all `src/` references removed atomically with the drop (incl. ~29+2 `season_type` fixtures); `ensure_season_row` is fail-loud (`int(season_id)` raises on non-numeric/compound); the scouting crawler's private season-row INSERT folded into the canonical `ensure_season_row` (TN-9/AC-11); `is_team_eligible_for_cleanup` reduced from 4 guards to 2 (is_active + no-other-report), behavior-preserving on the empty table, with the F-H1 completeness caveat recorded (shared-game guard owned by CE-3).
+  - **E-250-03**: Class-1 compound-slug DB `season_id` literals normalized to year-only across the affected fixtures; Class-2 opaque tokens + Class-3 filesystem/crawl slugs deliberately left; two distinct years (2025+2026) preserved in the isolation/exclusion fixtures; `plays_parser.py:22` docstring fixed (`plays_loader.py:32` Class-3 left, CR F2).
+  - **E-250-04**: context-layer prose de-scoped across CLAUDE.md, `.claude/rules/**`, `.claude/agents/**` — no multi-season/longitudinal/cross-team-identity live-capability framing remains; `PlayerTeamSeason` (never-existed table) removed from all loaded context; guard prose renumbered to 1-2 to match the code; `season_type`/`team_opponents` reframed as dropped; fresh-start philosophy KEPT.
+  - **E-250-05**: human docs corrected — `architecture.md` (`team_opponents` row), `ROADMAP.md` (`gc_athlete_profile_id` "leave inert" → dropped; E-104 abandoned), `operations.md` (delete-cascade 4→2 guards with an F-H1-consistent "not complete deletion safety" caution).
+  - **E-250-06**: athlete-profile + `/me/*` API docs softened — cross-season/longitudinal coaching-VALUE verdicts removed; endpoint schemas/behavior KEPT; cross-TEAM-in-current-season framing fenced (KEEP). A user-directed fidelity remediation then restored a dropped factual scope token (README "across all seasons") and deleted the added product-scope editorial notes — API docs record how the API BEHAVES, no product-scope editorializing.
+  - **E-250-07**: E-104 (athlete-profile identity probe) archived as ABANDONED — its schema anchor was dropped in E-250-02 and cross-team identity is a permanent non-goal.
+  - **Ancillary (pulled forward from E-255 per user direction)**: the `PlayerTeamSeason` token was scrubbed from agent-memory (`data-engineer/{MEMORY.md, endpoint-schema-notes.md}`, `baseball-coach/coaching-decisions.md`, `claude-architect/agent-blueprints.md`). E-255's DE + baseball-coach dockets annotated so the broader own-memory sweeps stay in its scope (only the token was removed early).
+
+  **PlayerTeamSeason framing (precise)**: `PlayerTeamSeason` is removed from ALL loaded context (CLAUDE.md, `.claude/rules/**`, `.claude/agents/**`) AND from agent-memory (DE/baseball-coach/CA). The only surviving mentions are in HISTORICAL / planning / archive artifacts (this epic's History, E-255's scope list, archived epics) which legitimately RECORD the removal and are correctly NOT scrubbed. Landing verified by the commit-gate staged-tree grep (`git grep --cached PlayerTeamSeason -- .claude/agent-memory/` → zero).
+
+  **Review Scorecard**:
+  - Per-story code review: E-250-01/-02/-03/-05/-06 all APPROVED, zero MUST FIX (E-250-06 carried a subsequent user-directed fidelity remediation, re-confirmed PASS). E-250-04 (context-layer) + E-250-07 (PM housekeeping) — per-story CR skipped by design; PM AC-verified directly.
+  - PM AC verification: all 7 stories PASS on every AC (independently verified against the worktree, not implementer summaries); scope-note rulings recorded per story (E-250-02 two DE scope notes OK; E-250-03 ~18-vs-5 file count OK; E-250-06 8th-file residual LEFT per user; E-250-04 admin-ui.md 8th file in grep-scope).
+  - CR integration review (Phase 4a): APPROVED, 0 MUST FIX; 1 SHOULD FIX (framing + E-255 cross-epic coordination, no code change) — handled: E-255 dockets annotated, PlayerTeamSeason framing recorded.
+  - Codex (Phase 4b): 4 findings — 3 accepted + remediated post-review (P1 operations.md:508 operator-safety caution → docs-writer; P3 `ensure_season_row` fail-loud negative tests, 13 passed → DE; P5 CLAUDE.md:46 "across games and seasons" cross-season line → CA), 1 dismissed (PM MEMORY.md "E-104 active" = stale-worktree-copy divergence artifact; the committed main-checkout surface is clean). **Verification-method lesson recorded**: the P5 miss shows a token-grep sweep for cross-season framing ("multi-season|longitudinal|cross-season") does NOT catch natural-language prose that expresses the concept without the hyphenated keywords ("across games and seasons") — both CA's sweep and PM's AC-6 verification missed it; the review layer caught it. Future context-layer de-scope AC verification should pair the grep with a read of the scope/data-philosophy prose.
+
+  **Documentation assessment**: Documentation trigger FIRED and was handled IN-EPIC — E-250-05 updated `docs/admin/architecture.md`, `docs/ROADMAP.md`, and `docs/admin/operations.md` (+ the Phase-4b P1 operator-safety caution in operations.md). No further documentation trigger fires: the human-facing docs are current with the post-drop reality. No additional docs-writer dispatch needed at closure.
+
+  **Context-layer assessment (six triggers, per `.claude/rules/context-layer-assessment.md`)**:
+  1. New convention/constraint? **YES** — the API-doc-fidelity principle ("never degrade factual API-endpoint documentation; API docs record how the API behaves, no product-scope editorializing; soften only our own coaching-relevance value verdicts"). Action: claude-architect codifies it into the context layer (API-doc rules / api-scout guidance) — dispatched at closure; **epic MUST NOT archive until that codification lands**.
+  2. Architectural decision with ongoing implications? **YES**, but codified IN-EPIC via E-250-04 (single-season de-scope prose across CLAUDE.md/`.claude/rules/**`/`.claude/agents/**`). No additional codification.
+  3. Footgun/failure mode/boundary discovered? **YES** — the factual-vs-value-verdict API-doc boundary; covered by the trigger-1 codification (no separate action).
+  4. Change to agent behavior/routing/coordination? **NO**.
+  5. Domain knowledge for future agents? **YES** — the API-doc-fidelity principle; covered by the trigger-1 codification.
+  6. New CLI command/workflow/procedure? **NO** — the epic removed surfaces and added none (`bb data dedup-players` behavior changed but the command already existed; its CLAUDE.md sentence was updated in E-250-04).

@@ -33,8 +33,8 @@ def db() -> sqlite3.Connection:
     load_real_schema(conn)
 
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES ('2025', '2025 Spring HS', 2025)"
     )
     conn.executemany(
         "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
@@ -65,7 +65,7 @@ def _insert_game(conn: sqlite3.Connection, game_id: str = "game-1") -> None:
     """Insert a test game."""
     conn.execute(
         "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
-        "home_score, away_score, status) VALUES (?, '2025-spring-hs', '2025-04-01', 1, 2, 5, 3, 'completed')",
+        "home_score, away_score, status) VALUES (?, '2025', '2025-04-01', 1, 2, 5, 3, 'completed')",
         (game_id,),
     )
 
@@ -150,7 +150,7 @@ def _insert_play(
         "INSERT INTO plays "
         "(game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, "
         "pitcher_id, outcome, pitch_count, home_score, away_score, did_outs_change) "
-        "VALUES (?, ?, ?, ?, '2025-spring-hs', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, '2025', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (game_id, play_order, inning, half, batting_team_id, perspective_team_id, batter_id,
          pitcher_id, outcome, pitch_count, home_score, away_score, did_outs_change),
     )
@@ -771,8 +771,8 @@ def _seed_reconcile_cli_db(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     load_real_schema(conn)
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES ('2025', '2025 Spring HS', 2025)"
     )
     conn.executemany(
         "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
@@ -944,8 +944,8 @@ class TestReconcileCLIGameIDPerspectives:
         conn = sqlite3.connect(str(db_path))
         load_real_schema(conn)
         conn.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) "
-            "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+            "INSERT INTO seasons (season_id, name, year) "
+            "VALUES ('2025', '2025 Spring HS', 2025)"
         )
         conn.executemany(
             "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
@@ -1949,7 +1949,7 @@ class TestGameRunsFromGamesTable:
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
             "home_score, away_score, status) VALUES "
-            "('game-runs', '2025-spring-hs', '2025-04-01', 1, 2, 7, 3, 'completed')"
+            "('game-runs', '2025', '2025-04-01', 1, 2, 7, 3, 'completed')"
         )
 
         _insert_pitching_boxscore(conn, "game-runs", "pitcher-h1", 1, bf=1)
@@ -1979,7 +1979,7 @@ class TestGameRunsFromGamesTable:
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
             "home_score, away_score, status) VALUES "
-            "('game-null-score', '2025-spring-hs', '2025-04-01', 1, 2, NULL, NULL, 'completed')"
+            "('game-null-score', '2025', '2025-04-01', 1, 2, NULL, NULL, 'completed')"
         )
 
         _insert_pitching_boxscore(conn, "game-null-score", "pitcher-h1", 1, bf=1)
@@ -2005,7 +2005,7 @@ class TestGameRunsFromGamesTable:
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
             "home_score, away_score, status) VALUES "
-            "('game-one-null', '2025-spring-hs', '2025-04-01', 1, 2, 5, NULL, 'completed')"
+            "('game-one-null', '2025', '2025-04-01', 1, 2, 5, NULL, 'completed')"
         )
 
         _insert_pitching_boxscore(conn, "game-one-null", "pitcher-h1", 1, bf=1)
@@ -2075,7 +2075,7 @@ class TestGamePACountFromBoxscore:
         conn.execute(
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
             "home_score, away_score, status) VALUES "
-            "('game-no-pitch', '2025-spring-hs', '2025-04-01', 1, 2, 1, 0, 'completed')"
+            "('game-no-pitch', '2025', '2025-04-01', 1, 2, 1, 0, 'completed')"
         )
 
         # No pitching boxscore rows for home team (bf=0 for away team)
@@ -2361,13 +2361,13 @@ class TestPerspectiveSelectionDeterminism:
             "INSERT INTO plays "
             "(game_id, play_order, inning, half, season_id, "
             "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
-            "VALUES ('game-persp-order', 1, 1, 'top', '2025-spring-hs', 2, 2, 'batter-a1', 'pitcher-h1')"
+            "VALUES ('game-persp-order', 1, 1, 'top', '2025', 2, 2, 'batter-a1', 'pitcher-h1')"
         )
         db.execute(
             "INSERT INTO plays "
             "(game_id, play_order, inning, half, season_id, "
             "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
-            "VALUES ('game-persp-order', 1, 1, 'top', '2025-spring-hs', 2, 1, 'batter-a1', 'pitcher-h1')"
+            "VALUES ('game-persp-order', 1, 1, 'top', '2025', 2, 1, 'batter-a1', 'pitcher-h1')"
         )
         # Minimal boxscore rows for both perspectives so signal gen doesn't crash
         _insert_pitching_boxscore(db, "game-persp-order", "pitcher-h1", 1, bf=1, perspective_team_id=1, appearance_order=1)
@@ -2396,7 +2396,7 @@ class TestPerspectiveSelectionDeterminism:
             "INSERT INTO plays "
             "(game_id, play_order, inning, half, season_id, "
             "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
-            "VALUES ('game-away-only', 1, 1, 'top', '2025-spring-hs', 2, 2, 'batter-a1', 'pitcher-h1')"
+            "VALUES ('game-away-only', 1, 1, 'top', '2025', 2, 2, 'batter-a1', 'pitcher-h1')"
         )
         _insert_pitching_boxscore(db, "game-away-only", "pitcher-h1", 1, bf=1, perspective_team_id=2, appearance_order=1)
         _insert_pitching_boxscore(db, "game-away-only", "pitcher-a1", 2, bf=0, perspective_team_id=2, appearance_order=1)
@@ -2420,7 +2420,7 @@ class TestPerspectiveSelectionDeterminism:
             "INSERT INTO plays "
             "(game_id, play_order, inning, half, season_id, "
             "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
-            "VALUES ('game-foreign', 1, 1, 'top', '2025-spring-hs', 2, 3, 'batter-a1', 'pitcher-h1')"
+            "VALUES ('game-foreign', 1, 1, 'top', '2025', 2, 3, 'batter-a1', 'pitcher-h1')"
         )
         _insert_pitching_boxscore(db, "game-foreign", "pitcher-h1", 1, bf=1, perspective_team_id=3, appearance_order=1)
         _insert_pitching_boxscore(db, "game-foreign", "pitcher-a1", 2, bf=0, perspective_team_id=3, appearance_order=1)
@@ -2689,8 +2689,8 @@ def _seeded_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     load_real_schema(conn)
     conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) "
-        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+        "INSERT INTO seasons (season_id, name, year) "
+        "VALUES ('2025', '2025 Spring HS', 2025)"
     )
     conn.executemany(
         "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",

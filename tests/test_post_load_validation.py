@@ -178,9 +178,9 @@ def test_duplicate_game_detected_produces_warning(
     # Seed a pre-existing completed game for the same date and team.
     # First ensure season exists.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "2025", "default", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (_SEASON_ID, "2025", 2025),
     )
     # Insert an opponent team for the pre-existing game.
     opp_cursor = db.execute(
@@ -233,9 +233,9 @@ def test_roster_count_exceeding_expected_produces_warning(
 
     # Ensure season exists for FK.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "2025", "default", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (_SEASON_ID, "2025", 2025),
     )
     # Pre-insert an extra player in team_rosters that isn't in roster.json.
     db.execute(
@@ -312,9 +312,9 @@ def test_validation_does_not_block_pipeline(
 
     # Ensure season exists for FK.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "2025", "default", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (_SEASON_ID, "2025", 2025),
     )
     # Pre-insert extra roster entry to trigger roster warning.
     db.execute(
@@ -352,15 +352,15 @@ def test_same_date_team_pair_different_seasons_no_warning(
 
     # Create two seasons.
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (_SEASON_ID, "2025", "default", 2025),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (_SEASON_ID, "2025", 2025),
     )
     other_season = "2024"
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, ?, ?)",
-        (other_season, "2024", "default", 2024),
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES (?, ?, ?)",
+        (other_season, "2024", 2024),
     )
 
     # Insert an opponent team.

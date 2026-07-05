@@ -32,6 +32,11 @@ from src.gamechanger.types import TeamRef
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-250-02: migration 008 drops seasons.season_type, team_opponents, and
+# players.gc_athlete_profile_id -- apply it so the schema matches the fixtures.
+_MIGRATION_008 = (
+    _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
+)
 
 
 @pytest.fixture()
@@ -42,6 +47,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
