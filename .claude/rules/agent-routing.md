@@ -9,9 +9,9 @@ paths:
 
 | Story Domain | Agent Type |
 |-------------|-----------|
-| Python implementation, crawlers, parsers, tests | `general-purpose` (software-engineer role in prompt) |
-| Database schema, SQL migrations, ETL | `general-purpose` (data-engineer role in prompt) |
-| API exploration, endpoint docs | `general-purpose` (api-scout role in prompt) |
+| Python implementation, crawlers, parsers, tests | `software-engineer` |
+| Database schema, SQL migrations, ETL | `data-engineer` |
+| API exploration, endpoint docs | `api-scout` |
 | Context-layer files: `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**` | `claude-architect` |
 | Documentation (`docs/admin/`, `docs/coaching/`) | `docs-writer` |
 | UI/UX design: wireframes, layout specs, component inventories, user flows | `ux-designer` |

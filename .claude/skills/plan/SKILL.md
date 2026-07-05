@@ -517,7 +517,7 @@ Commit all session artifacts produced during planning. This step is the main ses
      ```
      Stage each matching file individually with `git add <file>`.
    - `docs/vision-signals.md` (if modified) -- single file, `git add docs/vision-signals.md`
-   - `.project/research/E-NNN-*` (research artifacts, if any) -- wholly-owned by epic, `git add .project/research/E-NNN-*/`
+   - `.project/research/E-NNN-*` (research artifacts, if any) -- wholly-owned by epic, `git add .project/research/E-NNN-*` (no trailing slash, so a research artifact saved as a single FILE like `.project/research/E-NNN-topic.md` is staged, not only directory-form artifacts)
    - `.project/ideas/` (if any ideas captured) -- mixed directory, enumerate with:
      ```
      git diff --name-only -- .project/ideas/

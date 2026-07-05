@@ -4,7 +4,7 @@
 [E-251: Dispatch-Machinery Repair](../E-251-dispatch-machinery-repair/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, four stale-prose / citation defects in the skill and context-fundamentals files are corrected: the codex-review skill's closure step routes to Phase 5 (not a re-entry into or reordering of Phase 4a/4b), the plan skill's artifact-staging step stages file-form research artifacts, filesystem-context no longer teaches the obsolete PM-dispatches-implementers model, and context-fundamentals no longer cites a nonexistent CLAUDE.md "Workflow" section.

@@ -148,7 +148,7 @@ PM records all findings with their dispositions. Each finding gets one of three 
 
 ### Step 7: Wrap up
 
-- If this was an "and review" chain, control returns to the implement skill's Phase 4, which proceeds to Phase 4b (CR integration review).
+- If this was an "and review" chain, this skill ran as the implement skill's Phase 4b (Codex) pass; control returns to the implement skill, which proceeds to Phase 5 (closure). It does NOT re-enter Phase 4a (CR integration review) or Phase 4b -- the review chain is complete.
 - If this was a standalone review, present the disposition summary to the user and offer to commit changes.
 
 ---

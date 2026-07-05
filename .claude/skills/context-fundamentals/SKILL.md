@@ -121,7 +121,7 @@ A typical story dispatch adds **200-400 lines** of task-specific context (story 
 
 #### Decision 2: When to Use `/clear` Between Tasks
 
-The CLAUDE.md "Workflow" section explicitly recommends `/clear` between unrelated tasks. This is a context management instruction, not just a hygiene preference.
+Using `/clear` between unrelated tasks is a deliberate context-management practice, not just a hygiene preference.
 
 **Use `/clear` when**:
 - You are switching from one epic's story to a completely different epic's story (carry-over context from the first epic is noise for the second)
@@ -198,7 +198,6 @@ A session becomes risky when demand-loaded files are large (full API response du
 - **E-008-R-02 Research Summary**: `/.project/research/E-008-R-02-agent-skills-summary.md` -- Q7 identifies `context-fundamentals` as one of the three most applicable skills. The "Key Tensions" section (tension #2: progressive disclosure requires discipline) is directly relevant to the load-vs.-summarize decision in Decision 1.
 - **E-008 Recommendation**: `/.project/research/E-008-intent-context-layer-recommendation.md` -- Phase 1 implementation sketch specifies the `context-fundamentals` adaptation: add a section on baseball-crawl's context budget with approximate line counts.
 - **Statusline Documentation**: `.claude/hooks/README.md` -- Documents the context window usage bar thresholds (green/yellow/red) shown in the statusline. The color thresholds used in Decision 3 come from this documentation.
-- **CLAUDE.md Workflow Section**: `CLAUDE.md` (the "Workflow" section) -- Contains the `/clear` between unrelated tasks guidance that this skill formalizes.
 
 ### External Reference
 - muratcankoylan Agent Skills for Context Engineering: https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering -- The `context-fundamentals` skill in the Foundational category is the source for the four context component taxonomy, the lost-in-the-middle framing, and the context poisoning concept. Baseball-crawl's adaptation adds the specific ambient budget numbers, the task-specific size ranges, and the three decision guides with baseball-crawl-specific thresholds.

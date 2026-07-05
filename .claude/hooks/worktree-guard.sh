@@ -38,6 +38,15 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# Normalize the path before any guard comparison: collapse repeated slashes so an
+# absolute double-slash form UNDER the main-checkout prefix (e.g.
+# /workspaces/baseball-crawl//src/foo.py) cannot bypass the prefix/denylist/allowlist
+# checks below. Without this, the extra slash after the prefix would leave REL_PATH as
+# "/src/foo.py" (a leading slash), which fails the "src/*" denylist glob and would slip
+# a guarded write past the hook. (A relative double-slash like "src//foo.py" is a
+# separate matter -- it never matches the main-checkout prefix, so it exits early above.)
+FILE_PATH=$(printf '%s' "$FILE_PATH" | tr -s '/')
+
 MAIN_PREFIX="/workspaces/baseball-crawl/"
 
 # Only check files in the main checkout -- worktree writes always pass
@@ -47,6 +56,30 @@ fi
 
 # Extract the path relative to the main checkout
 REL_PATH="${FILE_PATH#$MAIN_PREFIX}"
+
+# Reject any path containing a `..` segment before mode dispatch. The `tr -s '/'`
+# above collapses duplicate slashes, but a parent-dir segment can still resolve
+# PAST the guard: in no-dispatch mode "docs/../src/foo.py" sidesteps the src/
+# denylist (REL_PATH matches no glob yet the write lands in src/), and in
+# dispatch mode ".claude/agent-memory/../src/foo.py" would match the agent-memory
+# allowlist glob yet land outside it. No legitimate main-checkout Write/Edit uses
+# a ".." segment (canonical tooling writes clean, fully-resolved paths), so deny
+# fail-closed in BOTH modes. Wrapping REL_PATH in slashes matches ".." only as a
+# whole path segment -- never a filename that merely contains two dots
+# (e.g. "foo..bar.md"). This is zero-dependency (no realpath), so it holds even
+# when the jq-required tooling is minimal.
+case "/$REL_PATH/" in
+  */../*)
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Path contains a \"..\" segment, which can resolve past the worktree guard. Write to a clean, fully-resolved path (under the epic worktree during dispatch, or .claude/agent-memory/ in the main checkout)."
+      }
+    }'
+    exit 0
+    ;;
+esac
 
 # Detect dispatch mode: check for epic worktree directories
 WORKTREE_DIR=$(ls -d /tmp/.worktrees/baseball-crawl-E-* 2>/dev/null | head -1)

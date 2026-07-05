@@ -4,7 +4,7 @@
 [E-251: Dispatch-Machinery Repair](../E-251-dispatch-machinery-repair/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three hook correctness defects are fixed: `worktree-guard.sh` normalizes paths so a double-slash form cannot bypass the guard, the commit-interception logic covers `git -C` invocation forms, and `pii-check.sh` distinguishes a scanner infrastructure failure from an actual PII detection in its reporting.

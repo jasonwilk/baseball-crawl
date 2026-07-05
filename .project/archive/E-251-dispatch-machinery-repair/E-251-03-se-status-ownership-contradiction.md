@@ -4,7 +4,7 @@
 [E-251: Dispatch-Machinery Repair](../E-251-dispatch-machinery-repair/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/agents/software-engineer.md` no longer instructs the SE to update story statuses, resolving its self-contradiction. The file becomes internally consistent with the never-own-statuses rule stated later in the same file and in the agent ecosystem (PM owns status transitions during dispatch).

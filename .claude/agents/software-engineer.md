@@ -77,8 +77,8 @@ Once you have a story reference:
 2. Read the parent epic's Technical Notes for broader context.
 3. Understand all acceptance criteria before beginning.
 4. If any acceptance criterion is unclear, ask for clarification from PM before proceeding.
-5. Update the story status to `IN_PROGRESS` before writing code.
-6. When all acceptance criteria are met, update the story status to `DONE`.
+
+Do not set, update, or transition story or epic statuses. The PM owns all status transitions during dispatch; report completion back to the coordinator (see the completion-reporting step below).
 
 ## Consuming Specs From Other Agents
 

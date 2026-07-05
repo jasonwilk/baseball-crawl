@@ -39,7 +39,7 @@ Progressive disclosure is the mechanism that makes file-based context efficient:
 This two-step load means a session can "know about" many context files without paying the token cost of loading all of them. The agent pays full cost only for what it actually uses.
 
 In baseball-crawl, progressive disclosure appears at multiple levels:
-- Epic tables list story IDs and titles -- the PM reads individual story files only when dispatching
+- Epic tables list story IDs and titles -- individual story files are read only when a story is dispatched, not all upfront
 - Agent definitions name skill files by trigger condition -- the agent reads the full SKILL.md only when the trigger fires
 - MEMORY.md contains pointers to deeper topic files -- agents read those only when the topic is active
 
@@ -92,13 +92,13 @@ When `software-engineer` or `data-engineer` receives a task, the standard contex
 
 File location: `epics/E-NNN-slug/E-NNN-SS.md`
 
-The story file is not ambient -- it is not loaded at session start. It is loaded per-task, when the PM dispatches the story. This keeps baseline session tokens low across the many stories in a project, while ensuring the implementing agent has full context for the specific story it is executing.
+The story file is not ambient -- it is not loaded at session start. It is loaded per-task, when the story is dispatched (the main session spawns the implementer with the story text in its spawn context). This keeps baseline session tokens low across the many stories in a project, while ensuring the implementing agent has full context for the specific story it is executing.
 
 **Pattern in practice**: Before writing a single line of code, read the story file. Check all acceptance criteria. If any AC references an external file (a design doc, an API spec, a data schema), load that file too before beginning work.
 
-#### Example 2: The PM Loads epic.md and All Story Files Before Dispatch
+#### Example 2: The PM Loads epic.md and All Story Files to Own Statuses and Verify ACs
 
-Before the `product-manager` dispatches any story, it reads:
+During dispatch the main session spawns implementers and routes stories, while the `product-manager` owns story/epic status transitions and acceptance-criteria verification. To do that, the PM reads from disk (not memory):
 1. The full `epic.md` for the parent epic (especially the Technical Notes section)
 2. All story files in the epic directory (to identify which are TODO vs. IN_PROGRESS vs. DONE)
 3. The story files for any completed dependencies (to understand what those stories delivered)
@@ -109,7 +109,7 @@ File locations:
 
 This is a deliberate load sequence, not an accident. The PM does not rely on memory alone for dependency statuses -- it reads the actual story files to confirm current status. Memory can be stale; the file is the source of truth.
 
-**Pattern in practice**: The PM's dispatch context block (sent to implementing agents via the Task tool) always includes the full story file text and the full epic Technical Notes section. Never a summary. Summaries drop information.
+**Pattern in practice**: The main session's dispatch context block (sent to implementing agents when it spawns them) always includes the full story file text and the full epic Technical Notes section. Never a summary. Summaries drop information.
 
 #### Example 3: Agent Memory Files Are Loaded at Session Start
 
@@ -187,7 +187,7 @@ When creating a new file that will serve as deferred context:
 ## References and Related Skills
 
 ### Related Skills in This Project
-- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): How filesystem-context integrates with multi-agent dispatch. The dispatch context block (story file + epic Technical Notes) is the primary instance of filesystem-context in the user -> PM -> implementing agent chain. Load this skill when coordinating context delivery across multiple agents.
+- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): How filesystem-context integrates with multi-agent dispatch. The dispatch context block (story file + epic Technical Notes) is the primary instance of filesystem-context in the main-session -> implementing-agent dispatch chain. Load this skill when coordinating context delivery across multiple agents.
 - **`context-fundamentals`** (`.claude/skills/context-fundamentals/SKILL.md`): The foundational framework for understanding context windows, token budgets, and the mechanics of why filesystem-context works. Load this skill before beginning complex multi-file tasks where context budget decisions are critical.
 
 ### Source Material

@@ -4,7 +4,7 @@
 [E-251: Dispatch-Machinery Repair](../E-251-dispatch-machinery-repair/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the Agent Selection routing table dispatches Python-implementation, DB-schema, and API-exploration stories to their named agents (`software-engineer`, `data-engineer`, `api-scout`) instead of bare `general-purpose` spawns. This ensures each specialist's definition, Pre-Submission Checklist, model/effort frontmatter, and agent memory load during dispatch.
