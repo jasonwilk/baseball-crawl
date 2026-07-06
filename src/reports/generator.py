@@ -1327,20 +1327,40 @@ def _run_tier2_enrichment(
     team_record: str | None,
     reference_date: date | None,
     public_id: str,
-) -> tuple[EnrichedPrediction | None, str]:
+) -> tuple[EnrichedPrediction | None, str | None]:
     """Run optional Tier-2 LLM enrichment, returning ``(prediction, status)``.
 
     ``status`` is one of :data:`TIER2_SUCCESS`,
-    :data:`TIER2_UNAVAILABLE_NO_KEY`, or :data:`TIER2_FAILED`.  The ``failed``
-    status is **cause-agnostic** (TN-4): it is read from the ``except`` branch,
-    NOT from the exception type, so a parse failure after the retry, an
-    HTTP/transport error, or a ``response_format``-400 all map to the same
-    status.  The preserved WARNING carries the specific cause via ``exc_info``
-    for log triage.
+    :data:`TIER2_UNAVAILABLE_NO_KEY`, :data:`TIER2_FAILED`, or ``None`` (the
+    Tier-2 stage did not run).  The ``failed`` status is **cause-agnostic**
+    (TN-4): it is read from the ``except`` branch, NOT from the exception type,
+    so a parse failure after the retry, an HTTP/transport error, or a
+    ``response_format``-400 all map to the same status.  The preserved WARNING
+    carries the specific cause via ``exc_info`` for log triage.
+
+    Suppress gate (E-253-07 / TN-2): when the deterministic Tier-1 prediction is
+    absent or ``confidence == 'suppress'`` (reason ``insufficient_data`` OR
+    ``unsupported_level``), enrichment is SKIPPED before any availability check
+    or API call -- no LLM cost is spent, and the honest softened suppress copy
+    renders alone.  Suppress is honest absence, not a degraded run, so the
+    status is ``None`` ("enrichment did not run", the same NULL the run record
+    already records when Tier-2 is not attempted) -- deliberately NOT a new
+    enrichment_status enum value (the run-record CHECK admits only
+    success/unavailable-no-key/failed/NULL).
 
     Non-fatal contract (TN-2): on failure this returns ``(None, TIER2_FAILED)``
     so the caller still renders the Tier-1 deterministic prediction.
     """
+    if starter_prediction is None or starter_prediction.confidence == "suppress":
+        logger.info(
+            "Tier-2 LLM enrichment skipped for public_id=%s: Tier-1 prediction "
+            "%s. No LLM call made; status=None (did not run).",
+            public_id,
+            "absent" if starter_prediction is None
+            else f"suppressed ({starter_prediction.suppress_reason})",
+        )
+        return None, None
+
     from src.llm.openrouter import is_llm_available
 
     if not is_llm_available():
@@ -2572,6 +2592,27 @@ def _delete_game_scoped_data_for_perspectives(
     )
 
 
+def _live_report_perspective_ids(
+    conn: sqlite3.Connection, exclude_team_id: int
+) -> set[int]:
+    """Return team_ids that still hold a ``reports`` row (F-H1 guard).
+
+    These are the perspectives whose game-level data must be preserved when a
+    DIFFERENT team is being deleted: a live report is regenerated from the DB,
+    and whole-game plays idempotency (``.claude/rules/data-model.md``) means any
+    destroyed shared-game plays are never re-fetched -- the hole is permanent
+    and silent.  ``exclude_team_id`` (the team being deleted) is dropped so the
+    guard never protects the deletion target against itself.
+
+    A row's mere existence counts as "live": ``bb report cleanup`` unlinks an
+    expired report's HTML but KEEPS the ``reports`` row (nulls ``report_path``),
+    and the row still underpins regeneration.  So any ``reports`` row is treated
+    as a data dependency, expired or not.
+    """
+    rows = conn.execute("SELECT DISTINCT team_id FROM reports").fetchall()
+    return {r[0] for r in rows if r[0] != exclude_team_id}
+
+
 def _delete_team_anchor_and_orphan_data(
     conn: sqlite3.Connection, team_id: int
 ) -> None:
@@ -2593,6 +2634,16 @@ def _delete_team_anchor_and_orphan_data(
          is NO ACTION (RESTRICT on immediate), so deleting a team without first
          removing its anchor rows raises ``IntegrityError`` at the
          ``DELETE FROM teams`` step.
+
+    F-H1 shared-game guard (E-253-01): the anchor pass is EXCLUDED from rows
+    owned by a perspective that still holds a live ``reports`` row.  When teams
+    X and Y played a shared game and Y holds a report, Y's pitcher FPS%/P-BF are
+    computed from the ``plays`` where X was batting (``batting_team_id = X``)
+    under Y's perspective (``perspective_team_id = Y``).  Deleting X must NOT
+    destroy those rows.  Because the spared rows still FK-reference X (and the
+    shared ``games`` row does too), the caller's teams-row survivor check keeps
+    X's ``teams`` row -- so sparing here does not cause an ``IntegrityError`` at
+    ``DELETE FROM teams`` (the FK-safety survivor path per TN-1).
 
     Pass order (perspective first, anchor second) matches the historical
     admin.py Phase 1b / Phase 3 ordering and keeps the two WHERE-clause
@@ -2637,26 +2688,46 @@ def _delete_team_anchor_and_orphan_data(
     # plays.batting_team_id and plays.perspective_team_id are independent FKs;
     # the perspective pass already handled perspective_team_id = T, so we
     # target batting_team_id = T here.  play_events must precede plays.
+    #
+    # F-H1 guard: SPARE rows whose perspective still holds a live report.  The
+    # same NOT-IN filter is applied to the ``play_events`` subquery so a spared
+    # play keeps its child events.  When ``protected`` is empty the clause is
+    # omitted (SQLite has no empty-tuple ``IN``), preserving the pre-guard
+    # behaviour for true orphans.
+    protected = _live_report_perspective_ids(conn, team_id)
+    if protected:
+        pp = ",".join("?" for _ in protected)
+        excl = f" AND perspective_team_id NOT IN ({pp})"
+        excl_params: tuple[int, ...] = tuple(protected)
+    else:
+        excl = ""
+        excl_params = ()
+
     conn.execute(
         "DELETE FROM play_events WHERE play_id IN ("
-        "  SELECT id FROM plays WHERE batting_team_id = ?"
+        "  SELECT id FROM plays WHERE batting_team_id = ?" + excl +
         ")",
-        (team_id,),
+        (team_id, *excl_params),
     )
     conn.execute(
-        "DELETE FROM plays WHERE batting_team_id = ?", (team_id,)
+        "DELETE FROM plays WHERE batting_team_id = ?" + excl,
+        (team_id, *excl_params),
     )
     conn.execute(
-        "DELETE FROM player_game_batting WHERE team_id = ?", (team_id,)
+        "DELETE FROM player_game_batting WHERE team_id = ?" + excl,
+        (team_id, *excl_params),
     )
     conn.execute(
-        "DELETE FROM player_game_pitching WHERE team_id = ?", (team_id,)
+        "DELETE FROM player_game_pitching WHERE team_id = ?" + excl,
+        (team_id, *excl_params),
     )
     conn.execute(
-        "DELETE FROM spray_charts WHERE team_id = ?", (team_id,)
+        "DELETE FROM spray_charts WHERE team_id = ?" + excl,
+        (team_id, *excl_params),
     )
     conn.execute(
-        "DELETE FROM reconciliation_discrepancies WHERE team_id = ?", (team_id,)
+        "DELETE FROM reconciliation_discrepancies WHERE team_id = ?" + excl,
+        (team_id, *excl_params),
     )
 
 

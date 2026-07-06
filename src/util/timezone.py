@@ -12,8 +12,8 @@ introduce a second timezone convention (epic TN-4): import
 
 The operating timezone is read once, from the ``OPERATING_TIMEZONE`` env var,
 defaulting to the venue (``America/Chicago``) when unset or invalid. The
-invalid-value degradation mirrors ``src.reports.morning_run.derive_local_date``
-(unknown tz -> log a WARNING and fall back, never crash).
+invalid-value degradation mirrors :func:`derive_local_date` (also housed here as
+of E-253-04): unknown tz -> log a WARNING and fall back, never crash.
 """
 
 from __future__ import annotations
@@ -73,3 +73,47 @@ def operating_today(now: datetime | None = None) -> date:
     elif now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     return now.astimezone(get_operating_timezone()).date()
+
+
+def derive_local_date(start_datetime: str | None, tz_name: str | None) -> str | None:
+    """Derive a game's LOCAL calendar date from its UTC start + IANA timezone.
+
+    A UTC-"today" filter (or a UTC-sliced ``game_date``) would miss late-evening
+    games that roll past UTC midnight (TN-9 / B3; CE-3 / E-253-04), so the
+    calendar date MUST be computed in the local timezone.
+
+    Relocated here from ``src.reports.morning_run`` (E-253-04) so lower-layer
+    callers -- notably ``src.gamechanger.loaders.game_loader`` -- can reuse it
+    without inverting the layering (loaders importing from reports).
+
+    Args:
+        start_datetime: ISO-8601 UTC datetime string (e.g.
+            ``"2026-06-20T23:00:00.000Z"``), or ``None`` (full-day events).
+        tz_name: IANA timezone string (e.g. ``"America/Chicago"``), or ``None``.
+            Pass an IANA NAME, never a :class:`~zoneinfo.ZoneInfo` object -- the
+            operating-tz seam callers bridge :func:`get_operating_timezone`'s
+            ``ZoneInfo`` to its name via ``.key`` before calling this.
+
+    Returns:
+        The local date as ``"YYYY-MM-DD"``, or ``None`` when ``start_datetime``
+        is absent (the caller falls back to its own raw date).
+    """
+    if not start_datetime:
+        return None
+    iso = start_datetime.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        logger.warning("Unparseable start_datetime %r; cannot derive local date", start_datetime)
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if tz_name:
+        try:
+            dt = dt.astimezone(ZoneInfo(tz_name))
+        except (ZoneInfoNotFoundError, ValueError):
+            logger.warning(
+                "Unknown timezone %r; using UTC date for the local-date filter",
+                tz_name,
+            )
+    return dt.date().isoformat()

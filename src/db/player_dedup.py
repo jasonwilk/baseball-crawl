@@ -16,10 +16,30 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+def _fold_name(name: str) -> str:
+    """Canonical dedup name fold: Unicode case- AND diacritic-insensitive.
+
+    NFKD-decompose, drop combining marks (so ``José`` -> ``Jose``), then
+    ``casefold`` (Unicode-aware lowercasing, so accented capitals fold too).
+
+    This is the SINGLE fold shared by detection (:func:`find_duplicate_players`,
+    via a registered SQLite function) and the planner's terminal-name test
+    (:func:`_terminal_names`), so the two never diverge (E-253-08). It replaces
+    the ASCII-only SQL ``COLLATE NOCASE`` in detection, which missed
+    accented-name duplicates. For pure-ASCII names it is identical to
+    ``str.lower()`` / ``NOCASE``, so all existing ASCII fork/component behavior
+    is unchanged (AC-4).
+    """
+    decomposed = unicodedata.normalize("NFKD", name)
+    without_marks = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return without_marks.casefold()
 
 
 @dataclass
@@ -176,9 +196,19 @@ def find_duplicate_players(
 
     where_clause = "AND " + " AND ".join(filters)
 
-    # The query finds pairs where both players are on the same team roster
-    # in the same season, have matching last names (case-insensitive), and
-    # one first_name is a case-insensitive prefix of the other.
+    # Detection folds names through _fold_name (E-253-08): Unicode case- AND
+    # diacritic-insensitive, matching the planner's _terminal_names fold so the
+    # two never diverge. Registered as a deterministic SQLite scalar so the
+    # comparison happens in SQL.
+    db.create_function("_dedup_fold", 1, _fold_name, deterministic=True)
+
+    # The query finds pairs where both players are on the same team roster in
+    # the same season, have matching FOLDED last names, and one FOLDED
+    # first_name is a prefix of the other. Prefix matching uses ``substr(...) =
+    # ...`` on the folded names rather than ``LIKE (first_name || '%')`` -- the
+    # old LIKE interpolated the first name as a pattern, so a first name
+    # containing a LIKE metacharacter (``%`` / ``_``) produced spurious prefix
+    # edges (E-253-08 AC-2); substr treats the whole value literally.
     #
     # We enforce p1.player_id < p2.player_id to avoid duplicate pairs (A,B)
     # and (B,A). The canonical selection happens in Python after fetching,
@@ -202,17 +232,19 @@ def find_duplicate_players(
         JOIN players p1 ON p1.player_id = tr1.player_id
         JOIN players p2 ON p2.player_id = tr2.player_id
         JOIN teams t ON t.id = tr1.team_id
-        WHERE p1.last_name = p2.last_name COLLATE NOCASE
-          AND LENGTH(p1.first_name) > 0
-          AND LENGTH(p2.first_name) > 0
+        WHERE _dedup_fold(p1.last_name) = _dedup_fold(p2.last_name)
+          AND LENGTH(_dedup_fold(p1.first_name)) > 0
+          AND LENGTH(_dedup_fold(p2.first_name)) > 0
           AND (
-              -- p1.first_name is a prefix of p2.first_name
-              (LENGTH(p1.first_name) <= LENGTH(p2.first_name)
-               AND p2.first_name LIKE (p1.first_name || '%') COLLATE NOCASE)
+              -- folded p1.first_name is a prefix of folded p2.first_name
+              (LENGTH(_dedup_fold(p1.first_name)) <= LENGTH(_dedup_fold(p2.first_name))
+               AND substr(_dedup_fold(p2.first_name), 1,
+                          LENGTH(_dedup_fold(p1.first_name))) = _dedup_fold(p1.first_name))
               OR
-              -- p2.first_name is a prefix of p1.first_name
-              (LENGTH(p2.first_name) <= LENGTH(p1.first_name)
-               AND p1.first_name LIKE (p2.first_name || '%') COLLATE NOCASE)
+              -- folded p2.first_name is a prefix of folded p1.first_name
+              (LENGTH(_dedup_fold(p2.first_name)) <= LENGTH(_dedup_fold(p1.first_name))
+               AND substr(_dedup_fold(p1.first_name), 1,
+                          LENGTH(_dedup_fold(p2.first_name))) = _dedup_fold(p2.first_name))
           )
           {where_clause}
         ORDER BY t.name, p1.last_name COLLATE NOCASE
@@ -514,6 +546,7 @@ def merge_player_pair(
     duplicate_id: str,
     *,
     manage_transaction: bool = True,
+    recompute_scopes: set[tuple[int, str]] | None = None,
 ) -> set[tuple[str, int, str]]:
     """Atomically merge duplicate_id into canonical_id.
 
@@ -526,6 +559,12 @@ def merge_player_pair(
         duplicate_id: The player_id to merge away.
         manage_transaction: If True (CLI use), wraps in BEGIN IMMEDIATE.
             If False (caller manages transaction), uses SAVEPOINT.
+        recompute_scopes: The ``(team_id, season_id)`` scopes the caller will
+            recompute after the merge (E-253-08 AC-3). Passed through to the
+            season-row handling so ``boxscore_only`` rows are only deleted where
+            they will be rebuilt; rows in un-rebuilt scopes are preserved. When
+            None (default), the caller is expected to recompute ALL affected
+            scopes, so every boxscore_only row is deleted (rebuilt).
 
     Returns:
         Set of (player_id, team_id, season_id) tuples that need season
@@ -642,14 +681,16 @@ def merge_player_pair(
         # rederivable from game rows -- they must survive the merge).
         # ---------------------------------------------------------------
         _delete_or_repoint_season_rows(
-            db, "player_season_batting", canonical_id, duplicate_id
+            db, "player_season_batting", canonical_id, duplicate_id,
+            recompute_scopes,
         )
 
         # ---------------------------------------------------------------
         # TN-6 Step 7: player_season_pitching -- same provenance-aware handling.
         # ---------------------------------------------------------------
         _delete_or_repoint_season_rows(
-            db, "player_season_pitching", canonical_id, duplicate_id
+            db, "player_season_pitching", canonical_id, duplicate_id,
+            recompute_scopes,
         )
 
         # ---------------------------------------------------------------
@@ -825,6 +866,7 @@ def _delete_or_repoint_season_rows(
     table: str,
     canonical_id: str,
     duplicate_id: str,
+    recompute_scopes: set[tuple[int, str]] | None = None,
 ) -> None:
     """Merge season-aggregate rows from a duplicate into the canonical player.
 
@@ -833,12 +875,27 @@ def _delete_or_repoint_season_rows(
     for non-merged players):
 
     * ``boxscore_only`` rows are derivable from the per-game rows by the
-      canonical recompute that runs after the merge, so they are DELETED for
-      BOTH players here and rebuilt under the canonical id later.
+      canonical recompute that runs after the merge, so they are DELETED (in the
+      rebuilt scopes) and rebuilt under the canonical id later.
     * ``full`` / ``supplemented`` rows are member-authoritative -- they come
       straight from the season-stats API and are NOT rederivable from game
       rows.  They must MOVE to the canonical id, never be deleted or downgraded
       to a boxscore sum.
+
+    Unrebuilt-scope guard (E-253-08 AC-3): the boxscore_only DELETE is only safe
+    for ``(team_id, season_id)`` scopes the post-merge recompute will actually
+    rebuild. The load path (``dedup_team_players(recompute_aggregates=False)``)
+    recomputes ONLY the loaded scope, so deleting a boxscore_only row in ANY
+    OTHER scope (e.g. a different season for the same merged human) would drop a
+    canonical aggregate that nothing rebuilds -- silent data loss. When
+    ``recompute_scopes`` is given, the boxscore_only DELETE is restricted to
+    those scopes; boxscore_only rows in un-rebuilt scopes are instead PRESERVED
+    -- they fall through to the same collision/re-point handling as member rows
+    (the canonical's survive untouched; the duplicate's re-point to the
+    canonical, or drop when the canonical already owns that scope). When
+    ``recompute_scopes`` is None (the standalone CLI path, which recomputes ALL
+    affected scopes), every boxscore_only row is deleted as before -- all get
+    rebuilt.
 
     Collision (PK ``UNIQUE(player_id, team_id, season_id)``): if the canonical
     player ALSO owns a member row for the SAME ``(team_id, season_id)`` as a
@@ -849,13 +906,25 @@ def _delete_or_repoint_season_rows(
     rows are member-authoritative for the same scope, so keeping one is correct
     and keeping the canonical's is the consistent choice.
     """
-    # boxscore_only rows: drop for both players; the post-merge canonical
-    # recompute rebuilds them under the canonical id from the per-game rows.
-    db.execute(
-        f"DELETE FROM {table} "  # noqa: S608
-        f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only'",
-        (canonical_id, duplicate_id),
-    )
+    # boxscore_only rows: drop for both players in the scopes the post-merge
+    # canonical recompute rebuilds; those get rebuilt under the canonical id
+    # from the per-game rows. Rows in un-rebuilt scopes are left in place (they
+    # fall through to the collision/re-point logic below) so a canonical
+    # aggregate that nothing would rebuild is never silently lost (AC-3).
+    if recompute_scopes is None:
+        db.execute(
+            f"DELETE FROM {table} "  # noqa: S608
+            f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only'",
+            (canonical_id, duplicate_id),
+        )
+    else:
+        for team_id, season_id in recompute_scopes:
+            db.execute(
+                f"DELETE FROM {table} "  # noqa: S608
+                f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only' "
+                f"AND team_id = ? AND season_id = ?",
+                (canonical_id, duplicate_id, team_id, season_id),
+            )
 
     # Collision resolution: drop the duplicate's member rows whose
     # (team_id, season_id) the canonical already owns a (member) row for.
@@ -919,9 +988,10 @@ def _terminal_names(
     """Return the DISTINCT terminal names of a component (TN-1).
 
     A *terminal* is a member whose first_name is NOT a strict prefix of any
-    other member's first_name (case-insensitive) -- i.e. a maximal name under
-    the prefix partial order.  The fork/collapse decision keys on the number of
-    distinct terminal NAMES (case-insensitively unequal), NOT the count of
+    other member's first_name (folded via :func:`_fold_name`: case- AND
+    diacritic-insensitive, E-253-08) -- i.e. a maximal name under the prefix
+    partial order.  The fork/collapse decision keys on the number of distinct
+    terminal NAMES (fold-unequal), NOT the count of
     terminal ``player_id``s: equal-named maximal members (the bread-and-butter
     cross-perspective duplicate, e.g. ``{Jon, Jon}``) collapse to a SINGLE
     terminal name and must not be misclassified as a fork.
@@ -932,16 +1002,16 @@ def _terminal_names(
     """
     distinct: dict[str, str] = {}
     for _pid, first, _last in members:
-        lower = first.lower()
+        folded = _fold_name(first)
         is_terminal = True
         for _opid, other_first, _olast in members:
-            other_lower = other_first.lower()
+            other_folded = _fold_name(other_first)
             # Strict prefix: the other name extends this one (longer + startswith).
-            if len(other_lower) > len(lower) and other_lower.startswith(lower):
+            if len(other_folded) > len(folded) and other_folded.startswith(folded):
                 is_terminal = False
                 break
         if is_terminal:
-            distinct.setdefault(lower, first)
+            distinct.setdefault(folded, first)
     return distinct
 
 
@@ -1078,6 +1148,7 @@ def execute_collapse(
     collapse: CollapsePlan,
     *,
     manage_transaction: bool,
+    recompute_scopes: set[tuple[int, str]] | None = None,
 ) -> set[tuple[str, int, str]]:
     """Merge every duplicate of one component into its canonical, atomically.
 
@@ -1111,6 +1182,7 @@ def execute_collapse(
                 collapse.canonical_player_id,
                 dup.player_id,
                 manage_transaction=False,
+                recompute_scopes=recompute_scopes,
             )
         if manage_transaction:
             db.execute("COMMIT")
@@ -1204,10 +1276,22 @@ def dedup_team_players(
     merged = 0
     all_affected: set[tuple[str, int, str]] = set()
 
+    # E-253-08 AC-3: when the caller recomputes only THIS scope after us
+    # (recompute_aggregates=False -- the ScoutingLoader load path, which then
+    # runs a single canonical_recompute(team_id, season_id)), restrict the merge's
+    # boxscore_only deletion to this scope so a merged human's boxscore_only rows
+    # in OTHER scopes (e.g. another season) are not dropped unrebuilt. When we own
+    # the recompute (recompute_aggregates=True), recompute_affected_seasons below
+    # rebuilds EVERY affected scope, so None (delete-all) is safe.
+    recompute_scopes: set[tuple[int, str]] | None = (
+        None if recompute_aggregates else {(team_id, season_id)}
+    )
+
     for collapse in plan.collapses:
         try:
             affected = execute_collapse(
-                db, collapse, manage_transaction=manage_transaction
+                db, collapse, manage_transaction=manage_transaction,
+                recompute_scopes=recompute_scopes,
             )
             all_affected.update(affected)
             merged += len(collapse.duplicates)

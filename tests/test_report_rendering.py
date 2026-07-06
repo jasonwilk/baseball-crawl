@@ -427,6 +427,77 @@ class TestSuppressState:
             "this team's level doesn't have pitch-count rules we can apply." in html
         )
         assert "USSSA" not in html
+
+
+# ── E-253-07: Tier-2 narrative is scoped to the non-suppress branch ─────────
+
+
+def _make_enriched(base: StarterPrediction) -> Any:
+    """Build an EnrichedPrediction with a recognizable narrative for assertions."""
+    from src.reports.llm_analysis import EnrichedPrediction
+    return EnrichedPrediction(
+        base=base,
+        narrative="Ace Smith projects to start; attack early in counts.",
+        bullpen_sequence="Then Closer Davis to finish.",
+        model_used="test-model",
+    )
+
+
+class TestTier2NarrativeSuppressGate:
+    """E-253-07 / TN-2 (template half): the Tier-2 narrative block must never
+    render under a suppressed prediction, even if an enriched_prediction is
+    somehow present; the non-suppress path is unchanged (AC-2/AC-4)."""
+
+    @pytest.mark.parametrize("reason", ["insufficient_data", "unsupported_level"])
+    def test_suppress_never_renders_narrative(self, reason):
+        """AC-2/AC-3: suppress + a (defensively) present enriched_prediction ->
+        NO 'Scouting Analysis' narrative and no narrative text."""
+        pred = StarterPrediction(confidence="suppress", suppress_reason=reason)
+        enriched = _make_enriched(pred)
+        html = render_report(
+            _base_data(starter_prediction=pred, enriched_prediction=enriched)
+        )
+        assert "Scouting Analysis" not in html
+        assert "attack early in counts" not in html
+        # The rendered narrative div (CSS class def in <style> is always present).
+        assert 'class="starter-narrative"' not in html
+
+    def test_non_suppress_still_renders_narrative(self):
+        """AC-4: a non-suppress prediction with an enriched_prediction renders
+        the narrative exactly as before (block unchanged, in place)."""
+        candidate = _make_candidate("Ace Smith")
+        pred = StarterPrediction(
+            confidence="moderate",
+            predicted_starter=candidate,
+            top_candidates=[candidate],
+            rotation_pattern="ace-dominant",
+            rest_table=_make_rest_table(),
+            bullpen_order=_make_bullpen_order(),
+        )
+        enriched = _make_enriched(pred)
+        html = render_report(
+            _base_data(starter_prediction=pred, enriched_prediction=enriched)
+        )
+        assert "Scouting Analysis" in html
+        assert "attack early in counts" in html
+        assert "Then Closer Davis to finish." in html
+        # AC-4: the AI-assisted disclaimer variant still selects on enriched.
+        assert "AI-assisted analysis" in html
+
+    def test_non_suppress_without_enriched_has_no_narrative(self):
+        """Sanity: no key configured (enriched None) -> no narrative, ranked
+        list still renders (baseline non-suppress path)."""
+        candidate = _make_candidate("Ace Smith")
+        pred = StarterPrediction(
+            confidence="moderate",
+            predicted_starter=candidate,
+            top_candidates=[candidate],
+        )
+        html = render_report(
+            _base_data(starter_prediction=pred, enriched_prediction=None)
+        )
+        assert "Scouting Analysis" not in html
+        assert "Ace Smith" in html  # ranked arm still present
         assert "League not detected" not in html
         assert "not yet supported" not in html
 

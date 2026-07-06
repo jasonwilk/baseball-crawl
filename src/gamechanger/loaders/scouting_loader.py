@@ -36,7 +36,7 @@ from typing import Any
 
 from src.db.players import ensure_player_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
-from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
+from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry, _opt_int
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -397,13 +397,24 @@ class ScoutingLoader:
             if not game_id:
                 continue
             score = game.get("score") or {}
-            start_ts = game.get("start_ts") or game.get("end_ts") or "1900-01-01T00:00:00Z"
+            # Absent instant: leave last_scoring_update EMPTY so GameLoader routes
+            # it through its absent-instant path and preserves the "1900-01-01"
+            # sentinel. Do NOT fabricate a "1900-01-01T00:00:00Z" string -- since
+            # E-253-04, GameLoader localizes any present instant via
+            # derive_local_date, and that UTC-midnight sentinel would shift back a
+            # day (America/Chicago -> "1899-12-31"). Keeps both loader paths
+            # consistent with _parse_summary_record (E-253-11 Round-1 remediation).
+            start_ts = game.get("start_ts") or game.get("end_ts") or ""
             entry = GameSummaryEntry(
                 event_id=str(game_id),
                 game_stream_id=str(game_id),
                 home_away=game.get("home_away"),
-                owning_team_score=int(score.get("team") or 0),
-                opponent_team_score=int(score.get("opponent_team") or 0),
+                # Missing public scores preserve NULL (not coerced to 0), so a
+                # scoreless doubleheader does not collapse under the natural-key
+                # dedup -- same _opt_int treatment as _parse_summary_record
+                # (E-253-06 AC-3, extended to the public path).
+                owning_team_score=_opt_int(score.get("team")),
+                opponent_team_score=_opt_int(score.get("opponent_team")),
                 opponent_id="",
                 last_scoring_update=str(start_ts),
                 start_time=game.get("start_ts"),

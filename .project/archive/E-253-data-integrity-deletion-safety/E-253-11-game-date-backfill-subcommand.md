@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, an operator-maintenance `bb data` subcommand will re-derive the venue-local `game_date` for existing `games` rows from the recoverable UTC instant, correcting the historical UTC mis-derivation. It follows the 3-tier recoverability model: clean re-derivation where an instant + timezone survive, operating-tz fallback where only the instant survives, and a counted skip where no instant is recoverable. It mirrors the idempotent `bb data backfill-appearance-order` operator-maintenance precedent.

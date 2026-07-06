@@ -35,13 +35,12 @@ from src.reports.morning_run import (
     PreflightError,
     SlotResult,
     _process_opponent,
-    derive_local_date,
     map_outcome_to_vocabulary,
     preflight_credential_check,
     run_morning,
 )
 from src.gamechanger.opponent_ladder import LadderResult, ResolutionOutcome
-from src.util.timezone import get_operating_timezone, operating_today
+from src.util.timezone import derive_local_date, get_operating_timezone, operating_today
 from tests.conftest import load_real_schema
 
 _PUBLIC_A = "publicAAAA"

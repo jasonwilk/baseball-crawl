@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, when the deterministic "Most Likely Arms" engine returns a suppressed prediction (`confidence == 'suppress'`), the report will show only the honest softened copy — no LLM narrative, no named pitcher — and the LLM call will be skipped entirely (no cost spent). The non-suppress rendering path is unchanged.

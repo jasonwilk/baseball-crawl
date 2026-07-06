@@ -133,7 +133,7 @@ def _make_boxscore(
                     "stats": [
                         {
                             "player_id": player_id,
-                            "stats": {"AB": 3, "H": 1, "RBI": 1, "BB": 0, "SO": 1},
+                            "stats": {"AB": 3, "R": 1, "H": 1, "RBI": 1, "BB": 0, "SO": 1},
                         }
                     ],
                     "extra": [
@@ -373,7 +373,7 @@ def test_stub_player_created_for_unknown_player_in_boxscore(
                     "stats": [
                         {
                             "player_id": unknown_player,
-                            "stats": {"AB": 4, "H": 2, "RBI": 0, "BB": 1, "SO": 0},
+                            "stats": {"AB": 4, "R": 1, "H": 2, "RBI": 0, "BB": 1, "SO": 0},
                         }
                     ],
                     "extra": [],
@@ -1629,7 +1629,7 @@ def _e247_boxscore(own_key: str) -> dict:
                     "stats": [
                         {
                             "player_id": _PLAYER_1,
-                            "stats": {"AB": 4, "H": 2, "RBI": 1, "BB": 1, "SO": 1},
+                            "stats": {"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 1, "SO": 1},
                         },
                     ],
                     "extra": [
@@ -1986,3 +1986,95 @@ def test_e247_disk_missing_roster_no_error(
     result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
 
     assert result.errors == 0, f"Expected errors=0 for missing roster, got {result.errors}"
+
+
+# ---------------------------------------------------------------------------
+# E-253 Round-1 remediation: public-path parity with the authenticated path
+# (E-253-04 sentinel preservation + E-253-06 AC-3 missing-score None handling)
+# ---------------------------------------------------------------------------
+
+
+def _write_games(scouting_dir: Path, games: list[dict]) -> None:
+    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
+
+
+def test_public_missing_start_ts_preserves_sentinel_game_date(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Round-1 F1: a completed PUBLIC game with no start_ts/end_ts keeps the
+    '1900-01-01' sentinel game_date -- it is NOT fabricated as
+    '1900-01-01T00:00:00Z' and then localized backward to '1899-12-31'."""
+    team_pk = _insert_team(db)
+    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
+    _write_games(scouting_dir, [
+        {
+            "id": "g-no-ts",
+            "game_status": "completed",
+            "home_away": "home",
+            "score": {"team": 5, "opponent_team": 3},
+            # no start_ts / end_ts -> no recoverable instant
+        }
+    ])
+    _make_boxscore(scouting_dir, "g-no-ts", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+
+    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    game_date = db.execute(
+        "SELECT game_date FROM games WHERE game_id = 'g-no-ts'"
+    ).fetchone()[0]
+    assert game_date == "1900-01-01", (
+        "absent-instant public game must preserve the sentinel, not shift to "
+        "1899-12-31"
+    )
+
+
+def test_public_missing_scores_stored_as_null(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Round-1 F2: a completed PUBLIC game with no score stores NULL home/away
+    score (not coerced to 0), matching _parse_summary_record (E-253-06)."""
+    team_pk = _insert_team(db)
+    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
+    _write_games(scouting_dir, [
+        {
+            "id": "g-noscore",
+            "game_status": "completed",
+            "home_away": "home",
+            "start_ts": "2025-04-10T18:00:00Z",
+            # no "score" key -> missing scores
+        }
+    ])
+    _make_boxscore(scouting_dir, "g-noscore", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+
+    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    row = db.execute(
+        "SELECT home_score, away_score FROM games WHERE game_id = 'g-noscore'"
+    ).fetchone()
+    assert row == (None, None), "missing public scores must be NULL, not 0"
+
+
+def test_public_scoreless_doubleheader_stays_two_rows(
+    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Round-1 F2 (E-253-06 AC-3 on the public path): two same-date, same-team
+    public games both missing scores AND start_ts do NOT collapse -- pre-fix,
+    both coerced to 0-0 with equal totals and the natural-key dedup redirected
+    the second onto the first."""
+    team_pk = _insert_team(db)
+    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
+    _write_games(scouting_dir, [
+        {"id": "dh-1", "game_status": "completed", "home_away": "home"},
+        {"id": "dh-2", "game_status": "completed", "home_away": "home"},
+    ])
+    _make_boxscore(scouting_dir, "dh-1", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+    _make_boxscore(scouting_dir, "dh-2", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+
+    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+
+    game_ids = {
+        r[0] for r in db.execute("SELECT game_id FROM games").fetchall()
+    }
+    assert {"dh-1", "dh-2"} <= game_ids, (
+        "a scoreless public doubleheader must remain two rows, not collapse"
+    )

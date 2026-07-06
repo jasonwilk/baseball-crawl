@@ -40,6 +40,25 @@ _MIGRATION_001 = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 _MIGRATION_008 = (
     _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
 )
+# E-253-02: migration 009 widens the spray_charts UNIQUE to include chart_type
+# so offense and defense for one event no longer collide.
+_MIGRATION_009 = (
+    _PROJECT_ROOT / "migrations" / "009_spray_chart_type_unique.sql"
+)
+
+
+def _apply_migration_009(conn: sqlite3.Connection) -> None:
+    """Apply migration 009's table rebuild on top of the base ``db`` fixture.
+
+    The shared ``db`` fixture stops at 001+008 (narrow UNIQUE). These tests need
+    the widened UNIQUE(event_gc_id, perspective_team_id, chart_type), so they
+    layer 009 on. Bare ``executescript`` is fine for the rebuild: a table
+    rebuild is FK-safe (spray_charts has no incoming references), matching how
+    the fixture already applies 001/008.
+    """
+    conn.executescript(_MIGRATION_009.read_text(encoding="utf-8"))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.commit()
 
 
 
@@ -361,6 +380,115 @@ def test_reloading_same_file_produces_zero_new_inserts(
     assert result2.loaded == 0
     assert result2.skipped == 1
     assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# E-253-02: chart_type UNIQUE widening (migration 009) + loader accounting
+# ---------------------------------------------------------------------------
+
+
+def test_offense_and_defense_same_event_both_persist(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-2/AC-4: with migration 009 applied, regenerating the spray load for a
+    game whose event has BOTH offensive and defensive data stores both rows.
+
+    Before the widening, the defensive ``INSERT OR IGNORE`` collided with the
+    offensive row (shared event_gc_id + perspective) and was silently dropped.
+    This is the regeneration proof: the defensive row is now present.
+    """
+    _apply_migration_009(db)
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
+
+    # Same event id present in BOTH the offense and defense sections.
+    payload = {
+        "stream_id": "stream-001",
+        "player_stats": {},
+        "spray_chart_data": {
+            "offense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]},
+            "defense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]},
+        },
+    }
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    result = loader.load_dir(
+        tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
+    )
+
+    assert result.loaded == 2
+    assert result.errors == 0
+    assert result.skipped == 0
+    chart_types = {
+        r[0]
+        for r in db.execute(
+            "SELECT chart_type FROM spray_charts "
+            "WHERE game_id = ? AND event_gc_id = ?",
+            (_GAME_ID, _EVENT_GC_1),
+        )
+    }
+    assert chart_types == {"offensive", "defensive"}
+
+
+def test_real_unique_collision_is_error_not_idempotent_skip(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-3: a genuine UNIQUE collision is distinguished from a true no-op.
+
+    Two events with the SAME id in one offensive section collide on the widened
+    UNIQUE(event_gc_id, perspective_team_id, chart_type): the first inserts, the
+    second is suppressed. The loader must count that as an ERROR (with a WARNING
+    log), NOT as a benign idempotent skip -- the whole-game gate, not this path,
+    owns true re-run no-ops.
+    """
+    _apply_migration_009(db)
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
+
+    payload = {
+        "stream_id": "stream-001",
+        "player_stats": {},
+        "spray_chart_data": {
+            "offense": {
+                _PLAYER_A: [
+                    _make_spray_event(_EVENT_GC_1, play_result="single"),
+                    _make_spray_event(_EVENT_GC_1, play_result="double"),
+                ]
+            },
+            "defense": {},
+        },
+    }
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.WARNING):
+        result = loader.load_dir(
+            tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
+        )
+
+    assert result.loaded == 1
+    assert result.errors == 1
+    assert result.skipped == 0
+    assert any(
+        "not an idempotent skip" in r.getMessage() for r in caplog.records
+    ), "expected a WARNING distinguishing the real collision from a no-op"
+    # Only the first event was stored.
+    assert (
+        db.execute(
+            "SELECT COUNT(*) FROM spray_charts WHERE event_gc_id = ?",
+            (_EVENT_GC_1,),
+        ).fetchone()[0]
+        == 1
+    )
 
 
 # ---------------------------------------------------------------------------

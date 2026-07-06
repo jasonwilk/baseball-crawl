@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, reconciliation `--execute` will record its discrepancy rows atomically with the plays corrections (a crash can no longer leave corrections applied but unrecorded), and `get_summary_from_db` will partition by `perspective_team_id` so distinct cross-perspective signals are no longer collapsed. Both are designed scoreboard-compatible.

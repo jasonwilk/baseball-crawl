@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the player-dedup detection will catch accented-name duplicates (Unicode fold consistent with the planner), will not create spurious dedup edges from `LIKE` metacharacters in first names, and the load-path dedup will not delete canonical `boxscore_only` season rows in scopes the end-of-load recompute never rebuilds.

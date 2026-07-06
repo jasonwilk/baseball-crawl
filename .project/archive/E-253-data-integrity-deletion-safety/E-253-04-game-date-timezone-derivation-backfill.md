@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a newly-loaded game's stored `game_date` will reflect the venue-local calendar date rather than the UTC date, so evening games no longer file under the next day (skewing rest math, the 7-day window, and cross-perspective dedup at UTC midnight). As the enabling step, the existing `derive_local_date` conversion helper is relocated to a neutral shared module so the game loader can import it without a layering inversion. The one-time backfill of existing rows is a separate story (E-253-11).

@@ -26,9 +26,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Callable
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -51,7 +50,7 @@ from src.gamechanger.opponent_ladder import (
 from src.gamechanger.team_resolver import TeamProfile, resolve_team
 from src.gamechanger.url_parser import parse_team_url
 from src.reports.generator import GenerationResult, _utcnow_iso, generate_report
-from src.util.timezone import operating_today
+from src.util.timezone import derive_local_date, operating_today
 
 logger = logging.getLogger(__name__)
 
@@ -218,42 +217,6 @@ class MorningRunResult:
         if slot.error_message:
             base += f"\n    ERROR: {slot.error_message}"
         return base
-
-
-def derive_local_date(start_datetime: str | None, tz_name: str | None) -> str | None:
-    """Derive a game's LOCAL calendar date from its UTC start + IANA timezone.
-
-    A UTC-"today" filter would miss late-evening games that roll past UTC
-    midnight (TN-9 / B3), so the same-day comparison MUST use the local date.
-
-    Args:
-        start_datetime: ISO-8601 UTC datetime string (e.g.
-            ``"2026-06-20T23:00:00.000Z"``), or ``None`` (full-day events).
-        tz_name: IANA timezone string (e.g. ``"America/Chicago"``), or ``None``.
-
-    Returns:
-        The local date as ``"YYYY-MM-DD"``, or ``None`` when ``start_datetime``
-        is absent (the caller falls back to the event's raw ``game_date``).
-    """
-    if not start_datetime:
-        return None
-    iso = start_datetime.replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError:
-        logger.warning("Unparseable start_datetime %r; cannot derive local date", start_datetime)
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    if tz_name:
-        try:
-            dt = dt.astimezone(ZoneInfo(tz_name))
-        except (ZoneInfoNotFoundError, ValueError):
-            logger.warning(
-                "Unknown timezone %r; using UTC date for the local-date filter",
-                tz_name,
-            )
-    return dt.date().isoformat()
 
 
 def _game_local_date(game: ScheduledGame) -> str | None:

@@ -1,4 +1,4 @@
-"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-appearance-order, reload-annotated-pitches, fix-self-games)."""
+"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-appearance-order, backfill-game-dates, reload-annotated-pitches, fix-self-games)."""
 
 from __future__ import annotations
 
@@ -597,6 +597,71 @@ def backfill_appearance_order(
         "rebuilds season aggregates from the backfilled appearance_order "
         "(verify with 'bb report verify-aggregates')."
     )
+
+    raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# bb data backfill-game-dates
+# ---------------------------------------------------------------------------
+
+
+@app.command("backfill-game-dates")
+def backfill_game_dates(
+    db_path: Optional[Path] = typer.Option(
+        None,
+        "--db",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Apply the corrected game_date values (default: dry-run, change nothing).",
+    ),
+) -> None:
+    """Re-derive venue-local game_date for existing games rows (E-253-11).
+
+    Corrects the historical UTC game_date mis-derivation (pre-E-253-04, evening
+    games filed under the next UTC day). Re-derives from the recoverable UTC
+    instant (games.start_time) using the game's timezone when present, else the
+    operating-tz default (OPERATING_TIMEZONE, America/Chicago). Only rows whose
+    re-derived date DIFFERS are updated -- idempotent and re-runnable. Rows with
+    start_time NULL have no recoverable instant and are left untouched + counted.
+
+    This corrects stored dates ONLY -- it does NOT re-run dedup. A corrected date
+    that shifts 7-day-window membership is the intended correction.
+
+    Examples:
+        bb data backfill-game-dates            # dry-run
+        bb data backfill-game-dates --execute  # apply
+    """
+    from src.db.backfill_game_dates import backfill_game_dates as _backfill
+
+    db_path = resolve_db_path(db_path)
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        try:
+            summary = _backfill(conn, dry_run=not execute)
+        except Exception as exc:
+            typer.echo(f"Error backfilling game_date: {exc}", err=True)
+            raise SystemExit(1) from exc
+
+    mode = "EXECUTE" if execute else "DRY-RUN"
+    typer.echo(f"\ngame_date Backfill Summary ({mode}):")
+    typer.echo(f"  Games processed: {summary['games_processed']}")
+    verb = "Rows updated" if execute else "Rows that WOULD be updated"
+    typer.echo(f"  {verb}: {summary['rows_updated']}")
+    typer.echo(f"  Rows already correct: {summary['rows_unchanged']}")
+    typer.echo(
+        f"  Skipped (start_time NULL, un-correctable): "
+        f"{summary['skipped_no_start_time']}"
+    )
+    typer.echo(
+        f"  Skipped (start_time unparseable): {summary['skipped_unparseable']}"
+    )
+    if not execute and summary["rows_updated"]:
+        typer.echo("\nDry-run only. Re-run with --execute to apply the corrections.")
 
     raise SystemExit(0)
 

@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, applying a migration is atomic: a mid-file failure in a multi-statement migration leaves ZERO of that file's statements applied and no `_migrations` row, so the database never wedges into a permanent duplicate-column crash-loop. The false "in a transaction" docstring is corrected to match the real behavior.

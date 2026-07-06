@@ -115,6 +115,55 @@ The command exits 0 only when zero self-games remain after the run. A non-zero e
 
 **When to run**: Once, if you suspect historical data includes self-game rows. Dry-run first to assess scope, then `--execute` to apply.
 
+### Backfilling Game Dates (`bb data backfill-game-dates`)
+
+*Last updated: 2026-07-06 | Source: E-253 (E-253-11)*
+
+`bb data backfill-game-dates` re-derives the venue-local `game_date` for existing `games` rows from the recoverable UTC instant (`start_time`), correcting a historical mis-derivation where an evening game filed under the *next* day's UTC date -- skewing rest-days math, the 7-day rolling window, and cross-perspective dedup at UTC midnight. E-253-04 fixed the derivation going forward for newly-loaded games; this command corrects existing rows.
+
+**Three-tier re-derivation model**:
+
+1. `start_time` present + `timezone` present -> clean re-derivation via the venue-local converter (`derive_local_date`).
+2. `start_time` present, `timezone` NULL -> re-derive using the operating-timezone default (`OPERATING_TIMEZONE` env, default `America/Chicago`).
+3. `start_time` NULL -> no recoverable instant. The row is left **untouched** and counted/reported as skipped -- the command never fabricates a date.
+
+**Default mode is dry-run** (previews changes, writes nothing):
+
+```bash
+bb data backfill-game-dates
+```
+
+**Execute mode** applies corrections:
+
+```bash
+bb data backfill-game-dates --execute
+```
+
+**Output:**
+
+```
+game_date Backfill Summary (DRY-RUN):
+  Games processed: 214
+  Rows that WOULD be updated: 31
+  Rows already correct: 178
+  Skipped (start_time NULL, un-correctable): 5
+  Skipped (start_time unparseable): 0
+
+Dry-run only. Re-run with --execute to apply the corrections.
+```
+
+**Idempotent**: Safe to run multiple times -- only rows whose re-derived date differs from the stored value are updated, so a second run is a no-op. Mirrors the `bb data backfill-appearance-order` operator-maintenance precedent.
+
+**Does not re-run dedup**: This command corrects stored `game_date` values only. It does not re-run player or game dedup. A corrected date that shifts a game's 7-day rolling-window membership is the intended correction, not a regression.
+
+**Custom database path**:
+
+```bash
+bb data backfill-game-dates --db /path/to/app.db
+```
+
+**When to run**: Once, on the live database, as a one-time post-E-253-04 correction of historical rows. Run the dry-run first to preview the scope of changes, then `--execute` to apply.
+
 ### Deduplicating Player Entries (`bb data dedup-players`)
 
 *Last updated: 2026-06-30 | Source: E-249 (connected-component dedup + fork refusal)*
@@ -905,4 +954,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-07-06 | Source: E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-07-06 | Source: E-253 (E-253-11: bb data backfill-game-dates), E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

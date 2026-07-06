@@ -15,8 +15,15 @@ Key data decisions
 ------------------
 - **Team resolution**: ``public_id`` → ``teams.id`` lookup (not ``gc_uuid``),
   because scouting paths use ``public_id`` as the directory name.
-- **Idempotency**: ``INSERT OR IGNORE`` keyed on ``event_gc_id``.
-  Re-running the same files produces zero new inserts (AC-3).
+- **Idempotency**: a genuine re-run is short-circuited by the whole-game
+  perspective gate in ``_load_game_data`` (returns a benign ``skipped=1``
+  BEFORE any event is inserted), so re-running the same files produces zero
+  new inserts. The row-level ``INSERT OR IGNORE`` is keyed on the migration-009
+  UNIQUE(``event_gc_id``, ``perspective_team_id``, ``chart_type``) -- offense
+  and defense for one event no longer collide (E-253-02). A collision reaching
+  ``_insert_event`` (a distinct event repeated within one load) is therefore a
+  real data anomaly, counted as an error and WARNING-logged -- NOT as an
+  idempotent skip.
 - **chart_type**: ``offense`` section → ``'offensive'``;
   ``defense`` section → ``'defensive'``.
 - **Primary defender only**: only the first entry in ``defenders[]`` is stored
@@ -552,5 +559,25 @@ class ScoutingSprayChartLoader:
         )
         if cursor.rowcount == 1:
             return LoadResult(loaded=1)
-        # INSERT OR IGNORE: row already existed -- idempotent skip.
-        return LoadResult(skipped=1)
+        # rowcount == 0: the INSERT OR IGNORE was suppressed by a UNIQUE
+        # collision on (event_gc_id, perspective_team_id, chart_type) -- the
+        # key widened in migration 009 (E-253-02) so offense and defense for
+        # one event no longer collide.  This is NOT an idempotent skip: the
+        # whole-game perspective gate in _load_game_data already short-circuits
+        # a genuine re-run of an already-loaded game (returning a benign
+        # skipped=1) BEFORE any event reaches here, so a collision at this point
+        # means a DISTINCT event lost a key race against a sibling within THIS
+        # load (e.g., the same event id repeated in one section).  Surface it as
+        # an error rather than silently miscounting it as an idempotent skip
+        # (E-253-02 AC-3).
+        logger.warning(
+            "Spray event %s (chart_type=%s) collided on "
+            "UNIQUE(event_gc_id, perspective_team_id, chart_type) for game %s "
+            "perspective %d; a distinct event was dropped -- not an idempotent "
+            "skip.",
+            event_gc_id,
+            chart_type,
+            game_id,
+            perspective_team_id,
+        )
+        return LoadResult(errors=1)

@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a DB-level partial UNIQUE index will backstop the cross-perspective game-dedup logic against the SELECT-then-INSERT race window, WITHOUT rejecting legitimate doubleheaders. The backstop applies only to games carrying the stable `game_stream_id`.

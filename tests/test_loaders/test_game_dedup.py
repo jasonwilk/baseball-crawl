@@ -37,6 +37,11 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 _MIGRATION_008 = (
     _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
 )
+# E-253-05: migration 010 adds the partial UNIQUE game-dedup backstop on
+# games(game_stream_id) WHERE game_stream_id IS NOT NULL.
+_MIGRATION_010 = (
+    _PROJECT_ROOT / "migrations" / "010_game_dedup_backstop.sql"
+)
 
 
 @pytest.fixture()
@@ -51,6 +56,19 @@ def db() -> sqlite3.Connection:
     conn.commit()
     yield conn
     conn.close()
+
+
+def _apply_migration_010(conn: sqlite3.Connection) -> None:
+    """Layer migration 010's partial UNIQUE backstop onto the base ``db`` fixture.
+
+    The base fixture stops at 001+008; the AC-4 no-regression test needs the
+    games(game_stream_id) backstop index active to prove the SELECT-then-INSERT
+    collapse still works WITH the index present (the collapse redirects to the
+    canonical game_id, so it never trips the index).
+    """
+    conn.executescript(_MIGRATION_010.read_text(encoding="utf-8"))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +255,34 @@ def test_dedup_reuses_existing_game_id(
 
     row = db.execute("SELECT game_id FROM games").fetchone()
     assert row[0] == _EVENT_ID_1
+
+
+def test_dedup_collapse_still_works_with_backstop_index(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """E-253-05 AC-4: with migration 010's partial UNIQUE backstop active, the
+    existing SELECT-then-INSERT cross-perspective collapse still yields ONE row
+    and does NOT raise an IntegrityError.
+
+    The collapse redirects the second load to the canonical game_id, so the
+    upsert's ``ON CONFLICT(game_id) DO UPDATE`` updates the existing row (its
+    game_stream_id becomes the incoming stream id) rather than inserting a
+    second row -- the backstop index is never tripped by the primary path.
+    """
+    _apply_migration_010(db)
+    loader = _make_loader(db)
+    _load_first_game(db, loader, tmp_path)  # game_stream_id = _STREAM_ID_1
+
+    # Second perspective of the same real game: different event_id + stream_id,
+    # same date/teams/score -> dedup collapses to the canonical row.
+    summary2 = _make_summary(event_id=_EVENT_ID_2, game_stream_id=_STREAM_ID_2)
+    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
+    loader.load_file(path2, summary2)
+
+    assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
+    row = db.execute("SELECT game_id, game_stream_id FROM games").fetchone()
+    assert row[0] == _EVENT_ID_1  # canonical game_id preserved
+    assert row[1] == _STREAM_ID_2  # upsert refreshed the stream id, no new row
 
 
 def test_dedup_stats_use_canonical_game_id(

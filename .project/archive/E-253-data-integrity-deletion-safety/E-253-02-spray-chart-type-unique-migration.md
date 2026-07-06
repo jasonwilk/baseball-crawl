@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, defensive spray-chart rows will persist instead of being silently discarded, and the loader will stop miscounting real UNIQUE collisions as idempotent skips. The `spray_charts` uniqueness widens to include `chart_type` so offense and defense for the same event no longer collide. Defensive coverage self-heals on the next report generation.

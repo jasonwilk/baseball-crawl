@@ -112,30 +112,53 @@ def get_applied_migrations(conn: sqlite3.Connection) -> set[str]:
 
 
 def apply_migration(conn: sqlite3.Connection, migration_file: Path) -> None:
-    """Apply a single migration file and record it in ``_migrations``.
+    """Apply a single migration file and record it in ``_migrations``, atomically.
 
-    Executes the file's SQL in a transaction.  On success, inserts a row into
-    ``_migrations``.  On failure, rolls back and re-raises.
+    The file's entire SQL body AND the ``_migrations`` tracking INSERT are wrapped
+    in one explicit ``BEGIN``/``COMMIT`` and run through a single
+    ``executescript()`` call, so they commit together or roll back together.  A
+    mid-file failure in a multi-statement migration (e.g., a failing 2nd ``ALTER``)
+    therefore applies NONE of that file's statements and records NO ``_migrations``
+    row -- the database can never wedge into a permanent, already-applied
+    duplicate-column crash-loop.  On any failure the open transaction is rolled
+    back and the original error is re-raised.
+
+    Statement ordering inside the script is load-bearing:
+
+    * ``executescript()`` implicitly COMMITs any pending transaction on entry, so
+      the leading ``PRAGMA foreign_keys=ON`` runs in autocommit mode.  FK
+      enforcement is a no-op when set inside a transaction, so the pragma MUST
+      precede ``BEGIN`` for the migration body to run with FKs enforced.
+    * ``BEGIN`` then opens the single transaction that wraps the whole migration;
+      the trailing ``COMMIT`` is reached only if every statement succeeds.
 
     Args:
         conn: Open SQLite connection.
         migration_file: Path to the ``.sql`` file to apply.
 
     Raises:
-        sqlite3.Error: If the SQL execution fails.
+        sqlite3.Error: If the SQL execution fails (after rolling back).
     """
     sql = migration_file.read_text(encoding="utf-8")
     logger.info("Applying migration: %s", migration_file.name)
+    # executescript() cannot take bound parameters, so the filename is
+    # interpolated into the tracking INSERT.  Filenames come from a NNN_*.sql
+    # glob, but double any single quote defensively so the INSERT is safe
+    # regardless of what lands in the migrations directory.
+    escaped_name = migration_file.name.replace("'", "''")
+    script = (
+        "PRAGMA foreign_keys=ON;\n"
+        "BEGIN;\n"
+        f"{sql}\n"
+        f"INSERT INTO _migrations (filename) VALUES ('{escaped_name}');\n"
+        "COMMIT;\n"
+    )
     try:
-        # executescript() resets connection state, so FK pragma must be inline.
-        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
-        conn.execute(
-            "INSERT INTO _migrations (filename) VALUES (?);",
-            (migration_file.name,),
-        )
-        conn.commit()
+        conn.executescript(script)
         logger.info("Migration applied: %s", migration_file.name)
     except sqlite3.Error:
+        # A mid-script failure leaves the explicit transaction open; roll it
+        # back so none of the file's statements (nor the tracking row) persist.
         conn.rollback()
         logger.error("Migration failed: %s", migration_file.name)
         raise

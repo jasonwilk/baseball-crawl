@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the documented GS (games-started) aggregation semantics on mixed `appearance_order` data will be pinned by a characterization test, and the operator remediation path for any legacy NULL-`appearance_order` rows on the live DB will be documented and recorded as a follow-up. This discharges the audit's Watch-List "check once during CE-3" mandate.

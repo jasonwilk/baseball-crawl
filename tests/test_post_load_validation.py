@@ -126,7 +126,7 @@ def _make_minimal_boxscore(own_key: str = _PUBLIC_ID) -> dict:
                     "stats": [
                         {
                             "player_id": _PLAYER_1,
-                            "stats": {"AB": 3, "H": 1, "RBI": 1, "BB": 0, "SO": 1},
+                            "stats": {"AB": 3, "R": 1, "H": 1, "RBI": 1, "BB": 0, "SO": 1},
                         }
                     ],
                     "extra": [],

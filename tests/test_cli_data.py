@@ -160,6 +160,7 @@ def test_data_help_lists_surviving_commands() -> None:
     assert "reconcile" in result.output
     assert "dedup-players" in result.output
     assert "backfill-appearance-order" in result.output
+    assert "backfill-game-dates" in result.output
     assert "reload-annotated-pitches" in result.output
     assert "fix-self-games" in result.output
     # The removed member/opponent-flow commands must not reappear. Match on a

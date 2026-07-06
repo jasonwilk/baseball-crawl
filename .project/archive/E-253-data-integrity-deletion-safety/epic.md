@@ -1,7 +1,7 @@
 # E-253: Data-Integrity & Deletion Safety
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- READY set 2026-07-06 after expert consultation (SE/DE/coach), internal review iter-1, and Codex spec-review iter-1 all incorporated. Awaiting separate user dispatch authorization. -->
@@ -47,17 +47,17 @@ The three expert design reads are captured in Technical Notes (TN-1 through TN-7
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-253-01 | F-H1: shared-game deletion guard (discharges E-250-02 TN-5) | TODO | None | software-engineer |
-| E-253-02 | Spray `chart_type` UNIQUE migration (009) + loader accounting | TODO | E-253-03 | data-engineer |
-| E-253-03 | Migration-runner atomicity + docstring correction | TODO | None | data-engineer |
-| E-253-04 | `game_date` operating-timezone derivation (+ helper relocation) | TODO | E-252 (E-252-05 seam) | software-engineer |
-| E-253-05 | Cross-perspective game-dedup partial UNIQUE backstop (010) | TODO | E-253-02, E-253-03 | data-engineer |
-| E-253-06 | Ingestion integrity guards: stat-key drift canary + 0-0 coercion | TODO | E-253-04 | software-engineer |
-| E-253-07 | Tier-2 suppress gate: skip enrichment + template honesty | TODO | E-253-01 | software-engineer |
-| E-253-08 | Player-dedup detection & recompute-scope hardening | TODO | None | software-engineer |
-| E-253-09 | Reconcile atomicity + perspective partition | TODO | None | software-engineer |
-| E-253-10 | GS mixed-`appearance_order` semantics: pin + operator check | TODO | None | software-engineer |
-| E-253-11 | `game_date` backfill subcommand (3-tier re-derivation) | TODO | E-253-04 | software-engineer |
+| E-253-01 | F-H1: shared-game deletion guard (discharges E-250-02 TN-5) | DONE | None | software-engineer |
+| E-253-02 | Spray `chart_type` UNIQUE migration (009) + loader accounting | DONE | E-253-03 | data-engineer |
+| E-253-03 | Migration-runner atomicity + docstring correction | DONE | None | data-engineer |
+| E-253-04 | `game_date` operating-timezone derivation (+ helper relocation) | DONE | E-252 (E-252-05 seam) | software-engineer |
+| E-253-05 | Cross-perspective game-dedup partial UNIQUE backstop (010) | DONE | E-253-02, E-253-03 | data-engineer |
+| E-253-06 | Ingestion integrity guards: stat-key drift canary + 0-0 coercion | DONE | E-253-04 | software-engineer |
+| E-253-07 | Tier-2 suppress gate: skip enrichment + template honesty | DONE | E-253-01 | software-engineer |
+| E-253-08 | Player-dedup detection & recompute-scope hardening | DONE | None | software-engineer |
+| E-253-09 | Reconcile atomicity + perspective partition | DONE | None | software-engineer |
+| E-253-10 | GS mixed-`appearance_order` semantics: pin + operator check | DONE | None | software-engineer |
+| E-253-11 | `game_date` backfill subcommand (3-tier re-derivation) | DONE | E-253-04 | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -120,13 +120,31 @@ Two SE-owned findings must be designed to survive into the future E-245 scoreboa
 - 2026-07-06: Internal review iter-1 triaged (CR spec audit + SE/DE/coach holistic). ACCEPTED: S1 (ZoneInfo→tz-name interface bridge → TN-5 + E-253-04 AC-3 + E-253-11 AC-1; E-252 implementer flagged separately), O1 (E-253-11 transitive E-252 blocker note), DE row-preservation (E-253-02 AC-6), SE 3 heads-ups (E-253-09/06 Technical Approach + TN-6 cross-story gating note). DISMISSED: O2 split (E-253-08 intentionally bundled — single-file pass; noted), O3 (migration 014/015 citations follow the archived-migration convention — no defect).
 - 2026-07-06: Codex spec-review iter-1 triaged (2 findings, both ACCEPTED). P1 (E-253-10 sizing): moved the operator-doc/live-DB-follow-up items out of story ACs into Handoff Context + epic Success Criteria; E-253-10 is now a clean SE slice (AC-1 pin test + AC-2 stop-and-flag guard). P2 (E-253-06 canary contract): SE pinned the concrete contract (verified against 46 real boxscores) — batting core set `AB,R,H,RBI,BB,SO`, pitching `H,R,ER,BB,SO`+`IP`, sourced from `_BATTING_MAIN`/`_PITCHING_MAIN`; extras excluded; batting+pitching groups only (fielding/catcher out of scope). Written into E-253-06 AC-1/AC-2 + Technical Approach.
 - 2026-07-06: **Status → READY** (user-approved; single Codex pass, no iter-2). 11 stories, all ACs testable, no open questions/placeholders. Awaiting separate user dispatch authorization.
+- 2026-07-06: **Dispatched + all 11 stories DONE** (serial, per-story CR + PM AC verification in the epic worktree). Shipped: **E-253-01** F-H1 shared-game deletion guard (perspective-scoped anchor pass + teams-row survivor — discharges the E-250-02 TN-5 deferred guard, lifts the operator no-deletions hold); **E-253-03** migration-runner atomicity (single `executescript` `PRAGMA;BEGIN;{body};INSERT _migrations;COMMIT`, rollback-on-failure) + docstring fix; **E-253-02** spray `chart_type` UNIQUE **migration 009** (canonical table rebuild, row-preserving) + loader collision accounting; **E-253-04** `game_date` operating-tz derivation + `derive_local_date` relocation to `src/util/timezone.py` (fixes the game_loader→reports layering inversion); **E-253-05** cross-perspective game-dedup partial-UNIQUE backstop **migration 010** (gated `game_stream_id IS NOT NULL`, doubleheader-safe); **E-253-06** ingestion integrity guards (group-grain stat-key drift canary sourced from `_BATTING_MAIN`/`_PITCHING_MAIN`+IP; 0-0 score coercion → `_opt_int` NULL-preserving); **E-253-07** Tier-2 suppress gate (call-site skip + defensive tripwire + template guard, both suppress reasons); **E-253-08** player-dedup hardening (Unicode `_fold_name` shared into detection + `_terminal_names`, LIKE-metachar escape, boxscore_only recompute-scope guard); **E-253-09** reconcile `--execute` single per-game commit atomicity + `get_summary_from_db` perspective-aware partition; **E-253-10** GS mixed-`appearance_order` characterization pin (test-only; AC-2 STOP not triggered — PM affirmed the conservative-undercount semantics as acceptable-as-documented); **E-253-11** `bb data backfill-game-dates` 3-tier re-derivation subcommand (idempotent, dry-run default). Migrations shipped: **009 + 010** (next available = **011**).
+- 2026-07-06: **Phase 4a integration review** (code-reviewer, whole-epic diff) — 0 findings.
+- 2026-07-06: **Phase 4b Codex code review** (headless, exit 0) — 2 VALID Priority-1 findings, both on the scouting/public loader path (`scouting_loader.py`) that E-253-04/06 fixed only on the authenticated `game_loader.py` path: (1) regression from E-253-04 — the fabricated `1900-01-01T00:00:00Z` sentinel was localized to `game_date` 1899-12-31; (2) E-253-06 AC-3 gap — `int(score or 0)` coerced missing public scores to 0-0. **Both accepted, 0 dismissed.** SE Round-1 remediation (in `scouting_loader.py` + 3 teeth-bearing tests in `test_scouting_loader.py`): absent-instant → empty `last_scoring_update` preserves the `1900-01-01` sentinel; scores route through the SHARED `_opt_int` imported from `game_loader` (missing→NULL, genuine 0→0). PM-confirmed both fixes address the findings and mirror `_parse_summary_record` (Phase 4b protocol — no CR re-review). Cross-path completeness gap closed.
+- 2026-07-06: **Documentation assessment** (`.claude/rules/documentation.md`) — trigger 1 (new feature ships) + trigger 5 (epic changes how the operator interacts) FIRE: the new `bb data backfill-game-dates` CLI subcommand needs an operator-runbook section. **Affected file: `docs/admin/operations.md`** (the operator runbook that already documents every other `bb data` maintenance command — `backfill-appearance-order`, `reload-annotated-pitches`, `fix-self-games`, `dedup-players`, `reconcile`). docs-writer dispatched to add a parallel `### Backfilling Game Dates (bb data backfill-game-dates)` section (3-tier re-derivation, dry-run default + `--execute`/`--db`, idempotent/re-runnable, corrects the historical UTC mis-derivation; note the post-E-253-04 one-time operator correction and the live-DB run follow-up). No coaching-doc (`docs/coaching/`) or API-doc (`docs/api/`) impact (internal data-integrity + operator-maintenance scope).
+- 2026-07-06: **Context-layer assessment** (`.claude/rules/context-layer-assessment.md`, six triggers, per-trigger verdicts):
+  1. New convention/pattern/constraint — **YES**: the operating-tz `ZoneInfo → .key` IANA-name bridge (never pass the object to `derive_local_date`); the migration-runner single-`executescript` atomic-body contract binding all future migrations; the partial-UNIQUE-gated-on-stable-id dedup backstop pattern; the cross-loader-path completeness discipline (a fix on the authenticated path must be mirrored on the public path).
+  2. Architectural decision with ongoing implications — **YES**: `derive_local_date` relocated to `src/util/timezone.py` as the neutral shared seam both loaders + morning_run import → candidate CLAUDE.md canonical-helper note (fixes the loaders→reports layering inversion).
+  3. Footgun/failure mode/boundary discovered — **YES**: authenticated-vs-public loader cross-path completeness boundary (the Phase 4b findings); reaffirmed shared-connection partial-commit footgun (reconcile), ZoneInfo double-wrap hazard, and table-rebuild silent-drop footgun (spray 009).
+  4. Change to agent behavior/routing/coordination — **NO**: E-253 did not modify dispatch, routing, agent definitions, communication, or the closure sequence.
+  5. Domain knowledge for future agent decisions — **YES**: the `.claude/rules/data-model.md` "~16% defensive coverage" claim is now false at the DB layer (defensive spray rows persist post-009) and must be corrected; the GS mixed-`appearance_order` conservative-undercount semantics and the canary core-key contract are data-model knowledge worth carrying forward.
+  6. New CLI command/workflow/operational procedure — **YES**: new `bb data backfill-game-dates` subcommand → CLAUDE.md Commands section + `bb data` help + `/workflow-help` cheat sheet.
+  **Verdict: 5 of 6 fire → claude-architect dispatched** to codify (headline items: data-model.md ~16% correction, `derive_local_date` canonical-helper note, `bb data backfill-game-dates` in CLAUDE.md Commands + `/workflow-help`). Epic MUST NOT archive until CA codification + the docs-writer update land.
+- 2026-07-06: **Operator follow-ups owed** (need live-DB access, unavailable in the worktree — record in completion summary): (a) **E-253-05** — if the live DB already holds two rows sharing one non-null `game_stream_id`, migration 010's `CREATE UNIQUE INDEX` fails-and-rolls-back cleanly on apply, surfacing a real duplicate for cleanup; (b) **E-253-10** — check the live DB for legacy NULL `appearance_order` rows and, if found, run `bb data backfill-appearance-order` → `canonical_recompute` → `bb report verify-aggregates` (the Watch-List "check once during CE-3" discharge); (c) **E-253-11** — run `bb data backfill-game-dates --execute` on the live DB to correct historical UTC-mis-derived `game_date` values.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iter-1 — CR spec audit | 4 (1 SHOULD-FIX S1 + 3 minor O1/O2/O3) | 2 (S1, O1) | 2 (O2 split, O3 no-defect) |
 | Internal iter-1 — Holistic team (SE/DE/coach) | 4 (DE row-preservation + 3 SE heads-ups) | 4 (1 new AC + 3 as implementer guidance, not new ACs) | 0 |
-| Codex iter-1 | 2 (P1 sizing, P2 canary contract) | 2 | 0 |
-| **Total** | **10** | **8** | **2** |
+| Codex iter-1 (spec review) | 2 (P1 sizing, P2 canary contract) | 2 | 0 |
+| **Spec-review subtotal** | **10** | **8** | **2** |
+| Dispatch — per-story CR (11 stories) | 1 (E-253-04 SHOULD-FIX docstring, round 2) | 1 (fixed) | 0 |
+| Phase 4a — CR integration review | 0 | 0 | 0 |
+| Phase 4b — Codex code review | 2 (F1 sentinel-localization regression; F2 public-path 0-0 coercion gap) | 2 (both remediated, Round 1) | 0 |
+| **Dispatch subtotal** | **3** | **3** | **0** |
+| **Grand total** | **13** | **11** | **2** |
 
 Notes: the 3 SE holistic heads-ups were accepted as implementer guidance folded into Technical Approach / TNs (E-253-09 rollback footgun, TN-6 cross-story gating, E-253-06 canary-key source), not as new ACs. coach's holistic pass raised no findings (E-253-07 faithful). The two dismissals: O2 (E-253-08 split — kept as one cohesive single-file dedup pass, split point noted) and O3 (migration 014/015 citations follow the archived-migration convention — no defect).

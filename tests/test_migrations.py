@@ -370,6 +370,178 @@ class TestFKEnforcementDuringMigration:
             conn.close()
 
 
+class TestMigrationRunnerAtomicity:
+    """E-253-03: applying a migration is atomic (all-or-nothing).
+
+    A multi-statement migration whose Nth statement (N > 1) fails must leave
+    ZERO of that file's statements applied and no ``_migrations`` row, so the
+    database never wedges into a permanent duplicate-column crash-loop. Before
+    the fix, ``executescript()`` ran the body in autocommit mode: statement 1
+    committed, the failing statement 2 aborted, no ``_migrations`` row was
+    written, and every re-run re-attempted the already-applied statement 1
+    forever.
+    """
+
+    @staticmethod
+    def _players_columns(db_path: Path) -> set[str]:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            return {row[1] for row in conn.execute("PRAGMA table_info(players);")}
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _migration_recorded(db_path: Path, filename: str) -> bool:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM _migrations WHERE filename = ?;", (filename,)
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def test_midfile_failure_applies_nothing_and_records_no_row(
+        self, fresh_db: Path
+    ) -> None:
+        """AC-1: a failing 2nd statement leaves the schema unchanged, no row.
+
+        Statement 1 adds a column (would succeed); statement 2 references a
+        non-existent table (fails). After the atomic runner rolls back, the
+        column from statement 1 must be ABSENT and no ``_migrations`` row must
+        exist for the file. Under the pre-fix autocommit runner the column
+        would survive -- so this is a genuine failing-input test.
+        """
+        run_migrations(db_path=fresh_db)
+        assert "de_atomic_probe" not in self._players_columns(fresh_db)
+
+        bad_migration = fresh_db.parent / "900_atomic_midfile_fail.sql"
+        bad_migration.write_text(
+            "ALTER TABLE players ADD COLUMN de_atomic_probe TEXT;\n"
+            "ALTER TABLE de_no_such_table ADD COLUMN x TEXT;\n",
+            encoding="utf-8",
+        )
+
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                apply_migration(conn, bad_migration)
+        finally:
+            conn.close()
+
+        # Statement 1 was rolled back with statement 2's failure.
+        assert "de_atomic_probe" not in self._players_columns(fresh_db), (
+            "statement 1 leaked past the rollback -- migration is not atomic"
+        )
+        # No tracking row: the migration is not falsely recorded as applied.
+        assert not self._migration_recorded(fresh_db, bad_migration.name), (
+            "_migrations row written despite mid-file failure"
+        )
+
+    def test_failed_migration_is_recoverable_no_crash_loop(
+        self, fresh_db: Path
+    ) -> None:
+        """AC-2: after the cause is fixed, the migration applies cleanly.
+
+        The classic wedge: attempt 1 adds a column then fails on a later
+        statement. With the atomic runner the column is rolled back, so the
+        corrected file (which adds the column once) applies without a
+        "duplicate column" already-applied crash-loop.
+        """
+        run_migrations(db_path=fresh_db)
+        migration_path = fresh_db.parent / "901_atomic_recoverable.sql"
+
+        # Attempt 1: add column, then fail on a bad statement.
+        migration_path.write_text(
+            "ALTER TABLE players ADD COLUMN de_recover_probe TEXT;\n"
+            "ALTER TABLE de_no_such_table ADD COLUMN x TEXT;\n",
+            encoding="utf-8",
+        )
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                apply_migration(conn, migration_path)
+        finally:
+            conn.close()
+        assert "de_recover_probe" not in self._players_columns(fresh_db)
+
+        # Fix the cause: the corrected file adds the column exactly once.
+        migration_path.write_text(
+            "ALTER TABLE players ADD COLUMN de_recover_probe TEXT;\n",
+            encoding="utf-8",
+        )
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            # Must NOT raise "duplicate column name" -- the wedge is gone.
+            apply_migration(conn, migration_path)
+        finally:
+            conn.close()
+
+        assert "de_recover_probe" in self._players_columns(fresh_db), (
+            "corrected migration did not apply -- recovery failed"
+        )
+        assert self._migration_recorded(fresh_db, migration_path.name), (
+            "recovered migration not recorded in _migrations"
+        )
+
+    def test_passing_multistatement_migration_records_row_once(
+        self, fresh_db: Path
+    ) -> None:
+        """AC-3: a normal (passing) multi-statement migration commits fully and
+        records exactly one ``_migrations`` row."""
+        run_migrations(db_path=fresh_db)
+        migration_path = fresh_db.parent / "902_atomic_passing.sql"
+        migration_path.write_text(
+            "ALTER TABLE players ADD COLUMN de_pass_a TEXT;\n"
+            "ALTER TABLE players ADD COLUMN de_pass_b TEXT;\n",
+            encoding="utf-8",
+        )
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            apply_migration(conn, migration_path)
+        finally:
+            conn.close()
+
+        cols = self._players_columns(fresh_db)
+        assert {"de_pass_a", "de_pass_b"} <= cols, (
+            "both statements of a passing migration must apply"
+        )
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM _migrations WHERE filename = ?;",
+                (migration_path.name,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert count == 1, f"expected exactly one _migrations row, got {count}"
+
+    def test_fk_enforcement_active_for_migration_body(self, fresh_db: Path) -> None:
+        """AC-4: FK enforcement is active for the migration body.
+
+        The PRAGMA is set before BEGIN, so an FK-violating INSERT in the body
+        is rejected. teams.program_id references programs(program_id); a
+        non-existent program must fail with IntegrityError (proving FKs are on)
+        and, being atomic, leave no tracking row.
+        """
+        run_migrations(db_path=fresh_db)
+        fk_migration = fresh_db.parent / "903_atomic_fk.sql"
+        fk_migration.write_text(
+            "INSERT INTO teams (program_id, name, membership_type, source, is_active) "
+            "VALUES ('de-nonexistent-program', 'Bad Team', 'tracked', 'manual', 1);\n",
+            encoding="utf-8",
+        )
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                apply_migration(conn, fk_migration)
+        finally:
+            conn.close()
+        assert not self._migration_recorded(fresh_db, fk_migration.name), (
+            "FK-violating migration must not be recorded as applied"
+        )
+
+
 class TestCrawlJobsMigration:
     """Verify migration 003_add_crawl_jobs.sql behavior."""
 
@@ -896,11 +1068,38 @@ class TestE220UpgradeGuard:
                 player_id TEXT NOT NULL,
                 team_id INTEGER NOT NULL
             );
+            -- spray_charts carries its FULL column shape (incl.
+            -- perspective_team_id) so pending migration 009's table REBUILD
+            -- (INSERT INTO spray_charts_new SELECT <all columns> FROM
+            -- spray_charts) applies cleanly under FK enforcement before the
+            -- E-220 guard runs. The guard still fires on the OTHER three stat
+            -- tables here (player_game_batting/pitching/plays), which remain
+            -- drifted (no perspective_team_id). games/teams stubs (below) exist
+            -- because 009's spray_charts_new FKs -> games/teams/players must
+            -- resolve for the copy INSERT to prepare under FK ON.
+            -- game_stream_id column present so pending migration 010's partial
+            -- UNIQUE index (games(game_stream_id) WHERE game_stream_id IS NOT
+            -- NULL) applies cleanly before the E-220 guard runs.
+            CREATE TABLE games (game_id TEXT PRIMARY KEY, game_stream_id TEXT);
+            CREATE TABLE teams (id INTEGER PRIMARY KEY);
             CREATE TABLE spray_charts (
-                id INTEGER PRIMARY KEY,
-                game_id TEXT,
-                player_id TEXT,
-                team_id INTEGER
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id             TEXT,
+                player_id           TEXT,
+                team_id             INTEGER,
+                perspective_team_id INTEGER,
+                pitcher_id          TEXT,
+                chart_type          TEXT,
+                play_type           TEXT,
+                play_result         TEXT,
+                x                   REAL,
+                y                   REAL,
+                fielder_position    TEXT,
+                error               INTEGER,
+                event_gc_id         TEXT,
+                created_at_ms       INTEGER,
+                season_id           TEXT,
+                UNIQUE(event_gc_id, perspective_team_id)
             );
             CREATE TABLE plays (
                 id INTEGER PRIMARY KEY,
@@ -950,7 +1149,34 @@ class TestE220UpgradeGuard:
             );
             CREATE TABLE player_game_batting (id INTEGER PRIMARY KEY, team_id INTEGER);
             CREATE TABLE player_game_pitching (id INTEGER PRIMARY KEY, team_id INTEGER);
-            CREATE TABLE spray_charts (id INTEGER PRIMARY KEY, team_id INTEGER);
+            -- Full spray_charts shape + games/teams stubs so pending migration
+            -- 009's table rebuild applies under FK ON before the guard runs
+            -- (see sibling test for rationale). The guard still fires on the
+            -- other three drifted stat tables.
+            -- game_stream_id column present so pending migration 010's partial
+            -- UNIQUE index (games(game_stream_id) WHERE game_stream_id IS NOT
+            -- NULL) applies cleanly before the E-220 guard runs.
+            CREATE TABLE games (game_id TEXT PRIMARY KEY, game_stream_id TEXT);
+            CREATE TABLE teams (id INTEGER PRIMARY KEY);
+            CREATE TABLE spray_charts (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id             TEXT,
+                player_id           TEXT,
+                team_id             INTEGER,
+                perspective_team_id INTEGER,
+                pitcher_id          TEXT,
+                chart_type          TEXT,
+                play_type           TEXT,
+                play_result         TEXT,
+                x                   REAL,
+                y                   REAL,
+                fielder_position    TEXT,
+                error               INTEGER,
+                event_gc_id         TEXT,
+                created_at_ms       INTEGER,
+                season_id           TEXT,
+                UNIQUE(event_gc_id, perspective_team_id)
+            );
             CREATE TABLE plays (id INTEGER PRIMARY KEY, team_id INTEGER);
             -- play_events must exist so pending additive migration 007 applies
             -- before the E-220 guard runs (see sibling test for rationale).
@@ -1318,4 +1544,344 @@ class TestScheduledReportRunsMigration:
         ).fetchone()
         conn.close()
         assert row is not None
+
+
+class TestSprayChartTypeUniqueMigration:
+    """Verify migration 009_spray_chart_type_unique.sql (E-253-02).
+
+    Migration 009 widens spray_charts uniqueness from
+    ``UNIQUE(event_gc_id, perspective_team_id)`` to
+    ``UNIQUE(event_gc_id, perspective_team_id, chart_type)`` via a table
+    rebuild, so offense and defense for one event no longer collide. These
+    tests assert the widened constraint, index/FK preservation, and -- on a
+    POPULATED table -- that the rebuild drops no rows (AC-6).
+    """
+
+    @staticmethod
+    def _mig(name: str) -> Path:
+        for f in collect_migration_files():
+            if f.name == name:
+                return f
+        raise AssertionError(f"migration not found: {name}")
+
+    @staticmethod
+    def _spray_unique_cols(conn: sqlite3.Connection) -> list[str] | None:
+        """Return the key columns of the table-origin UNIQUE on spray_charts."""
+        for _seq, name, unique, origin, *_rest in conn.execute(
+            "PRAGMA index_list(spray_charts);"
+        ):
+            if unique and origin == "u":
+                return [
+                    r[2]
+                    for r in conn.execute(f"PRAGMA index_info({name!r});").fetchall()
+                ]
+        return None
+
+    def test_migration_009_present(self) -> None:
+        """AC-5: migration 009 exists in migrations/ (008 was the prior latest)."""
+        names = [f.name for f in collect_migration_files()]
+        assert "009_spray_chart_type_unique.sql" in names
+
+    def test_unique_widened_on_fresh_db(self, fresh_db: Path) -> None:
+        """AC-1: a fully-migrated fresh DB carries the 3-column UNIQUE."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            cols = self._spray_unique_cols(conn)
+        finally:
+            conn.close()
+        assert cols == ["event_gc_id", "perspective_team_id", "chart_type"]
+
+    def test_indexes_preserved_after_rebuild(self, fresh_db: Path) -> None:
+        """AC-1: both spray_charts indexes survive the table rebuild."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            idx = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' "
+                    "AND tbl_name='spray_charts' AND name LIKE 'idx_%';"
+                )
+            }
+        finally:
+            conn.close()
+        assert {"idx_spray_charts_player", "idx_spray_charts_game"} <= idx
+
+    def test_offense_and_defense_same_event_coexist(self, fresh_db: Path) -> None:
+        """AC-2: offense + defense for one event+perspective both persist."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        try:
+            team_id = conn.execute(
+                "INSERT INTO teams (name, membership_type) VALUES ('T', 'tracked');"
+            ).lastrowid
+            for chart_type in ("offensive", "defensive"):
+                conn.execute(
+                    "INSERT OR IGNORE INTO spray_charts "
+                    "(perspective_team_id, chart_type, event_gc_id, season_id) "
+                    "VALUES (?, ?, 'ev1', '2026');",
+                    (team_id, chart_type),
+                )
+            conn.commit()
+            got = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT chart_type FROM spray_charts "
+                    "WHERE event_gc_id='ev1' AND perspective_team_id=? "
+                    "ORDER BY chart_type;",
+                    (team_id,),
+                )
+            ]
+        finally:
+            conn.close()
+        assert got == ["defensive", "offensive"]
+
+    def test_rebuild_preserves_all_rows_on_populated_db(self) -> None:
+        """AC-6: applying 009 through the runner to a POPULATED spray_charts
+        preserves every row and widens the UNIQUE.
+
+        Build the pre-009 state (001 + 008), populate spray_charts (including a
+        NULL-key row), then apply migration 009 via ``apply_migration`` (the
+        real, atomic E-253-03 runner -- FK enforced). Post-rebuild row count
+        equals pre-rebuild count: closes the table-rebuild silent-drop footgun.
+        """
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.executescript(
+                self._mig("001_initial_schema.sql").read_text(encoding="utf-8")
+            )
+            conn.executescript(
+                self._mig(
+                    "008_drop_identity_opponent_season_type.sql"
+                ).read_text(encoding="utf-8")
+            )
+            # _migrations table so apply_migration can record 009.
+            conn.executescript(
+                "CREATE TABLE IF NOT EXISTS _migrations ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "filename TEXT NOT NULL UNIQUE, "
+                "applied_at TEXT NOT NULL DEFAULT (datetime('now')));"
+            )
+            conn.execute("PRAGMA foreign_keys=ON;")
+            team_id = conn.execute(
+                "INSERT INTO teams (name, membership_type) VALUES ('T', 'tracked');"
+            ).lastrowid
+            rows = [
+                (team_id, "offensive", "ev1", "2026"),
+                (team_id, "offensive", "ev2", "2026"),
+                (team_id, "offensive", "ev3", "2026"),
+                (team_id, "defensive", "ev4", "2026"),
+                (team_id, None, None, "2026"),  # NULL event_gc_id + NULL chart_type
+            ]
+            conn.executemany(
+                "INSERT INTO spray_charts "
+                "(perspective_team_id, chart_type, event_gc_id, season_id) "
+                "VALUES (?, ?, ?, ?);",
+                rows,
+            )
+            conn.commit()
+            pre = conn.execute("SELECT COUNT(*) FROM spray_charts;").fetchone()[0]
+            # Narrow UNIQUE still in force pre-rebuild.
+            assert self._spray_unique_cols(conn) == [
+                "event_gc_id",
+                "perspective_team_id",
+            ]
+
+            apply_migration(
+                conn, self._mig("009_spray_chart_type_unique.sql")
+            )
+
+            post = conn.execute("SELECT COUNT(*) FROM spray_charts;").fetchone()[0]
+            assert post == pre, f"row count changed in rebuild: {pre} -> {post}"
+            # Widened now, and both indexes back.
+            assert self._spray_unique_cols(conn) == [
+                "event_gc_id",
+                "perspective_team_id",
+                "chart_type",
+            ]
+            idx = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' "
+                    "AND tbl_name='spray_charts' AND name LIKE 'idx_%';"
+                )
+            }
+            assert {"idx_spray_charts_player", "idx_spray_charts_game"} <= idx
+            # AC-2 on the populated+rebuilt DB: a defensive row for an existing
+            # offensive event now inserts (collided under the narrow key).
+            conn.execute("PRAGMA foreign_keys=ON;")
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO spray_charts "
+                "(perspective_team_id, chart_type, event_gc_id, season_id) "
+                "VALUES (?, 'defensive', 'ev1', '2026');",
+                (team_id,),
+            )
+            conn.commit()
+            assert cur.rowcount == 1
+            # Migration recorded exactly once; FK integrity intact.
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM _migrations "
+                    "WHERE filename='009_spray_chart_type_unique.sql';"
+                ).fetchone()[0]
+                == 1
+            )
+            assert conn.execute("PRAGMA foreign_key_check;").fetchall() == []
+        finally:
+            conn.close()
+
+
+class TestGameDedupBackstopMigration:
+    """Verify migration 010_game_dedup_backstop.sql (E-253-05).
+
+    Migration 010 adds a PARTIAL UNIQUE INDEX on games(game_stream_id) gated on
+    ``game_stream_id IS NOT NULL``. It backstops the cross-perspective
+    SELECT-then-INSERT dedup race for games carrying the stable game_stream_id,
+    WITHOUT rejecting doubleheaders (distinct game_stream_ids) or affecting
+    tracked/public games whose game_stream_id is NULL.
+    """
+
+    _INDEX = "idx_games_stream_id_unique"
+
+    @staticmethod
+    def _seed_game_parents(conn: sqlite3.Connection) -> tuple[int, int]:
+        """Seed one season + two teams so games FK constraints are satisfied."""
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, year) VALUES ('2026', 'S', 2026);"
+        )
+        t1 = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('Home', 'tracked');"
+        ).lastrowid
+        t2 = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('Away', 'tracked');"
+        ).lastrowid
+        conn.commit()
+        return t1, t2
+
+    @staticmethod
+    def _insert_game(
+        conn: sqlite3.Connection,
+        game_id: str,
+        home: int,
+        away: int,
+        stream_id: str | None,
+        game_date: str = "2026-05-01",
+    ) -> None:
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, "
+            "away_team_id, home_score, away_score, status, game_stream_id) "
+            "VALUES (?, '2026', ?, ?, ?, 5, 3, 'completed', ?);",
+            (game_id, game_date, home, away, stream_id),
+        )
+
+    def test_migration_010_present(self) -> None:
+        """AC-5: migration 010 exists (010 follows 009 from E-253-02)."""
+        names = [f.name for f in collect_migration_files()]
+        assert "010_game_dedup_backstop.sql" in names
+
+    def test_partial_unique_index_shape(self, fresh_db: Path) -> None:
+        """AC-1: a UNIQUE + PARTIAL index on games(game_stream_id) exists, with
+        the ``game_stream_id IS NOT NULL`` predicate."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            shape = None
+            cols: list[str] = []
+            # index_list: (seq, name, unique, origin, partial)
+            for _seq, name, unique, _origin, partial in conn.execute(
+                "PRAGMA index_list(games);"
+            ):
+                if name == self._INDEX:
+                    shape = (unique, partial)
+                    cols = [
+                        r[2]
+                        for r in conn.execute(
+                            f"PRAGMA index_info({name!r});"
+                        ).fetchall()
+                    ]
+            sql_row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?;",
+                (self._INDEX,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert shape is not None, f"{self._INDEX} not found on games"
+        unique, partial = shape
+        assert unique == 1, "index must be UNIQUE"
+        assert partial == 1, "index must be PARTIAL"
+        assert cols == ["game_stream_id"]
+        assert sql_row is not None
+        assert "game_stream_id IS NOT NULL" in sql_row[0]
+
+    def test_duplicate_non_null_stream_id_rejected(self, fresh_db: Path) -> None:
+        """AC-1: a second games row with the same non-null game_stream_id (the
+        race-created duplicate of one real game) is rejected."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            t1, t2 = self._seed_game_parents(conn)
+            self._insert_game(conn, "g1", t1, t2, "stream-A")
+            conn.commit()
+            with pytest.raises(sqlite3.IntegrityError):
+                self._insert_game(conn, "g2", t1, t2, "stream-A")
+        finally:
+            conn.close()
+
+    def test_doubleheader_not_rejected(self, fresh_db: Path) -> None:
+        """AC-2: two distinct games -- same date + same team pair but DIFFERENT
+        game_stream_id -- both persist (the backstop does NOT reject a real
+        doubleheader)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            t1, t2 = self._seed_game_parents(conn)
+            self._insert_game(conn, "g1", t1, t2, "stream-A")
+            self._insert_game(conn, "g2", t1, t2, "stream-B")  # 2nd game of DH
+            conn.commit()
+            n = conn.execute(
+                "SELECT COUNT(*) FROM games WHERE game_date='2026-05-01' "
+                "AND home_team_id=? AND away_team_id=?;",
+                (t1, t2),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert n == 2
+
+    def test_null_stream_id_passthrough(self, fresh_db: Path) -> None:
+        """AC-3: rows with NULL game_stream_id are not indexed -> multiple such
+        rows on the same date+pair are allowed; the partial index does not apply
+        and the existing SELECT-then-INSERT dedup path still governs them."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            t1, t2 = self._seed_game_parents(conn)
+            self._insert_game(conn, "n1", t1, t2, None)
+            self._insert_game(conn, "n2", t1, t2, None)  # same date+pair, NULL stream
+            conn.commit()
+            n = conn.execute(
+                "SELECT COUNT(*) FROM games WHERE game_stream_id IS NULL;"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert n == 2
+
+    def test_migration_idempotent_second_run(self, fresh_db: Path) -> None:
+        """AC-1: a second run_migrations does not error or duplicate the index."""
+        run_migrations(db_path=fresh_db)
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            names = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?;",
+                    (self._INDEX,),
+                )
+            ]
+        finally:
+            conn.close()
+        assert names.count(self._INDEX) == 1
 

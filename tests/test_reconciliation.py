@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -1263,6 +1264,114 @@ class TestPitcherCorrection:
         ).fetchone()
         assert row[0] == "pitcher-h2"
 
+    def test_corrections_and_discrepancies_commit_atomically(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-1 (E-253-09): the plays.pitcher_id corrections and the
+        reconciliation_discrepancies audit rows share ONE per-game commit.
+
+        Simulate a crash AFTER corrections are applied but BEFORE the commit (by
+        making the discrepancy write raise). Pre-fix, the corrections had already
+        been committed by _correct_pitcher_attribution, so they would persist
+        with no audit row. Post-fix, they are uncommitted and the failure rolls
+        BOTH back -- no correction survives without its audit record.
+        """
+        _insert_game(db, "game-atomic")
+        _insert_pitching_boxscore(db, "game-atomic", "pitcher-h1", 1,
+                                  bf=2, so=1, pitches=6, ip_outs=2)
+        _insert_pitching_boxscore(db, "game-atomic", "pitcher-h2", 1,
+                                  bf=1, so=0, pitches=3, ip_outs=1)
+        _insert_pitching_boxscore(db, "game-atomic", "pitcher-a1", 2,
+                                  bf=2, pitches=6, ip_outs=2)
+        _insert_batting_boxscore(db, "game-atomic", "batter-h1", 1, ab=1)
+        _insert_batting_boxscore(db, "game-atomic", "batter-h2", 1, ab=1)
+        _insert_batting_boxscore(db, "game-atomic", "batter-a1", 2, ab=2)
+        _insert_batting_boxscore(db, "game-atomic", "batter-a2", 2, ab=1)
+        # Play 3 (top) is misattributed to pitcher-h1; correction -> pitcher-h2.
+        _insert_play(db, "game-atomic", 1, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                     outcome="Strikeout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-atomic", 2, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h1",
+                     outcome="Groundout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-atomic", 3, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                     outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-atomic", 4, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+                     outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-atomic", 5, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+                     outcome="Groundout", pitch_count=3, did_outs_change=1)
+        db.commit()  # baseline committed; the reconcile run is the unit under test
+
+        # The write raises -> the single per-game commit is never reached.
+        with patch(
+            "src.reconciliation.engine._write_discrepancies",
+            side_effect=RuntimeError("simulated crash before commit"),
+        ):
+            with pytest.raises(RuntimeError):
+                reconcile_game(db, "game-atomic", dry_run=False)
+
+        # AC-1: the correction was rolled back -- play 3 keeps its original
+        # pitcher (no correction persisted without an audit row).
+        row = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-atomic' AND play_order = 3"
+        ).fetchone()
+        assert row[0] == "pitcher-h1", (
+            "correction must be rolled back when the audit write fails"
+        )
+        # And no discrepancy rows were persisted for this game.
+        count = db.execute(
+            "SELECT COUNT(*) FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-atomic'"
+        ).fetchone()[0]
+        assert count == 0
+
+    def test_successful_execute_commits_corrections_and_audit_together(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Happy path: a successful execute persists BOTH the correction and its
+        discrepancy audit rows (single commit landed)."""
+        _insert_game(db, "game-ok")
+        _insert_pitching_boxscore(db, "game-ok", "pitcher-h1", 1,
+                                  bf=2, so=1, pitches=6, ip_outs=2)
+        _insert_pitching_boxscore(db, "game-ok", "pitcher-h2", 1,
+                                  bf=1, so=0, pitches=3, ip_outs=1)
+        _insert_pitching_boxscore(db, "game-ok", "pitcher-a1", 2,
+                                  bf=2, pitches=6, ip_outs=2)
+        _insert_batting_boxscore(db, "game-ok", "batter-a1", 2, ab=2)
+        _insert_batting_boxscore(db, "game-ok", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-ok", "batter-h1", 1, ab=1)
+        _insert_batting_boxscore(db, "game-ok", "batter-h2", 1, ab=1)
+        for po, batter in ((1, "batter-a1"), (2, "batter-a2"), (3, "batter-a1")):
+            _insert_play(db, "game-ok", po, inning=1, half="top",
+                         batting_team_id=2, batter_id=batter, pitcher_id="pitcher-h1",
+                         outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-ok", 4, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+                     outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-ok", 5, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+                     outcome="Groundout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-ok", dry_run=False)
+        assert summary.total_plays_reassigned == 1
+
+        # Correction persisted...
+        row = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-ok' AND play_order = 3"
+        ).fetchone()
+        assert row[0] == "pitcher-h2"
+        # ...and its audit rows persisted in the same commit.
+        count = db.execute(
+            "SELECT COUNT(*) FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-ok'"
+        ).fetchone()[0]
+        assert count > 0
+
 
 class TestCorrectionEdgeCases:
     """Edge cases for the correction algorithm."""
@@ -1436,13 +1545,15 @@ class TestGetSummaryFromDB:
 class TestSummaryDeduplication:
     """E-223-02: get_summary_from_db deduplicates across perspectives and runs."""
 
-    def test_cross_perspective_same_player_id_dedup(
+    def test_cross_perspective_same_player_id_not_collapsed(
         self, db: sqlite3.Connection
     ) -> None:
-        """Same signal, same player_id, two perspectives → deduplicated to 1.
+        """AC-2 (E-253-09): same signal + same player_id under TWO perspectives
+        are NOT collapsed -- the dedup partition includes perspective_team_id.
 
-        When the same player_id appears in both perspectives (e.g., after
-        bb data dedup-players has merged stubs), the dedup key collapses them.
+        Pre-fix, the partition omitted perspective_team_id, so two rows that
+        differ ONLY by perspective (the API-source team) collapsed to 1 --
+        losing a distinct cross-perspective signal. They must count as 2.
         """
         from src.reconciliation.engine import get_summary_from_db
 
@@ -1461,22 +1572,24 @@ class TestSummaryDeduplication:
         )
 
         result = get_summary_from_db(db)
-        assert result["total_records"] == 1, (
-            f"Same player_id dedup: expected 1, got {result['total_records']}"
+        assert result["total_records"] == 2, (
+            f"Two perspectives must stay distinct: expected 2, got "
+            f"{result['total_records']}"
         )
-        assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 1
+        assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 2
 
     def test_cross_perspective_different_player_ids_not_collapsed(
         self, db: sqlite3.Connection
     ) -> None:
         """Same signal, different perspective-specific player_ids → counted
-        separately (documented limitation).
+        separately.
 
-        GameChanger returns different player_id UUIDs for the same human
-        from different perspectives (data-model.md:30). Until
-        bb data dedup-players merges the stubs, these are distinct rows
-        and the summary counts them separately. This is acceptable because
-        the standard pipeline runs dedup-players before summary inspection.
+        GameChanger returns different player_id UUIDs for the same human from
+        different perspectives (data-model.md:30). These are distinct rows and
+        the summary counts them separately -- both because the player_ids differ
+        AND (since E-253-09) because perspective_team_id is in the dedup
+        partition. Cross-perspective identity is a Non-Goal; per-perspective
+        signals are the intended grain.
         """
         from src.reconciliation.engine import get_summary_from_db
 
@@ -1500,12 +1613,64 @@ class TestSummaryDeduplication:
 
         result = get_summary_from_db(db)
         # Not collapsed: different player_ids are distinct dedup keys.
-        # This is a documented limitation (see engine.py docstring).
         assert result["total_records"] == 2, (
             f"Different player_ids should NOT be collapsed: "
             f"expected 2, got {result['total_records']}"
         )
         assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 2
+
+    def test_game_level_sentinel_two_perspectives_not_collapsed(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-2 (E-253-09): game-level signals share the ``__game__`` sentinel
+        player_id across perspectives, so WITHOUT perspective_team_id in the
+        partition they would have collapsed. They must stay distinct (2)."""
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-gl-persp")
+        for ptid in (1, 2):
+            db.execute(
+                "INSERT INTO reconciliation_discrepancies "
+                "(game_id, run_id, perspective_team_id, team_id, player_id, "
+                "signal_name, category, status) VALUES "
+                "('g-gl-persp', 'r1', ?, ?, ?, 'game_runs', 'game', 'MATCH')",
+                (ptid, ptid, GAME_LEVEL_PLAYER_ID),
+            )
+
+        result = get_summary_from_db(db)
+        assert result["total_records"] == 2, (
+            f"Game-level sentinel under two perspectives must stay distinct: "
+            f"expected 2, got {result['total_records']}"
+        )
+        assert result["game_signals"]["game_runs"]["MATCH"] == 2
+
+    def test_same_perspective_cross_run_still_collapses(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-2 preserves 'most recent row wins': same perspective + same key
+        across runs still collapses to the latest status (perspective added to
+        the partition must NOT break same-perspective cross-run dedup)."""
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-same-persp")
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status, created_at) VALUES "
+            "('g-same-persp', 'r1', 1, 1, 'p1', 'pitcher_so', 'pitcher', "
+            "'CORRECTABLE', '2026-01-01 00:00:00')"
+        )
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status, created_at) VALUES "
+            "('g-same-persp', 'r2', 1, 1, 'p1', 'pitcher_so', 'pitcher', "
+            "'CORRECTED', '2026-01-02 00:00:00')"
+        )
+
+        result = get_summary_from_db(db)
+        assert result["total_records"] == 1
+        assert result["pitcher_signals"]["pitcher_so"]["CORRECTED"] == 1
 
     def test_cross_run_dedup_uses_latest_status(
         self, db: sqlite3.Connection

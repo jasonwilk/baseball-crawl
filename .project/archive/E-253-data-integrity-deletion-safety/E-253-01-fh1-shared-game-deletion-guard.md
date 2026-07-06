@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, deleting a report will never destroy per-game or plays data that a still-live report depends on. When teams X and Y played each other and Y holds a live report, deleting X's report (and cleaning up X) must preserve the shared-game plays/stat rows under Y's perspective, so Y's pitcher FPS%/P-BF remain intact. This is the guard the E-250-02 TN-5 amendment declared REQUIRED-but-deferred to CE-3; completing it lifts the live operator "no report deletions" hold.

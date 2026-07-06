@@ -193,86 +193,102 @@ def reconcile_game(
         game_stream_id, season_id, game_home_score, game_away_score,
     )
 
-    # In execute mode: capture pre-correction status per signal/team/player,
-    # apply corrections, then re-detect to get post-correction signals
-    if not dry_run:
-        # Save pre-correction status per (signal_name, team_id, player_id)
-        pre_status_map: dict[tuple[str, int, str], str] = {}
-        for d in discrepancies:
-            pre_status_map[(d.signal_name, d.team_id, d.player_id)] = d.status
-            pre = summary.pre_correction_signal_counts.setdefault(d.signal_name, {})
-            pre[d.status] = pre.get(d.status, 0) + 1
+    # E-253-09 AC-1: corrections (execute mode) and the discrepancy audit rows
+    # commit TOGETHER, once per game, so no crash window can leave corrections
+    # applied but their audit rows unwritten. On any failure, roll this game's
+    # uncommitted writes back before propagating: reconcile_all / the CLI loop
+    # many games on ONE connection, and an uncommitted failed game would
+    # otherwise be committed by the next game's success
+    # (architecture-subsystems.md "Shared-connection partial-commit footgun").
+    try:
+        # In execute mode: capture pre-correction status per signal/team/player,
+        # apply corrections, then re-detect to get post-correction signals
+        if not dry_run:
+            # Save pre-correction status per (signal_name, team_id, player_id)
+            pre_status_map: dict[tuple[str, int, str], str] = {}
+            for d in discrepancies:
+                pre_status_map[(d.signal_name, d.team_id, d.player_id)] = d.status
+                pre = summary.pre_correction_signal_counts.setdefault(d.signal_name, {})
+                pre[d.status] = pre.get(d.status, 0) + 1
 
-        # Apply pitcher attribution corrections for each team
-        total_reassigned = 0
-        all_corrections: list[dict[str, Any]] = []
-        for team_id in (home_team_id, away_team_id):
-            is_home = team_id == home_team_id
-            pitching_half = "top" if is_home else "bottom"
+            # Apply pitcher attribution corrections for each team
+            total_reassigned = 0
+            all_corrections: list[dict[str, Any]] = []
+            for team_id in (home_team_id, away_team_id):
+                is_home = team_id == home_team_id
+                pitching_half = "top" if is_home else "bottom"
 
-            pitching_rows = _load_pitching_rows(
-                conn, game_id, team_id, chosen_perspective_id,
-            )
-
-            pitcher_order_from_json = _extract_pitcher_order(
-                conn, game_id, game_stream_id, season_id, team_id, is_home,
-                perspective_team_id=chosen_perspective_id,
-            )
-
-            corrections = _correct_pitcher_attribution(
-                conn, game_id, team_id, pitching_half,
-                pitching_rows, pitcher_order_from_json,
-                chosen_perspective_id,
-            )
-            total_reassigned += len(corrections)
-            all_corrections.extend(corrections)
-
-        summary.total_plays_reassigned = total_reassigned
-
-        # Re-detect after correction over the same shared detection function.
-        discrepancies = _detect_discrepancies(
-            conn, game_id, chosen_perspective_id, home_team_id, away_team_id,
-            game_stream_id, season_id, game_home_score, game_away_score,
-        )
-
-        # Build correction_detail JSON for affected pitcher signals
-        correction_detail_json = json.dumps(all_corrections) if all_corrections else None
-
-        # Upgrade signals to CORRECTED only when that specific signal was
-        # non-MATCH pre-correction and is now MATCH post-correction
-        for d in discrepancies:
-            if d.status == "MATCH" and d.category == "pitcher":
-                pre_status = pre_status_map.get(
-                    (d.signal_name, d.team_id, d.player_id)
+                pitching_rows = _load_pitching_rows(
+                    conn, game_id, team_id, chosen_perspective_id,
                 )
-                if pre_status == "CORRECTABLE":
-                    d.status = "CORRECTED"
-                    # Merge reassignment info with existing correction_detail
-                    # (e.g., supplement metadata) rather than overwriting it.
-                    if d.correction_detail and correction_detail_json:
-                        existing = json.loads(d.correction_detail)
-                        d.correction_detail = json.dumps({
-                            **existing,
-                            "reassignments": all_corrections,
-                        })
-                    elif correction_detail_json:
-                        d.correction_detail = correction_detail_json
 
-        # Track game-level correction outcomes
-        post_statuses: set[str] = set()
-        for d in discrepancies:
-            post_statuses.add(d.status)
-        if total_reassigned > 0:
-            summary.games_corrected = 1
-        else:
-            summary.games_unchanged = 1
-        post_statuses.discard("MATCH")
-        post_statuses.discard("CORRECTED")
-        if "AMBIGUOUS" in post_statuses:
-            summary.games_with_remaining_ambiguity = 1
+                pitcher_order_from_json = _extract_pitcher_order(
+                    conn, game_id, game_stream_id, season_id, team_id, is_home,
+                    perspective_team_id=chosen_perspective_id,
+                )
 
-    # Write discrepancy rows (always -- dry_run only gates corrections, not logging)
-    _write_discrepancies(conn, run_id, discrepancies)
+                corrections = _correct_pitcher_attribution(
+                    conn, game_id, team_id, pitching_half,
+                    pitching_rows, pitcher_order_from_json,
+                    chosen_perspective_id,
+                )
+                total_reassigned += len(corrections)
+                all_corrections.extend(corrections)
+
+            summary.total_plays_reassigned = total_reassigned
+
+            # Re-detect after correction over the same shared detection function.
+            discrepancies = _detect_discrepancies(
+                conn, game_id, chosen_perspective_id, home_team_id, away_team_id,
+                game_stream_id, season_id, game_home_score, game_away_score,
+            )
+
+            # Build correction_detail JSON for affected pitcher signals
+            correction_detail_json = json.dumps(all_corrections) if all_corrections else None
+
+            # Upgrade signals to CORRECTED only when that specific signal was
+            # non-MATCH pre-correction and is now MATCH post-correction
+            for d in discrepancies:
+                if d.status == "MATCH" and d.category == "pitcher":
+                    pre_status = pre_status_map.get(
+                        (d.signal_name, d.team_id, d.player_id)
+                    )
+                    if pre_status == "CORRECTABLE":
+                        d.status = "CORRECTED"
+                        # Merge reassignment info with existing correction_detail
+                        # (e.g., supplement metadata) rather than overwriting it.
+                        if d.correction_detail and correction_detail_json:
+                            existing = json.loads(d.correction_detail)
+                            d.correction_detail = json.dumps({
+                                **existing,
+                                "reassignments": all_corrections,
+                            })
+                        elif correction_detail_json:
+                            d.correction_detail = correction_detail_json
+
+            # Track game-level correction outcomes
+            post_statuses: set[str] = set()
+            for d in discrepancies:
+                post_statuses.add(d.status)
+            if total_reassigned > 0:
+                summary.games_corrected = 1
+            else:
+                summary.games_unchanged = 1
+            post_statuses.discard("MATCH")
+            post_statuses.discard("CORRECTED")
+            if "AMBIGUOUS" in post_statuses:
+                summary.games_with_remaining_ambiguity = 1
+
+        # Write discrepancy rows (always -- dry_run only gates corrections, not
+        # logging), then a SINGLE per-game commit so the corrections above and
+        # these audit rows land atomically (E-253-09 AC-1).
+        _write_discrepancies(conn, run_id, discrepancies)
+        conn.commit()
+    except Exception:
+        # Roll back this game's uncommitted corrections + partial audit rows so
+        # the shared-connection loop can't later commit them (footgun).
+        conn.rollback()
+        raise
 
     # Build summary
     summary.games_processed = 1
@@ -1121,9 +1137,14 @@ def _correct_pitcher_attribution(
             play_idx += 1
 
     if corrections:
-        conn.commit()
+        # E-253-09 AC-1: do NOT commit here. The pitcher_id corrections are left
+        # uncommitted so reconcile_game commits them ATOMICALLY with the
+        # reconciliation_discrepancies audit rows in a single per-game commit --
+        # a crash in the old commit-here-then-write-later window left corrections
+        # applied but unrecorded.
         logger.info(
-            "Corrected %d play(s) for game_id=%s, team_id=%d.",
+            "Corrected %d play(s) for game_id=%s, team_id=%d "
+            "(uncommitted; committed atomically with the discrepancy rows).",
             len(corrections), game_id, team_id,
         )
 
@@ -1138,20 +1159,20 @@ def _correct_pitcher_attribution(
 def get_summary_from_db(conn: sqlite3.Connection) -> dict[str, Any]:
     """Build aggregate statistics from reconciliation_discrepancies records.
 
-    Deduplicates on ``(game_id, team_id, player_id, signal_name)`` so each
-    discrepancy signal is counted once per reconciliation run family.  When
-    multiple rows exist for the same composite key with different statuses
-    (e.g., CORRECTABLE in run 1, CORRECTED in run 2), the most recent row
-    wins (``created_at DESC, rowid DESC``).
+    Deduplicates on ``(game_id, perspective_team_id, team_id, player_id,
+    signal_name)`` so each discrepancy signal is counted once per reconciliation
+    run family.  When multiple rows exist for the same composite key with
+    different statuses (e.g., CORRECTABLE in run 1, CORRECTED in run 2), the most
+    recent row wins (``created_at DESC, rowid DESC``).
 
-    **Cross-perspective limitation**: ``player_id`` is perspective-specific
-    (the same human gets different UUIDs from different perspectives — see
-    ``data-model.md:30``).  Cross-perspective rows for the same real-world
-    signal will have different ``player_id`` values and are NOT collapsed by
-    this dedup.  Full cross-perspective dedup requires ``bb data dedup-players``
-    to have merged the perspective-specific stubs first.  This is acceptable
-    because the summary is a diagnostic tool and the standard pipeline runs
-    dedup-players before summary inspection.
+    **Perspective-aware (E-253-09 AC-2)**: ``perspective_team_id`` is part of the
+    dedup partition, so two rows recorded for the same real-world signal under
+    DIFFERENT perspectives (the API-source team whose call produced the row) are
+    kept DISTINCT and never collapsed -- matching the perspective-provenance
+    invariant (``.claude/rules/perspective-provenance.md``) and the grain the
+    E-245 scoreboard consumes.  This also covers game-level signals whose
+    ``player_id`` is a shared ``__game__`` sentinel across perspectives, which
+    the old partition (without ``perspective_team_id``) would have collapsed.
 
     Returns a dict with per-signal match rates, correction counts, and gaps.
     """
@@ -1159,7 +1180,7 @@ def get_summary_from_db(conn: sqlite3.Connection) -> dict[str, Any]:
         "SELECT signal_name, category, status, COUNT(*) "
         "FROM ("
         "  SELECT *, ROW_NUMBER() OVER ("
-        "    PARTITION BY game_id, team_id, player_id, signal_name "
+        "    PARTITION BY game_id, perspective_team_id, team_id, player_id, signal_name "
         "    ORDER BY created_at DESC, rowid DESC"
         "  ) AS rn "
         "  FROM reconciliation_discrepancies"
@@ -1210,6 +1231,10 @@ def _write_discrepancies(
     E-220 round 7 P1-2: writes both ``perspective_team_id`` (the API-source
     team) and ``team_id`` (the participant team) so cross-perspective
     discrepancies for the same game persist independently.
+
+    E-253-09 AC-1: does NOT commit -- the caller (``reconcile_game``) owns a
+    single per-game commit so these audit rows land atomically with the
+    ``plays.pitcher_id`` corrections (no crash window between the two).
     """
     for d in discrepancies:
         conn.execute(
@@ -1225,4 +1250,3 @@ def _write_discrepancies(
                 d.status, d.correction_detail,
             ),
         )
-    conn.commit()

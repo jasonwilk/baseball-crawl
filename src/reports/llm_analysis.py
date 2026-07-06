@@ -229,7 +229,19 @@ def enrich_prediction(
 
     Raises:
         LLMError: On API failures or malformed responses.
+        ValueError: If called with a suppressed or absent prediction. Enriching
+            a ``confidence == 'suppress'`` prediction would launder a
+            low-confidence guess into confident prose (E-253-07 / TN-2), so the
+            caller MUST gate suppress out first (``_run_tier2_enrichment`` does).
+            This is a defensive contract tripwire, not a runtime path -- it
+            fires before any LLM call, so no cost is spent.
     """
+    if prediction is None or prediction.confidence == "suppress":
+        raise ValueError(
+            "enrich_prediction called with a suppressed/absent prediction; "
+            "the caller must skip Tier-2 enrichment on suppress (E-253-07)."
+        )
+
     system_prompt = _SYSTEM_PROMPT_TEMPLATE
 
     user_prompt = _build_user_prompt(

@@ -3136,6 +3136,261 @@ class TestCrossPerspectiveScopedDelete:
         assert games_total == 0
 
 
+class TestFH1SharedGameDeletionGuard:
+    """E-253-01 F-H1: deleting X must not destroy a live-report team's shared-game data.
+
+    Setup shared by the tests: teams X (deletion target, its report already
+    removed by the caller) and Y (holds a live ``reports`` row) played a shared
+    game G (home=X, away=Y). Under Y's perspective the game's ``plays`` include
+    X's at-bats (``batting_team_id = X``) -- those pitches feed Y's pitcher
+    FPS%/P-BF. The unbounded anchor pass in ``_delete_team_anchor_and_orphan_data``
+    deletes ``plays`` by ``batting_team_id = X`` across ALL perspectives, so
+    without the guard Y's rows are collateral damage; whole-game plays
+    idempotency then never re-fetches them (permanent silent hole).
+    """
+
+    @staticmethod
+    def _seed_shared_game(db, *, y_has_report: bool):
+        """Seed X, Y, shared game G, and Y-perspective + X-perspective plays.
+
+        Returns ``(x_id, y_id)``. When ``y_has_report`` is True a ``reports``
+        row is inserted for Y (the F-H1 guard's trigger).
+        """
+        _seed_season(db)
+        _seed_player(db, "x-bat", "Xavier", "Batter")   # bats for X
+        _seed_player(db, "y-pit", "Yuri", "Pitcher")     # pitches for Y
+        _seed_player(db, "y-bat", "Yves", "Batter")      # bats for Y
+
+        # X: deletion target -- inactive stub, its own report already deleted.
+        x_id = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('X Stub', 'tracked', 0)"
+        ).lastrowid
+        # Y: still holds a live report.
+        y_id = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Y Report Team', 'tracked', 1)"
+        ).lastrowid
+
+        if y_has_report:
+            db.execute(
+                "INSERT INTO reports (slug, team_id, title, expires_at) "
+                "VALUES ('y-live', ?, 'Y Report', '2099-01-01T00:00:00Z')",
+                (y_id,),
+            )
+
+        # Shared game G: X home, Y away.
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES ('G', '2026', ?, ?, 4, 6, "
+            "'2026-04-01')",
+            (x_id, y_id),
+        )
+        for pid in (x_id, y_id):
+            db.execute(
+                "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+                "VALUES ('G', ?)",
+                (pid,),
+            )
+
+        # --- Y's perspective (must survive X's deletion) --------------------
+        # X batting under Y's perspective: the FPS%/P-BF-bearing rows.
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id, "
+            "pitch_count, is_first_pitch_strike) "
+            "VALUES ('G', 1, 1, 'top', '2026', ?, ?, 'x-bat', 'y-pit', 5, 1)",
+            (x_id, y_id),
+        )
+        y_persp_x_bat_play = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        db.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type, "
+            "pitch_result, is_first_pitch) VALUES (?, 1, 'pitch', 'strike_looking', 1)",
+            (y_persp_x_bat_play,),
+        )
+        # Y batting under Y's perspective (also must survive; untouched anchor).
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id, "
+            "pitch_count, is_first_pitch_strike) "
+            "VALUES ('G', 2, 1, 'bottom', '2026', ?, ?, 'y-bat', 'x-bat', 3, 0)",
+            (y_id, y_id),
+        )
+        # X's batting line as recorded under Y's perspective.
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('G', 'x-bat', ?, ?, 4, 2)",
+            (x_id, y_id),
+        )
+
+        # --- X's own perspective (correctly deleted with X) -----------------
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id, "
+            "pitch_count, is_first_pitch_strike) "
+            "VALUES ('G', 1, 1, 'top', '2026', ?, ?, 'x-bat', 'y-pit', 5, 1)",
+            (x_id, x_id),
+        )
+        db.commit()
+        return x_id, y_id
+
+    def test_anchor_pass_destroys_shared_game_plays_without_guard(self, db):
+        """The hole: with NO live report protecting Y, the anchor pass wipes Y's
+        X-batting plays (the pre-guard F-H1 destruction this story prevents).
+        """
+        x_id, y_id = self._seed_shared_game(db, y_has_report=False)
+
+        # Baseline: Y's perspective has the X-batting FPS-bearing row.
+        before = db.execute(
+            "SELECT COUNT(*) FROM plays WHERE perspective_team_id = ? "
+            "AND batting_team_id = ?",
+            (y_id, x_id),
+        ).fetchone()[0]
+        assert before == 1
+
+        cascade_delete_team(db, x_id)
+
+        # Unprotected: Y's X-batting rows are gone -- demonstrates the hole the
+        # guard closes (this is the destruction, reproduced).
+        after = db.execute(
+            "SELECT COUNT(*) FROM plays WHERE perspective_team_id = ? "
+            "AND batting_team_id = ?",
+            (y_id, x_id),
+        ).fetchone()[0]
+        assert after == 0, (
+            "sanity: without a live report the anchor pass destroys the "
+            "X-batting rows -- confirms the guard, not luck, is what saves them"
+        )
+
+    def test_guard_preserves_shared_game_plays_under_live_report(self, db):
+        """AC-1: Y holds a live report -> Y's X-batting plays (and their
+        play_events) survive X's deletion; Y's FPS%/P-BF query is unchanged.
+        """
+        x_id, y_id = self._seed_shared_game(db, y_has_report=True)
+
+        def fps_query():
+            # FPS% / P-BF surrogate: over Y's pitcher, sum first-pitch strikes
+            # and count batters faced, from Y-perspective plays.
+            row = db.execute(
+                "SELECT COALESCE(SUM(is_first_pitch_strike), 0), COUNT(*) "
+                "FROM plays WHERE perspective_team_id = ? AND pitcher_id = 'y-pit'",
+                (y_id,),
+            ).fetchone()
+            return (row[0], row[1])
+
+        before = fps_query()
+        y_persp_play_ids_before = {
+            r[0] for r in db.execute(
+                "SELECT id FROM plays WHERE perspective_team_id = ?", (y_id,)
+            ).fetchall()
+        }
+
+        cascade_delete_team(db, x_id)
+
+        # AC-1: Y's X-batting rows survive, identical to before.
+        assert fps_query() == before, "Y's FPS%/P-BF inputs must be unchanged"
+        y_persp_play_ids_after = {
+            r[0] for r in db.execute(
+                "SELECT id FROM plays WHERE perspective_team_id = ?", (y_id,)
+            ).fetchall()
+        }
+        assert y_persp_play_ids_after == y_persp_play_ids_before
+        # The X-batting FPS-bearing play specifically survives.
+        assert db.execute(
+            "SELECT COUNT(*) FROM plays WHERE perspective_team_id = ? "
+            "AND batting_team_id = ?",
+            (y_id, x_id),
+        ).fetchone()[0] == 1
+        # Its play_events survive too (guard applied to the subquery).
+        assert db.execute(
+            "SELECT COUNT(*) FROM play_events pe JOIN plays p ON pe.play_id = p.id "
+            "WHERE p.perspective_team_id = ? AND p.batting_team_id = ?",
+            (y_id, x_id),
+        ).fetchone()[0] == 1
+        # X's batting line under Y's perspective survives.
+        assert db.execute(
+            "SELECT COUNT(*) FROM player_game_batting "
+            "WHERE perspective_team_id = ? AND team_id = ?",
+            (y_id, x_id),
+        ).fetchone()[0] == 1
+        # X's OWN perspective rows are gone.
+        assert db.execute(
+            "SELECT COUNT(*) FROM plays WHERE perspective_team_id = ?", (x_id,)
+        ).fetchone()[0] == 0
+
+    def test_guard_retains_x_team_row_and_shared_game_without_integrity_error(self, db):
+        """AC-2: X's teams row and the shared game/anchor rows are RETAINED
+        (FK-safety survivor path); the operation raises no IntegrityError.
+        """
+        x_id, y_id = self._seed_shared_game(db, y_has_report=True)
+
+        # Completes cleanly (no sqlite3.IntegrityError raised).
+        cascade_delete_team(db, x_id)
+
+        # X's teams row retained (still FK-referenced by the shared game + spared
+        # plays that reference batting_team_id = X).
+        assert db.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (x_id,)
+        ).fetchone() is not None
+        # Shared game row retained (Y's perspective keeps it alive).
+        assert db.execute(
+            "SELECT 1 FROM games WHERE game_id = 'G'"
+        ).fetchone() is not None
+
+    def test_true_orphan_fully_cleaned_up(self, db):
+        """AC-3: a team sharing NO game with any live-report team is fully
+        cleaned up -- the guard does not regress orphan deletion.
+        """
+        _seed_season(db)
+        _seed_player(db, "z-bat", "Zed", "Batter")
+        # An unrelated live report exists, but for a team that shares no game.
+        other_id = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Unrelated Report Team', 'tracked', 1)"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO reports (slug, team_id, title, expires_at) "
+            "VALUES ('other-live', ?, 'Other', '2099-01-01T00:00:00Z')",
+            (other_id,),
+        )
+        # True orphan X: solo game, sole perspective, its own report deleted.
+        x_id = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Orphan X', 'tracked', 0)"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "game_date) VALUES ('go', '2026', ?, ?, '2026-04-02')",
+            (x_id, x_id),
+        )
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id) "
+            "VALUES ('go', 1, 1, 'top', '2026', ?, ?, 'z-bat')",
+            (x_id, x_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES ('go', ?)",
+            (x_id,),
+        )
+        db.commit()
+
+        cascade_delete_team(db, x_id)
+
+        # X and all its data are gone.
+        assert db.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (x_id,)
+        ).fetchone() is None
+        assert db.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = 'go'"
+        ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM games WHERE game_id = 'go'"
+        ).fetchone()[0] == 0
+
+
 class TestCleanupNonFatal:
     """AC-3: Cleanup failure is non-fatal."""
 
@@ -3733,9 +3988,11 @@ class TestTier2EnrichmentStatus:
     """The three TN-4 outcomes are distinguishable and operator-detectable."""
 
     def _args(self):
-        # The helper does not inspect these; the patched enrich_prediction /
-        # is_llm_available drive the outcome.
-        return (object(), [{"game_id": "g1"}])
+        # E-253-07: the helper now gates on prediction.confidence, so pass a
+        # real NON-suppress StarterPrediction. The patched enrich_prediction /
+        # is_llm_available still drive the success/unavailable/failed outcome.
+        from src.reports.starter_prediction import StarterPrediction
+        return (StarterPrediction(confidence="high"), [{"game_id": "g1"}])
 
     def test_unavailable_no_key_status(self):
         """is_llm_available() False → (None, unavailable-no-key); not a failure."""
@@ -3831,6 +4088,69 @@ class TestTier2EnrichmentStatus:
 
         assert result is None
         assert status == TIER2_FAILED
+
+
+class TestTier2SuppressGate:
+    """E-253-07 / TN-2: a suppressed (or absent) Tier-1 prediction skips Tier-2
+    enrichment entirely -- no LLM call, no cost -- and yields a NULL status
+    ('did not run'). Both suppress reasons are covered (AC-1/AC-3)."""
+
+    @staticmethod
+    def _suppressed(reason: str):
+        from src.reports.starter_prediction import StarterPrediction
+        return StarterPrediction(confidence="suppress", suppress_reason=reason)
+
+    @pytest.mark.parametrize("reason", ["insufficient_data", "unsupported_level"])
+    def test_suppress_skips_llm_and_returns_null_status(self, reason):
+        """AC-1/AC-3: on suppress the LLM client is never invoked; status None."""
+        from src.reports.generator import _run_tier2_enrichment
+
+        with (
+            patch("src.llm.openrouter.is_llm_available") as mock_avail,
+            patch("src.reports.llm_analysis.enrich_prediction") as mock_enrich,
+        ):
+            result, status = _run_tier2_enrichment(
+                self._suppressed(reason), [{"game_id": "g1"}],
+                team_name="Rival High", team_record="3-1",
+                reference_date=None, public_id="abc123",
+            )
+
+        assert result is None
+        assert status is None  # NULL: enrichment did not run (not a failure)
+        # No cost: neither the availability check nor the enrichment ran.
+        mock_avail.assert_not_called()
+        mock_enrich.assert_not_called()
+
+    def test_absent_prediction_skips_llm(self):
+        """A None Tier-1 prediction also skips enrichment (no LLM call)."""
+        from src.reports.generator import _run_tier2_enrichment
+
+        with (
+            patch("src.llm.openrouter.is_llm_available") as mock_avail,
+            patch("src.reports.llm_analysis.enrich_prediction") as mock_enrich,
+        ):
+            result, status = _run_tier2_enrichment(
+                None, [{"game_id": "g1"}],
+                team_name="Rival High", team_record="3-1",
+                reference_date=None, public_id="abc123",
+            )
+
+        assert result is None
+        assert status is None
+        mock_avail.assert_not_called()
+        mock_enrich.assert_not_called()
+
+    @pytest.mark.parametrize("reason", ["insufficient_data", "unsupported_level"])
+    def test_enrich_prediction_defensive_guard_raises_without_llm(self, reason):
+        """Defensive half: enrich_prediction itself refuses a suppressed
+        prediction BEFORE any API call (the caller must gate; this is a
+        contract tripwire)."""
+        from src.reports.llm_analysis import enrich_prediction
+
+        with patch("src.reports.llm_analysis.query_openrouter") as mock_query:
+            with pytest.raises(ValueError, match="suppressed"):
+                enrich_prediction(self._suppressed(reason), [{"game_id": "g1"}])
+        mock_query.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

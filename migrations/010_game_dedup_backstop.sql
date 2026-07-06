@@ -1,0 +1,68 @@
+-- ===========================================================================
+-- Migration 010: cross-perspective game-dedup partial UNIQUE backstop
+-- ===========================================================================
+-- Epic E-253 (story E-253-05), Technical Notes TN-6.
+--
+-- WHAT: Adds a PARTIAL UNIQUE INDEX on games(game_stream_id) gated on
+--   ``game_stream_id IS NOT NULL``.
+--
+-- WHY:  Cross-perspective game dedup is SELECT-then-INSERT via
+--   ``GameLoader._find_duplicate_game`` (game_loader.py) on a natural key
+--   (game_date + unordered {home_team_id, away_team_id}). Under the
+--   cross-process boundary (admin UI + interactive report CLI + morning-run
+--   cron all writing one SQLite file) there is a narrow race window: two
+--   writers can both SELECT-find-no-duplicate and both INSERT, creating two
+--   ``games`` rows for the SAME real game. There is no DB-level backstop today.
+--   ``game_stream_id`` (from the authenticated game-summaries endpoint) is the
+--   stable identifier for a real game across perspectives -- so two rows
+--   carrying the same non-null ``game_stream_id`` are, by definition, the same
+--   real game. This unique index makes the racing second INSERT fail loudly
+--   (IntegrityError) instead of silently duplicating the game.
+--
+-- WHY PARTIAL (gated on game_stream_id IS NOT NULL) -- three reasons this MUST
+--   NOT be a bare ``UNIQUE(game_date, team_lo, team_hi)`` (TN-6 HAZARD):
+--   1. DOUBLEHEADERS: a legitimate doubleheader is two DISTINCT real games on
+--      the same date between the same two teams. Each real game has its OWN
+--      ``game_stream_id``, so a unique index keyed on ``game_stream_id`` admits
+--      both rows -- whereas an unordered-pair-on-date UNIQUE would wrongly
+--      reject the second game. The existing start_time/score doubleheader
+--      disambiguation in ``_find_duplicate_game`` is preserved unchanged.
+--   2. TRACKED / PUBLIC-OPPONENT GAMES: these often have NO ``game_stream_id``
+--      (it is NULL). The partial predicate leaves those rows UNINDEXED, so the
+--      backstop does not apply and the existing SELECT-then-INSERT dedup path
+--      continues to govern them (no behavior change).
+--   3. CROSS-STORY NON-CONFLICT: E-253-04 (game_date correction) and E-253-06
+--      (0-0 score coercion) also touch the game-dedup natural key; gating this
+--      index on ``game_stream_id IS NOT NULL`` (rather than on date/teams/score)
+--      is what keeps this backstop from colliding with those changes. The
+--      gating is load-bearing.
+--
+-- RELATIONSHIP TO _find_duplicate_game: this index is a BACKSTOP, not a
+--   replacement. ``_find_duplicate_game`` remains the primary dedup path and
+--   redirects a detected cross-perspective duplicate to the canonical
+--   ``game_id`` (so ``_upsert_game``'s ``ON CONFLICT(game_id) DO UPDATE`` then
+--   updates the existing row -- no new row, no index violation). The index only
+--   fires when the SELECT-then-INSERT path is defeated by the race and two
+--   DISTINCT ``game_id`` rows would carry the same ``game_stream_id``.
+--   ``ON CONFLICT(game_id)`` does NOT swallow a ``game_stream_id`` UNIQUE
+--   violation (different conflict target), so the racing INSERT surfaces as an
+--   IntegrityError -- exactly the intended backstop.
+--
+-- FK SAFETY / RUNNER: a partial UNIQUE INDEX is a plain schema-object create
+--   with no FK involvement; it applies cleanly under the E-253-03 runner, which
+--   wraps this body in ``PRAGMA foreign_keys=ON; BEGIN; ... COMMIT;`` via a
+--   single executescript(). Do NOT add BEGIN/COMMIT/PRAGMA here.
+--
+-- IDEMPOTENCY: ``CREATE UNIQUE INDEX IF NOT EXISTS`` is re-run safe; the runner
+--   also applies each file exactly once (tracked by filename in _migrations).
+--
+-- OPERATOR NOTE: if live data already contains two rows sharing one non-null
+--   ``game_stream_id`` (a duplicate the pre-backstop race could have created),
+--   this CREATE UNIQUE INDEX will fail to apply -- correctly surfacing a real
+--   duplicate for cleanup. Distinct real games never share a ``game_stream_id``,
+--   so such a failure indicates a genuine duplicate, not a false positive.
+-- ---------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_games_stream_id_unique
+    ON games(game_stream_id)
+    WHERE game_stream_id IS NOT NULL;

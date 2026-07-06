@@ -56,6 +56,7 @@ from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import is_gc_uuid
+from src.util.timezone import derive_local_date, get_operating_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,39 @@ _PITCHING_EXTRAS: dict[str, str] = {
 # HR allowed is genuinely not in the boxscore pitching extras (confirmed by E-100).
 _PITCHING_EXTRAS_SKIP_DEBUG = {"HR"}
 
+# Stat-key drift canary core sets (E-253-06 / TN-7). Single-sourced from the
+# parse dicts above so adding/removing a main key makes the canary track it
+# automatically -- NEVER a fresh parallel hardcoded list. These are the keys the
+# loader reads out of each row's ``stats`` dict; pitching additionally reads the
+# always-present ``IP`` literal (converted to ip_outs, so not in _PITCHING_MAIN).
+# Verified invariant across 46 real boxscores (941 batting, 207 pitching rows):
+# every core key is present in every row. When a core key is absent from ALL
+# rows of a NON-EMPTY group, that is the signature of a GameChanger field rename
+# silently zeroing the stat for every player -- the canary fires (group-grain).
+# Extras are DELIBERATELY excluded: they live in the sparse ``extra[]`` array,
+# not the per-row ``stats`` dict, and are optionally-absent by design.
+_BATTING_CANARY_KEYS: tuple[str, ...] = tuple(_BATTING_MAIN)
+_PITCHING_CANARY_KEYS: tuple[str, ...] = (*_PITCHING_MAIN, "IP")
+
 # Sentinel opponent name used when an opponent is truly unresolvable (no stat
 # block, no UUID, no schedule name). Resolving to a distinct sentinel row -- not
 # ``own_team_id`` -- is the home != away invariant guard (E-245-04 / TN-6).
 _UNKNOWN_OPPONENT_NAME = "Unknown Opponent"
+
+
+def _opt_int(value: object) -> int | None:
+    """Coerce a score-like value to int, preserving MISSING as ``None``.
+
+    A present ``0`` (a genuinely scoreless line) stays ``0``; only an absent or
+    blank value becomes ``None``. This is the fix for the 0-0 coercion footgun
+    (E-253-06 / audit LOW): flattening missing scores to ``0`` lets two distinct
+    scoreless games on the same date/team-pair collapse under the natural-key
+    dedup (both look like the same 0-0 game). ``None`` scores instead leave the
+    dedup with no score signal, so distinct games stay distinct rows.
+    """
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +163,10 @@ class GameSummaryEntry:
         event_id: Canonical game UUID (games.game_id PK).
         game_stream_id: Boxscore file key (used as filename).
         home_away: 'home', 'away', or None.
-        owning_team_score: Score for the team that owns the game-summaries file.
-        opponent_team_score: Score for the opponent team.
+        owning_team_score: Score for the team that owns the game-summaries file,
+            or None when the summary omits score data (NOT coerced to 0 -- see
+            :func:`_opt_int`).
+        opponent_team_score: Score for the opponent team, or None when absent.
         opponent_id: UUID of the opponent team.
         last_scoring_update: ISO 8601 timestamp string.
         start_time: ISO 8601 datetime string from schedule/public endpoint, or None.
@@ -144,8 +176,8 @@ class GameSummaryEntry:
     event_id: str
     game_stream_id: str
     home_away: str | None
-    owning_team_score: int
-    opponent_team_score: int
+    owning_team_score: int | None
+    opponent_team_score: int | None
     opponent_id: str
     last_scoring_update: str
     start_time: str | None = None
@@ -497,8 +529,8 @@ class GameLoader:
             event_id=str(event_id),
             game_stream_id=str(game_stream_id),
             home_away=record.get("home_away"),
-            owning_team_score=int(record.get("owning_team_score") or 0),
-            opponent_team_score=int(record.get("opponent_team_score") or 0),
+            owning_team_score=_opt_int(record.get("owning_team_score")),
+            opponent_team_score=_opt_int(record.get("opponent_team_score")),
             opponent_id=str(game_stream.get("opponent_id") or ""),
             last_scoring_update=str(record.get("last_scoring_update") or ""),
         )
@@ -590,8 +622,22 @@ class GameLoader:
             summary, own_team_id, opp_team_id
         )
 
-        # Game date from last_scoring_update (YYYY-MM-DD prefix).
-        game_date = summary.last_scoring_update[:10] if summary.last_scoring_update else "1900-01-01"
+        # Game date: the venue-LOCAL calendar date of the scoring instant
+        # (CE-3 / E-253-04). Deriving it from the raw UTC prefix files an
+        # evening game under the next UTC day, skewing rest math, the 7-day
+        # window, and cross-perspective dedup at UTC midnight. Use the game's
+        # own timezone when present, else the operating-tz seam -- bridging the
+        # seam's ZoneInfo to its IANA name via ``.key`` (derive_local_date takes
+        # a NAME, never a ZoneInfo object). Falls back to the old UTC slice only
+        # when the instant is absent/unparseable.
+        if summary.last_scoring_update:
+            tz_name = summary.timezone or get_operating_timezone().key
+            game_date = (
+                derive_local_date(summary.last_scoring_update, tz_name)
+                or summary.last_scoring_update[:10]
+            )
+        else:
+            game_date = "1900-01-01"
 
         # Pre-load dedup check: if a game already exists for this date and
         # team pair (in either home/away order), reuse the existing game_id
@@ -913,7 +959,13 @@ class GameLoader:
         # Build extras lookup: {player_id: {stat_name: value}}
         extras = self._build_extras_index(group.get("extra") or [])
 
-        for stat_row in group.get("stats") or []:
+        stat_rows: list[dict] = group.get("stats") or []
+        result.errors += self._canary_stat_key_drift(
+            stat_rows, _BATTING_CANARY_KEYS,
+            group_label="batting", team_id=team_id, game_id=game_id,
+        )
+
+        for stat_row in stat_rows:
             player_id = stat_row.get("player_id")
             if not player_id:
                 logger.error(
@@ -989,7 +1041,13 @@ class GameLoader:
 
         extras = self._build_extras_index(group.get("extra") or [])
 
-        for idx, stat_row in enumerate(group.get("stats") or [], start=1):
+        stat_rows: list[dict] = group.get("stats") or []
+        result.errors += self._canary_stat_key_drift(
+            stat_rows, _PITCHING_CANARY_KEYS,
+            group_label="pitching", team_id=team_id, game_id=game_id,
+        )
+
+        for idx, stat_row in enumerate(stat_rows, start=1):
             player_id = stat_row.get("player_id")
             if not player_id:
                 logger.error(
@@ -1050,6 +1108,45 @@ class GameLoader:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _canary_stat_key_drift(
+        self,
+        stat_rows: list[dict],
+        core_keys: tuple[str, ...],
+        *,
+        group_label: str,
+        team_id: int,
+        game_id: str,
+    ) -> int:
+        """Stat-key drift canary (E-253-06 / TN-7): return 1 on fire, else 0.
+
+        Fires at GROUP grain (never per-row) when a core key is absent from the
+        per-row ``stats`` dict of ALL rows in a NON-EMPTY group -- the signature
+        of a GameChanger field rename that would silently zero the stat for
+        every player on the team. ``verify-aggregates`` cannot catch this because
+        both perspectives share the same corrupted source. The returned ``1`` is
+        the ``LoadResult.errors`` increment the caller adds -- a hard-fail signal
+        the future E-245 reconciliation scoreboard can consume (AC-4).
+
+        The group is still loaded (a renamed key is unreadable regardless of what
+        we do here); the point is that the corruption is now LOUD (an ERROR +
+        ``errors`` increment) instead of silently loading zeros. Extras are NOT
+        checked: they live in the sparse ``extra[]`` array, not the per-row
+        ``stats`` dict, and are optionally-absent by design (AC-2).
+        """
+        if not stat_rows:
+            return 0
+        per_row_stats = [row.get("stats") or {} for row in stat_rows]
+        drifted = [k for k in core_keys if all(k not in s for s in per_row_stats)]
+        if not drifted:
+            return 0
+        logger.error(
+            "Stat-key drift canary FIRED for %s group (game %s team %s): core "
+            "key(s) %s absent from the stats dict of ALL %d row(s) -- likely a "
+            "GameChanger field rename silently zeroing the stat for every player.",
+            group_label, game_id, team_id, sorted(drifted), len(per_row_stats),
+        )
+        return 1
 
     def _build_extras_index(
         self, extra_list: list[dict]
@@ -1274,8 +1371,8 @@ class GameLoader:
         game_date: str,
         home_team_id: int,
         away_team_id: int,
-        home_score: int,
-        away_score: int,
+        home_score: int | None,
+        away_score: int | None,
         game_stream_id: str,
         start_time: str | None = None,
         timezone: str | None = None,
@@ -1287,8 +1384,9 @@ class GameLoader:
             game_date: ISO 8601 date string.
             home_team_id: INTEGER PK of the home team.
             away_team_id: INTEGER PK of the away team.
-            home_score: Final home score.
-            away_score: Final away score.
+            home_score: Final home score, or None when the summary omits it
+                (stored as NULL -- never coerced to 0, per E-253-06).
+            away_score: Final away score, or None when the summary omits it.
             game_stream_id: Stream ID from game-summaries (boxscore file key).
             start_time: ISO 8601 datetime string from schedule/public endpoint.
             timezone: IANA timezone identifier (e.g., ``America/Chicago``).
@@ -1328,7 +1426,8 @@ class GameLoader:
              home_score, away_score, game_stream_id, start_time, timezone),
         )
         logger.debug(
-            "Upserted game %s: %s vs %s (%d-%d) on %s",
+            # %s (not %d): home/away score may be None for a score-less summary.
+            "Upserted game %s: %s vs %s (%s-%s) on %s",
             game_id,
             home_team_id,
             away_team_id,

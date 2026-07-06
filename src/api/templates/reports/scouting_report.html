@@ -604,7 +604,14 @@
 {% endif %}
 
 {# ---- LLM Narrative (Tier 2) ---- #}
-{% if enriched_prediction %}
+{# E-253-07 / TN-2: scoped to the NON-SUPPRESS branch -- the narrative must
+   NEVER render under a suppressed prediction (the softened "not enough games"
+   copy stands alone). This is the template half of the two-part suppress gate;
+   the call-site half (_run_tier2_enrichment) already yields enriched_prediction
+   is None on suppress, so this condition is belt-and-suspenders. Kept in place
+   (not physically relocated above the rest/bullpen blocks) so the non-suppress
+   render order is byte-identical to before (AC-4). #}
+{% if enriched_prediction and starter_prediction and starter_prediction.confidence != "suppress" %}
 <div class="starter-narrative">
   <div class="starter-narrative-header">Scouting Analysis</div>
   <div class="starter-narrative-text">{{ enriched_prediction.narrative | e }}</div>

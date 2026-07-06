@@ -4,7 +4,7 @@
 [E-253: Data-Integrity & Deletion Safety](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a GameChanger field rename that silently zeroes a stat for every player will surface as a load ERROR instead of passing verification, and missing game-summary scores will no longer be coerced to 0-0 in a way that lets a scoreless doubleheader collapse into one game. Both are ingestion-integrity guards in the game loader.

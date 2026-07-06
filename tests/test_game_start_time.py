@@ -263,6 +263,130 @@ class TestGameLoaderPreservesStartTime:
 
 
 # ---------------------------------------------------------------------------
+# E-253-04: game_date is the venue-LOCAL calendar date of the scoring instant
+# ---------------------------------------------------------------------------
+
+
+def _load_summary(
+    db: sqlite3.Connection,
+    own_team_ref: TeamRef,
+    tmp_path: Path,
+    *,
+    game_id: str,
+    stream_id: str,
+    last_scoring_update: str,
+    timezone: str | None,
+) -> str:
+    """Load a minimal boxscore for one summary and return the stored game_date."""
+    boxscore = {
+        "OwnTeamSlug": {
+            "stats": [{"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "SO": 1}],
+            "extra": [],
+            "lineup": [],
+        },
+        "opp-uuid-5678": {
+            "stats": [{"AB": 3, "R": 0, "H": 1, "RBI": 0, "BB": 1, "SO": 2}],
+            "extra": [],
+            "lineup": [],
+        },
+    }
+    bs_path = tmp_path / f"{stream_id}.json"
+    bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
+    summary = GameSummaryEntry(
+        event_id=game_id,
+        game_stream_id=stream_id,
+        home_away="home",
+        owning_team_score=1,
+        opponent_team_score=0,
+        opponent_id="opp-uuid-5678",
+        last_scoring_update=last_scoring_update,
+        start_time=last_scoring_update,
+        timezone=timezone,
+    )
+    GameLoader(db=db, owned_team_ref=own_team_ref).load_file(bs_path, summary)
+    db.commit()
+    row = db.execute(
+        "SELECT game_date FROM games WHERE game_id = ?", (game_id,)
+    ).fetchone()
+    return row[0]
+
+
+class TestGameDateLocalDerivation:
+    """E-253-04: an evening game must file under the venue-local date, not the
+    next UTC day (the old ``last_scoring_update[:10]`` slice)."""
+
+    def test_evening_game_uses_local_date_not_next_utc_day(
+        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path
+    ) -> None:
+        """AC-2: 2026-06-21T03:00Z == 2026-06-20 22:00 America/Chicago (CDT).
+
+        The UTC prefix is ``2026-06-21``; the correct local date is
+        ``2026-06-20``.
+        """
+        game_date = _load_summary(
+            db, own_team_ref, tmp_path,
+            game_id="game-eve", stream_id="stream-eve",
+            last_scoring_update="2026-06-21T03:00:00.000Z",
+            timezone="America/Chicago",
+        )
+        assert game_date == "2026-06-20", (
+            "evening game must file under the local calendar date, not the "
+            "next UTC day"
+        )
+
+    def test_missing_timezone_falls_back_to_operating_seam(
+        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """AC-3: no game timezone -> operating-tz seam (default America/Chicago).
+
+        The seam returns a ZoneInfo; the loader bridges it to the IANA name via
+        ``.key`` before calling ``derive_local_date`` (never passes the object).
+        With no OPERATING_TIMEZONE set the default (America/Chicago) applies, so
+        the same evening instant still resolves to the prior local day.
+        """
+        monkeypatch.delenv("OPERATING_TIMEZONE", raising=False)
+        game_date = _load_summary(
+            db, own_team_ref, tmp_path,
+            game_id="game-noz", stream_id="stream-noz",
+            last_scoring_update="2026-06-21T03:00:00.000Z",
+            timezone=None,
+        )
+        assert game_date == "2026-06-20"
+
+    def test_operating_timezone_env_override_applies_on_fallback(
+        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """AC-3: the fallback honors an OPERATING_TIMEZONE override (proves the
+        seam is consulted, not a hard-coded default). 2026-06-21T04:30Z falls
+        between NY midnight (04:00Z, EDT UTC-4) and Chicago midnight (05:00Z,
+        CDT UTC-5): NY has already rolled to 2026-06-21 while Chicago is still
+        2026-06-20. Under the NY override the date must be 2026-06-21.
+        """
+        monkeypatch.setenv("OPERATING_TIMEZONE", "America/New_York")
+        game_date = _load_summary(
+            db, own_team_ref, tmp_path,
+            game_id="game-ny", stream_id="stream-ny",
+            last_scoring_update="2026-06-21T04:30:00.000Z",
+            timezone=None,
+        )
+        assert game_date == "2026-06-21"
+
+    def test_absent_instant_falls_back_to_sentinel(
+        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path
+    ) -> None:
+        """An empty last_scoring_update preserves the '1900-01-01' sentinel."""
+        game_date = _load_summary(
+            db, own_team_ref, tmp_path,
+            game_id="game-none", stream_id="stream-none",
+            last_scoring_update="",
+            timezone="America/Chicago",
+        )
+        assert game_date == "1900-01-01"
+
+
+# ---------------------------------------------------------------------------
 # AC-1: Migration file exists with correct DDL
 # ---------------------------------------------------------------------------
 

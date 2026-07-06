@@ -278,7 +278,14 @@ def test_game_record_has_correct_season_id(db: sqlite3.Connection, tmp_path: Pat
 
 
 def test_game_record_has_correct_game_date(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-1: game_date is extracted from last_scoring_update (YYYY-MM-DD prefix)."""
+    """AC-1: game_date is the venue-LOCAL calendar date of last_scoring_update.
+
+    Since E-253-04 the loader derives game_date via ``derive_local_date`` (the
+    game's timezone, else the operating-tz seam) rather than slicing the raw UTC
+    ``last_scoring_update[:10]`` prefix. This fixture's afternoon-Chicago instant
+    resolves to the same local day (2025-05-10), so the asserted value is
+    unchanged.
+    """
     boxscore = _make_boxscore()
     team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
@@ -2496,3 +2503,221 @@ def test_load_payload_commits_per_call() -> None:
     # After a per-call commit the connection has no pending transaction.
     assert db.in_transaction is False
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# E-253-06: Stat-key drift canary (TN-7)
+# ---------------------------------------------------------------------------
+
+
+class TestStatKeyDriftCanary:
+    """The canary ERRORs when a core stat key is absent from ALL rows of a
+    non-empty group -- the signature of a GameChanger field rename that would
+    silently zero the stat for every player. Group-grain, never per-row."""
+
+    def test_normal_boxscore_does_not_fire(self) -> None:
+        """AC-2: a realistic boxscore (all core keys present) -> no canary error."""
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        result = loader.load_payload(_make_boxscore(), _make_summary())
+        assert result.errors == 0
+        db.close()
+
+    def test_renamed_batting_core_key_in_all_rows_fires(self) -> None:
+        """AC-1: 'AB' renamed (here: absent) in ALL batting rows -> one error.
+
+        Simulates GC renaming the at-bats field: the loader-read ``AB`` key is
+        gone from every row's ``stats`` dict (the value has moved under a name
+        the parser does not read), so AB would silently load 0 for everyone.
+        """
+        drifted = [
+            {
+                "player_id": _PLAYER_OWN_1,
+                # AB renamed away -> the loader-read key is absent; value now
+                # sits under a name the parser ignores.
+                "stats": {"AtBats": 3, "R": 1, "H": 2, "RBI": 1, "BB": 1, "SO": 0},
+            },
+            {
+                "player_id": _PLAYER_OWN_P1,
+                "stats": {"AtBats": 4, "R": 0, "H": 1, "RBI": 0, "BB": 0, "SO": 1},
+            },
+        ]
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        result = loader.load_payload(
+            _make_boxscore(own_batting=drifted), _make_summary()
+        )
+        # Group-grain: exactly one error for the own-team batting group.
+        assert result.errors == 1
+        db.close()
+
+    def test_renamed_pitching_core_key_in_all_rows_fires(self) -> None:
+        """AC-1: 'IP' absent from ALL pitching rows -> one error.
+
+        IP is a canary core key (read separately from _PITCHING_MAIN, always
+        present per row); its disappearance must fire.
+        """
+        drifted = [
+            {
+                "player_id": _PLAYER_OWN_P1,
+                # IP renamed away; the remaining _PITCHING_MAIN keys are intact.
+                "stats": {"InningsPitched": 5, "H": 3, "R": 2, "ER": 2, "BB": 1, "SO": 7},
+            }
+        ]
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        result = loader.load_payload(
+            _make_boxscore(own_pitching=drifted), _make_summary()
+        )
+        assert result.errors == 1
+        db.close()
+
+    def test_core_key_present_in_one_row_does_not_fire(self) -> None:
+        """AC-2: 'AB' present in >=1 row (absent in another) -> no canary error.
+
+        The canary is group-grain absence: a partially-missing key (a single
+        odd row) is NOT drift -- only absence from EVERY row is.
+        """
+        mixed = [
+            {
+                "player_id": _PLAYER_OWN_1,
+                "stats": {"AB": 3, "R": 1, "H": 2, "RBI": 1, "BB": 1, "SO": 0},
+            },
+            {
+                "player_id": _PLAYER_OWN_P1,
+                # AB absent here only -> still present in the group.
+                "stats": {"R": 0, "H": 1, "RBI": 0, "BB": 0, "SO": 1},
+            },
+        ]
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        result = loader.load_payload(_make_boxscore(own_batting=mixed), _make_summary())
+        assert result.errors == 0
+        db.close()
+
+    def test_absent_extra_in_all_rows_does_not_fire(self) -> None:
+        """AC-2: an extra ('2B') absent from every row must NOT fire the canary.
+
+        Extras live in the separate sparse ``extra[]`` array, not the per-row
+        ``stats`` dict, and are optionally-absent by design (no doubles all game
+        -> 2B absent everywhere). The default boxscore has empty batting extras,
+        so 2B is absent for all players; the canary must stay silent.
+        """
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        box = _make_boxscore()  # batting_extra defaults to []
+        # Sanity: no batting row's stats dict contains an extra like 2B.
+        own_group = box[_OWN_TEAM_SLUG]["groups"][0]
+        assert all("2B" not in r["stats"] for r in own_group["stats"])
+        result = loader.load_payload(box, _make_summary())
+        assert result.errors == 0
+        db.close()
+
+    def test_empty_group_does_not_fire(self) -> None:
+        """AC-1 scope: an EMPTY stat group is not drift (no rows to be missing
+        a key) -> no canary error."""
+        db = _fresh_db()
+        loader = _make_loader(db)
+        ensure_season_row(db, loader._season_id)
+        box = _make_boxscore(own_batting=[], own_pitching=[])
+        result = loader.load_payload(box, _make_summary())
+        assert result.errors == 0
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# E-253-06: missing scores are NOT coerced to 0-0 (scoreless doubleheader)
+# ---------------------------------------------------------------------------
+
+
+class TestMissingScoreNoCoercion:
+    """Missing game-summary scores must not flatten to 0-0 and collapse two
+    distinct scoreless games into one row under the natural-key dedup."""
+
+    def test_missing_scores_stored_as_null(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        """A summary omitting scores stores NULL home/away score, not 0."""
+        summaries = [
+            {
+                "event_id": _EVENT_ID,
+                "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
+                "home_away": "home",
+                # owning_team_score / opponent_team_score deliberately omitted.
+                "last_scoring_update": "2025-05-10T19:39:58.788Z",
+            }
+        ]
+        team_dir = _write_team_dir(
+            tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: _make_boxscore()}
+        )
+        _make_loader(db).load_all(team_dir)
+
+        row = db.execute(
+            "SELECT home_score, away_score FROM games WHERE game_id = ?", (_EVENT_ID,)
+        ).fetchone()
+        assert row == (None, None), "missing scores must be NULL, not coerced to 0"
+
+    def test_genuine_zero_score_preserved(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        """A real 0 score (present, value 0) stays 0 -- only MISSING becomes NULL."""
+        summaries = [
+            {
+                "event_id": _EVENT_ID,
+                "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
+                "home_away": "home",
+                "owning_team_score": 0,
+                "opponent_team_score": 0,
+                "last_scoring_update": "2025-05-10T19:39:58.788Z",
+            }
+        ]
+        team_dir = _write_team_dir(
+            tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: _make_boxscore()}
+        )
+        _make_loader(db).load_all(team_dir)
+
+        row = db.execute(
+            "SELECT home_score, away_score FROM games WHERE game_id = ?", (_EVENT_ID,)
+        ).fetchone()
+        assert row == (0, 0), "a genuine 0-0 must be preserved, not nulled"
+
+    def test_scoreless_doubleheader_stays_two_rows(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        """AC-3: two same-date, same-team games both missing scores (and no
+        start_time) do NOT collapse -- they remain two games rows.
+
+        Pre-fix, both coerced to 0-0 with equal score totals, so the natural-key
+        dedup treated the second as a duplicate of the first and redirected it.
+        """
+        summaries = [
+            {
+                "event_id": "dh-game-1",
+                "game_stream": {"id": "dh-stream-1", "opponent_id": _OPP_TEAM_ID},
+                "home_away": "home",
+                # No scores, no start_time -> the only pre-fix distinguishing
+                # signal (score total) was the false 0-0 collapse.
+                "last_scoring_update": "2025-05-10T13:00:00.000Z",
+            },
+            {
+                "event_id": "dh-game-2",
+                "game_stream": {"id": "dh-stream-2", "opponent_id": _OPP_TEAM_ID},
+                "home_away": "home",
+                "last_scoring_update": "2025-05-10T18:00:00.000Z",
+            },
+        ]
+        team_dir = _write_team_dir(
+            tmp_path,
+            summaries=summaries,
+            boxscores={
+                "dh-stream-1": _make_boxscore(),
+                "dh-stream-2": _make_boxscore(),
+            },
+        )
+        _make_loader(db).load_all(team_dir)
+
+        game_ids = {
+            r[0] for r in db.execute("SELECT game_id FROM games").fetchall()
+        }
+        assert game_ids == {"dh-game-1", "dh-game-2"}, (
+            "a scoreless doubleheader must remain two rows, not collapse to one"
+        )

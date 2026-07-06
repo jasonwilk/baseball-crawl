@@ -1010,13 +1010,17 @@ class TestDedupTeamPlayers:
 
         call_count = 0
 
-        def failing_merge(db, canonical, duplicate, *, manage_transaction=True):
+        def failing_merge(
+            db, canonical, duplicate, *, manage_transaction=True,
+            recompute_scopes=None,
+        ):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("Simulated merge failure")
             return original_merge(
-                db, canonical, duplicate, manage_transaction=manage_transaction
+                db, canonical, duplicate, manage_transaction=manage_transaction,
+                recompute_scopes=recompute_scopes,
             )
 
         with patch("src.db.player_dedup.merge_player_pair", side_effect=failing_merge):
@@ -1905,5 +1909,170 @@ class TestDedupPlanShape:
         fork = plan.refused_forks[0]
         assert sorted(fork.terminal_names) == ["Aaron", "Abel"]
         assert {m.player_id for m in fork.members} == {"p-a", "p-aaron", "p-abel"}
+
+
+# ---------------------------------------------------------------------------
+# E-253-08 AC-1: accented-name (diacritic) duplicate detection
+# ---------------------------------------------------------------------------
+
+
+class TestAccentedNameDetection:
+    """Detection folds diacritics (via _fold_name), matching the planner, so a
+    José/Jose duplicate is caught -- the ASCII-only COLLATE NOCASE missed it."""
+
+    def test_diacritic_only_difference_is_detected(self, db: sqlite3.Connection) -> None:
+        """AC-1: 'José García' and 'Jose Garcia' on the same roster are a pair."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-accent", "José", "García")
+        _seed_player(db, "p-plain", "Jose", "Garcia")
+        _seed_roster(db, 1, "p-accent", "2026")
+        _seed_roster(db, 1, "p-plain", "2026")
+
+        pairs = find_duplicate_players(db, season_id="2026")
+        assert len(pairs) == 1
+        assert {pairs[0].canonical_player_id, pairs[0].duplicate_player_id} == {
+            "p-accent", "p-plain",
+        }
+
+    def test_accented_pair_collapses_not_forks(self, db: sqlite3.Connection) -> None:
+        """AC-1/AC-4: the folded names are equal, so the planner sees ONE
+        terminal name and collapses (does not misclassify as a fork)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-accent", "José", "García")
+        _seed_player(db, "p-plain", "Jose", "Garcia")
+        _seed_roster(db, 1, "p-accent", "2026")
+        _seed_roster(db, 1, "p-plain", "2026")
+
+        plan = plan_player_dedup(db, team_id=1, season_id="2026")
+        assert len(plan.collapses) == 1
+        assert len(plan.refused_forks) == 0
+
+
+# ---------------------------------------------------------------------------
+# E-253-08 AC-2: LIKE-metacharacter first names create no spurious edges
+# ---------------------------------------------------------------------------
+
+
+class TestLikeMetacharacterDetection:
+    """A first name containing a LIKE wildcard ('%' or '_') must be matched
+    literally -- the old `LIKE (first_name || '%')` treated it as a pattern,
+    welding a legitimate collapse into a refused fork."""
+
+    def test_underscore_wildcard_creates_no_spurious_edge(self, db: sqlite3.Connection) -> None:
+        """AC-2: 'A_' does not falsely prefix-match 'Alex' (or 'Al')."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-wild", "A_", "Smith")
+        _seed_player(db, "p-alex", "Alex", "Smith")
+        _seed_roster(db, 1, "p-wild", "2026")
+        _seed_roster(db, 1, "p-alex", "2026")
+
+        pairs = find_duplicate_players(db, season_id="2026")
+        # Under the old unescaped LIKE, 'A_%' would match 'Alex' -> a false pair.
+        assert pairs == []
+
+    def test_wildcard_does_not_weld_legit_collapse_into_fork(self, db: sqlite3.Connection) -> None:
+        """AC-2/AC-4: a legitimate Al->Alex collapse is NOT sabotaged by a
+        wildcard-bearing 'A_' teammate falsely joining the component."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-al", "Al", "Smith")
+        _seed_player(db, "p-alex", "Alex", "Smith")
+        _seed_player(db, "p-wild", "A_", "Smith")
+        _seed_roster(db, 1, "p-al", "2026")
+        _seed_roster(db, 1, "p-alex", "2026")
+        _seed_roster(db, 1, "p-wild", "2026")
+
+        plan = plan_player_dedup(db, team_id=1, season_id="2026")
+        # Al->Alex collapses cleanly; 'A_' is isolated (no edges), no fork.
+        assert len(plan.collapses) == 1
+        assert plan.collapses[0].canonical_player_id == "p-alex"
+        assert [d.player_id for d in plan.collapses[0].duplicates] == ["p-al"]
+        assert len(plan.refused_forks) == 0
+
+
+# ---------------------------------------------------------------------------
+# E-253-08 AC-3: load-path dedup preserves boxscore_only rows in scopes the
+# end-of-load recompute does not rebuild
+# ---------------------------------------------------------------------------
+
+
+class TestUnrebuiltScopeDeletionGuard:
+    """The load path (recompute_aggregates=False) recomputes only the loaded
+    (team_id, season_id); merging must not delete a merged human's canonical
+    boxscore_only rows in OTHER scopes that nothing would rebuild (AC-3)."""
+
+    @staticmethod
+    def _insert_season_batting(db, player_id, team_id, season_id, *, ab, h):
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, ab, h) "
+            "VALUES (?, ?, ?, 'boxscore_only', ?, ?)",
+            (player_id, team_id, season_id, ab, h),
+        )
+
+    def test_load_path_preserves_boxscore_only_in_unrebuilt_scope(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-3: dedup on (team 1, 2026) must not drop the canonical's 2025
+        boxscore_only row (a scope the caller will NOT recompute)."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_season(db, "2026")
+        _seed_season(db, "2025")
+        _seed_player(db, "p-oliver", "Oliver", "Holbein")
+        _seed_player(db, "p-o", "O", "Holbein")
+        _seed_roster(db, 1, "p-oliver", "2026")
+        _seed_roster(db, 1, "p-o", "2026")
+        # Canonical boxscore_only aggregate in a DIFFERENT season (2025) -- the
+        # load-path recompute (scoped to 2026) will not rebuild it.
+        self._insert_season_batting(db, "p-oliver", 1, "2025", ab=30, h=12)
+        # And an in-scope 2026 boxscore_only row (deleted + normally rebuilt).
+        self._insert_season_batting(db, "p-oliver", 1, "2026", ab=15, h=6)
+
+        # Load-path invocation: recompute_aggregates=False activates the scope
+        # guard (the ScoutingLoader recomputes only 2026 afterwards).
+        dedup_team_players(
+            db, 1, "2026", manage_transaction=True, recompute_aggregates=False,
+        )
+
+        # AC-3: the 2025 (un-rebuilt) canonical row SURVIVES. Pre-fix, the
+        # unscoped boxscore_only DELETE dropped it -> silent data loss.
+        surviving = db.execute(
+            "SELECT ab, h FROM player_season_batting "
+            "WHERE player_id = 'p-oliver' AND team_id = 1 AND season_id = '2025'"
+        ).fetchone()
+        assert surviving == (30, 12)
+        # The in-scope 2026 boxscore_only row was deleted (caller rebuilds it).
+        in_scope = db.execute(
+            "SELECT 1 FROM player_season_batting WHERE player_id = 'p-oliver' "
+            "AND team_id = 1 AND season_id = '2026' "
+            "AND stat_completeness = 'boxscore_only'"
+        ).fetchone()
+        assert in_scope is None
+
+    def test_cli_path_deletes_all_boxscore_only(self, db: sqlite3.Connection) -> None:
+        """Contrast: recompute_aggregates=True (CLI) recomputes ALL affected
+        scopes, so delete-all is safe -- the 2025 boxscore_only row is dropped
+        and (here, with no 2025 per-game rows) not rebuilt, matching the prior
+        behavior for the CLI path. Proves the guard is load-path-only."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_season(db, "2026")
+        _seed_season(db, "2025")
+        _seed_player(db, "p-oliver", "Oliver", "Holbein")
+        _seed_player(db, "p-o", "O", "Holbein")
+        _seed_roster(db, 1, "p-oliver", "2026")
+        _seed_roster(db, 1, "p-o", "2026")
+        self._insert_season_batting(db, "p-oliver", 1, "2025", ab=30, h=12)
+
+        dedup_team_players(
+            db, 1, "2026", manage_transaction=True, recompute_aggregates=True,
+        )
+
+        # CLI path: delete-all (None scopes) -> the 2025 boxscore_only row is
+        # dropped (its scope is recomputed from per-game rows, of which there
+        # are none here).
+        row = db.execute(
+            "SELECT 1 FROM player_season_batting WHERE player_id = 'p-oliver' "
+            "AND season_id = '2025' AND stat_completeness = 'boxscore_only'"
+        ).fetchone()
+        assert row is None
 
 
