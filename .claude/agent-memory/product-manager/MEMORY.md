@@ -3,8 +3,8 @@
 This is an INDEX. Detailed per-epic history lives in [archived-epics.md](archived-epics.md); reusable patterns in [lessons-learned.md](lessons-learned.md); ideas in `/.project/ideas/README.md`. Keep this file lean (< 17KB) — move detail to topic files, one line per entry here.
 
 ## Numbering State
-- **Next available epic number: E-257** (E-251 created+READY 2026-07-04 = CE-1; E-252–E-256 created as DRAFT stubs 2026-07-04 = CE-2–CE-6 from the platform audit)
-- **Next available idea number: IDEA-100** (IDEA-097..099 created 2026-07-06 at E-252 closure: 097 team_resolver proxy/pacing posture, 098 unify prod-detection via is_production() [csrf.py], 099 broaden busy_timeout to non-triad SQLite writers; IDEA-093..096 created earlier during E-254 planning/review)
+- **Next available epic number: E-258** (E-251 created+READY 2026-07-04 = CE-1; E-252–E-256 created as DRAFT stubs 2026-07-04 = CE-2–CE-6 from the platform audit; **E-257 created as DRAFT stub 2026-07-06** = reconciliation-scoreboard productization, DE-owned, dropped-thread from E-245 closure / E-253 planning, NOT a CE item — sequence before/alongside E-256)
+- **Next available idea number: IDEA-101** (IDEA-100 created 2026-07-06 = stat_completeness guard inspect-and-narrow, from platform-audit §3 defense-held REVISIT; IDEA-097..099 created 2026-07-06 at E-252 closure: 097 team_resolver proxy/pacing posture, 098 unify prod-detection via is_production() [csrf.py], 099 broaden busy_timeout to non-triad SQLite writers; IDEA-093..096 created earlier during E-254 planning/review)
 - Memory numbers go STALE and have caused real collisions (E-229, IDEA-071). Before assigning ANY epic/story/idea number, ALWAYS glob the live dirs: `ls /epics/` `ls /.project/archive/` `ls /.project/ideas/`. Trust the filesystem, not these counters.
 
 ## Active Epics
