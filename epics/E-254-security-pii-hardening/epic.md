@@ -1,39 +1,157 @@
-# E-254: Security & PII Hardening — DRAFT STUB (audit CE-4)
+# E-254: Security & PII Hardening
 
 ## Status
-`DRAFT`
-<!-- Capture stub from the 2026-07-03 platform audit (PLATFORM-AUDIT.md, repo root, UNCOMMITTED).
-     Carries the audit's CE-4 scope, absorbed findings, size, owners, sequence. NOT refined: no stories/ACs.
-     Refine to READY before dispatch. Do NOT dispatch a DRAFT. -->
+`READY`
+<!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
+<!-- Set READY 2026-07-06 after: expert consultation (SE + api-scout) done, all stories have
+     testable ACs, internal review + Codex spec-review (2 iterations) incorporated, quality
+     checklist passed. Dispatch requires separate user authorization. -->
+
+## Review Scorecard
+Refined through three review rounds; all real findings incorporated (fix-all-real-findings), only a false-positive dismissed.
+- **Internal review (iteration 1)**: api-scout 3 (denylist gaps) — 3 ACCEPT; software-engineer 4 (login-timing, admin-sweep, staged-blob, refuse-to-start) — 4 ACCEPT; code-reviewer spec-audit 3 (F1 = same 3 denylist gaps, converged/ACCEPT; F2 `get_app_env` AC-bind — **DISMISS**, no downstream consumer; F3 scope-integrity — informational). PM self-review — 3 notes incorporated.
+- **Codex spec-review (iteration 1)**: 7 findings — **7 ACCEPT / 0 dismiss**. Plus api-scout's P1-07 review surfaced a real-PII scope tail → user **Decision A-refined** (narrow 07 + pull both minors forward + follow-up IDEA-096), and SE's sign-off added 2 folds (generate-route background-crawl mock; login-timing repeated-probe residual → IDEA-095).
+- **Codex spec-review (iteration 2)**: 3 findings — **3 ACCEPT / 0 dismiss** (test-file naming for the conflict check; admin partial-coverage framing; Story-01 stale-consumer reference).
+- **Net**: ~23 review findings across all rounds; 1 dismissal (a verified false positive); 4 ideas captured for accepted-residuals/follow-ups (IDEA-093/094/095/096); 2 user scope decisions (Expand + uncommitted sidecar; then A-refined minors-forward).
 
 ## Overview
-Make the designated safety controls actually enforce what the project believes they do, and close the auth/serving hardening gaps. The PII scanner — the sole enforcement behind "credentials MUST NEVER appear in commit history" — is case-sensitive and misses the project's own UPPERCASE credential format end-to-end; several auth and report-serving paths leak live credentials or fail open.
+Make the project's designated safety controls actually enforce what the project believes they do, and close the auth and report-serving hardening gaps surfaced by the 2026-07-03 platform audit (CE-4). The PII scanner — the sole enforcement behind "credentials MUST NEVER appear in commit history" — is case-sensitive and misses the project's own UPPERCASE credential format end-to-end, and in `--staged` mode scans the working tree rather than the blobs that actually commit. Several auth and report-serving paths leak live credentials or fail open. This epic strengthens each control and adds the missing regression coverage.
 
-## Audit Provenance
-- **CE #**: CE-4 · **Size**: M · **Owners**: software-engineer, api-scout · **Sequence**: position 6 — the scanner fix (F-H3 core) is a quick win that can be pulled forward; the rest is a coherent hardening pass.
-- **§4 scope row (verbatim)**: "PII scanner case + staged-blob fixes (F-H3), magic-link log/GET-verify fixes, endpoint-doc PII scrub (15 files), APP_ENV fail-safe, rowcount gate, cache-control, timing, options rate-limit, admin sweep test."
-- **Absorbs**: F-H3 (HIGH) + 4 medium + 7 low.
+## Background & Context
+This epic implements slice **CE-4** of the 2026-07-03 platform audit (`PLATFORM-AUDIT.md`, repo root, uncommitted). It covers all CE-4 work items — the HIGH finding (F-H3) plus the medium/low auth, serving, and doc-scrub items enumerated in the audit's §4 scope row: scanner-case + staged-blob, magic-link log + GET-verify, endpoint-doc PII scrub, APP_ENV fail-safe, passkey rowcount, cache-control, login timing, options rate-limit, and the admin sweep test. It was captured as a DRAFT stub on 2026-07-04 and refined to stories on 2026-07-06.
 
-## Absorbed Findings (one-liners copied from the audit)
-- **F-H3 (HIGH)** — PII scanner credential patterns are case-sensitive; the project's own UPPERCASE env-var credential format passes clean end-to-end (`pii_patterns.py:67`). Pasted `GC_ACCESS_TOKEN=eyJ…` commits with "[pii-scan] … 0 violations". Fix: compile with `re.IGNORECASE`; add project-specific token key names; regression tests with uppercase forms.
-- **`pii_scanner --staged` scans working-tree content, not the staged blobs that commit; staged-but-deleted files silently skipped** (`pii_scanner.py:141`). Fix: read `git show :<path>`.
-- **Magic-link URLs (live 15-min admin credentials) written to logs when Mailgun unconfigured, no production guard, fake success page** (`email.py:52`). Fix: gate the stdout fallback on `APP_ENV != 'production'`; error without the body.
-- **Magic-link verification consumes the token and issues a 7-day session on a bare GET** (`auth.py:324`) — mail-provider link scanners burn the token (lockout) and can receive a live session; raw token lands in access logs. Fix: no-side-effect GET interstitial + CSRF-protected POST consume.
-- **15 endpoint docs commit a real, identifiable 14U youth team** (full UUID, `public_id`, name/city, exact 61-29-2 record) — the api-docs rule was literally written from this data and the docs were never scrubbed. Fix: sweep all 15 files to the placeholder taxonomy (git history retains old values; this stops propagation). *(api-scout)*
-- **Cookie Secure flags + dev-bypass guard all fail open on missing/mistyped `APP_ENV`** (`auth.py:93`, LOW).
-- **Passkey registration consume ignores the DELETE rowcount, violating the single-use invariant** (`auth.py:595`, LOW).
-- **Report HTML served `Cache-Control: public, max-age=3600`, undermining revocation by up to an hour** (`reports.py:85`, LOW).
-- **Login timing reveals whether an email is registered, defeating the route's stated enumeration protection** (`auth.py:317`, LOW).
-- **Unauthenticated passkey-options endpoint allows unbounded challenge-row writes** (`auth.py:685`, LOW).
-- **Admin denial is per-route opt-in with no sweep test; all POST mutation routes lack non-admin 403 coverage** (`reports_admin.py:664`, LOW).
+**Why now**: F-H3 is the highest-severity item in this slice — the credential scanner is the last line of defense against a pasted `GC_ACCESS_TOKEN=eyJ…` entering git history, and it currently passes such a paste clean with a reassuring "[pii-scan] … 0 violations". The remaining findings are a coherent auth/serving hardening pass that shares files and test infrastructure with the scanner fix.
 
-## Non-Goals (boundary vs. adjacent epics)
-- The 15-endpoint-doc PII scrub is shared with CE-5's api-doc truth sweep — the scrub itself is scoped HERE (security); CE-5 handles the doc-ACCURACY corrections to the same files. Coordinate so one pass covers both (or sequence CE-4's scrub first).
-- Known-vulnerable dependency PINS (jinja2/starlette CVEs) → CE-6 foundations (dep refresh), not here — though the reachable starlette multipart DoS is security-relevant; note the linkage at refinement.
+**Expert consultation**:
+- **software-engineer** (design owner for the scanner, auth, and serving fixes) reviewed every finding against the live tree and provided the implementation approach and testable-AC shape folded into the Technical Notes below. Four decision points were resolved by PM (email dev-log behavior, APP_ENV normalization, login-timing approach, passkey-options cap) — see Technical Notes.
+- **api-scout** (owner of the endpoint-doc PII scrub) provides the authoritative file list and scrub target for Story E-254-07 (see TN-10).
 
-## Refinement Notes (for the future planning session)
-- Never accept infra/network controls (Cloudflare) as a substitute for app-layer fixes (`.claude/agent-memory/product-manager/feedback_csrf_cloudflare.md`) — the magic-link GET-verify fix must be app-layer.
-- api-scout owns the 15-file endpoint-doc PII scrub; software-engineer owns the scanner + auth + serving fixes.
+**Key constraint (app-layer, not infrastructure)**: Every fix here MUST be an application-layer control. Cloudflare / network controls are never an acceptable substitute for an app-layer security fix (see `.claude/agent-memory/product-manager/feedback_csrf_cloudflare.md`). The magic-link GET-verify redesign in particular is an app-layer change to the route flow, not a proxy rule.
+
+## Goals
+- The PII scanner detects the project's own UPPERCASE credential-assignment format (F-H3) and scans the actual staged blob content in `--staged` mode.
+- Magic-link credentials no longer leak: the stdout log fallback is production-guarded, and magic-link verification no longer consumes a token or issues a session on a bare, side-effect-ful GET.
+- A single canonical `is_production()` predicate governs every security-sensitive APP_ENV gate (cookie `Secure`, dev-bypass guard, email fallback), so a casing/whitespace variant can no longer silently select the insecure posture, and an unrecognized value is loud rather than silent.
+- Report HTML is served with a revocation-respecting cache policy.
+- The remaining low-severity auth gaps are closed: passkey-registration single-use enforcement, login-timing enumeration, and the unauthenticated passkey-options challenge-row flood.
+- Non-admin access to every admin mutation route is proven by a sweep test that fails closed if a future route ships without the admin gate.
+- `docs/api/` no longer commits the IDENTIFIED real identities — the identified opponent team, ALL real minor names anywhere under `docs/api/` (the highest-sensitivity class, pulled forward per the user decision), the operator's own-program identity, and the operator's name — verified by the enumerated byte-gate (per TN-10). (Adult opponent/venue/tournament names + the bulk unredacted-UUID tail across the rest of `docs/api/` are a deliberate follow-up, IDEA-096, not this epic.)
+
+## Non-Goals
+- **Doc-accuracy corrections to the endpoint docs** (wrong schema shapes, count/duplicate fixes) — those belong to CE-5 / E-255 (the API-doc truth sweep). Story E-254-07 scrubs identifying VALUES to placeholders only; it does not correct factual schema/behavior content (TN-10).
+- **Vulnerable dependency pins** (jinja2 / starlette CVEs, including the reachable starlette multipart DoS) → CE-6 foundations (dependency refresh), not here. Noted as a linkage only.
+- **Fully removing the raw magic-link token from access logs** — the GET URL still carries the token after this epic; eliminating that requires fragment/JS delivery and is captured as IDEA-093 (see Open Questions).
+- **Router-level admin dependency refactor** — the E-254 deliverable is the sweep test; the `Depends`-on-router defense-in-depth refactor is captured as IDEA-094.
+- **Systematic `docs/api/` PII tail** — the ADULT opponent/venue/tournament names and the bulk unredacted real-UUID tail across ~30 endpoint docs OUTSIDE E-254-07's audited scope. E-254-07 pulls all real MINOR names forward (highest-sensitivity) but leaves the adult/UUID tail to a follow-up: IDEA-096 (a blanket UUID→placeholder sweep + a POSITIVE "example JSON uses taxonomy placeholders" rule; excludes the GameChanger app-identity client-ID constants in `auth.md`/`headers.md`/`post-auth.md`, which are documented API constants, not PII).
+- **CI backstop** for the test suite — out of scope for this slice.
+
+## Success Criteria
+- All seven stories DONE with their ACs verified.
+- `python -m pytest tests/` is green in the main checkout with the epic's changes applied (closure gate).
+- A pasted UPPERCASE credential assignment (e.g. `GC_ACCESS_TOKEN=eyJ…`) is blocked by the scanner in both direct-file and `--staged` modes, proven by regression tests.
+- Every admin mutation route returns 403 for an authenticated non-admin, proven by the sweep test with an admin positive-control.
+- No file under `docs/api/` matches any entry in the E-254-07 denylist (held in the uncommitted sidecar, TN-10) — the reviewer's byte-verifiable gate over all 24 scrubbed files.
+
+## Stories
+| ID | Title | Status | Dependencies | Assignee |
+|----|-------|--------|-------------|----------|
+| E-254-01 | Canonical `is_production()` APP_ENV fail-safe predicate | TODO | None | software-engineer |
+| E-254-02 | Magic-link credential-leak fixes (GET-verify split + email log guard) | TODO | E-254-01 | software-engineer |
+| E-254-03 | Auth-route hardening (passkey rowcount, login timing, options cap) | TODO | E-254-02 | software-engineer |
+| E-254-04 | Report-serving revocation-respecting cache-control | TODO | None | software-engineer |
+| E-254-05 | Admin authorization sweep test | TODO | None | software-engineer |
+| E-254-06 | PII scanner: case-insensitive patterns + staged-blob scanning (F-H3) | TODO | None | software-engineer |
+| E-254-07 | Endpoint-doc PII scrub | TODO | None | api-scout |
+
+## Dispatch Team
+- software-engineer
+- api-scout
+
+## Technical Notes
+
+These notes are the single source of truth for the epic's shared procedures and constraints. Story ACs reference them by number rather than restating them.
+
+### TN-1: File/function path map (the audit's "auth.py:N" spans two files)
+The audit's line references to "auth.py" cover TWO distinct modules — stories name the exact file and function:
+- **`src/api/routes/auth.py`** (route handlers): `_is_dev_mode` (87-93, cookie `Secure`), `post_login` (244-321, timing), `verify_token` GET (324-423, magic-link consume), `post_passkey_register` (557-677, consume-rowcount site ~591-599), `get_passkey_login_options` (685-710, unauthenticated challenge write).
+- **`src/api/auth.py`** (session middleware): `SessionMiddleware.__init__` APP_ENV read (~354-355, dev-bypass production guard).
+- **`src/api/csrf.py`**: APP_ENV read (~135, CSRF cookie `Secure`).
+- **`src/api/email.py`**: `send_email` (~52-55, stdout fallback).
+
+### TN-2: Canonical `is_production()` predicate (established by E-254-01, email consumer added by 02)
+A single canonical predicate governs every security-sensitive APP_ENV gate. Placement: `src/api/helpers.py` (alongside the existing `get_app_url()`, per SE — architecture-adjacent but not a context-layer path, so it stays a software-engineer story). Behavior:
+- **Normalizer + predicate**: a `get_app_env()` normalizer applies `.strip().lower()`, and `is_production()` returns True iff the normalized value equals `production` — so `Production`, `PRODUCTION`, and `" production "` all correctly select the production posture. Unset / empty resolves to non-production (local dev needs `Secure`-off cookies over HTTP; this is preserved and is the load-bearing local-dev default).
+- **Loud-at-startup on unrecognized values**: the recognized value set is `{production, development, dev, test, staging}`. A non-empty `APP_ENV` normalizing to a value OUTSIDE that set (an abbreviation typo like `prod` / `prd`) MUST be caught at STARTUP — a CRITICAL-level log AND refuse-to-start (raise), mirroring the existing `DEV_USER_EMAIL`-in-production guard in `SessionMiddleware.__init__` that already raises. This catches the typo loudly at boot instead of silently downgrading the cookie `Secure` flag at runtime (which is the actual finding). Missing/unset stays dev and does NOT raise. The startup guard belongs alongside the existing `DEV_USER_EMAIL` guard.
+- **Consumers (four)**: `src/api/routes/auth.py::_is_dev_mode` (cookie `Secure`), `src/api/auth.py::SessionMiddleware.__init__` (dev-bypass guard), `src/api/csrf.py` (~line 135, CSRF cookie `Secure`), and `src/api/email.py` (fallback guard, added in E-254-02) all read THIS one predicate — no divergent inline `os.environ.get("APP_ENV", ...)` security-gate read remains in any of the four.
+- **Dependency ordering**: E-254-01 establishes the predicate + startup guard first; E-254-02 (email guard) depends on it. This avoids divergent APP_ENV reads landing in parallel.
+
+### TN-3: Magic-link GET/POST verify split (E-254-02)
+`verify_token` (GET `/auth/verify`) currently consumes the token and issues a 7-day session on a bare GET — mail-provider link scanners burn the token (operator lockout) and can receive a live session. The redesign is app-layer:
+- **GET `/auth/verify`** becomes side-effect-free: it validates the token's existence/expiry WITHOUT deleting it or creating a session, and renders an interstitial page with a form. If the token is missing/invalid/expired, it renders the existing verify-error page. The interstitial form carries TWO hidden fields — the magic-link `token` (in the POST FORM BODY, not the URL, so the consuming request does not put the token in access logs) and `csrf_token` from `request.state.csrf_token`.
+- **POST `/auth/verify`** performs the atomic, DELETE-gated single-use consume (the existing rowcount==0 → already-consumed rejection is preserved) and, on success, creates the session and sets the cookie (reuse the existing `_set_session_cookie`; set-cookie on a 302 already works), then redirects (to `/admin/reports` or `/auth/passkey/prompt` as today).
+- **CSRF**: the existing double-submit CSRF middleware (`src/api/csrf.py`) already protects all POSTs and sets/exposes the `csrf_token` cookie + `request.state.csrf_token`; no new CSRF infrastructure is needed. The POST route is CSRF-validated automatically.
+- **Expired-token cleanup**: the side-effect-free GET deliberately does NOT delete expired tokens (that would be a side effect). This is intentional and loses nothing — `post_login` already DELETEs all prior tokens for a user before issuing a new one, and the TTL is 15 minutes, so expired rows do not accumulate. A reviewer should not flag "lost cleanup."
+- **Residual (out of scope, IDEA-093)**: the raw token remains in the GET URL and thus in access logs; a log reader could craft a POST replay before the user clicks. The GET/POST split closes the scanner-prefetch threat (the finding); full removal needs fragment/JS delivery.
+
+### TN-4: Email stdout-fallback production guard (E-254-02)
+`send_email` logs the full message body (which, for magic links, contains the live 15-minute URL+token) at INFO when `MAILGUN_API_KEY` is unset, and returns True (a fake success). Guarded behavior via `is_production()` (TN-2):
+- **Non-production**: keep logging the message (including the URL) so a local operator can grab the link — local-only, no email infra. Return True.
+- **Production**: do NOT log the body; emit an ERROR that the sender is misconfigured (no secret material) and return False (an honest failure, not a fake success).
+
+### TN-5: PII scanner F-H3 + staged-blob (E-254-06)
+This is a security control (`.claude/rules/pii-safety.md` — "never weaken patterns"); this work STRENGTHENS it. Two fixes:
+- **Case-insensitivity (F-H3)**: compile the CREDENTIAL patterns (`bearer_token`, `api_key_assignment`) in `COMPILED_PATTERNS` (`src/safety/pii_patterns.py`) with `re.IGNORECASE` — the email/phone patterns are already case-neutral so IGNORECASE is scoped to the credential regexes. Broaden the `api_key_assignment` key alternation to include the project's token-key-shaped names (token / gc_*token / client_token / refresh_token / device_id) — a targeted key-name broadening, NOT a blanket `\w+` widening. The value side keeps its `[=:]` + 16+ non-space-value requirement, so prose like "rotate the api_key" still does not match (no false-positive blowup). `SYNTHETIC_MARKER` and the `pii-ok` inline marker stay case-sensitive by design — they are substring `in line` authoring conventions, not credential patterns, and a typo'd marker (`PII-OK`) must NOT suppress a real finding.
+- **Staged-blob scanning**: `--staged` mode currently scans working-tree bytes (`scan_file` reads the path), so a token can be staged and then the working tree cleaned and the commit still leaks. In `--staged` mode only, read the staged blob via `git show :<path>`; refactor the post-read scanning body into a shared text-scanning helper consumed by both the file-path and staged-blob paths. Staged file DELETIONS (`git rm`) are out of scope — they are already excluded by the `--diff-filter=ACM` in `get_staged_files`.
+- **Exists()-gate footgun (must-fix)**: the staged-blob path applies the skip-path and extension gates but MUST NOT reuse the `Path.exists()` scannability gate (`_scannability_skip_reason`, `pii_scanner.py:111`). The genuine leak vector is a token staged as an ADD whose working-tree copy is then deleted (`rm`): the index still holds the blob (listed Added by ACM) but `Path.exists()` is False, so reusing the existing gate wholesale would return "does not exist" and SKIP the staged token — reintroducing the leak. In `--staged` mode the content is read from the blob via `git show :<path>` regardless of working-tree existence.
+
+### TN-6: Test discipline (all code stories)
+- **Test-file conflict map** (SE-verified): the ONLY test file touched by more than one story is `tests/test_auth_routes.py` (01 session-cookie-`Secure`, 02 verify GET/POST split, 03 login-timing) — safe because 01→02→03 is a serial `blockedBy` chain with a staging boundary, and each story only ADDS its own test functions (no parallel edit). All other primary test files are story-EXCLUSIVE: 01 `test_helpers.py` / `test_auth.py` / `test_csrf.py`; 02 `test_email.py`; 03 `test_passkey.py`; 04 `test_report_routes.py`; 05 `test_admin_authz_sweep.py` (new); 06 `test_pii_scanner.py` / `test_pii_hook_integration.py`. The independent stories 04/05/06 use fully distinct files → parallel-safe on the test-file axis. Each story's "Files to Modify" names its primary file(s); broader importing suites are run-only (see below).
+- **Full middleware stack**: all auth/admin ACs exercise the route through the real `SessionMiddleware` + `CSRFMiddleware` stack via the existing `TestClient` fixtures — NOT bare route-function calls (a bare call bypasses the CSRF gate and the session attach).
+- **No wall-clock timing assertions**: the login-timing AC is behavioral/structural (equal call structure across branches, send scheduled-not-awaited), never a wall-clock comparison (flaky).
+- **PII scanner git isolation**: scanner tests use a `git` tmp_path fixture (init a throwaway repo, stage content there) — they MUST NOT stage into or read the project repo. The `git show :<path>` failure path is exercised with a mocked/absent blob and asserts warn-and-skip while the exit code still reflects other findings.
+- **Test-scope discovery** (`.claude/rules/testing.md`): `auth.py`, `email.py`, and `pii_*` are widely imported — run the discovered importing test files, not only the story-named ones. Scanner stories run the full `tests/test_pii_scanner.py` + `tests/test_pii_hook_integration.py` and keep the <1s/20-file perf bar.
+- **Error-path coverage**: where a story adds a failure branch (email prod-misconfig, staged-blob read failure, over-cap options), an AC asserts the failure is surfaced honestly (return value / status / warning), never a misleading success.
+- **Cookie-`Secure`-under-production fixture caution**: a test asserting the session/CSRF cookie carries `Secure` under `APP_ENV=production` must construct the app WITHOUT `DEV_USER_EMAIL` (otherwise the dev-bypass production guard raises at startup) and authenticate via a real session row rather than dev-bypass.
+
+### TN-7: Passkey-options live-challenge cap (E-254-03)
+`get_passkey_login_options` (GET `/auth/passkey/login/options`) is unauthenticated and inserts one `webauthn_challenges` row (kind=`login`) per call; `store_challenge` sweeps only EXPIRED rows, so within the 5-minute TTL an attacker creates unbounded rows. Fix (app-layer, deterministic — no IP/infra dependency):
+- Enforce a hard cap of **100** live `KIND_LOGIN` challenge rows. The cap is scoped to `kind='login'` ONLY — registration challenges are session-id-keyed (UPSERT, bounded per session); only login is unbounded. Count live login rows before storing; at/over the cap the endpoint returns **429** WITHOUT inserting a new row, so the live login count cannot grow past the cap. 100 is generous for a single-operator HS app and is operator-adjustable.
+- No IP-based limiting (do not trust a forwarded-IP header — proxy boundary). TTL is unchanged (already 5 minutes — already short); the cap is the new bound. Expired rows continue to be swept on write.
+- The cap is a module-level constant so a test can monkeypatch it to a small N and exercise the over-cap path without seeding 100 live rows.
+
+### TN-8: Login-timing equalization (E-254-03)
+`post_login` does token generation + two DB writes + an awaited Mailgun send only for KNOWN emails; unknown emails do nothing, so response time reveals registration. Fix:
+- Move the Mailgun send to a `BackgroundTask` so BOTH branches return before any network I/O (also improves UX), and perform symmetric cheap work (comparable token-hash / DB work) on the unknown-email branch so the two code paths are structurally symmetric.
+- ACs are behavioral (equal call structure / send scheduled-not-awaited), per TN-6 — no wall-clock assertions.
+
+### TN-9: Admin authorization sweep test (E-254-05)
+All 8 `reports_admin.py` routes already call `_require_admin`; the gap is that the gate is opt-in per route (a future route can ship open) and existing non-admin-403 coverage is per-route / PARTIAL (some routes are covered in `test_admin.py` / `test_admin_routes.py`) with NO router-wide sweep asserting every current+future route is guarded. The deliverable is an introspection sweep test that enumerates `reports_admin.router.routes` and, for each:
+- unauthenticated → 302 redirect to login;
+- authenticated non-admin → 403;
+- POST routes are exercised with a VALID CSRF token so the 403 proves the ADMIN gate (not the CSRF gate);
+- an admin positive-control asserts admin gets the route's EXPECTED SUCCESS status — **303** for the mutation-redirect routes (create/update/delete user, generate/delete report — the live handlers redirect with 303) and **200** for any GET admin route — NOT merely "not 403" (a 404 from an unresolved id would satisfy "not 403" vacuously).
+- **Route-matching requirement**: the sweep MUST substitute path parameters and supply minimal valid POST bodies so each route actually MATCHES its handler. For the admin positive-control specifically, the `{user_id}`/`{report_id}` params MUST use FIXTURE-BACKED EXISTING ids (a seeded user + report), NOT arbitrary dummy ids — because the admin gate passes and the handler then looks the id up, so a non-existent id returns 404 (the vacuous-pass hole). For the unauth (302) and non-admin (403) levels, `_require_admin` short-circuits BEFORE the id lookup, so an integer dummy id suffices there.
+- **Background-crawl mocking**: for the POST `/reports/generate` positive-control, the sweep MUST mock the report-generation entrypoint (the handler's background `generate_report` call) so it asserts the 303 WITHOUT triggering a live GameChanger crawl — under `TestClient`, BackgroundTasks run after the response, so an un-mocked positive control fires a real network crawl.
+Runs through the full middleware stack (TN-6).
+
+### TN-10: Endpoint-doc PII scrub (E-254-07)
+Owned by api-scout, who performed the full audit. **Scope is 24 files under `docs/api/`, NOT the audit's 15** — the audit undercounted (it scoped to one opponent team only). The scrub covers the real THIRD-PARTY + minor surface (the identified opponent team + — highest sensitivity — BOTH real minors under `docs/api/`, names AND player UUIDs, pulled forward per the user decision) PLUS, per the user-approved expansion (Decision #1), the operator's OWN-program identity (own team name/nickname + own-team public_id) and the operator's first name. **The exact real identifiers are NOT inlined in this committed artifact (Decision #2)** — they live ONLY in the uncommitted, gitignored `secrets/pii-denylist.txt` (api-scout-owned); the committed byte-gate is a config/config.example split — a PII-free harness `scripts/check_doc_pii.sh` + a fake-token example `scripts/pii-denylist.example.txt`. Scrub rules:
+- **Scrub target**: the EXISTING placeholder taxonomy in `.claude/rules/api-docs.md` (§"PII-Safe Placeholder Taxonomy" + "Semi-Identifying Combinations") — no new taxonomy needed. Names → `"Example Team 14U"`, org → `"Example Organization"`, city/state → `"Anytown"` / `"XX"`, full UUIDs → all-zero or the canonical `<prefix>-REDACTED` placeholder form, public_id → `"xXxXxXxXxXxX"`, person → `"Player One"`, record → generic `{wins, losses, ties}`.
+- **Bare 8-char UUID prose prefixes** also count: bare-prose occurrences MUST be wrapped/redacted, but the approved `<prefix>-REDACTED` placeholders (which intentionally retain a real prefix) ARE accepted and MUST NOT be re-touched. The byte-gate (in the sidecar) therefore uses `-REDACTED`-excluded greps, not naive bare-token greps. (The canonical placeholder embedding a real prefix is itself the root of this awkwardness — a context-layer follow-up in Open Questions, F5.)
+- **Highest priority — BOTH minors**: the operator's child (name, jersey, player UUID) in `flows/spray-chart-rendering.md` + `get-me-associated-players.md`, and an opponent youth player (name, player UUID) in `get-teams-team_id-opponents-players.md` — scrub all of it; the byte-gate verifies both via split name-part tokens + player-UUID prefix gates (exact tokens in the sidecar).
+- **Surgical / value-only**: swap ONLY identifying values; NEVER re-touch already-approved `*-REDACTED` / `xXxX` placeholders. Three files are already clean and MUST NOT be touched: `get-bats-starting-lineups-event_id.md`, `get-bats-starting-lineups-latest-team_id.md`, `get-teams-team_id-lineup-recommendation.md`.
+- **No frontmatter/verification drift**: a scrub is not a live re-verification, so `status` and `last_confirmed` MUST NOT move.
+- **CE-5 boundary**: value-only, changes zero API-behavior claims (fully consistent with the api-docs.md Fidelity rule). Where a prose caveat uses a real UUID as evidence (e.g. "confirmed across 2 teams" citing two real team UUIDs), scrubbing the UUID preserves the factual claim while removing identity — team identity is not itself an API fact, so it stays in CE-4. Sequence CE-4 before CE-5 so CE-5 edits already-clean files.
+- **Verifiable AC (reviewer's byte-gate)**: the reviewer runs the committed harness `scripts/check_doc_pii.sh <docs-dir>` with the real (uncommitted) denylist via `PII_DENYLIST_FILE` (default `secrets/pii-denylist.txt`). It greps the target for the 22-token real-identifier CATEGORY set (BOTH minors' names + player UUIDs; the identified team's UUIDs/public_ids; real own-team & opponent names; location — city/state; org & event names; operator first name; win-loss record) and returns: `0` = real denylist loaded + zero matches (PASS); `1` = identifier still present (FAIL, `file:line`); `2` = self-test failed / denylist malformed (INVALID); `3` = real denylist absent → EXAMPLE MODE (INCONCLUSIVE). The gate passes iff it prints `REAL mode; 22 patterns loaded` and exits `0`; exits `2`/`3` MUST NOT be recorded as a passing scrub. Satisfies R1 (missing real denylist → loud INCONCLUSIVE, never a false PASS — machinery-based self-test is data-independent) and R2 (committed fake `*.example` documents the format with no real token). Literal identifiers are NEVER committed — only the harness + `*.example` are in git (Decision #2). Full AC wording in Story E-254-07 AC-3.
+- **Dispatch-time note**: `secrets/pii-denylist.txt` is pre-created (uncommitted, api-scout-owned); the harness + example are created in the worktree during Story 07 and ride the closure patch. `secrets/` does NOT exist in the worktree (worktree-guard also blocks `secrets/` writes there), so the reviewer runs the WORKTREE harness with `PII_DENYLIST_FILE` pointed at the MAIN-CHECKOUT secrets file (both checkouts share the filesystem) — no copy into the worktree.
+
+## Open Questions
+- **Taxonomy gap + placeholder root cause (context-layer, non-blocking, F5)**: api-scout flagged that `.claude/rules/api-docs.md`'s taxonomy names full UUIDs but does not explicitly cover bare 8-char UUID prose prefixes. Compounding this, the taxonomy's own canonical `<prefix>-REDACTED` placeholder literally embeds a REAL team's UUID prefix — which is the root reason the byte-gate needs `-REDACTED` exclusions. Recommend claude-architect (a) add a one-line clarification that bare prefixes count, AND (b) switch the canonical placeholder example off the real prefix (to `00000000-…`). Does not block E-254-07; capture as a context-layer follow-up at closure.
+- **Denylist as a re-runnable check**: api-scout suggested promoting the E-254-07 denylist grep into a durable re-runnable check (owner: PM/claude-architect). Out of scope for E-254; noted for closure context-layer assessment.
 
 ## History
-- 2026-07-04: Created as a DRAFT capture stub from the platform audit (CE-4). Not refined; not dispatchable until taken to READY.
+- 2026-07-04: Created as a DRAFT capture stub from the platform audit (CE-4).
+- 2026-07-06: Refined to 7 stories with testable ACs after full software-engineer (scanner/auth/serving design, verified against the live tree) and api-scout (doc scrub) consultation. api-scout's audit corrected the doc-scrub scope from the audit's 15 to 23 files (second real team + real player UUID + a named minor). Four decision points resolved by PM; two follow-ups captured as IDEA-093 / IDEA-094.
+- 2026-07-06 (review iteration 1): incorporated the combined triage bundle — api-scout 3 denylist gaps ACCEPTED (retired a dead record token → JSON-form record match; broadened to a bare city-name gate; added `-REDACTED`-excluded bare-prefix greps); api-scout Part 2 scope finding — additional third-party opponent names folded in, and (per user **Decision #1 = EXPAND**) the operator's own-program identity + first name + a 24th file added → **24-file scope**. SE 4 ACCEPTED (login-timing call-parity pin, admin sweep expected-status + path-param substitution, staged-blob ADD-then-`rm` leak + exists()-gate footgun, refuse-to-start empty-string/deploy notes); CR spec-audit (independently grep-confirmed the denylist gaps; `get_app_env` AC-bind DISMISSED — no downstream consumer); 3 PM self-review notes incorporated. Per user **Decision #2**, the exact real identifiers (child name, real UUIDs, public_ids, opponent/own-team names, operator name) were kept OUT of the committed artifacts. api-scout finalized the byte-gate as a config/config.example split (built + tested, all exit paths verified): a COMMITTED PII-free harness `scripts/check_doc_pii.sh` + a COMMITTED fake-token example `scripts/pii-denylist.example.txt`, with the real 18-token denylist ONLY in the uncommitted, gitignored `secrets/pii-denylist.txt`. This satisfies R1 (missing real denylist → exit 3 EXAMPLE MODE, never a false PASS) and R2 (committed fake example). AC-3 was finalized to the harness + exit-code table.
+- 2026-07-06 (Codex spec-review, iteration 1): 7 findings, all ACCEPT + incorporated (repo-reality claims PM-verified first-hand): admin-sweep 303-not-302 + fixture-backed ids + generate-route background-crawl mock; magic-link GET no-deletes; report-serving seven 404 branches; login-timing non-rate-limited-known-email + accepted repeated-probe residual (IDEA-095); APP_ENV recognized-set pinned (killed the "implementer's call" contradiction); admin AC-5 reworded to a positive standing-guard; endpoint-doc category-list reconciliation. api-scout's P1-07 review surfaced a real-PII TAIL beyond the audited scope → user decided **option A refined**: narrow E-254-07's claim to its audited/enumerated scope, PULL BOTH real minors (names + player UUIDs) fully into 07's byte-gate now (denylist 18→**22 tokens**, no new files — both minors live in already-in-scope files), and defer the systematic adult-name + bulk-UUID tail (~28 files) to **IDEA-096** (positive taxonomy rule, excl. GC app-identity client-ID constants). Consistency + PII-free re-verified zero.
+- 2026-07-06 (Codex spec-review, iteration 2): 3 findings, all ACCEPT + incorporated: named the primary test file(s) per story (SE-verified) + a TN-6 test-file conflict map (only `test_auth_routes.py` is multi-story, on the serial 01→02→03 chain; 04/05/06 distinct → parallel-safe); corrected the Story-05/TN-9 admin-coverage framing (per-route/partial coverage exists; the gap is the router-wide sweep); repointed the Story-01 stale "E-254-03 consumes the predicate" reference (03 touches no APP_ENV gate). Consistency + PII-free re-verified zero. **Set to READY** per the user's "re-run once, then READY" decision. Dispatch requires separate user authorization.
