@@ -36,22 +36,49 @@ def get_db_path() -> Path:
     return resolve_db_path()
 
 
-def get_connection() -> sqlite3.Connection:
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Open and return a new SQLite connection with recommended pragmas.
+
+    This is the SINGLE connection factory for every SQLite writer in the
+    system -- the admin UI (uvicorn workers), the interactive CLI, and the
+    morning-run cron. They share one WAL file across processes, so every
+    connection must carry a ``busy_timeout`` (a lock overlap WAITS instead of
+    immediately raising ``database is locked``) and the WAL-safe
+    ``synchronous=NORMAL``.
+
+    Pragma scope: ``journal_mode=WAL`` is a persistent DB-file property, but
+    ``foreign_keys``, ``busy_timeout``, and ``synchronous`` are per-connection
+    and so are set on every connection returned here.
+
+    Note: default (deferred) isolation is preserved -- this factory does NOT
+    switch to ``isolation_level=None`` (full autocommit). busy_timeout only
+    protects writers that also commit their write transactions promptly (never
+    holding an open write transaction across a network fetch); that transaction
+    discipline is the caller's responsibility.
 
     Callers are responsible for closing the connection (use as a context
     manager or call ``conn.close()`` explicitly).
 
+    Args:
+        db_path: Optional explicit database path. Defaults to the factory's
+            canonical resolution (``get_db_path()`` -> ``resolve_db_path()``),
+            so existing no-arg callers are unaffected. The CLI/cron pass their
+            already-resolved ``resolve_db_path(override)`` here.
+
     Returns:
-        Open sqlite3.Connection with WAL mode and foreign keys enabled.
+        Open sqlite3.Connection with WAL mode, foreign keys enabled,
+        ``busy_timeout=30000`` (30s), and ``synchronous=NORMAL``.
 
     Raises:
         sqlite3.Error: If the database file cannot be opened.
     """
-    db_path = get_db_path()
+    if db_path is None:
+        db_path = get_db_path()
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 

@@ -66,6 +66,25 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """
     app_env = os.environ.get("APP_ENV", "development")
     logger.info("baseball-crawl API starting (env=%s)", app_env)
+
+    # E-252-08: reap reports stuck at status='generating' from a generation process
+    # that died mid-run (SIGKILL, a prior container restart). Running this at
+    # startup means a stuck row is cleared on the next app boot with no operator
+    # action. Isolated so a reaper failure never blocks app startup. (The reaper
+    # also rides the opportunistic cleanup_expired_reports path at report-generation
+    # time; startup covers the restart case.)
+    try:
+        from src.reports.generator import reap_stale_generating_reports
+
+        reaped = reap_stale_generating_reports()
+        if reaped.reaped:
+            logger.info(
+                "Startup reaper: %d stale 'generating' report(s) marked failed",
+                reaped.reaped,
+            )
+    except Exception:  # noqa: BLE001 -- startup reaping is best-effort
+        logger.warning("Startup stale-'generating' reaper failed; continuing", exc_info=True)
+
     yield
     logger.info("baseball-crawl API shutting down")
 

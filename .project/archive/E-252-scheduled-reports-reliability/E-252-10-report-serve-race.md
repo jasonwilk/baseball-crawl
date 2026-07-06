@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the public report-serving route returns a clean 404 (never a 500) when the report's HTML file is unlinked between the `is_file()` guard and the `read_text()` call — closing a TOCTOU race with the concurrent cleanup/reaper passes.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import closing
 
@@ -16,6 +17,7 @@ from src.gamechanger.opponent_ladder import METHOD_NO_PRESENCE, METHOD_OPERATOR
 from src.gamechanger.team_resolver import resolve_team
 from src.gamechanger.url_parser import parse_team_url
 from src.reports.aggregate_parity import verify_aggregates
+from src.api.db import get_connection
 from src.db.paths import resolve_db_path
 from src.reports.generator import (
     cleanup_expired_reports,
@@ -31,6 +33,8 @@ app = typer.Typer(
 
 console = Console()
 err_console = Console(stderr=True)
+
+logger = logging.getLogger(__name__)
 
 
 @app.callback()
@@ -335,8 +339,13 @@ def map_opponent_cmd(
         err_console.print(f"[red]Database not found:[/red] {db_path}")
         raise typer.Exit(code=1)
 
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.execute("PRAGMA foreign_keys=ON;")
+    # Route through the single connection factory (E-252-03 AC-7 / GAP A): this
+    # UPDATE-ing writer is a SQLite writer on the shared WAL file, so it must
+    # carry the factory's busy_timeout + WAL-safe pragmas and WAIT on a concurrent
+    # write lock instead of immediately raising "database is locked". The factory
+    # already sets PRAGMA foreign_keys=ON, so this is behavior-preserving (the
+    # UPDATE logic and `updated`-count semantics are unchanged).
+    with closing(get_connection(db_path=db_path)) as conn:
         updated = _apply_opponent_mapping(
             conn, root_team_id, public_id=public_id, method=method
         )
@@ -362,6 +371,41 @@ def map_opponent_cmd(
             f"[green]Mapped[/green] root_team_id={root_team_id}{team_label} "
             f"-> public_id={public_id} across {updated} team(s)."
         )
+
+
+def _emit_summary_if_needed(send_summary, *, result, run_error, dry_run: bool) -> bool:
+    """Attempt the always-sent end-of-run summary (the missed-run heartbeat).
+
+    Called from ``morning_run_cmd``'s ``finally`` so the summary fires even when
+    the run body crashed (E-252-03 AC-1). Returns True when the summary was sent
+    (or when dry-run, where no summary is due). On a run-body crash (``result``
+    is None / ``run_error`` set) the summary still fires with the failure surfaced
+    in its detail. The send is RETRIED once before being declared failed (AC-3);
+    the caller turns a False return into a non-zero exit.
+    """
+    if dry_run:
+        return True
+    if result is not None:
+        generated, failed, unresolved = result.generated, result.failed, result.unresolved
+        detail = result.detail_lines
+    else:
+        generated = failed = unresolved = 0
+        detail = ""
+    if run_error is not None:
+        crash_line = (
+            f"RUN ABORTED — the morning-run body raised before completing: {run_error}"
+        )
+        detail = f"{crash_line}\n{detail}" if detail else crash_line
+    for attempt in (1, 2):  # one retry before declaring the heartbeat failed (AC-3)
+        if send_summary(
+            generated=generated,
+            failed=failed,
+            unresolved=unresolved,
+            detail=detail,
+        ):
+            return True
+        logger.warning("End-of-run summary send failed (attempt %d/2)", attempt)
+    return False
 
 
 @app.command(name="morning-run")
@@ -395,6 +439,7 @@ def morning_run_cmd(
         send_end_of_run_summary_sync,
         send_preflight_failure_alert_sync,
         send_unresolved_opponent_alert_sync,
+        validate_alerting_config,
     )
     from src.gamechanger.client import ConfigurationError, GameChangerClient
     from src.reports.morning_run import (
@@ -419,6 +464,19 @@ def morning_run_cmd(
         err_console.print(f"[red]Database not found:[/red] {db_path}")
         raise typer.Exit(code=1)
 
+    # AC-2: the end-of-run summary email is the ONLY missed-run signal, so for a
+    # real run validate the alerting channel can actually DELIVER before doing any
+    # work. A misconfigured channel (no ADMIN_EMAIL, or production without
+    # Mailgun) aborts loudly HERE rather than running to completion with a
+    # silently-dead heartbeat. Dry-run sends no summary, so it is exempt.
+    if not dry_run:
+        alerting_error = validate_alerting_config()
+        if alerting_error:
+            err_console.print(
+                f"[red]Alerting channel misconfigured:[/red] {alerting_error}"
+            )
+            raise typer.Exit(code=1)
+
     try:
         client = GameChangerClient()
     except ConfigurationError as exc:
@@ -435,78 +493,106 @@ def morning_run_cmd(
         send_preflight_failure_alert_sync(str(exc))
         raise typer.Exit(code=1)
 
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.execute("PRAGMA foreign_keys=ON;")
-        result = run_morning(
-            team_urls,
-            conn=conn,
-            client=client,
-            target_date=target_date,
+    # AC-1: wrap the run body so an unexpected crash still triggers the summary
+    # (the heartbeat) in the `finally`, then surfaces as a non-zero exit -- the run
+    # must never die silently. E-252-02 isolates per-TEAM failures INSIDE
+    # run_morning; this guards a crash OUTSIDE that isolation (or a path it does
+    # not cover, e.g. the connection factory or the output loop).
+    result = None
+    run_error: Exception | None = None
+    try:
+        # Route through the single connection factory (GAP A / E-252-06): the
+        # morning-run cron is a THIRD SQLite writer on the shared WAL file, so its
+        # connection must carry the busy_timeout + WAL-safe pragmas the factory
+        # sets rather than the old hand-rolled sqlite3.connect + inline
+        # foreign_keys.
+        with closing(get_connection(db_path=db_path)) as conn:
+            result = run_morning(
+                team_urls,
+                conn=conn,
+                client=client,
+                target_date=target_date,
+                dry_run=dry_run,
+            )
+
+        # Per-slot output: the dry-run eyeball line + the unresolved-mappable
+        # prominent line + alert (the alert carries the templated map-opponent cmd).
+        for slot in result.slots:
+            if slot.resolved_public_id and slot.resolved_team_name:
+                record = f" — record {slot.resolved_record}" if slot.resolved_record else ""
+                console.print(
+                    f"[green]RESOLVED[/green] {slot.opponent_name} "
+                    f"(opponent_id={slot.opponent_root_team_id}) -> "
+                    f"{slot.resolved_team_name} [public_id: {slot.resolved_public_id}]{record}"
+                )
+            elif (
+                slot.resolution_outcome == "unresolved_mappable"
+                and slot.error_message is None
+            ):
+                # A GENUINE unresolved-mappable opponent (no error). A resolution-
+                # CRASH slot shares this outcome value but carries an error_message,
+                # so it is excluded -- the operator must NOT be prompted to
+                # `map-opponent` an opponent whose processing simply errored.
+                # soft_wrap so the copy-paste-ready map-opponent template is never
+                # split across a line break on a narrow terminal.
+                console.print(
+                    f"[yellow]UNRESOLVED[/yellow] {slot.opponent_name} "
+                    f"(opponent_id={slot.opponent_root_team_id}) — needs "
+                    f"`bb report map-opponent {slot.opponent_root_team_id} <PASTE-GC-TEAM-URL>`",
+                    soft_wrap=True,
+                )
+                if not dry_run:
+                    send_unresolved_opponent_alert_sync(
+                        root_team_id=slot.opponent_root_team_id,
+                        opponent_name=slot.opponent_name or "(unnamed)",
+                    )
+            elif slot.error_message:
+                # A per-game failure (resolution crash or generation failure) —
+                # show the error, no map-opponent prompt.
+                err_console.print(
+                    f"[red]FAILED[/red] {slot.opponent_name} "
+                    f"(opponent_id={slot.opponent_root_team_id}): {slot.error_message}"
+                )
+            else:
+                console.print(
+                    f"[dim]{slot.resolution_outcome}[/dim] {slot.opponent_name} "
+                    f"(opponent_id={slot.opponent_root_team_id})"
+                )
+
+        console.print(
+            f"\n[bold]Morning run complete[/bold] ({result.teams_processed} team(s)): "
+            f"{result.generated} generated, {result.failed} failed, "
+            f"{result.unresolved} unresolved, {result.deferred} deferred, "
+            f"{result.skipped} skipped, {result.denied} denied (403)."
+        )
+        # Make an all-teams-denied (likely FALSE-403 / pin) situation loud on the
+        # CLI too -- not just in the summary email.
+        if result.denied:
+            err_console.print(f"[yellow]{result.denied_detail}[/yellow]")
+    except Exception as exc:  # noqa: BLE001 -- the heartbeat MUST fire on ANY crash
+        run_error = exc
+        logger.exception("Morning-run body failed")
+        err_console.print(f"[red]Morning run failed:[/red] {exc}")
+    finally:
+        # Always-sent end-of-run summary (the missed-run signal). Attempted in the
+        # finally so a body crash above still emails a summary (with the failure in
+        # its detail). Not sent in --dry-run. The denied/transient/rate-limit lines
+        # ride in `detail` via result.detail_lines (no email-helper signature change).
+        summary_sent = _emit_summary_if_needed(
+            send_end_of_run_summary_sync,
+            result=result,
+            run_error=run_error,
             dry_run=dry_run,
         )
 
-    # Per-slot output: the dry-run eyeball line + the unresolved-mappable
-    # prominent line + alert (the alert carries the templated map-opponent cmd).
-    for slot in result.slots:
-        if slot.resolved_public_id and slot.resolved_team_name:
-            record = f" — record {slot.resolved_record}" if slot.resolved_record else ""
-            console.print(
-                f"[green]RESOLVED[/green] {slot.opponent_name} "
-                f"(opponent_id={slot.opponent_root_team_id}) -> "
-                f"{slot.resolved_team_name} [public_id: {slot.resolved_public_id}]{record}"
-            )
-        elif (
-            slot.resolution_outcome == "unresolved_mappable"
-            and slot.error_message is None
-        ):
-            # A GENUINE unresolved-mappable opponent (no error). A resolution-
-            # CRASH slot shares this outcome value but carries an error_message,
-            # so it is excluded -- the operator must NOT be prompted to
-            # `map-opponent` an opponent whose processing simply errored.
-            # soft_wrap so the copy-paste-ready map-opponent template is never
-            # split across a line break on a narrow terminal.
-            console.print(
-                f"[yellow]UNRESOLVED[/yellow] {slot.opponent_name} "
-                f"(opponent_id={slot.opponent_root_team_id}) — needs "
-                f"`bb report map-opponent {slot.opponent_root_team_id} <PASTE-GC-TEAM-URL>`",
-                soft_wrap=True,
-            )
-            if not dry_run:
-                send_unresolved_opponent_alert_sync(
-                    root_team_id=slot.opponent_root_team_id,
-                    opponent_name=slot.opponent_name or "(unnamed)",
-                )
-        elif slot.error_message:
-            # A per-game failure (resolution crash or generation failure) — show
-            # the error, no map-opponent prompt.
-            err_console.print(
-                f"[red]FAILED[/red] {slot.opponent_name} "
-                f"(opponent_id={slot.opponent_root_team_id}): {slot.error_message}"
-            )
-        else:
-            console.print(
-                f"[dim]{slot.resolution_outcome}[/dim] {slot.opponent_name} "
-                f"(opponent_id={slot.opponent_root_team_id})"
-            )
-
-    console.print(
-        f"\n[bold]Morning run complete[/bold] ({result.teams_processed} team(s)): "
-        f"{result.generated} generated, {result.failed} failed, "
-        f"{result.unresolved} unresolved, {result.deferred} deferred, "
-        f"{result.skipped} skipped, {result.denied} denied (403)."
-    )
-    # Make an all-teams-denied (likely FALSE-403 / pin) situation loud on the CLI
-    # too -- not just in the summary email.
-    if result.denied:
-        err_console.print(f"[yellow]{result.denied_detail}[/yellow]")
-
-    # Always-sent end-of-run summary (the missed-run signal; warn+skip if
-    # ADMIN_EMAIL unset). Not sent in --dry-run (no run occurred). The denied
-    # line rides in `detail` (no email-helper signature change).
-    if not dry_run:
-        send_end_of_run_summary_sync(
-            generated=result.generated,
-            failed=result.failed,
-            unresolved=result.unresolved,
-            detail=result.detail_lines,
+    # AC-1 / AC-3 exit code: a body crash, OR a failed/skipped summary send, must
+    # exit NON-ZERO (never a false success) so a cron/monitor catches it.
+    if run_error is not None:
+        raise typer.Exit(code=1)
+    if not dry_run and not summary_sent:
+        err_console.print(
+            "[red]End-of-run summary email FAILED to send[/red] after retry — the "
+            "missed-run heartbeat did not go out; investigate the alerting channel "
+            "(ADMIN_EMAIL / Mailgun)."
         )
+        raise typer.Exit(code=1)

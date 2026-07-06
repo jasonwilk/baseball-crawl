@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a same-day re-run of `bb report morning-run` that hits the idempotency skip branch for an already-generated slot no longer wipes that slot's `report_id`/`report_slug` from the `scheduled_report_runs` audit row. A subsequent run therefore recognizes the prior success and does not do a wasteful duplicate crawl + generate.

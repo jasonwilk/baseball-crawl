@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb report morning-run`'s default target date is the venue-local operating date (not the container's UTC date), so an evening cron or an evening manual run no longer defaults to tomorrow's games. The date is derived through a single, reusable operating-timezone seam that CE-3/E-253 will reuse for `game_date`.

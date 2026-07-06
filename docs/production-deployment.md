@@ -108,6 +108,12 @@ Required settings for production:
 | `MAILGUN_FROM_EMAIL` | `noreply@` + your `MAILGUN_DOMAIN` | From address for magic link emails (see `.env.example`) |
 | `ADMIN_EMAIL` | `<jason's-email>` | Bootstrap admin access |
 
+Optional -- scheduled reports:
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `OPERATING_TIMEZONE` | `America/Chicago` | IANA timezone name. Controls the venue-local "today" that `bb report morning-run` defaults its target date to (see [operations.md](admin/operations.md#morning-run-scheduled-reports)); an explicit `--date` still overrides it. Defaults to `America/Chicago` if unset; an invalid value falls back to the default with a logged warning. |
+
 Optional -- Cloudflare management (not needed for tunnel runtime):
 
 | Variable | Value | Notes |
@@ -486,4 +492,4 @@ backups only. The active database file (`data/app.db`) is what matters.
 
 ---
 
-*Last updated: 2026-03-26 | Story: E-157-02*
+*Last updated: 2026-07-06 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var)*

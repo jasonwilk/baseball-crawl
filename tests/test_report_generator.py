@@ -31,9 +31,12 @@ from src.reports.generator import (
     _update_report_failed,
     _update_report_ready,
     CleanupResult,
+    ReaperResult,
+    STALE_GENERATING_SECONDS,
     cleanup_expired_reports,
     generate_report,
     list_reports,
+    reap_stale_generating_reports,
 )
 from tests.conftest import load_real_schema
 
@@ -4159,6 +4162,150 @@ class TestCleanupExpiredReports:
         assert result.success is False
         # Proves generation ran past the swallowed cleanup error to the parser.
         assert "UUID" in (result.error_message or "")
+
+
+class TestReapStaleGenerating:
+    """E-252-08: reap reports stuck at status='generating' to 'failed'."""
+
+    def _fresh_conn(self, tmp_path):
+        conn = sqlite3.connect(str(tmp_path / "test.db"))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        return conn
+
+    def _insert_generating(self, conn, slug, team_id, generated_at, report_path=None):
+        conn.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, "
+            "expires_at, report_path) VALUES (?, ?, 'Test Report', 'generating', ?, ?, ?)",
+            (slug, team_id, generated_at, _iso_offset_days(+14), report_path),
+        )
+        conn.commit()
+
+    def test_stale_generating_reaped_to_failed(self, db, tmp_path):
+        """AC-1: a 'generating' row whose start is older than the threshold is
+        transitioned to 'failed' with an operator-readable reaped message."""
+        team_id = _seed_team(db)
+        self._insert_generating(db, "stale1", team_id, _iso_offset_days(-1))
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert isinstance(result, ReaperResult)
+        assert result.reaped == 1
+        verify = self._fresh_conn(tmp_path)
+        row = verify.execute(
+            "SELECT status, error_message FROM reports WHERE slug = 'stale1'"
+        ).fetchone()
+        verify.close()
+        assert row[0] == "failed"
+        assert "Reaped" in (row[1] or "")
+
+    def test_fresh_generating_left_untouched(self, db, tmp_path):
+        """AC-2: a 'generating' row WITHIN the threshold (a live generation) is NOT
+        reaped -- the reaper must not kill an in-progress generation."""
+        team_id = _seed_team(db)
+        self._insert_generating(db, "fresh1", team_id, _iso_offset_days(0))  # now
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert result.reaped == 0
+        verify = self._fresh_conn(tmp_path)
+        row = verify.execute(
+            "SELECT status FROM reports WHERE slug = 'fresh1'"
+        ).fetchone()
+        verify.close()
+        assert row[0] == "generating"  # live generation untouched
+
+    def test_reaper_fires_via_cleanup_trigger(self, db, tmp_path):
+        """AC-3/AC-6: the reaper runs on its real no-operator-action trigger --
+        invoke cleanup_expired_reports() and observe the stale row transition."""
+        team_id = _seed_team(db)
+        self._insert_generating(db, "viacleanup", team_id, _iso_offset_days(-1))
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            cleanup_expired_reports()  # the opportunistic trigger
+
+        verify = self._fresh_conn(tmp_path)
+        row = verify.execute(
+            "SELECT status FROM reports WHERE slug = 'viacleanup'"
+        ).fetchone()
+        verify.close()
+        assert row[0] == "failed"
+
+    def test_reaper_unlinks_orphan_html(self, db, tmp_path):
+        """A stuck 'generating' row's orphan partial HTML (written before the ready
+        update set report_path, so report_path is NULL) is unlinked by the reaper --
+        cleanup_expired_reports (keyed on report_path IS NOT NULL) never could."""
+        team_id = _seed_team(db)
+        orphan = _write_report_file(tmp_path, "orphan1")  # data/reports/orphan1.html
+        self._insert_generating(db, "orphan1", team_id, _iso_offset_days(-1), report_path=None)
+        assert orphan.exists()
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            # The reaper resolves the orphan via the named _REPORTS_DIR constant
+            # (computed from _REPO_ROOT at import time), so redirect it too.
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert result.reaped == 1
+        assert result.files_removed == 1
+        assert not orphan.exists()  # orphan HTML removed
+
+    def test_reaper_idempotent_and_terminal_rows_immune(self, db, tmp_path):
+        """AC-6/TN-8: running twice does not corrupt; already-'ready' and already-
+        'failed' rows are never touched by the reaper."""
+        team_id = _seed_team(db)
+        self._insert_generating(db, "stale2", team_id, _iso_offset_days(-1))
+        _insert_report_row(
+            db, "ready2", team_id, _iso_offset_days(+7), "reports/ready2.html", status="ready"
+        )
+        db.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at) "
+            "VALUES ('failed2', ?, 'T', 'failed', ?, ?)",
+            (team_id, _iso_offset_days(-1), _iso_offset_days(+7)),
+        )
+        db.commit()
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            first = reap_stale_generating_reports()
+            second = reap_stale_generating_reports()
+
+        assert first.reaped == 1
+        assert second.reaped == 0  # idempotent: nothing left to reap on the re-run
+        verify = self._fresh_conn(tmp_path)
+        rows = dict(verify.execute("SELECT slug, status FROM reports").fetchall())
+        verify.close()
+        assert rows["stale2"] == "failed"
+        assert rows["ready2"] == "ready"    # a completed report is immune
+        assert rows["failed2"] == "failed"  # a terminal failure is immune
+
+    def test_stale_generating_seconds_constant(self):
+        """AC-5: the threshold is the single named constant (1 hour), and is well
+        below the 14-day report expiry."""
+        from src.reports.generator import _EXPIRY_DAYS
+
+        assert STALE_GENERATING_SECONDS == 3600
+        assert STALE_GENERATING_SECONDS < _EXPIRY_DAYS * 24 * 3600
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a transient failure on one team's schedule/opponents crawl (a 5xx server error, a connection error, or a rate-limit error) is isolated to that team: the run records the failure, moves on to the remaining teams, and the always-sent summary still fires. A recurring rate-limit condition escalates to an early, deliberate stop rather than hammering GameChanger. Today only `ForbiddenError` (403) is isolated; any other exception aborts teams 2–4, records nothing, and suppresses the summary.

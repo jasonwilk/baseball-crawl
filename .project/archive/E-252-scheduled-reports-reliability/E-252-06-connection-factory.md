@@ -1,13 +1,15 @@
-# E-252-06: Extend get_connection() with busy_timeout; route all writers through it + contention test
+# E-252-06: Extend get_connection() with busy_timeout; route the scheduled-reports writers through it + contention test
 
 ## Epic
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
-After this story is complete, every SQLite writer (admin UI, interactive CLI, morning-run cron) opens its connection through the single `get_connection()` factory, which sets a `busy_timeout` so a lock overlap WAITS instead of immediately raising `database is locked`. The morning-run CLI no longer hand-rolls its own bare connection. This is the foundation half of the third-writer contention fix (paired with E-252-07).
+After this story is complete, every SQLite writer **in the scheduled-reports path** — the admin UI (uvicorn workers), the interactive report CLI (`bb report`, incl. `map-opponent` per E-252-03 AC-7), and the morning-run cron — opens its connection through the single `get_connection()` factory, which sets a `busy_timeout` so a lock overlap WAITS instead of immediately raising `database is locked`. The morning-run CLI no longer hand-rolls its own bare connection. This is the foundation half of the third-writer contention fix (paired with E-252-07).
+
+**Scope note (P5, corrected during Phase 4b):** the earlier "every SQLite writer" / "route all writers" wording OVER-CLAIMED. This story covers only the scheduled-reports triad above. The `bb data` maintenance writers (`cli/data.py` ×5) and the loader/crawler modules also write the same WAL file but are OUT of scope here — broader `busy_timeout` coverage for them is a captured follow-up idea (closure-idea C), not a gap in this story's delivery.
 
 ## Context
 The morning-run CLI is a THIRD SQLite writer on one WAL file alongside the admin UI (uvicorn workers) and the interactive CLI. Per data-engineer's source-verified analysis (Technical Notes TN-5):

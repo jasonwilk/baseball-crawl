@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the always-sent end-of-run summary email — the system's only missed-run signal — is guaranteed to be attempted on every non-dry-run (including when the run body crashes), a misconfigured alerting channel is caught loudly before the run rather than silently after, and the operator can tell a real send from a silently-dropped one.
@@ -24,6 +24,7 @@ Additionally, a crash in the run body (before E-252-02's isolation catches it, o
 - [ ] **AC-4**: Given a production environment (`APP_ENV` production) with `MAILGUN_API_KEY` unset, when an operator email would be sent, then the stdout fallback does NOT report the message as sent — the dev-stdout path is tri-stated so "logged to stdout" is treated as success only in non-production; in production an unconfigured Mailgun is a failure/misconfiguration, not a silent success.
 - [ ] **AC-5**: The local-dev experience is preserved: with `APP_ENV` development (or unset) and no Mailgun configured, operator alerts and the summary continue to log to stdout and are treated as sent (no crash, no abort) — the tri-state must not break local dev.
 - [ ] **AC-6**: Error-path tests (per Technical Notes TN-8) cover: a crashing run body still emails a summary and exits non-zero (AC-1); a misconfigured channel aborts in preflight (AC-2); a failed send surfaces non-zero (AC-3); production-unset-Mailgun is not a false success (AC-4); dev-stdout still works (AC-5).
+- [ ] **AC-7** (folded from an E-252-06 CR advisory — completes the epic Description's "every SQLite writer... through the single factory"): The `map-opponent` writer in `src/cli/report.py` (`_apply_opponent_mapping`'s connection at ~`:339`, which UPDATEs `opponent_links`) opens its connection through `get_connection(db_path=...)` — passing its already-resolved `resolve_db_path()` — instead of the hand-rolled `sqlite3.connect(...)` + inline `PRAGMA foreign_keys=ON`, so it carries the factory's `busy_timeout` + WAL-safe pragmas and WAITS on a concurrent write lock rather than immediately raising `database is locked`. This is a behavior-preserving reroute (the UPDATE logic and `updated`-count semantics are unchanged); no new contention test is required (E-252-06 AC-7 already pins the factory contract) — the existing `map-opponent` tests must stay green (no regression). Scope note: the read-mostly `bb report list` connection (`~:161`) is deliberately NOT rerouted — under WAL, readers do not block on writers, so it does not need `busy_timeout` for this contention concern.
 
 ## Technical Approach
 Close the three TN-7 gaps together because they share the alerting surface:
@@ -41,7 +42,7 @@ Keep the operator-only, no-coach-content invariant of the alerts (E-240-06 TN-7)
 ## Files to Create or Modify
 - `src/api/helpers.py` (new `is_production()` helper — the single-source prod-detection seam)
 - `src/api/email.py` (`send_email` tri-state dev fallback using `is_production()`; any preflight-validation helper for alerting config)
-- `src/cli/report.py` (`morning_run_cmd` — try/finally around the run body; preflight alerting-config validation via `is_production()`; check/retry the summary send)
+- `src/cli/report.py` (`morning_run_cmd` — try/finally around the run body; preflight alerting-config validation via `is_production()`; check/retry the summary send. AC-7: also reroute the `map-opponent` / `_apply_opponent_mapping` connection at ~`:339` through `get_connection(db_path=...)` — a one-line, behavior-preserving factory reroute in the same file)
 - `src/api/routes/auth.py` (repoint `_is_dev_mode` to `return not is_production()` — behavior-preserving single-source)
 - `tests/test_helpers.py` (new — `is_production()` for production / development / unset `APP_ENV`)
 - `tests/test_cli_report.py` and/or `tests/test_email.py` (or the existing modules) — the AC-6 error-path tests

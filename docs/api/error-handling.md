@@ -11,6 +11,7 @@
 | 401 Unauthorized | Authentication required or expired. The `gc-token` is missing, expired (~61-minute access token TTL), or invalid. Run `GET /me/user` to check token validity. Refresh programmatically via `POST /auth {"type":"refresh"}`. |
 | 403 Forbidden | Authenticated but not authorized. Common case: `GET /bats-starting-lineups/{event_id}` returns 403 for away games where the authenticated user's team was not the primary scorer. |
 | 404 Not Found | Endpoint does not exist, or the resource does not exist for this entity. Some 404s indicate premium/gated features (e.g., batting insight endpoints returned 404). |
+| 429 Too Many Requests | Rate limited. **Never observed in captures** -- GC's actual 429 behavior is unknown. The shared client applies a defensive handling policy anyway; see 429 Rate-Limit Handling (client policy) below. |
 | 500 Internal Server Error | Server-side error. A known pattern: endpoints requiring pagination parameters (`?page_size=50` + `x-pagination: true` header) return HTTP 500 when those parameters are missing. See Pagination 500 Errors below. |
 
 ## Pagination HTTP 500 Errors
@@ -60,12 +61,29 @@ No observed users had profile photos set. The endpoint pattern exists; 404 is ex
 
 `GET /bats-starting-lineups/{event_id}` returns HTTP 403 when the `event_id` refers to an away game where the authenticated user's team was not the primary scorer. Use home game event_ids, or events where the user's team managed scoring.
 
+## 429 Rate-Limit Handling (client policy)
+
+_Source: E-252-04. Last updated: 2026-07-06._
+
+**We have still never observed a `429 Too Many Requests` from the GC API in any capture** -- GC's real rate-limit behavior (thresholds, whether it even sends `Retry-After`, and in what units) remains unknown. The policy below is OUR defensive handling in the shared client (`src/gamechanger/client.py`, `_send_with_retries`), designed against that unobserved behavior so an unexpected 429 during a scheduled/cron run cannot hang the process indefinitely. It is not tuned to a measured value.
+
+On HTTP 429 the client:
+
+1. **Reads `Retry-After`.** The header value is parsed as integer delay-seconds (RFC 7231 §7.1.3). If the header is absent or unparseable, it falls back to `_DEFAULT_RETRY_AFTER_SECONDS = 60`.
+2. **Clamps against a hard cap** `_MAX_RETRY_AFTER_SECONDS = 60`:
+   - **Within cap (`Retry-After <= 60`):** sleep the value, then retry the request **once** inline (not a loop). Return the response on 200; otherwise raise `RateLimitError`.
+   - **Over cap (`Retry-After > 60`):** raise `RateLimitError` **immediately, without sleeping** -- a server-dictated `Retry-After: 3600` must never stall the cron for an hour.
+
+Because the default fallback (60s) equals the cap (60s), a header-less 429 always takes the within-cap path (sleep 60s, retry once).
+
+> **Revisit if a real 429 is ever captured.** The 60s cap and the retry-once policy are placeholders against unknown behavior. Once GC's actual 429 semantics are observed (via mitmproxy captures in `proxy/data/`), re-tune the cap, the fallback, and the retry count to match, and update this section with the observed behavior.
+
 ## Retry Behavior
 
 - **401 Unauthorized:** Do not retry. The token is expired. Rotate credentials via the browser capture workflow (`bb creds import`) and restart the session.
 - **400 Bad Request:** Do not retry with the same request. Diagnose the malformed parameter or header.
 - **500 Internal Server Error:** Check if pagination parameters are missing. If it is a one-off 500 (not a pagination issue), wait and retry with exponential backoff.
-- **Rate limiting:** No `429 Too Many Requests` responses observed in captures. Follow the rate limiting and timing guidelines in `CLAUDE.md` (1-2 second delays between sequential requests, exponential backoff on errors).
+- **Rate limiting (429):** No `429 Too Many Requests` responses observed in captures. The shared client nonetheless applies a defensive policy (60s `Retry-After` cap, within-cap-retry-once, over-cap-raise-immediately, header-fallback-then-clamp) -- see 429 Rate-Limit Handling (client policy) above. Follow the rate limiting and timing guidelines in `CLAUDE.md` (1-2 second delays between sequential requests, exponential backoff on errors) to avoid triggering rate limits in the first place.
 
 ## Implementation Pattern
 

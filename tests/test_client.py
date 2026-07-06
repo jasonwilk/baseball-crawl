@@ -240,17 +240,32 @@ def test_rate_limit_error_on_429_without_retry_after(
     assert meaningful_sleeps == [60]
 
 
+# ---------------------------------------------------------------------------
+# E-252-04: Retry-After cap (_MAX_RETRY_AFTER_SECONDS) + single within-cap retry.
+# GC 429 behavior is UNOBSERVED (TN-6): these pin the DELIBERATE policy, not a
+# measured value. Tests patch time.sleep and assert on CALL COUNTS + args.
+# ---------------------------------------------------------------------------
+
+
 @respx.mock
-def test_rate_limit_does_not_silently_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HTTP 429 is not silently retried -- it raises immediately after the wait."""
-    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+def test_within_cap_429_recurs_sleeps_once_retries_once_then_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-1: a within-cap 429 that recurs on the single retry -> sleep called
+    AT MOST ONCE (arg <= cap), send called AT MOST TWICE, then RateLimitError.
+    Pins 'no ~180s three-attempt stacking'.
+    """
+    from src.gamechanger.client import _MAX_RETRY_AFTER_SECONDS
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
 
     call_count = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal call_count
         call_count += 1
-        return httpx.Response(429)
+        return httpx.Response(429, headers={"Retry-After": "30"})  # within the 60s cap
 
     respx.get(f"{_BASE_URL}/me/teams").mock(side_effect=handler)
     client = _make_client(monkeypatch)
@@ -258,8 +273,98 @@ def test_rate_limit_does_not_silently_retry(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(RateLimitError):
         client.get("/me/teams")
 
-    # Should only have been called once (no silent retry)
-    assert call_count == 1
+    assert call_count == 2  # initial + exactly one retry (no 3-attempt stacking)
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert len(meaningful_sleeps) <= 1
+    assert all(s <= _MAX_RETRY_AFTER_SECONDS for s in meaningful_sleeps)
+    assert meaningful_sleeps == [30]
+
+
+@respx.mock
+def test_within_cap_429_retry_returns_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-1: a within-cap 429 whose single retry returns 200 returns that response
+    (the wait paid off; no RateLimitError).
+    """
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "10"}),
+        httpx.Response(200, json=[{"ok": True}]),
+    ]
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        resp = responses[call_count]
+        call_count += 1
+        return resp
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    result = client.get("/me/teams")
+
+    assert result == [{"ok": True}]
+    assert call_count == 2  # initial 429 + one retry that succeeded
+
+
+@respx.mock
+def test_over_cap_429_raises_immediately_without_sleeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2 / AC-8: a Retry-After ABOVE the cap (e.g. 3600) raises immediately --
+    sleep called ZERO times, send called ONCE -- so an hour-long server-dictated
+    stall can never hang the cron.
+    """
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(429, headers={"Retry-After": "3600"})  # > 60s cap
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(RateLimitError):
+        client.get("/me/teams")
+
+    assert call_count == 1  # raised immediately, no retry
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == []  # never slept the hour
+
+
+@respx.mock
+def test_unparseable_retry_after_falls_back_to_default_and_clamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-3: an absent/unparseable Retry-After falls back to
+    _DEFAULT_RETRY_AFTER_SECONDS (60) and clamps to the cap -- never sleeps longer
+    than the cap.
+    """
+    from src.gamechanger.client import (
+        _DEFAULT_RETRY_AFTER_SECONDS,
+        _MAX_RETRY_AFTER_SECONDS,
+    )
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "not-a-number"})
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(RateLimitError):
+        client.get("/me/teams")
+
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [_DEFAULT_RETRY_AFTER_SECONDS]  # fell back to 60
+    assert all(s <= _MAX_RETRY_AFTER_SECONDS for s in meaningful_sleeps)
 
 
 # ---------------------------------------------------------------------------

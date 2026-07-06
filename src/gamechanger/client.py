@@ -49,6 +49,20 @@ from src.http.session import create_session, resolve_proxy_from_dict
 # Default fallback when Retry-After header cannot be parsed as an integer.
 _DEFAULT_RETRY_AFTER_SECONDS = 60
 
+# Hard ceiling on how long a 429 Retry-After may stall us (E-252-04, TN-6). This
+# lives in the SHARED client, so it is a DELIBERATE GLOBAL change affecting EVERY
+# GameChanger caller (scouting/plays crawls, reports, morning-run), not just the
+# scheduled run. Policy in ``_send_with_retries``: Retry-After <= cap -> sleep the
+# (clamped) amount and retry ONCE, returning on 200; > cap -> raise immediately
+# WITHOUT sleeping, so a ``Retry-After: 3600`` can never hang the cron for an hour.
+# CAVEAT: GC 429 behavior is UNOBSERVED (docs/api/error-handling.md -- "No 429 Too
+# Many Requests responses observed in captures"); this cap is designed against the
+# unknown, NOT tuned to a measured value -- revisit if a real 429 is ever captured.
+# NOTE: _DEFAULT_RETRY_AFTER_SECONDS == this cap, so a header-less 429 always takes
+# the within-cap branch and sleeps the full 60s; lower the default below the cap if
+# cheaper header-less 429s are wanted later.
+_MAX_RETRY_AFTER_SECONDS = 60
+
 
 def _parse_retry_after(value: str) -> int:
     """Parse a Retry-After header value, returning seconds to wait.
@@ -457,7 +471,9 @@ class GameChangerClient:
         Raises:
             CredentialExpiredError: On 401 after refresh retry (authed verbs only).
             ForbiddenError: On 403.
-            RateLimitError: On 429 (after waiting Retry-After).
+            RateLimitError: On 429 -- capped by ``_MAX_RETRY_AFTER_SECONDS``:
+                within-cap waits then retries once and raises only if still
+                rate-limited; over-cap raises immediately without waiting.
             GameChangerAPIError: On 5xx after all retries exhausted, or on any
                 unexpected status.
         """
@@ -500,15 +516,40 @@ class GameChangerClient:
                 retry_after = _parse_retry_after(
                     response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
                 )
+                if retry_after > _MAX_RETRY_AFTER_SECONDS:
+                    # Over the cap: refuse the server-dictated stall. Raise
+                    # immediately WITHOUT sleeping (a Retry-After: 3600 must never
+                    # hang the cron for an hour). (E-252-04 AC-2 / TN-6.)
+                    logger.warning(
+                        "Rate limit on %s (HTTP 429) with Retry-After %ds > %ds cap; "
+                        "raising immediately without waiting.",
+                        label,
+                        retry_after,
+                        _MAX_RETRY_AFTER_SECONDS,
+                    )
+                    raise RateLimitError(
+                        f"Rate limit exceeded for {label} (HTTP 429). "
+                        f"Retry-After {retry_after}s exceeds the "
+                        f"{_MAX_RETRY_AFTER_SECONDS}s cap; not waiting."
+                    )
+                # Within the cap: wait the clamped amount, then retry ONCE inline
+                # (mirroring the 401 refresh-retry above -- NOT a loop). Return on
+                # 200; if the single retry is still non-200, raise. Replaces the
+                # old sleep-then-raise-anyway (which both stalled AND failed with no
+                # retry). (E-252-04 AC-1 / TN-6.)
                 logger.warning(
-                    "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                    "Rate limit on %s (HTTP 429). Waiting %ds, then retrying once.",
                     label,
                     retry_after,
                 )
                 time.sleep(retry_after)
+                retry_response = send()
+                if retry_response.status_code == 200:
+                    return retry_response
                 raise RateLimitError(
                     f"Rate limit exceeded for {label} (HTTP 429). "
-                    f"Waited {retry_after}s."
+                    f"Waited {retry_after}s and retried once; still rate-limited "
+                    f"(HTTP {retry_response.status_code})."
                 )
 
             if 500 <= response.status_code < 600:

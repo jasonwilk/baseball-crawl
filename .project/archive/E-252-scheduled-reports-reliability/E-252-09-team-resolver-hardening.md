@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a connection-level HTTP failure (not just a timeout) in the public `team_resolver` calls is caught and surfaced as a handled `GameChangerAPIError` rather than propagating as an unhandled `httpx` exception — so a transient network blip during opponent display-profile resolution cannot crash the morning run.

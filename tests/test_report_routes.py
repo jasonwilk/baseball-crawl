@@ -130,6 +130,66 @@ class TestServeReport:
         assert "public" in response.headers.get("cache-control", "")
 
 
+class TestServeReadRace:
+    """E-252-10: a concurrent unlink between is_file() and read_text() -> 404, not 500."""
+
+    def test_read_race_returns_404_not_500(self, setup):
+        """AC-1/AC-5: the file passes the is_file() guard but read_text() then
+        raises FileNotFoundError (a concurrent cleanup/reaper unlink) -> a clean
+        404, NOT a 500 / unhandled exception."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "race-slug.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(db_path, "race-slug", report_path="reports/race-slug.html")
+
+        # is_file() (unpatched) passes because the file exists; read_text() is
+        # forced to raise as if the file vanished in the race window.
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError("file vanished")):
+            response = client.get("/reports/race-slug")
+
+        assert response.status_code == 404  # NOT 500
+
+    def test_read_permission_error_also_404(self, setup):
+        """AC-1: ANY OSError on the read (not only unlink) folds to 404."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "perm-slug.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(db_path, "perm-slug", report_path="reports/perm-slug.html")
+
+        with patch("pathlib.Path.read_text", side_effect=PermissionError("denied")):
+            response = client.get("/reports/perm-slug")
+
+        assert response.status_code == 404
+
+    def test_read_race_404_identical_to_unknown(self, setup):
+        """AC-2: the race 404 is byte-identical to the unknown-slug 404 (no leak of
+        report existence)."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "race2.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(db_path, "race2", report_path="reports/race2.html")
+
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError("gone")):
+            race_resp = client.get("/reports/race2")
+        unknown_resp = client.get("/reports/totally-unknown-xyz")
+
+        assert race_resp.status_code == unknown_resp.status_code == 404
+        assert race_resp.content == unknown_resp.content  # identical body -> no leak
+
+    def test_happy_path_still_served_when_readable(self, setup):
+        """AC-4: the happy path is unchanged -- a present, readable file is still
+        served as HTML with the Cache-Control header (the guard only affects the
+        read-failure path)."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "ok-slug.html").write_text(
+            "<html><body>OK</body></html>", encoding="utf-8"
+        )
+        _insert_report(db_path, "ok-slug", report_path="reports/ok-slug.html")
+
+        response = client.get("/reports/ok-slug")
+
+        assert response.status_code == 200
+        assert "<html><body>OK</body></html>" in response.text
+        assert "public" in response.headers.get("cache-control", "")
+
+
 # ---------------------------------------------------------------------------
 # AC-7(b): 404 for unknown slug
 # ---------------------------------------------------------------------------

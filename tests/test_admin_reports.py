@@ -175,6 +175,38 @@ class TestReportsPage:
         response = client.get("/admin/reports")
         assert 'http-equiv="refresh"' in response.text
 
+    def test_reaped_failed_report_is_terminal_and_deletable(self, setup):
+        """E-252-08 AC-4: a report reaped to 'failed' renders as terminal (NO
+        indefinite meta-refresh) and shows the delete affordance -- so the operator
+        recovers it through the normal admin flow instead of raw SQL. This pins the
+        existing template gating (meta-refresh on has_generating; delete on
+        status != 'generating') for a failed row -- the reaper only changes status,
+        it does not need a template change.
+        """
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        failed_id = _insert_report(
+            db_path, team_id, slug="reaped1", status="failed",
+            error_message="Reaped: generation did not complete", report_path=None,
+        )
+
+        response = client.get("/admin/reports")
+        html = response.text
+        # Terminal: with no 'generating' row present, the page does NOT meta-refresh.
+        assert 'http-equiv="refresh"' not in html
+        # Deletable: the delete form for the failed row is rendered.
+        assert f"/admin/reports/{failed_id}/delete" in html
+
+    def test_generating_report_has_no_delete_affordance(self, setup):
+        """E-252-08 AC-4 (contrast): a still-'generating' row is NOT deletable -- its
+        delete form is withheld (so the reaper is what makes a stuck row deletable)."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        gen_id = _insert_report(db_path, team_id, slug="gen2", status="generating")
+
+        response = client.get("/admin/reports")
+        assert f"/admin/reports/{gen_id}/delete" not in response.text
+
 
 # ---------------------------------------------------------------------------
 # AC-9(b): POST with valid URL creates background task and redirects

@@ -26,6 +26,8 @@ import os
 
 import httpx
 
+from src.api.helpers import is_production
+
 logger = logging.getLogger(__name__)
 
 _MAILGUN_API_BASE = "https://api.mailgun.net/v3"
@@ -51,6 +53,19 @@ async def send_email(to_email: str, subject: str, body: str) -> bool:
     """
     mg_key = os.environ.get("MAILGUN_API_KEY", "")
     if not mg_key:
+        # Tri-state (E-252-03 AC-4/AC-5): logging to stdout is a valid "delivery"
+        # ONLY outside production. In production an unconfigured Mailgun means the
+        # message is NOT delivered, so returning True here would be a dangerous
+        # false-positive for the missed-run summary -- report it as a failure.
+        if is_production():
+            logger.error(
+                "MAILGUN_API_KEY is unset in production; cannot deliver email to "
+                "%s (subject: %s). Refusing to report a stdout-logged message as "
+                "sent.",
+                to_email,
+                subject,
+            )
+            return False
         logger.info("[DEV] Email to %s | subject: %s\n%s", to_email, subject, body)
         return True
 
@@ -133,6 +148,51 @@ async def send_magic_link_email(to_email: str, magic_link_url: str) -> bool:
 # ---------------------------------------------------------------------------
 # Morning-run operator alerts (E-240-06, TN-7) -- operator-only, no coach content
 # ---------------------------------------------------------------------------
+
+
+def validate_alerting_config() -> str | None:
+    """Return an operator-facing error if the alerting channel cannot deliver.
+
+    Used by the morning-run non-dry-run preflight (E-252-03 AC-2): a misconfigured
+    channel aborts the run loudly BEFORE the run body executes, rather than running
+    to completion with a silently-dead heartbeat (the end-of-run summary email is
+    the ONLY missed-run signal). Returns ``None`` when the channel is deliverable.
+
+    Misconfigured when:
+      * ``ADMIN_EMAIL`` is unset -- no operator recipient, so every alert is
+        skipped (:func:`_send_operator_alert` warns-and-skips); OR
+      * production (:func:`~src.api.helpers.is_production`) AND EITHER
+        ``MAILGUN_API_KEY`` OR ``MAILGUN_DOMAIN`` is unset -- :func:`send_email`
+        requires BOTH in prod (a missing key falls back to a stdout non-delivery;
+        a missing domain hard-fails and returns False), so either gap is a dead
+        heartbeat.
+
+    In development without Mailgun, stdout logging IS a valid delivery (AC-5), so
+    only a missing ``ADMIN_EMAIL`` disqualifies the channel there.
+    """
+    if not os.environ.get("ADMIN_EMAIL", "").strip():
+        return (
+            "ADMIN_EMAIL is unset -- no operator recipient, so the end-of-run "
+            "summary (the missed-run signal) can never be delivered. Set "
+            "ADMIN_EMAIL before scheduling morning-run."
+        )
+    if is_production():
+        # send_email in prod needs BOTH MAILGUN_API_KEY and MAILGUN_DOMAIN (the
+        # domain is a hard requirement -- email.py's send_email returns False
+        # without it). A missing EITHER means the summary silently never sends.
+        missing = [
+            var
+            for var in ("MAILGUN_API_KEY", "MAILGUN_DOMAIN")
+            if not os.environ.get(var, "").strip()
+        ]
+        if missing:
+            return (
+                f"APP_ENV=production but {' and '.join(missing)} unset -- operator "
+                "emails would not be delivered (Mailgun requires BOTH "
+                "MAILGUN_API_KEY and MAILGUN_DOMAIN). Configure Mailgun before "
+                "scheduling morning-run."
+            )
+    return None
 
 
 async def _send_operator_alert(subject: str, body: str) -> bool:

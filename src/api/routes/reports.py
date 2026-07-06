@@ -79,7 +79,23 @@ async def serve_report(slug: str) -> Response:
         logger.warning("Report file not found: %s (slug=%s)", file_path, slug)
         return Response(status_code=404)
 
-    html_content = file_path.read_text(encoding="utf-8")
+    try:
+        html_content = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        # TOCTOU race (E-252-10): a concurrent unlink can remove the file between
+        # the is_file() guard above and this read -- cleanup_expired_reports() runs
+        # opportunistically at every `bb report generate` / `bb report cleanup`, and
+        # the E-252-08 stuck-'generating' reaper unlinks orphan HTML on the same
+        # lifecycle. Fold the read failure (FileNotFoundError and any other OSError)
+        # into the SAME uniform 404 as the is_file()-false case -- never a 500 --
+        # preserving the route's no-information-leakage contract (AC-1/AC-2), with a
+        # matching operator-visible warning (AC-3).
+        logger.warning(
+            "Report file unreadable, likely concurrent unlink: %s (slug=%s): %s",
+            file_path, slug, exc,
+        )
+        return Response(status_code=404)
+
     return HTMLResponse(
         content=html_content,
         headers={"Cache-Control": "public, max-age=3600"},

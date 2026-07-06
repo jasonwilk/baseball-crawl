@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a report whose generation process died mid-flight (leaving its `reports` row stuck at `status='generating'`) is eventually reaped to a terminal `failed` state, so the admin page stops meta-refreshing on it forever and the row becomes deletable through the normal admin UI instead of requiring raw SQL.

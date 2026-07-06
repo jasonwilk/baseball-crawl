@@ -17,7 +17,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.api.helpers import format_avg, format_date, ip_display  # noqa: E402
+from src.api.helpers import format_avg, format_date, ip_display, is_production  # noqa: E402
 
 
 class TestIpDisplay:
@@ -80,6 +80,28 @@ class TestFormatAvg:
         """Return type is always str."""
         assert isinstance(format_avg(2, 6), str)
         assert isinstance(format_avg(0, 0), str)
+
+
+class TestIsProduction:
+    """Tests for is_production() -- the single-source prod-detection seam (E-252-03)."""
+
+    def test_true_when_app_env_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APP_ENV", "production")
+        assert is_production() is True
+
+    def test_false_when_development(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APP_ENV", "development")
+        assert is_production() is False
+
+    def test_false_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default (APP_ENV unset) is non-production."""
+        monkeypatch.delenv("APP_ENV", raising=False)
+        assert is_production() is False
+
+    def test_false_for_other_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Only the exact string 'production' is production (mirrors the == idiom)."""
+        monkeypatch.setenv("APP_ENV", "staging")
+        assert is_production() is False
 
 
 class TestFormatDate:

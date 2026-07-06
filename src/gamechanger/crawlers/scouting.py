@@ -51,6 +51,7 @@ from src.gamechanger.client import (
     ForbiddenError,
     GameChangerAPIError,
     GameChangerClient,
+    RateLimitError,
 )
 from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.loaders import ensure_season_row
@@ -268,6 +269,19 @@ class ScoutingCrawler:
             except ForbiddenError as exc:
                 logger.warning(
                     "Boxscore fetch failed game=%s public_id=%s: %s",
+                    game_stream_id, public_id, exc,
+                )
+                continue
+            except RateLimitError as exc:
+                # E-252-04 / TN-6: isolate a PER-GAME boxscore 429 so it skips
+                # only this game -- the remaining games of the team still crawl
+                # (the 429 no longer aborts the whole team crawl). This is the
+                # per-game seam ONLY; team-level 429s (schedule/roster) are left
+                # to propagate to morning-run's per-team seam (E-252-02) so the
+                # systemic-429 escalation can observe recurring 429s. GC 429
+                # behavior is UNOBSERVED (revisit if a real 429 is captured).
+                logger.warning(
+                    "Boxscore fetch rate-limited (429) game=%s public_id=%s: %s",
                     game_stream_id, public_id, exc,
                 )
                 continue

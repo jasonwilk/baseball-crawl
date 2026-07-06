@@ -7,6 +7,14 @@ coverage was removed with those functions in E-239.
 
 All tests use an in-memory SQLite database created from migrations/001_initial_schema.sql.
 No real DB file is read or written.
+
+# noqa: fixture-schema -- The E-252-06 connection-contention tests
+(TestConnectionContention) create a minimal ad-hoc `t` table via
+_init_contention_db to exercise SQLite's database-level write-lock /
+busy_timeout behavior (BEGIN IMMEDIATE + threaded lock holder). They test
+connection/lock mechanics, not schema, so load_real_schema is not the natural
+fit (coupling the lock test to the 704-line production schema adds nothing).
+The schema-based tests in this file still use load_real_schema via _make_db.
 """
 
 from __future__ import annotations
@@ -348,3 +356,168 @@ class TestGetDbPathDefault:
             path = db_module.get_db_path()
 
         assert path == custom_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Connection factory contention -- busy_timeout (E-252-06)
+# ---------------------------------------------------------------------------
+#
+# The morning-run cron is a THIRD SQLite writer on one shared WAL file
+# alongside the admin UI and the interactive CLI. get_connection() sets a
+# busy_timeout so a lock overlap WAITS instead of immediately raising
+# "database is locked". These tests use REAL on-disk files under tmp_path (NOT
+# :memory:, NOT the real data/app.db) with a threaded lock holder, following
+# the DE-specified deterministic shape (BEGIN IMMEDIATE + a threading.Event set
+# after the lock is actually held + the check_same_thread rule: each connection
+# is created in the thread that uses it).
+
+import threading  # noqa: E402
+import time  # noqa: E402
+
+from src.api.db import get_connection  # noqa: E402
+
+HOLD_MS = 300  # how long connection A holds the write lock
+TIMEOUT_MS = 2000  # connection B's busy_timeout (short so the suite stays fast)
+
+
+def _init_contention_db(path: Path) -> None:
+    """Create a real on-disk WAL database with a single table for the tests.
+
+    WAL is set once up front here (it is a persistent DB-file property), so the
+    contender connections in the tests inherit it without re-setting it.
+    """
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestConnectionContention:
+    """busy_timeout makes a write-lock overlap WAIT rather than raise immediately."""
+
+    def test_busy_timeout_waits_for_lock(self, tmp_path: Path) -> None:
+        """AC-4: B (with busy_timeout) WAITS for A's lock, then SUCCEEDS.
+
+        Connection A holds a write lock (BEGIN IMMEDIATE) for HOLD_MS on a
+        worker thread; connection B, with busy_timeout=TIMEOUT_MS, issues an
+        INSERT and must block until A releases. Asserting B's elapsed time
+        spans the hold proves it WAITED rather than raised.
+        """
+        db_file = tmp_path / "contention_wait.db"
+        _init_contention_db(db_file)
+
+        lock_acquired = threading.Event()
+
+        def hold_lock() -> None:
+            # check_same_thread rule: create+use the connection in THIS thread.
+            holder = sqlite3.connect(str(db_file))
+            try:
+                holder.execute("BEGIN IMMEDIATE;")  # acquire the write lock
+                lock_acquired.set()  # signal ONLY after the lock is held
+                time.sleep(HOLD_MS / 1000.0)
+                holder.commit()  # release the lock
+            finally:
+                holder.close()
+
+        worker = threading.Thread(target=hold_lock)
+        worker.start()
+
+        # Wait until A actually holds the lock before B contends for it. Start
+        # the clock here (just after the lock is confirmed held) so elapsed
+        # captures the whole hold window; connection-open overhead only adds to
+        # it, keeping the >= HOLD_MS assertion robust.
+        assert lock_acquired.wait(timeout=5), "worker never acquired the lock"
+        start = time.monotonic()
+
+        contender = sqlite3.connect(str(db_file))
+        try:
+            contender.execute(f"PRAGMA busy_timeout={TIMEOUT_MS};")
+            contender.execute("INSERT INTO t (val) VALUES ('b');")
+            contender.commit()
+        finally:
+            contender.close()
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+
+        worker.join(timeout=5)
+
+        # B could not commit before A released ~HOLD_MS after acquisition. A
+        # 10% slack absorbs sub-millisecond scheduling skew between the worker's
+        # set() and the main thread's clock start; this is still an order of
+        # magnitude above the ~1ms fast-fail path pinned by AC-5.
+        assert elapsed_ms >= HOLD_MS * 0.9, (
+            f"B returned in {elapsed_ms:.0f}ms; expected to WAIT ~{HOLD_MS}ms"
+        )
+
+    def test_zero_busy_timeout_fails_fast(self, tmp_path: Path) -> None:
+        """AC-5 (companion): busy_timeout=0 -> B raises 'database is locked' FAST.
+
+        Same fixture, but B sets busy_timeout=0. It must raise
+        sqlite3.OperationalError immediately (elapsed well under the hold),
+        pinning that the pragma is load-bearing in both directions.
+        """
+        db_file = tmp_path / "contention_fast.db"
+        _init_contention_db(db_file)
+
+        lock_acquired = threading.Event()
+        release = threading.Event()
+
+        def hold_lock() -> None:
+            holder = sqlite3.connect(str(db_file))
+            try:
+                holder.execute("BEGIN IMMEDIATE;")
+                lock_acquired.set()
+                # Hold until the main thread has observed B's fast-fail; the
+                # hold duration is irrelevant to a fast-fail, so gate it on an
+                # Event rather than a sleep.
+                release.wait(timeout=5)
+                holder.commit()
+            finally:
+                holder.close()
+
+        worker = threading.Thread(target=hold_lock)
+        worker.start()
+        assert lock_acquired.wait(timeout=5), "worker never acquired the lock"
+
+        contender = sqlite3.connect(str(db_file))
+        try:
+            contender.execute("PRAGMA busy_timeout=0;")
+            start = time.monotonic()
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                contender.execute("INSERT INTO t (val) VALUES ('b');")
+                contender.commit()
+            elapsed_ms = (time.monotonic() - start) * 1000.0
+        finally:
+            contender.close()
+            release.set()
+            worker.join(timeout=5)
+
+        assert elapsed_ms < HOLD_MS, (
+            f"expected fast-fail well under {HOLD_MS}ms, got {elapsed_ms:.0f}ms"
+        )
+
+
+class TestConnectionFactoryPragmas:
+    """Pin the get_connection() factory contract (AC-7)."""
+
+    def test_factory_output_pragmas(self, tmp_path: Path) -> None:
+        """AC-7: a connection from get_connection() carries all four pragmas.
+
+        Reads back the factory OUTPUT (not hand-set pragmas), so a regression
+        that drops or lowers busy_timeout fails HERE even though AC-4/AC-5 use
+        hand-set pragmas on raw connections and would stay green. A db_path
+        override in tmp_path keeps this off the real data/app.db.
+        """
+        db_file = tmp_path / "factory.db"
+        with closing(get_connection(db_path=db_file)) as conn:
+            busy = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
+            fk = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
+            journal = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+            sync = conn.execute("PRAGMA synchronous;").fetchone()[0]
+
+        assert busy == 30000, f"busy_timeout: expected 30000, got {busy}"
+        assert fk == 1, f"foreign_keys: expected 1 (ON), got {fk}"
+        assert journal == "wal", f"journal_mode: expected 'wal', got {journal!r}"
+        assert sync == 1, f"synchronous: expected 1 (NORMAL), got {sync}"

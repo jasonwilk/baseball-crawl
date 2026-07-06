@@ -61,7 +61,7 @@ from src.api import passkey_challenges
 from src.api.auth import create_session, hash_token
 from src.api.db import get_connection
 from src.api.email import send_magic_link_email
-from src.api.helpers import get_app_url
+from src.api.helpers import get_app_url, is_production
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +87,15 @@ _MAGIC_LINK_COOLDOWN_SECONDS = 60
 def _is_dev_mode() -> bool:
     """Return True when running in non-production mode.
 
+    Delegates to the single-source prod-detection seam
+    (:func:`src.api.helpers.is_production`) so ``APP_ENV`` is read one way
+    everywhere (E-252-03). Behavior-preserving: ``not is_production()`` is exactly
+    the prior ``APP_ENV != 'production'``.
+
     Returns:
         True if APP_ENV is not 'production'.
     """
-    return os.environ.get("APP_ENV", "development") != "production"
+    return not is_production()
 
 
 def _get_webauthn_rp_id() -> str:

@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a `Retry-After: 3600` on an HTTP 429 can no longer stall the cron for a server-controlled hour and then abort: the client caps the wait, retries once within the cap or raises immediately over the cap, and a 429 on a single opponent's boxscore fetch is isolated so it does not abort the whole team's crawl.

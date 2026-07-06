@@ -84,8 +84,10 @@ def resolve_team(public_id: str) -> TeamProfile:
 
     Raises:
         TeamNotFoundError: If the API returns 404.
-        GameChangerAPIError: If the API returns a non-200/non-404 status code,
-            or if the 200 response body is missing required fields.
+        GameChangerAPIError: If the API returns a non-200/non-404 status code, if
+            the 200 response body is missing required fields, or if the HTTP
+            request fails at the transport level (timeout, connection error, DNS,
+            TLS -- any ``httpx.RequestError``).
     """
     url = f"{_BASE_URL}/public/teams/{public_id}"
     logger.debug("Resolving team profile for public_id=%s", public_id)
@@ -101,9 +103,18 @@ def resolve_team(public_id: str) -> TeamProfile:
                 },
                 timeout=_TIMEOUT_SECONDS,
             )
-        except httpx.TimeoutException as exc:
+        except httpx.RequestError as exc:
+            # E-252-09: catch the WHOLE transport-error family (httpx.RequestError
+            # supertype of TimeoutException AND ConnectError / NetworkError / etc.),
+            # not just timeouts, so a connection-level blip (DNS, refused, TLS) is
+            # surfaced as the documented GameChangerAPIError instead of crashing the
+            # caller (e.g. the morning run). `{exc}` keeps the message accurate per
+            # failure type. NOTE: httpx.HTTPStatusError is NOT a RequestError and is
+            # never raised here anyway (status codes are inspected below, not via
+            # raise_for_status), so no status handling is swallowed.
             raise GameChangerAPIError(
-                f"Request timed out after {_TIMEOUT_SECONDS}s for public_id={public_id!r}"
+                f"HTTP request failed for public_id={public_id!r} "
+                f"({type(exc).__name__}): {exc}"
             ) from exc
 
     if response.status_code == 404:
@@ -162,7 +173,9 @@ def discover_opponents(public_id: str) -> list[DiscoveredOpponent]:
         case-insensitively; order matches first occurrence).
 
     Raises:
-        GameChangerAPIError: If the API returns a non-200 status code.
+        GameChangerAPIError: If the API returns a non-200 status code, or if the
+            HTTP request fails at the transport level (timeout, connection error,
+            DNS, TLS -- any ``httpx.RequestError``).
     """
     url = f"{_BASE_URL}/public/teams/{public_id}/games"
     logger.debug("Discovering opponents for public_id=%s", public_id)
@@ -177,9 +190,13 @@ def discover_opponents(public_id: str) -> list[DiscoveredOpponent]:
                 },
                 timeout=_TIMEOUT_SECONDS,
             )
-        except httpx.TimeoutException as exc:
+        except httpx.RequestError as exc:
+            # E-252-09: catch the whole transport-error family (see resolve_team) so
+            # a connection-level failure surfaces as GameChangerAPIError, not a raw
+            # httpx exception that crashes the caller.
             raise GameChangerAPIError(
-                f"Request timed out after {_TIMEOUT_SECONDS}s for public_id={public_id!r}"
+                f"HTTP request failed for public_id={public_id!r} "
+                f"({type(exc).__name__}): {exc}"
             ) from exc
 
     if response.status_code != 200:

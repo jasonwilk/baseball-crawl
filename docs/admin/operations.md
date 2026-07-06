@@ -215,12 +215,13 @@ Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned,
 
 For each team URL passed as an argument, the command:
 
-1. Verifies credentials once (preflight check) before touching any team data.
-2. Reads the team's GameChanger schedule and opponent registry.
-3. Filters to games whose LOCAL date matches the target date (today by default).
-4. For each upcoming opponent on that date, runs the resolution ladder to find the opponent's `public_id`.
-5. For auto-resolved opponents, calls the existing `generate_report` pipeline -- the same pipeline as `bb report generate`.
-6. Records each slot's outcome to `scheduled_report_runs` and sends operator alerts.
+1. For non-dry-run invocations, validates that the operator-alert channel can deliver (aborts before touching any team data if not -- see [Alerting-channel preflight](#alerting-channel-preflight-non-dry-run-only) below).
+2. Verifies credentials once (preflight check) before touching any team data.
+3. Reads the team's GameChanger schedule and opponent registry.
+4. Filters to games whose LOCAL date matches the target date (today by default -- the venue-local operating date; see the timezone note below).
+5. For each upcoming opponent on that date, runs the resolution ladder to find the opponent's `public_id`.
+6. For auto-resolved opponents, calls the existing `generate_report` pipeline -- the same pipeline as `bb report generate`.
+7. Records each slot's outcome to `scheduled_report_runs` and sends operator alerts.
 
 Execution is strictly sequential -- one process, a plain loop over teams then opponents. One opponent's failure does not abort the rest of the run.
 
@@ -237,7 +238,9 @@ The variadic team URLs are the only per-season configuration. Edit the crontab o
   https://web.gc.com/teams/lsb-freshman-2026
 ```
 
-A 6 AM default is appropriate for most weekday high school and Legion games (4--7 PM starts): the reports are ready hours before game time. Adjust the time zone on the server if the cron daemon runs in UTC.
+A 6 AM default is appropriate for most weekday high school and Legion games (4--7 PM starts): the reports are ready hours before game time.
+
+**Timezone note**: the default target date (used whenever `--date` is omitted) is the venue-local operating date, not the container's UTC date. Production containers run on UTC, so without this a run late in the venue's evening would otherwise default to tomorrow's games. Set `OPERATING_TIMEZONE` in `.env` to an IANA timezone name (e.g. `America/Chicago`, `America/New_York`) to control it; it defaults to `America/Chicago` when unset. An invalid timezone value logs a warning and falls back to the default rather than crashing. `--date YYYY-MM-DD` always overrides the computed default regardless of `OPERATING_TIMEZONE`.
 
 ### --date override for early-start games
 
@@ -313,9 +316,22 @@ The operator map queue is larger than auto-resolution alone implies, for two rea
 
 These are expected conditions, not defects.
 
+### Alerting-channel preflight (non-dry-run only)
+
+Before touching any team data, a non-dry-run invocation validates that the operator-alert channel -- the end-of-run summary's delivery path -- can actually deliver. If it cannot, the run aborts immediately with a non-zero exit and a clear error message, instead of running to completion behind a silently-dead heartbeat.
+
+The channel is misconfigured when:
+
+- `ADMIN_EMAIL` is unset -- there is no operator recipient, so every alert (including the summary) would be skipped.
+- In production (`APP_ENV=production`): `MAILGUN_API_KEY` or `MAILGUN_DOMAIN` is unset -- Mailgun requires both to actually send. (In development, stdout logging is a valid delivery path when Mailgun is not configured, so only a missing `ADMIN_EMAIL` fails this check there.)
+
+`--dry-run` skips this check entirely -- it sends no summary, so there is no channel to validate.
+
 ### Reading the end-of-run summary email
 
-The end-of-run summary is **always sent** at the end of every non-aborted morning run (when `ADMIN_EMAIL` is configured in `.env`). Its **absence** is the missed-run signal -- if no email arrived by mid-morning on a game day, the cron job did not run.
+The end-of-run summary is **always attempted** at the end of every non-dry-run morning run -- including when the run body crashes partway through. The send is wrapped so a crash still triggers a summary, with the failure surfaced in its detail lines, and the send is retried once before being declared failed. Its **absence** (or a non-zero exit from the command -- see Exit codes below) is the missed-run signal -- if no email arrived by mid-morning on a game day, the cron job did not run cleanly.
+
+In production, an unconfigured Mailgun (`MAILGUN_API_KEY` unset) is treated as a failed send rather than a false "sent" -- the alerting-channel preflight above should catch this before the run even starts, but the summary send itself no longer reports success for a message it could only log to stdout.
 
 **Email subject line:**
 
@@ -353,6 +369,23 @@ Before touching any team data, `morning-run` verifies that GameChanger credentia
 **Action**: refresh credentials (`bb creds import` or `bb creds setup web`) and re-run manually, or wait for the next scheduled run after credentials are restored.
 
 A per-team 403 (ForbiddenError) is distinct from a preflight failure and is not treated as an auth expiry: the team is skipped and counted in the `denied` tally, but the run continues for other teams.
+
+### Exit codes
+
+`bb report morning-run` exits non-zero in any of the following cases, so a cron wrapper or monitor can key on the exit code as a run-health signal (previously the command exited 0 regardless of outcome):
+
+| Condition | Exit code |
+|-----------|-----------|
+| Database not found at the resolved path | 1 |
+| Alerting channel misconfigured (preflight, non-dry-run only) | 1 |
+| GameChanger credentials not configured | 1 |
+| Preflight credential check failed | 1 |
+| The run body raised an unexpected exception | 1 |
+| The end-of-run summary email failed to send after one retry (non-dry-run only) | 1 |
+| Invalid `--date` value | 2 |
+| Normal completion (per-opponent failures are counted but do not fail the run) | 0 |
+
+A non-zero exit and a missing summary email are two independent signals of a run that needs investigation -- either one is enough to act on.
 
 ### Idempotency
 
@@ -872,4 +905,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-07-05 | Source: E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-07-06 | Source: E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

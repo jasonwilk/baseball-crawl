@@ -4,7 +4,7 @@
 [E-252: Scheduled-Reports Reliability (Cron-Grade Morning-Run)](../E-252-scheduled-reports-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the morning run no longer holds a SQLite write lock across the multi-team network crawl, no longer loses its own-team INSERTs on a no-games team, records each slot's audit row inside per-slot error isolation (one slot's DB error can't abort the rest), and reserves each slot before generation so an overlap/SIGKILL can't double-generate. This is the transaction-discipline half of the third-writer contention fix (paired with E-252-06).

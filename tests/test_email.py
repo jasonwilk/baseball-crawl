@@ -9,6 +9,7 @@ error path. No real HTTP -- Mailgun is mocked via respx; per .claude/rules/testi
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -25,6 +26,7 @@ from src.api.email import (
     send_preflight_failure_alert_sync,
     send_unresolved_opponent_alert,
     send_unresolved_opponent_alert_sync,
+    validate_alerting_config,
 )
 
 _MAILGUN_URL = "https://api.mailgun.net/v3/mg.example.com/messages"
@@ -99,7 +101,9 @@ async def test_send_email_missing_domain_when_key_set_returns_false() -> None:
 async def test_send_email_stdout_fallback_when_no_key(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with patch.dict("os.environ", {"MAILGUN_API_KEY": ""}, clear=False):
+    # APP_ENV pinned to development so the tri-state's dev branch is deterministic
+    # (E-252-03 -- no key + non-production => stdout + True).
+    with patch.dict("os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "development"}, clear=False):
         with caplog.at_level("INFO"):
             ok = await send_email("op@example.com", "Hello", "Body here")
 
@@ -107,6 +111,110 @@ async def test_send_email_stdout_fallback_when_no_key(
     assert "[DEV]" in caplog.text
     assert "op@example.com" in caplog.text
     assert "Body here" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_email_no_key_in_production_returns_false(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC-4: production + unconfigured Mailgun must NOT report a stdout-logged
+    message as sent -- the tri-state returns False (a misconfiguration), so the
+    missed-run summary never gets a false 'sent'.
+    """
+    with patch.dict("os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "production"}, clear=False):
+        with caplog.at_level("ERROR"):
+            ok = await send_email("op@example.com", "Hello", "Body here")
+
+    assert ok is False
+    assert "MAILGUN_API_KEY" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_email_no_key_in_development_returns_true() -> None:
+    """AC-5: local dev preserved -- no key + development => treated as sent (True)."""
+    with patch.dict("os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "development"}, clear=False):
+        ok = await send_email("op@example.com", "Hello", "Body here")
+    assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_send_email_no_key_unset_app_env_returns_true() -> None:
+    """AC-5: APP_ENV unset defaults to development => stdout fallback treated as sent."""
+    env = {k: v for k, v in os.environ.items() if k != "APP_ENV"}
+    env["MAILGUN_API_KEY"] = ""
+    with patch.dict("os.environ", env, clear=True):
+        ok = await send_email("op@example.com", "Hello", "Body here")
+    assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# E-252-03: validate_alerting_config() -- the non-dry-run alerting preflight
+# ---------------------------------------------------------------------------
+
+
+def test_validate_alerting_config_admin_unset_returns_error() -> None:
+    """AC-2: no ADMIN_EMAIL => no operator recipient => misconfigured (error string)."""
+    with patch.dict("os.environ", {"ADMIN_EMAIL": ""}, clear=False):
+        err = validate_alerting_config()
+    assert err is not None
+    assert "ADMIN_EMAIL" in err
+
+
+def test_validate_alerting_config_prod_without_mailgun_returns_error() -> None:
+    """AC-2/AC-4: production + no Mailgun => misconfigured (stdout is not delivery)."""
+    with patch.dict(
+        "os.environ",
+        {"ADMIN_EMAIL": "op@lsb.test", "APP_ENV": "production", "MAILGUN_API_KEY": ""},
+        clear=False,
+    ):
+        err = validate_alerting_config()
+    assert err is not None
+    assert "MAILGUN_API_KEY" in err
+
+
+def test_validate_alerting_config_dev_with_admin_is_ok() -> None:
+    """AC-5: development + ADMIN_EMAIL set + no Mailgun => deliverable (None)."""
+    with patch.dict(
+        "os.environ",
+        {"ADMIN_EMAIL": "op@lsb.test", "APP_ENV": "development", "MAILGUN_API_KEY": ""},
+        clear=False,
+    ):
+        assert validate_alerting_config() is None
+
+
+def test_validate_alerting_config_prod_with_mailgun_is_ok() -> None:
+    """Production WITH BOTH MAILGUN_API_KEY and MAILGUN_DOMAIN + ADMIN_EMAIL =>
+    deliverable (None). (P1#2: the domain is required, so it must be set here.)"""
+    with patch.dict(
+        "os.environ",
+        {
+            "ADMIN_EMAIL": "op@lsb.test",
+            "APP_ENV": "production",
+            "MAILGUN_API_KEY": "key-fake",
+            "MAILGUN_DOMAIN": "mg.example.com",
+        },
+        clear=False,
+    ):
+        assert validate_alerting_config() is None
+
+
+def test_validate_alerting_config_prod_without_domain_returns_error() -> None:
+    """P1#2: production + MAILGUN_API_KEY set but MAILGUN_DOMAIN UNSET => misconfigured.
+    send_email hard-fails without the domain (returns False), so the summary would
+    silently never send -- the preflight must catch it, not green-light the run."""
+    with patch.dict(
+        "os.environ",
+        {
+            "ADMIN_EMAIL": "op@lsb.test",
+            "APP_ENV": "production",
+            "MAILGUN_API_KEY": "key-fake",
+            "MAILGUN_DOMAIN": "",  # explicitly unset (overrides any ambient value)
+        },
+        clear=False,
+    ):
+        err = validate_alerting_config()
+    assert err is not None
+    assert "MAILGUN_DOMAIN" in err
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +242,13 @@ async def test_send_magic_link_delegates_to_send_email() -> None:
 async def test_send_magic_link_stdout_fallback_returns_true(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Preserved behavior: no key -> stdout log, returns True, link in output."""
-    with patch.dict("os.environ", {"MAILGUN_API_KEY": ""}, clear=False):
+    """Preserved behavior: no key -> stdout log, returns True, link in output.
+
+    APP_ENV pinned to development so the tri-state's dev branch is deterministic.
+    """
+    with patch.dict(
+        "os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "development"}, clear=False
+    ):
         with caplog.at_level("INFO"):
             ok = await send_magic_link_email("user@example.com", "https://x/magic")
 

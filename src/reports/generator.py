@@ -1380,6 +1380,125 @@ def _run_tier2_enrichment(
     return enriched, TIER2_SUCCESS
 
 
+# ---------------------------------------------------------------------------
+# Stuck-'generating' report reaper (E-252-08)
+# ---------------------------------------------------------------------------
+
+# Staleness threshold for the stuck-'generating' reaper. A reports row is created
+# 'generating' (in _create_report_row) BEFORE the crawl/load/render pipeline runs;
+# _update_report_ready / _update_report_failed transition it at the end. If the
+# process dies mid-generation (SIGKILL, container restart, an uncaught crash
+# OUTSIDE the failure handler) the row stays 'generating' forever -- the admin
+# /admin/reports page meta-refreshes on it indefinitely and its delete affordance
+# is hidden (gated on status != 'generating'). The reaper transitions such a row to
+# 'failed' once its generation START (generated_at) is older than this threshold.
+#
+# Derivation (AC-5): the value MUST be >= the max realistic single-report
+# end-to-end generation wall-time (crawl + load + spray + plays + render -- "a few
+# minutes" per the `bb report generate` CLI help) PLUS a large safety margin, and
+# MUST be well below the 14-day (_EXPIRY_DAYS) report expiry. 1 hour is ~10-20x a
+# real single-report generation, so it never kills a LIVE (even cross-process)
+# generation, yet reaps a genuinely-dead one the same day. It bounds ONE report's
+# generation (generated_at is that report's START). Operator-tunable.
+STALE_GENERATING_SECONDS = 3600
+
+
+@dataclass
+class ReaperResult:
+    """Outcome of one stuck-'generating' reaper sweep (E-252-08).
+
+    ``reaped`` counts rows transitioned generating -> failed; ``files_removed``
+    counts orphan partial-HTML files unlinked; ``errors`` counts rows whose reap
+    raised (per-row error isolation -- one bad row does not abort the sweep).
+    """
+
+    reaped: int = 0
+    files_removed: int = 0
+    errors: int = 0
+
+
+def reap_stale_generating_reports() -> ReaperResult:
+    """Reap reports stuck at status='generating' past the staleness threshold.
+
+    Selects ``reports`` rows in ``status='generating'`` whose ``generated_at`` (the
+    generation START) is older than :data:`STALE_GENERATING_SECONDS`, and
+    transitions each to ``status='failed'`` with an operator-readable reaped
+    message -- so the admin page stops meta-refreshing on it and it becomes
+    deletable through the normal admin flow (the delete affordance is gated on
+    ``status != 'generating'``).
+
+    Orphan HTML: a report's HTML is written to ``reports/{slug}.html`` BEFORE the
+    'ready' transition that sets ``report_path``, so a death in that narrow window
+    leaves an orphan file while ``report_path`` is still NULL -- which
+    :func:`cleanup_expired_reports` (keyed on ``report_path IS NOT NULL``) can
+    NEVER reap. The reaper therefore unlinks ``reports/{slug}.html`` by slug
+    (canonical ``_REPO_ROOT`` resolution + an ``.is_file()`` guard, mirroring
+    :func:`cleanup_expired_reports` / ``_delete_report``) before flipping the row.
+
+    Idempotent: only ``generating`` rows older than the threshold are selected, so
+    a re-run finds none (they are now ``failed``); ``ready``/``failed``/``no_games``
+    rows and fresh in-progress ``generating`` rows are never touched.
+
+    Reachable without operator action via :func:`cleanup_expired_reports` (which
+    runs opportunistically at ``generate_report`` start and via ``bb report
+    cleanup``) and the FastAPI app lifespan startup.
+
+    Returns:
+        A :class:`ReaperResult` with ``reaped`` / ``files_removed`` / ``errors``.
+    """
+    result = ReaperResult()
+    threshold = (
+        datetime.now(timezone.utc) - timedelta(seconds=STALE_GENERATING_SECONDS)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    reaped_message = (
+        f"Reaped: generation did not complete within {STALE_GENERATING_SECONDS}s "
+        "(the generation process likely died mid-run); marked failed so the report "
+        "can be deleted or regenerated."
+    )
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, slug FROM reports "
+            "WHERE status = 'generating' AND generated_at < ?",
+            (threshold,),
+        ).fetchall()
+
+        for row in rows:
+            report_id = row["id"]
+            slug = row["slug"]
+            try:
+                # Unlink any orphan partial HTML (written before the 'ready' update
+                # that would have set report_path -- so report_path is still NULL and
+                # cleanup_expired_reports can never reap it). Canonical resolution
+                # via the named _REPORTS_DIR constant + is_file guard, mirroring
+                # cleanup_expired_reports / _delete_report.
+                file_path = _REPORTS_DIR / f"{slug}.html"
+                if file_path.is_file():
+                    file_path.unlink()
+                    logger.info("Removed orphan HTML for reaped report: %s", file_path)
+                    result.files_removed += 1
+                conn.execute(
+                    "UPDATE reports SET status = 'failed', error_message = ? "
+                    "WHERE id = ? AND status = 'generating'",
+                    (reaped_message, report_id),
+                )
+                result.reaped += 1
+            except Exception as exc:  # noqa: BLE001 -- per-row error isolation
+                logger.warning(
+                    "Failed to reap stale 'generating' report id=%s: %s", report_id, exc
+                )
+                result.errors += 1
+                continue
+        conn.commit()
+
+    if result.reaped:
+        logger.info(
+            "Reaped %d stale 'generating' report(s) to failed (%d orphan file(s) removed)",
+            result.reaped, result.files_removed,
+        )
+    return result
+
+
 def cleanup_expired_reports() -> CleanupResult:
     """Remove on-disk HTML files for expired reports; KEEP the DB rows.
 
@@ -1401,6 +1520,17 @@ def cleanup_expired_reports() -> CleanupResult:
     Returns:
         A :class:`CleanupResult` with ``files_removed`` and ``errors`` counts.
     """
+    # E-252-08: also reap stuck 'generating' reports here, so the reaper rides the
+    # SAME no-operator-action trigger as expired-file cleanup (opportunistic at
+    # generate_report start + `bb report cleanup`). Isolated so a reaper failure can
+    # never block or fail the expired-file sweep (this function's own contract).
+    try:
+        reap_stale_generating_reports()
+    except Exception:  # noqa: BLE001 -- the reaper is best-effort housekeeping
+        logger.warning(
+            "Stale-'generating' reaper failed during cleanup; continuing", exc_info=True
+        )
+
     result = CleanupResult()
     now_iso = _utcnow_iso()
     with closing(get_connection()) as conn:

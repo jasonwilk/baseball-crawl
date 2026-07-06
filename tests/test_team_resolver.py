@@ -179,6 +179,28 @@ class TestResolveTeamTimeout:
             resolve_team(_PUBLIC_ID)
 
 
+class TestResolveTeamTransportErrors:
+    """E-252-09: the WHOLE httpx.RequestError family (not just timeout) is caught."""
+
+    @respx.mock
+    def test_connect_error_raises_api_error(self) -> None:
+        """AC-1/AC-3: a connection-level ConnectError (DNS / refused / TLS) is
+        caught and re-raised as the documented GameChangerAPIError -- NOT a raw
+        httpx exception that would crash the caller (the morning run, map-opponent).
+        """
+        respx.get(_ENDPOINT).mock(side_effect=httpx.ConnectError("connection refused"))
+        with pytest.raises(GameChangerAPIError, match="connection refused"):
+            resolve_team(_PUBLIC_ID)
+
+    @respx.mock
+    def test_read_error_raises_api_error(self) -> None:
+        """AC-1: another non-timeout httpx.RequestError subclass is also caught
+        (proving the broadened catch covers the whole transport family)."""
+        respx.get(_ENDPOINT).mock(side_effect=httpx.ReadError("read failed"))
+        with pytest.raises(GameChangerAPIError, match="ReadError"):
+            resolve_team(_PUBLIC_ID)
+
+
 # ---------------------------------------------------------------------------
 # discover_opponents tests (E-042-05)
 # ---------------------------------------------------------------------------
@@ -306,4 +328,12 @@ class TestDiscoverOpponentsErrors:
         """AC-6: timeout raises GameChangerAPIError."""
         respx.get(_GAMES_ENDPOINT).mock(side_effect=httpx.TimeoutException("timed out"))
         with pytest.raises(GameChangerAPIError, match="timed out"):
+            discover_opponents(_PUBLIC_ID)
+
+    @respx.mock
+    def test_connect_error_raises_api_error(self) -> None:
+        """E-252-09 AC-1/AC-4: a connection-level ConnectError is caught and
+        re-raised as GameChangerAPIError (same broadened catch as resolve_team)."""
+        respx.get(_GAMES_ENDPOINT).mock(side_effect=httpx.ConnectError("connection refused"))
+        with pytest.raises(GameChangerAPIError, match="connection refused"):
             discover_opponents(_PUBLIC_ID)

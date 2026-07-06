@@ -24,6 +24,20 @@ def get_app_url() -> str:
     return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
 
+def is_production() -> bool:
+    """Return True when running in production (``APP_ENV=production``).
+
+    The single-source production-detection seam (E-252-03). ``APP_ENV`` defaults
+    to ``development`` when unset, mirroring the existing ``== "production"``
+    idiom in ``csrf.py`` / ``auth.py`` / ``main.py``. A leaf helper (imports only
+    ``os``), so ``email.py``, the morning-run CLI preflight, and
+    ``routes/auth.py::_is_dev_mode`` can all single-source prod detection without
+    an import cycle (``routes/auth.py`` already imports ``email.py``, so a direct
+    ``_is_dev_mode`` import into ``email.py`` would cycle).
+    """
+    return os.environ.get("APP_ENV", "development") == "production"
+
+
 def ip_display(ip_outs: int | None) -> str:
     """Convert an ip_outs integer to standard innings-pitched display notation.
 

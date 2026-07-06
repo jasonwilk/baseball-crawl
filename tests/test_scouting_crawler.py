@@ -27,6 +27,7 @@ from src.gamechanger.client import (
     CredentialExpiredError,
     ForbiddenError,
     GameChangerAPIError,
+    RateLimitError,
 )
 from src.gamechanger.crawlers.scouting import (
     ScoutingCrawler,
@@ -509,6 +510,51 @@ def test_credential_expired_on_boxscore_propagates_from_scout_team(
     mock_client.get.side_effect = [_ROSTER_RESPONSE, CredentialExpiredError("token expired")]
     with pytest.raises(CredentialExpiredError):
         crawler.scout_team(_PUBLIC_ID)
+
+
+# ---------------------------------------------------------------------------
+# E-252-04 AC-5: per-game boxscore 429 is isolated; the 401 re-raise is preserved
+# ---------------------------------------------------------------------------
+
+
+def test_boxscore_rate_limit_isolates_single_game_siblings_still_crawl(
+    crawler: ScoutingCrawler, mock_client: MagicMock
+) -> None:
+    """AC-5: a RateLimitError (429) on ONE game's boxscore fetch is isolated --
+    that game is skipped and the team's remaining games still crawl (the 429 no
+    longer aborts the whole team crawl).
+    """
+    completed_games = [{"id": "game-1"}, {"id": "game-2"}, {"id": "game-3"}]
+    # game-1 -> 429 (isolated), game-2 + game-3 -> boxscore dicts.
+    mock_client.get.side_effect = [
+        RateLimitError("429 on game-1 boxscore"),
+        {"boxscore": "two"},
+        {"boxscore": "three"},
+    ]
+
+    boxscores, games_crawled = crawler._fetch_boxscores_in_memory("pub-x", completed_games)
+
+    assert games_crawled == 2  # game-1 skipped, game-2 + game-3 crawled
+    assert set(boxscores.keys()) == {"game-2", "game-3"}
+    assert mock_client.get.call_count == 3  # every game was attempted
+
+
+def test_boxscore_credential_expired_still_aborts_team_crawl(
+    crawler: ScoutingCrawler, mock_client: MagicMock
+) -> None:
+    """AC-5: a mid-boxscore CredentialExpiredError (401) STILL re-raises (aborts
+    the whole team crawl). The new 429 isolation must NOT weaken the 401 abort --
+    a 401 is a run-wide token death, not a single-game problem.
+    """
+    completed_games = [{"id": "game-1"}, {"id": "game-2"}]
+    mock_client.get.side_effect = [
+        CredentialExpiredError("token died mid-boxscore"),
+        {"boxscore": "two"},  # must never be reached
+    ]
+    with pytest.raises(CredentialExpiredError):
+        crawler._fetch_boxscores_in_memory("pub-x", completed_games)
+    # Aborted at game-1: game-2 was never fetched.
+    assert mock_client.get.call_count == 1
 
 
 def test_forbidden_on_boxscore_does_not_propagate(
