@@ -6,7 +6,7 @@ Three SOUND_BUT_UNDERDOCUMENTED items from `PLATFORM-AUDIT.md` §3 (lines 199-20
 **How to apply:** when CE-5 is refined/dispatched, hand these three rationales to claude-architect as the source text for its charter/rule edits. Do not re-litigate the decisions; they are Jason-approved (2026-07-05).
 
 ## 1. Nine-agent roster review (audit §3 item #1)
-**Decision (D4, Jason-approved 2026-07-05): refocus both ux-designer and docs-writer; retire neither.**
+**Decision (D4, Jason-approved 2026-07-05; RE-CONFIRMED by Jason 2026-07-07 during E-255 planning): refocus both ux-designer and docs-writer; retire neither.** (A ux-designer docket recon briefly framed the refocus as "not final"; Jason re-confirmed REPURPOSE directly, so that framing is superseded — E-255-03 refocuses the ux charter, E-255-09 takes the REPURPOSED branch.)
 Recorded rationale: *"The 2026-06-12 reports-first reframe (E-239) deleted the coaching dashboard but not the design/documentation need. ux-designer refocuses from dashboard UI to report layout, trust surfaces, and the tools-hub IA pass (2026-06-20 signal — a live forward docket). docs-writer refocuses from dashboard docs to admin runbooks + coaching how-tos for reports and morning-run (it has a live CE-5 docket). Neither is retired; both have forward work."*
 Physical home: `.claude/agents/ux-designer.md`, `.claude/agents/docs-writer.md` — CA edits in CE-5. Also referenced in audit §7 CA docket line 284 ("ux-designer repurpose-or-retire (user decision)" — now DECIDED: refocus) and line 300-301 (ux-designer own-memory rewrite around surviving surfaces).
 
