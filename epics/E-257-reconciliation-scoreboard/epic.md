@@ -14,7 +14,7 @@ CLAUDE.md's north-star Operating Principle ("Always Get Closer to Byte-Identical
 - **Not a CE-numbered audit epic.** This is a dropped thread surfaced by the 2026-07-03 platform audit review: E-245 deferred scoreboard productization to a future epic; E-253 (CE-3) planning referenced resuming it (the audit's recommended sequence put CE-3 "with the E-245 reconciliation-scoreboard resumption") but never filed a tracking artifact.
 - **Owner**: data-engineer (the baseline author; the reconciliation grain and axis policy are data-model decisions).
 - **Size**: M (estimate — refine).
-- **Sequence**: **before or alongside E-256 (CE-6)**. E-256's REVISIT cutover (retire stored `player_season_*` in favor of query-time derivation) and the north-star enforcement both reason about the same plays-vs-boxscore fidelity surface; the scoreboard should exist as the measurement baseline before or beside that simplification, not after it.
+- **Sequence**: **STRICTLY BEFORE E-256 (CE-6)** (tightened 2026-07-07 from "before or alongside"). E-256's closure runtime smoke folds in THIS epic's axis counters, and E-256's query-time-aggregate cutover sign-off sharpens once the scoreboard baseline exists — both depend on the scoreboard existing first, so E-257 is now a hard upstream of E-256, not a parallel option.
 
 ## Scope (from the E-245 baseline)
 Productize the plays-vs-boxscore reconciliation scoreboard from data-engineer's manual query. The baseline doc (`.project/research/E-245-plays-boxscore-reconciliation-baseline.md`) carries the current-state numbers, the grain decision, and the proposed metric:
@@ -22,7 +22,9 @@ Productize the plays-vs-boxscore reconciliation scoreboard from data-engineer's 
 - **Three axis counters** tracked alongside the per-stat metric: (1) dropped-pitch-events (pitch text stranded as `event_type='other'`), (2) no-plays units (coverage / perspective-misalignment), (3) self-games (`home_team_id = away_team_id`).
 - **The gate rule**: "no stat's abs-Δ regresses and no axis counter increases" for any ingestion, parser, or reconciliation change. This is the concrete enforcement mechanism CLAUDE.md's Operating Principle says "lands when that scoreboard exists."
 
-## Already-landed dependency (do NOT re-plan)
+## Registered from agentic-flow review (2026-07-07, AGENTIC-FLOW-REVIEW.md §3.7 / §6 rows 9+11)
+- **Report-time plausibility gate** (flow-review item 11, §3.7 last bullet): a new scope item — before a report renders, range-check the headline rates (FPS 40–75%, P/PA 3.0–4.5) in `src/reports/generator.py` / `build_pitcher_profiles` and surface an implausible value rather than shipping it. Rationale: the operator was the only QA that caught an 18x-off FPS in a shipped report. This is a fast render-time guard, complementary to (not a substitute for) the offline scoreboard; refine whether it lands as its own story here or a standalone story at planning.
+- **Axis counters must be externally consumable** (flow-review item 9, §3.7): E-256's closure runtime smoke (Phase 5 Step 1c, landing in E-256) will fold in this epic's three axis counters (self-games==0, dropped-pitch-events, no-plays) as smoke assertions. Design the counter surface so an external gate can read it (a stable, machine-readable counter output — not only a human-readable diagnostic), so the smoke can assert on it without re-deriving.
 - **E-253 (CE-3) already shipped the stat-key drift canary** the audit said "belongs with the E-245 scoreboard" (`game_loader.py` group-grain stat-key drift canary + `scouting_loader.py` mirror). This epic does NOT re-plan the canary; it consumes/complements it. The canary catches a GC field rename zeroing a stat on both sides (which the scoreboard alone can't see because both sides share the corrupted source); the scoreboard measures fidelity where data exists. They are companions, not duplicates.
 
 ## Refinement Notes (for the future planning session)
@@ -34,3 +36,4 @@ Productize the plays-vs-boxscore reconciliation scoreboard from data-engineer's 
 
 ## History
 - 2026-07-06: Created as a DRAFT capture stub to home the dropped E-245 scoreboard-productization thread (E-253 planning spun it out without filing). Not refined; not dispatchable until taken to READY.
+- 2026-07-07: agentic-flow-review items registered; sequencing E-257→E-256 made strict.
