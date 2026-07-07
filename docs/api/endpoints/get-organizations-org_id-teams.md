@@ -76,7 +76,7 @@ x-pagination: true
 
 ## Response
 
-Bare JSON array of team objects. 7 teams observed for Lincoln Rebels organization.
+Bare JSON array of team objects. 7 teams observed for Example Organization.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -102,17 +102,17 @@ Bare JSON array of team objects. 7 teams observed for Lincoln Rebels organizatio
   "root_team_id": "cb67372e-REDACTED",
   "organization_id": "87452e66-REDACTED",
   "status": "active",
-  "name": "Lincoln Rebels 9U",
+  "name": "Example Team 9U",
   "sport": "baseball",
   "season_name": "summer",
   "season_year": 2026,
-  "city": "Lincoln",
+  "city": "Anytown",
   "state": "NE",
   "country": "United States",
   "staff_ids": [],
   "proxy_team_id": "3d0e3553-REDACTED",
   "age_group": "9U",
-  "team_public_id": "KCRUFIkaHGXI"
+  "team_public_id": "xXxXxXxXxXxX"
 }
 ```
 

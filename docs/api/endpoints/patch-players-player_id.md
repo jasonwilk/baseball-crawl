@@ -28,11 +28,11 @@ caveats:
     WRITE OPERATION: Updates player profile attributes. Not relevant to read-only
     data ingestion.
   - >
-    OBSERVED CONTEXT: Triggered twice (06:16:46 and 06:16:51) while viewing Justin Werner
-    (player_id a473bdac-763d-407b-8a18-b2ac8df925b9) on the opponent player page.
+    OBSERVED CONTEXT: Triggered twice (06:16:46 and 06:16:51) while viewing Player One
+    (player_id a473bdac-REDACTED) on the opponent player page.
     The GC web app appears to trigger a PATCH when the user sets or edits player
     attributes such as batting side or throwing hand. The player_id is from OUR team
-    roster (a473bdac is a Lincoln Rebels player), not the opponent being viewed --
+    roster (a473bdac-REDACTED is an Example Team player), not the opponent being viewed --
     suggesting the PATCH was on a roster player being updated while navigating.
   - >
     REQUEST BODY UNKNOWN: Body schema not captured. Based on content type

@@ -10,7 +10,7 @@ profiles:
       Full schema documented. Both teams' batting and pitching lines confirmed.
       Path parameter is event_id -- empirically verified 2026-03-18: event_id
       returns 200, game_stream.id returns 500 (same game, direct A/B test,
-      Standing Bear Freshman 2025). Prior documentation incorrectly identified
+      Example Team Freshman). Prior documentation incorrectly identified
       the parameter as game_stream.id.
   mobile:
     status: unverified
@@ -31,7 +31,7 @@ caveats:
     game_stream.id. In game-summaries: event_id == game_stream.game_id (always
     equal); game_stream.id is a third distinct UUID that returns 500
     {"error":"[scheduling] Cannot find event[...]"}. Direct A/B test confirmed
-    2026-03-18 (Standing Bear Freshman 2025). Prior documentation (2026-03-04,
+    2026-03-18 (Example Team Freshman). Prior documentation (2026-03-04,
     2026-03-12) incorrectly identified the parameter as game_stream.id -- likely
     caused by confusion between game_stream.id and game_stream.game_id when
     reading game-summaries records. The /public/teams/{public_id}/games `id` field
@@ -95,7 +95,7 @@ No `gc-user-action` observed for this endpoint.
 ## Response
 
 Single JSON object. Top-level keys are team identifiers (exactly 2 -- one per team). Keys are asymmetric:
-- **Own team:** `public_id` slug (short alphanumeric, no dashes, e.g., `"a1GFM9Ku0BbF"`)
+- **Own team:** `public_id` slug (short alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`)
 - **Opponent:** UUID (with dashes, e.g., `"f0e73e42-f248-402b-8171-524b4e56a535"`)
 
 Detect which key is which: check if the key matches UUID format (contains dashes) or slug format (alphanumeric only, no dashes).
@@ -178,4 +178,4 @@ Each group contains:
 - `player_text` encoding may be empty for subs.
 - No `gc-user-action` observed -- may be optional for this endpoint.
 
-**Discovered:** 2026-03-04. **Schema fully documented:** 2026-03-04. **Path parameter corrected:** 2026-03-18 -- parameter is `event_id`, not `game_stream.id` (direct A/B test, Standing Bear Freshman 2025).
+**Discovered:** 2026-03-04. **Schema fully documented:** 2026-03-04. **Path parameter corrected:** 2026-03-18 -- parameter is `event_id`, not `game_stream.id` (direct A/B test, Example Team Freshman).

@@ -15,6 +15,7 @@ Run with:
 
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
 import sys
@@ -331,3 +332,41 @@ class TestCSRFCookieDelivery:
             ) as client:
                 response = client.get("/admin/users")
         assert CSRF_COOKIE_NAME in response.cookies
+
+
+# ---------------------------------------------------------------------------
+# CSRF cookie Secure flag (E-254-01 AC-4)
+# ---------------------------------------------------------------------------
+
+
+class TestCSRFCookieSecureFlag:
+    """The csrf_token cookie carries Secure only under production APP_ENV (AC-4).
+
+    DEV_USER_EMAIL and APP_ENV are stripped from the ambient env so each case
+    is deterministic; the cookie is emitted per-request by CSRFMiddleware, so
+    APP_ENV at request time governs the Secure attribute.
+    """
+
+    def _get_csrf_setcookie(self, db: Path, env: dict[str, str]) -> str:
+        base = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("DEV_USER_EMAIL", "APP_ENV")
+        }
+        base.update(env)
+        base["DATABASE_PATH"] = str(db)
+        with patch.dict("os.environ", base, clear=True):
+            with TestClient(app) as client:
+                response = client.get("/auth/login")
+        set_cookies = response.headers.get_list("set-cookie")
+        csrf = [c for c in set_cookies if c.startswith(f"{CSRF_COOKIE_NAME}=")]
+        assert csrf, f"no csrf Set-Cookie header found in {set_cookies}"
+        return csrf[0]
+
+    def test_csrf_cookie_secure_in_production(self, db: Path) -> None:
+        """APP_ENV=production -> csrf_token cookie carries Secure."""
+        assert "Secure" in self._get_csrf_setcookie(db, {"APP_ENV": "production"})
+
+    def test_csrf_cookie_not_secure_when_unset(self, db: Path) -> None:
+        """APP_ENV unset -> csrf_token cookie does NOT carry Secure."""
+        assert "Secure" not in self._get_csrf_setcookie(db, {})

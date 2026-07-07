@@ -7,9 +7,20 @@ and as importable Python functions for use in DB query functions.
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 
+logger = logging.getLogger(__name__)
+
 _APP_URL_DEFAULT = "http://baseball.localhost:8001"
+
+# Recognized ``APP_ENV`` values (post-normalization).  A non-empty value that
+# normalizes to anything OUTSIDE this set is a typo (e.g. ``prod``/``prd``) and
+# is caught loudly at startup by :func:`validate_app_env` rather than silently
+# selecting the insecure (non-``Secure`` cookie) posture at runtime.
+_RECOGNIZED_APP_ENVS = frozenset(
+    {"production", "development", "dev", "test", "staging"}
+)
 
 
 def get_app_url() -> str:
@@ -24,18 +35,68 @@ def get_app_url() -> str:
     return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
 
-def is_production() -> bool:
-    """Return True when running in production (``APP_ENV=production``).
+def get_app_env() -> str:
+    """Return the normalized ``APP_ENV`` value (``.strip().lower()``).
 
-    The single-source production-detection seam (E-252-03). ``APP_ENV`` defaults
-    to ``development`` when unset, mirroring the existing ``== "production"``
-    idiom in ``csrf.py`` / ``auth.py`` / ``main.py``. A leaf helper (imports only
-    ``os``), so ``email.py``, the morning-run CLI preflight, and
-    ``routes/auth.py::_is_dev_mode`` can all single-source prod detection without
-    an import cycle (``routes/auth.py`` already imports ``email.py``, so a direct
-    ``_is_dev_mode`` import into ``email.py`` would cycle).
+    Casing and surrounding whitespace are discarded so that ``production``,
+    ``Production``, ``PRODUCTION``, and ``" production "`` all normalize to
+    ``"production"``.  Unset or empty ``APP_ENV`` normalizes to ``""`` -- callers
+    treat that as the local-dev posture (non-production).  This is the single
+    normalizer that both :func:`is_production` and :func:`validate_app_env`
+    build on (E-254-01).
     """
-    return os.environ.get("APP_ENV", "development") == "production"
+    return os.environ.get("APP_ENV", "").strip().lower()
+
+
+def is_production() -> bool:
+    """Return True when running in production (``APP_ENV`` normalizes to ``production``).
+
+    The single-source production-detection seam (E-252-03, strict-normalized in
+    E-254-01).  Reads :func:`get_app_env`, so casing/whitespace variants of
+    ``production`` correctly select the production posture and unset/empty
+    resolves to non-production (local dev needs ``Secure``-off cookies over
+    HTTP; this default is load-bearing).  A leaf helper (imports only ``os`` /
+    ``logging``), so ``email.py``, the morning-run CLI preflight,
+    ``routes/auth.py::_is_dev_mode``, ``auth.py::SessionMiddleware``, and
+    ``csrf.py`` can all single-source prod detection without an import cycle.
+    """
+    return get_app_env() == "production"
+
+
+def validate_app_env() -> None:
+    """Refuse to start when ``APP_ENV`` is set to an unrecognized value.
+
+    A non-empty ``APP_ENV`` that normalizes to a value OUTSIDE
+    :data:`_RECOGNIZED_APP_ENVS` (an abbreviation typo such as ``prod``/``prd``)
+    is caught at startup -- a CRITICAL-level log plus a ``RuntimeError`` -- rather
+    than silently downgrading the cookie ``Secure`` flag at runtime (the actual
+    fail-open the audit flagged).  Unset OR set-but-empty ``APP_ENV`` is treated
+    as unset (local-dev posture) and does NOT raise.
+
+    Called once at app construction, alongside the ``DEV_USER_EMAIL``-in-production
+    guard in :meth:`src.api.auth.SessionMiddleware.__init__` (E-254-01).
+
+    Raises:
+        RuntimeError: If ``APP_ENV`` is non-empty and normalizes outside the
+            recognized set.
+    """
+    normalized = get_app_env()
+    if not normalized:
+        return
+    if normalized not in _RECOGNIZED_APP_ENVS:
+        recognized = ", ".join(sorted(_RECOGNIZED_APP_ENVS))
+        raw = os.environ.get("APP_ENV", "")
+        logger.critical(
+            "APP_ENV=%r is not a recognized environment (expected one of %s, "
+            "or unset for local dev); refusing to start to avoid silently "
+            "selecting an insecure cookie posture at runtime.",
+            raw,
+            recognized,
+        )
+        raise RuntimeError(
+            f"Unrecognized APP_ENV={raw!r}; expected one of {recognized}, "
+            "or leave it unset for local development."
+        )
 
 
 def ip_display(ip_outs: int | None) -> str:

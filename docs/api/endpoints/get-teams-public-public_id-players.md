@@ -47,7 +47,7 @@ see_also:
 
 # GET /teams/public/{public_id}/players
 
-**Status:** CONFIRMED LIVE -- 200 OK. 20 players returned. LSB JV Grizzlies (`y24fFdnr3RAN`). Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK. 20 players returned. Example Team JV (`xXxXxXxXxXxX`). Last verified: 2026-03-04.
 
 Returns the roster for a team identified by its `public_id` slug. Same 5-field schema as `GET /teams/{team_id}/players` (authenticated UUID endpoint). The distinction is this endpoint uses the short alphanumeric `public_id` instead of the team UUID.
 
@@ -61,7 +61,7 @@ GET https://api.team-manager.gc.com/teams/public/{public_id}/players
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `public_id` | string | Alphanumeric public ID slug (e.g., `"y24fFdnr3RAN"`). NOT a UUID. Available from `GET /me/teams` (`public_id` field) or from `GET /teams/{team_id}` (`public_id` field). |
+| `public_id` | string | Alphanumeric public ID slug (e.g., `"xXxXxXxXxXxX"`). NOT a UUID. Available from `GET /me/teams` (`public_id` field) or from `GET /teams/{team_id}` (`public_id` field). |
 
 ## Headers (Web Profile)
 

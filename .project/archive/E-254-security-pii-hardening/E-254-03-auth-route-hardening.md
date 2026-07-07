@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three remaining low-severity auth gaps in `src/api/routes/auth.py` are closed: passkey registration enforces single-use of its challenge via the consume rowcount, the login route no longer reveals whether an email is registered through response timing, and the unauthenticated passkey-options endpoint can no longer be used to flood the challenge table with unbounded rows.
@@ -51,5 +51,7 @@ software-engineer
 
 ## Notes
 The cap value (100) and TTL (unchanged, 5 min) are in TN-7. Timing ACs must never assert wall-clock durations (TN-6).
+
+**Phase-4b remediation (2026-07-07)**: the Codex post-dev review reproduced a count-then-insert TOCTOU in the options cap — two SQLite connections each reading live-count 99 < 100 and both inserting → a live count of 101, overshooting the cap. Since AC-5/TN-7 promise a true hard bound ("the live login count cannot grow past the cap"), the cap was hardened to a single count-guarded atomic INSERT (the count check and the insert are one statement; SQLite's single-writer serialization stops two concurrent callers both passing the gate). AC-5/TN-7's hard-cap wording is now literally honest — no softening. AC-5 re-verified against the atomic implementation.
 
 **Accepted residual (login-timing, LOW)**: the AC-3 call-parity equalizes the FRESH-known vs UNKNOWN paths (the single-probe enumeration vector the finding targets). A THIRD path — the rate-limit-suppression branch — does LESS work than both, so REPEATED probes of a REGISTERED email show a timing DROP on the 2nd probe while an UNREGISTERED email stays flat (a repeated-probe differential). Chasing constant-time across all three paths is over-scoping for a LOW finding on a single-operator app; this residual is ACCEPTED-AND-NOTED (same disposition class as IDEA-093). Optional zero-residual hardening (not required): run the same dummy equalizing work in the rate-limited branch too. Captured as IDEA-095.

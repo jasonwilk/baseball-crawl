@@ -24,7 +24,9 @@ Promote after E-254 closes (don't balloon a mid-review story). A natural next PI
 ## Notes
 Surfaced by api-scout during the E-254 Codex-review triage while confirming the P1-07 org/event token coverage. E-254-07's Description was narrowed to its audited/enumerated scope so it does not over-claim; this idea holds the remainder. Related: the E-254 Open-Questions context-layer follow-ups (taxonomy bare-prefix clarification + denylist-as-re-runnable-check).
 
+**Concrete Class-B instance found during E-254-07 dispatch (2026-07-07)**: a THIRD person name (a likely own-roster minor's name — the exact identifier is withheld here per Decision #2) was found in `docs/api/endpoints/patch-players-player_id.md`, OUTSIDE the 22-token E-254-07 denylist. api-scout scrubbed it to a placeholder for hygiene during the scrub (gate-neutral, since it's not a denylist token), but flagged that it (and likely more own-roster/opponent names) belongs in THIS systematic tail and/or the real denylist. This is a concrete confirmation that the tail contains at least one more likely-minor name beyond the two E-254-07 pulled forward — reinforcing that the systematic sweep is more than cosmetic. When this idea is promoted, api-scout's full inventory (held outside git, per Decision #2) should enumerate all such residual names.
+
 ---
 Created: 2026-07-06
-Last reviewed: 2026-07-06
+Last reviewed: 2026-07-07
 Review by: 2026-10-04

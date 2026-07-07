@@ -38,6 +38,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.background import BackgroundTask
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -439,14 +440,17 @@ class TestPostLogin:
 
 
 class TestVerifyToken:
-    """Token verification flows (AC-17d, AC-17e, AC-17f)."""
+    """Magic-link verify flows -- GET/POST split (E-254-02 AC-1..AC-5).
 
-    def test_valid_token_creates_session_and_redirects(self, db: Path) -> None:
-        """Valid token verification creates session and redirects (AC-17d).
+    GET /auth/verify is side-effect-free (renders an interstitial); the atomic
+    single-use consume + session creation moved to a CSRF-protected POST, so a
+    mail-provider link scanner's GET prefetch can no longer burn the token or
+    receive a live session.
+    """
 
-        A user with no passkeys is redirected to the passkey prompt interstitial;
-        a user with passkeys is redirected directly to /admin/reports.
-        """
+    def test_get_valid_token_renders_interstitial_no_consume(self, db: Path) -> None:
+        """AC-1: GET valid token -> interstitial form (token + csrf), NO consume,
+        NO session cookie, token row still present."""
         user_id = _insert_user(db, "verify@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
@@ -454,32 +458,73 @@ class TestVerifyToken:
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
+        assert response.status_code == 200
+        # The interstitial embeds the live token, so it must not be cached by a
+        # shared/intermediary cache (E-254-02 defense-in-depth).
+        assert response.headers.get("cache-control") == "no-store"
+        # No session set by the side-effect-free GET.
+        assert "session" not in response.cookies
+        # Interstitial form carries the token and the CSRF token as hidden fields.
+        assert 'name="token"' in response.text
+        assert raw_token in response.text
+        assert 'name="csrf_token"' in response.text
+        assert 'action="/auth/verify"' in response.text
+        assert 'method="post"' in response.text.lower()
+        # Token row is NOT consumed by the GET.
+        conn = sqlite3.connect(str(db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE token = ?",
+            (hash_token(raw_token),),
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1
+
+    def test_post_valid_token_creates_session_and_redirects(self, db: Path) -> None:
+        """AC-3: POST valid token + CSRF -> consume, session, redirect.
+
+        A user with no passkeys is redirected to the passkey prompt interstitial;
+        a user with passkeys is redirected directly to /admin/reports.
+        """
+        user_id = _insert_user(db, "verifypost@example.com")
+        raw_token = _insert_magic_token(db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
+
         assert response.status_code == 302
         location = response.headers["location"]
-        # New user (no passkeys) -> passkey prompt; user with passkeys -> /admin/reports
-        # (E-238-05: retargeted off the quarantined /dashboard).
         assert "/admin/reports" in location or "/auth/passkey/prompt" in location
         assert "/dashboard" not in location
 
-    def test_valid_token_sets_session_cookie(self, db: Path) -> None:
-        """Valid token sets the session cookie on the response (AC-17d)."""
+    def test_post_valid_token_sets_session_cookie(self, db: Path) -> None:
+        """AC-3: POST valid token sets the session cookie."""
         user_id = _insert_user(db, "cookie@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         assert "session" in response.cookies
 
-    def test_valid_token_inserts_session_row(self, db: Path) -> None:
-        """Valid token verification inserts a row in the sessions table (AC-17d)."""
+    def test_post_valid_token_inserts_session_row(self, db: Path) -> None:
+        """AC-3: POST valid token inserts a row in the sessions table."""
         user_id = _insert_user(db, "sessrow@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                client.get(f"/auth/verify?token={raw_token}")
+                client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -489,17 +534,17 @@ class TestVerifyToken:
         conn.close()
         assert count == 1
 
-    def test_valid_token_is_deleted_after_use(self, db: Path) -> None:
-        """Valid token is deleted from magic_link_tokens after verification (AC-17d).
-
-        E-100 schema uses DELETE for single-use enforcement (no used_at column).
-        """
+    def test_post_valid_token_is_deleted_after_use(self, db: Path) -> None:
+        """AC-3: POST valid token deletes the magic_link_tokens row (single-use)."""
         user_id = _insert_user(db, "markused@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                client.get(f"/auth/verify?token={raw_token}")
+                client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -510,8 +555,33 @@ class TestVerifyToken:
         conn.close()
         assert count == 0  # Row was deleted on use
 
-    def test_expired_token_shows_error_page(self, db: Path) -> None:
-        """Expired token renders verify_error.html (AC-17e)."""
+    def test_post_without_csrf_rejected_before_consume(self, db: Path) -> None:
+        """AC-5: POST without a valid CSRF token is rejected (403) and the token
+        is NOT consumed (no session created)."""
+        user_id = _insert_user(db, "nocsrf@example.com")
+        raw_token = _insert_magic_token(db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            # No csrf_token cookie/field -> CSRFMiddleware rejects with 403.
+            with TestClient(app, follow_redirects=False) as client:
+                response = client.post("/auth/verify", data={"token": raw_token})
+
+        assert response.status_code == 403
+        conn = sqlite3.connect(str(db))
+        token_count = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE token = ?",
+            (hash_token(raw_token),),
+        ).fetchone()[0]
+        session_count = conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert token_count == 1  # not consumed
+        assert session_count == 0  # no session
+
+    def test_get_expired_token_shows_error_no_delete(self, db: Path) -> None:
+        """AC-2: GET expired token renders the error page and does NOT delete the
+        row (the side-effect-free GET performs no writes for any token state)."""
         user_id = _insert_user(db, "expired@example.com")
         raw_token = _insert_magic_token(db, user_id, expired=True)
 
@@ -519,11 +589,21 @@ class TestVerifyToken:
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
-        assert response.status_code in (400, 200)  # renders error page
+        assert response.status_code == 400
         assert "invalid or has expired" in response.text.lower()
+        # The verify-error response on the GET auth path is also no-store.
+        assert response.headers.get("cache-control") == "no-store"
+        # The GET must NOT delete the expired row (no side effects).
+        conn = sqlite3.connect(str(db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE token = ?",
+            (hash_token(raw_token),),
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1
 
     def test_used_token_shows_error_page(self, db: Path) -> None:
-        """Already-used token (deleted) renders verify_error.html (AC-17f).
+        """AC-4: after a POST consumes the token, a second POST is rejected.
 
         After first use the token row is deleted, so a second attempt gets
         'not found' -> same verify_error.html response.
@@ -531,28 +611,34 @@ class TestVerifyToken:
         user_id = _insert_user(db, "alreadyused@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
-        # First use consumes (deletes) the token.
+        # First use (POST) consumes (deletes) the token.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                client.get(f"/auth/verify?token={raw_token}")
+                client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         # Second attempt -- token is gone.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         assert "invalid or has expired" in response.text.lower()
 
-    def test_nonexistent_token_shows_error_page(self, db: Path) -> None:
-        """Non-existent token renders verify_error.html."""
+    def test_get_nonexistent_token_shows_error_page(self, db: Path) -> None:
+        """GET non-existent token renders verify_error.html."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/verify?token=doesnotexisttoken123456789012")
 
         assert "invalid or has expired" in response.text.lower()
 
-    def test_missing_token_param_shows_error_page(self, db: Path) -> None:
-        """Missing token parameter renders verify_error.html."""
+    def test_get_missing_token_param_shows_error_page(self, db: Path) -> None:
+        """GET with a missing token parameter renders verify_error.html."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/verify")
@@ -560,20 +646,26 @@ class TestVerifyToken:
         assert response.status_code in (400, 422, 200)
         # Either error page or validation error -- either is acceptable
 
-    def test_used_token_cannot_be_reused(self, db: Path) -> None:
-        """A valid token cannot be used twice (AC-17f)."""
+    def test_post_used_token_cannot_be_reused(self, db: Path) -> None:
+        """AC-4: a valid token cannot be POST-consumed twice."""
         user_id = _insert_user(db, "reuse@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 # First use -- should succeed
-                response1 = client.get(f"/auth/verify?token={raw_token}")
+                response1 = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
                 assert response1.status_code == 302
 
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 # Second use -- should fail (token was deleted)
-                response2 = client.get(f"/auth/verify?token={raw_token}")
+                response2 = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
                 assert "invalid or has expired" in response2.text.lower()
 
 
@@ -660,16 +752,22 @@ class TestSessionCookieProperties:
     """Session cookie has correct flags (AC-7)."""
 
     def test_session_cookie_is_httponly(self, db: Path) -> None:
-        """Verify cookie after verify contains HttpOnly flag."""
+        """Verify cookie after POST verify contains HttpOnly flag."""
         user_id = _insert_user(db, "cookieflags@example.com")
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
-        set_cookie = response.headers.get("set-cookie", "").lower()
-        assert "httponly" in set_cookie
+        # The session Set-Cookie is emitted alongside the CSRF cookie; select it.
+        session_cookie = next(
+            c for c in response.headers.get_list("set-cookie") if c.startswith("session=")
+        ).lower()
+        assert "httponly" in session_cookie
 
     def test_session_cookie_has_max_age(self, db: Path) -> None:
         """Verify cookie contains Max-Age=604800 (7 days)."""
@@ -678,10 +776,15 @@ class TestSessionCookieProperties:
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
-        set_cookie = response.headers.get("set-cookie", "").lower()
-        assert "max-age=604800" in set_cookie
+        session_cookie = next(
+            c for c in response.headers.get_list("set-cookie") if c.startswith("session=")
+        ).lower()
+        assert "max-age=604800" in session_cookie
 
     def test_session_cookie_samesite_lax(self, db: Path) -> None:
         """Verify cookie contains SameSite=Lax."""
@@ -690,10 +793,15 @@ class TestSessionCookieProperties:
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
-        set_cookie = response.headers.get("set-cookie", "").lower()
-        assert "samesite=lax" in set_cookie
+        session_cookie = next(
+            c for c in response.headers.get_list("set-cookie") if c.startswith("session=")
+        ).lower()
+        assert "samesite=lax" in session_cookie
 
 
 # ---------------------------------------------------------------------------
@@ -783,10 +891,13 @@ class TestStaleMagicLinkInvalidation:
         assert len(captured_url) == 1
         new_token = captured_url[0].split("token=")[-1]
 
-        # The new token must verify successfully.
+        # The new token must verify successfully (via the POST consume path).
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={new_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": new_token, "csrf_token": _CSRF},
+                )
 
         assert response.status_code == 302
         location = response.headers["location"]
@@ -819,13 +930,20 @@ class TestStaleMagicLinkInvalidation:
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, cookies=_CSRF_COOKIES) as client:
-                # Verify A -- must fail (deleted by B issuance).
-                response_a = client.get(f"/auth/verify?token={token_a_raw}")
+                # Verify A -- must fail (deleted by B issuance). A POST consume of
+                # the deleted token hits the not-found branch -> error page.
+                response_a = client.post(
+                    "/auth/verify",
+                    data={"token": token_a_raw, "csrf_token": _CSRF},
+                )
             assert "invalid or has expired" in response_a.text.lower()
 
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 # Verify B -- must succeed.
-                response_b = client.get(f"/auth/verify?token={token_b_raw}")
+                response_b = client.post(
+                    "/auth/verify",
+                    data={"token": token_b_raw, "csrf_token": _CSRF},
+                )
             assert response_b.status_code == 302
 
     def test_only_newest_token_exists_after_new_issuance(self, db: Path) -> None:
@@ -1050,18 +1168,22 @@ class TestNavRetargetCanaryE238:
         assert "/dashboard" not in response.headers["location"]
 
     def test_verify_with_passkeys_redirects_to_reports(self, db: Path) -> None:
-        """GET /verify for a user WITH passkeys redirects to /admin/reports (AC-1).
+        """POST /verify for a user WITH passkeys redirects to /admin/reports (AC-1).
 
         This exercises the magic-link success ``has_passkeys`` branch in
         auth.py (the FIVE-site inventory) -- the branch that previously sent
-        the operator to the quarantined /dashboard.
+        the operator to the quarantined /dashboard. E-254-02 moved the consume +
+        redirect to POST /auth/verify.
         """
         user_id = _insert_user(db, "haspk@example.com")
         _insert_passkey_credential(db, user_id)
         raw_token = _insert_magic_token(db, user_id)
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
         assert response.status_code == 302
         location = response.headers["location"]
         assert location == "/admin/reports"
@@ -1085,3 +1207,159 @@ class TestNavRetargetCanaryE238:
         # No hop in the redirect chain targeted /dashboard.
         for hop in response.history:
             assert "/dashboard" not in hop.headers.get("location", "")
+
+
+# ---------------------------------------------------------------------------
+# Session cookie Secure flag (E-254-01 AC-3)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionCookieSecureFlag:
+    """The session cookie carries Secure only under production APP_ENV (AC-3).
+
+    Exercised through the full middleware stack via a real magic-link verify
+    (not dev bypass) so the DEV_USER_EMAIL production guard is not tripped
+    (TN-6 cookie-Secure caution). DEV_USER_EMAIL and APP_ENV are removed from
+    the ambient env so each case is deterministic.
+    """
+
+    def _verify_and_get_session_setcookie(self, db: Path, env: dict[str, str]) -> str:
+        user_id = _insert_user(db, "sec@example.com")
+        raw_token = _insert_magic_token(db, user_id)
+        base = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("DEV_USER_EMAIL", "APP_ENV")
+        }
+        base.update(env)
+        base["DATABASE_PATH"] = str(db)
+        # E-254-02: the session cookie is set on the CSRF-protected POST consume.
+        with patch.dict("os.environ", base, clear=True):
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
+        set_cookies = response.headers.get_list("set-cookie")
+        session_cookies = [c for c in set_cookies if c.startswith("session=")]
+        assert session_cookies, f"no session Set-Cookie header found in {set_cookies}"
+        return session_cookies[0]
+
+    def test_session_cookie_secure_in_production(self, db: Path) -> None:
+        """APP_ENV=production -> session cookie carries Secure."""
+        header = self._verify_and_get_session_setcookie(db, {"APP_ENV": "production"})
+        assert "Secure" in header
+
+    def test_session_cookie_secure_production_whitespace_variant(self, db: Path) -> None:
+        """APP_ENV=' production ' (whitespace variant) still carries Secure (AC-1/AC-3)."""
+        header = self._verify_and_get_session_setcookie(db, {"APP_ENV": " production "})
+        assert "Secure" in header
+
+    def test_session_cookie_not_secure_when_unset(self, db: Path) -> None:
+        """APP_ENV unset -> session cookie does NOT carry Secure."""
+        header = self._verify_and_get_session_setcookie(db, {})
+        assert "Secure" not in header
+
+
+# ---------------------------------------------------------------------------
+# Login-timing equalization (E-254-03 AC-3)
+# ---------------------------------------------------------------------------
+
+
+class TestLoginTimingEqualization:
+    """POST /auth/login does not reveal registration via response timing (AC-3).
+
+    Behavioral/structural only -- NO wall-clock assertions (TN-6/TN-8). The
+    fresh-known issuance path and the unknown path must (a) return the
+    byte-identical confirmation page and (b) invoke the equalizing op
+    (`hash_token`) an EQUAL number of times, so a do-nothing-unknown
+    implementation fails call-count parity. The Mailgun send is scheduled as a
+    BackgroundTask (not awaited inline) and only on the known path.
+    """
+
+    def _post_login(self, db: Path, email: str) -> "object":
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    return client.post(
+                        "/auth/login",
+                        data={"email": email, "csrf_token": _CSRF},
+                    )
+
+    def test_known_and_unknown_return_identical_page(self, db: Path) -> None:
+        """AC-3: fresh-known and unknown emails return the byte-identical 200 page."""
+        _insert_user(db, "known-fresh@example.com")
+
+        known = self._post_login(db, "known-fresh@example.com")
+        unknown = self._post_login(db, "never-registered@example.com")
+
+        assert known.status_code == 200
+        assert unknown.status_code == 200
+        assert known.text == unknown.text
+
+    def test_equalizing_op_call_parity(self, db: Path) -> None:
+        """AC-3: `hash_token` is invoked an EQUAL number of times on the
+        fresh-known issuance path and the unknown path (a do-nothing unknown
+        branch would fail this)."""
+        _insert_user(db, "known-parity@example.com")
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with patch(
+                    "src.api.routes.auth.hash_token", wraps=hash_token
+                ) as mock_hash:
+                    with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                        client.post(
+                            "/auth/login",
+                            data={"email": "known-parity@example.com", "csrf_token": _CSRF},
+                        )
+                    known_calls = mock_hash.call_count
+                    mock_hash.reset_mock()
+                    with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                        client.post(
+                            "/auth/login",
+                            data={"email": "unknown-parity@example.com", "csrf_token": _CSRF},
+                        )
+                    unknown_calls = mock_hash.call_count
+
+        assert known_calls == unknown_calls
+        assert known_calls == 1  # exactly one hash_token per branch
+
+    def test_send_scheduled_as_background_task_only_for_known(self, db: Path) -> None:
+        """AC-3: the Mailgun send is scheduled as a BackgroundTask (not awaited
+        inline) and only on the known path; the unknown path schedules nothing."""
+        _insert_user(db, "known-bg@example.com")
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with patch(
+                    "src.api.routes.auth.BackgroundTask", wraps=BackgroundTask
+                ) as mock_bg:
+                    # Known email -> send scheduled via BackgroundTask exactly once.
+                    with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                        client.post(
+                            "/auth/login",
+                            data={"email": "known-bg@example.com", "csrf_token": _CSRF},
+                        )
+                    assert mock_bg.call_count == 1
+                    assert mock_bg.call_args.args[0] is mock_send
+                    mock_bg.reset_mock()
+                    # Unknown email -> no BackgroundTask scheduled.
+                    with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                        client.post(
+                            "/auth/login",
+                            data={"email": "unknown-bg@example.com", "csrf_token": _CSRF},
+                        )
+                    assert mock_bg.call_count == 0

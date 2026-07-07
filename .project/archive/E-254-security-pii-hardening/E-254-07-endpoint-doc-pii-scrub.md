@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/api/` no longer carries these IDENTIFIED real identities: (a) the identified opponent team (full UUIDs, public_ids, name, city, an exact win-loss record) + a real player UUID; (b) the operator's OWN-program identity (own team name/nickname + an own-team public_id); (c) the operator's first name; and (d) **BOTH real MINORS under `docs/api/` — names AND player UUIDs** (the operator's child + an opponent youth player; the highest-sensitivity class, pulled forward per the user decision). All replaced per the api-docs.md placeholder taxonomy and verified by the 22-token byte-gate. Both minors live in files already in the 24-file scope, so scope stays 24 files — only the denylist grew (to 22 tokens). **Scope boundary (NOT an absolute claim)**: this story does NOT guarantee "no real identity anywhere under `docs/api/`" — a real-PII TAIL of ADULT names (opponent/venue/tournament) and unredacted real full UUIDs across ~28 more endpoint docs remains OUT of scope (minors are pulled IN; adults + bulk UUIDs are NOT). That systematic sweep is a deliberate follow-up (IDEA-096), best enforced by a positive "example JSON must use taxonomy placeholders" rule rather than an ever-growing denylist. **The exact real identifiers are NOT written into this committed story (user Decision #2)** — they live in the uncommitted, gitignored real denylist `secrets/pii-denylist.txt` (api-scout-owned); only the PII-free harness (`scripts/check_doc_pii.sh`) and a fake-token example (`scripts/pii-denylist.example.txt`) are committed.

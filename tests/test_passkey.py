@@ -630,6 +630,153 @@ class TestPostPasskeyRegister:
 
 
 # ---------------------------------------------------------------------------
+# E-254-03 AC-1/AC-2: passkey registration single-use rowcount gate
+# ---------------------------------------------------------------------------
+
+
+class TestPasskeyRegisterRowcountGate:
+    """POST /auth/passkey/register gates on the consume rowcount (E-254-03 AC-1/2)."""
+
+    def _build_body(self, credential_id: bytes) -> dict[str, object]:
+        raw_id_b64url = _b64url(credential_id)
+        return {
+            "id": raw_id_b64url,
+            "rawId": raw_id_b64url,
+            "type": "public-key",
+            "response": {
+                "attestationObject": _b64url(b"fake-attestation"),
+                "clientDataJSON": _b64url(b'{"type":"webauthn.create","challenge":"test"}'),
+            },
+        }
+
+    def test_happy_path_stores_exactly_one_credential(self, db: Path) -> None:
+        """AC-2: a first-time registration with a live challenge stores the
+        credential exactly once (the rowcount gate does not break the happy path)."""
+        user_id = _insert_user(db, "rowcount-happy@example.com")
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
+
+        credential_id = secrets.token_bytes(16)
+        mock_verified = MagicMock()
+        mock_verified.credential_id = credential_id
+        mock_verified.credential_public_key = secrets.token_bytes(64)
+        mock_verified.sign_count = 0
+
+        challenge_b64 = base64.b64encode(secrets.token_bytes(32)).decode()
+        _seed_challenge(db, "registration", session_id, challenge_b64)
+
+        env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
+        with patch.dict("os.environ", env, clear=False):
+            with patch(
+                "src.api.routes.auth.verify_registration_response",
+                return_value=mock_verified,
+            ):
+                with TestClient(
+                    app, cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF}
+                ) as client:
+                    response = client.post(
+                        "/auth/passkey/register",
+                        json=self._build_body(credential_id),
+                        headers={CSRF_HEADER: _CSRF},
+                    )
+
+        assert response.status_code == 200
+        conn = sqlite3.connect(str(db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM passkey_credentials WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1
+
+    def test_replayed_challenge_rejected_no_second_credential(self, db: Path) -> None:
+        """AC-1: a second registration POST for the same (now-consumed) challenge
+        is rejected with 400 and stores no second credential."""
+        user_id = _insert_user(db, "rowcount-replay@example.com")
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
+
+        credential_id = secrets.token_bytes(16)
+        mock_verified = MagicMock()
+        mock_verified.credential_id = credential_id
+        mock_verified.credential_public_key = secrets.token_bytes(64)
+        mock_verified.sign_count = 0
+
+        challenge_b64 = base64.b64encode(secrets.token_bytes(32)).decode()
+        _seed_challenge(db, "registration", session_id, challenge_b64)
+
+        env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
+        with patch.dict("os.environ", env, clear=False):
+            with patch(
+                "src.api.routes.auth.verify_registration_response",
+                return_value=mock_verified,
+            ):
+                with TestClient(
+                    app, cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF}
+                ) as client:
+                    first = client.post(
+                        "/auth/passkey/register",
+                        json=self._build_body(credential_id),
+                        headers={CSRF_HEADER: _CSRF},
+                    )
+                    # Second attempt: the challenge row was consumed by the first.
+                    second = client.post(
+                        "/auth/passkey/register",
+                        json=self._build_body(secrets.token_bytes(16)),
+                        headers={CSRF_HEADER: _CSRF},
+                    )
+
+        assert first.status_code == 200
+        assert second.status_code == 400
+        conn = sqlite3.connect(str(db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM passkey_credentials WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1  # no second credential stored
+
+    def test_consume_rowcount_zero_rejects_before_storing(self, db: Path) -> None:
+        """AC-1: even with a live challenge present at read time, a consume that
+        returns rowcount 0 (lost the race) is rejected with 400 and stores no
+        credential -- proving the gate is the DELETE rowcount, not the read."""
+        user_id = _insert_user(db, "rowcount-race@example.com")
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
+
+        challenge_b64 = base64.b64encode(secrets.token_bytes(32)).decode()
+        _seed_challenge(db, "registration", session_id, challenge_b64)
+
+        env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
+        with patch.dict("os.environ", env, clear=False):
+            # get_challenge still returns the live challenge, but the consume
+            # loses the race and deletes 0 rows -> the rowcount gate must reject.
+            with patch(
+                "src.api.routes.auth.passkey_challenges.consume_challenge",
+                return_value=0,
+            ):
+                with patch(
+                    "src.api.routes.auth.verify_registration_response",
+                ) as mock_verify:
+                    with TestClient(
+                        app, cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF}
+                    ) as client:
+                        response = client.post(
+                            "/auth/passkey/register",
+                            json=self._build_body(secrets.token_bytes(16)),
+                            headers={CSRF_HEADER: _CSRF},
+                        )
+
+        assert response.status_code == 400
+        # Rejected before verification / storage.
+        mock_verify.assert_not_called()
+        conn = sqlite3.connect(str(db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM passkey_credentials WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert count == 0
+
+
+# ---------------------------------------------------------------------------
 # AC-14d: Authentication options endpoint returns valid JSON
 # ---------------------------------------------------------------------------
 
@@ -686,6 +833,202 @@ class TestGetPasskeyLoginOptions:
 
         data = response.json()
         assert data.get("allowCredentials", []) == []
+
+
+# ---------------------------------------------------------------------------
+# E-254-03 AC-4/5/6: passkey login-options live-challenge cap (flood guard)
+# ---------------------------------------------------------------------------
+
+
+def _count_login_challenges(db_path: Path, *, live_only: bool) -> int:
+    """Count webauthn_challenges rows with kind='login' (optionally live only)."""
+    where = "kind = 'login'"
+    if live_only:
+        where += " AND expires_at > datetime('now')"
+    conn = sqlite3.connect(str(db_path))
+    n = conn.execute(f"SELECT COUNT(*) FROM webauthn_challenges WHERE {where}").fetchone()[0]
+    conn.close()
+    return int(n)
+
+
+class TestPasskeyLoginOptionsCap:
+    """GET /auth/passkey/login/options enforces the live-login-row cap (E-254-03 AC-4/5/6)."""
+
+    def test_under_cap_stores_one_row(self, db: Path) -> None:
+        """AC-4: below the cap, one options call stores exactly one login row."""
+        env = {"DATABASE_PATH": str(db)}
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                response = client.get("/auth/passkey/login/options")
+
+        assert response.status_code == 200
+        assert _count_login_challenges(db, live_only=True) == 1
+
+    def test_at_cap_returns_429_without_inserting(
+        self, db: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-5: at/over the cap, the endpoint returns 429 and does NOT insert a
+        new login row (the live login count does not grow past the cap)."""
+        monkeypatch.setattr("src.api.routes.auth._MAX_LIVE_LOGIN_CHALLENGES", 2)
+        # Seed exactly the cap of live login challenges (distinct lookup keys).
+        for i in range(2):
+            key = base64.b64encode(f"live-{i}".encode() + secrets.token_bytes(24)).decode()
+            _seed_challenge(db, "login", key, key)
+        assert _count_login_challenges(db, live_only=True) == 2
+
+        env = {"DATABASE_PATH": str(db)}
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                response = client.get("/auth/passkey/login/options")
+
+        assert response.status_code == 429
+        # No new row inserted; the live login count is unchanged.
+        assert _count_login_challenges(db, live_only=True) == 2
+
+    def test_registration_challenges_do_not_count_toward_login_cap(
+        self, db: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-5: the cap is scoped to kind='login' only -- registration
+        challenges at/over the numeric cap do not trigger the 429."""
+        monkeypatch.setattr("src.api.routes.auth._MAX_LIVE_LOGIN_CHALLENGES", 2)
+        for i in range(3):
+            key = f"reg-session-{i}"
+            _seed_challenge(db, "registration", key, base64.b64encode(secrets.token_bytes(24)).decode())
+
+        env = {"DATABASE_PATH": str(db)}
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                response = client.get("/auth/passkey/login/options")
+
+        assert response.status_code == 200
+        assert _count_login_challenges(db, live_only=True) == 1
+
+    def test_expired_login_rows_swept_and_not_counted(
+        self, db: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-6: expired login rows are swept on write and do not count toward
+        the cap, so legitimate use is not blocked by stale rows."""
+        monkeypatch.setattr("src.api.routes.auth._MAX_LIVE_LOGIN_CHALLENGES", 2)
+        # Seed cap-many EXPIRED login rows -- they must not block a new call.
+        for i in range(2):
+            key = base64.b64encode(f"expired-{i}".encode() + secrets.token_bytes(24)).decode()
+            _seed_challenge(db, "login", key, key, expired=True)
+        assert _count_login_challenges(db, live_only=False) == 2
+        assert _count_login_challenges(db, live_only=True) == 0
+
+        env = {"DATABASE_PATH": str(db)}
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                response = client.get("/auth/passkey/login/options")
+
+        assert response.status_code == 200
+        # Expired rows were swept; exactly one fresh live login row remains.
+        assert _count_login_challenges(db, live_only=True) == 1
+        assert _count_login_challenges(db, live_only=False) == 1
+
+    def test_cap_refuses_at_cap_sequential(self, db: Path) -> None:
+        """AC-5 (sequential companion to the concurrent test below): once the cap
+        is filled, a further guarded insert is refused. Run sequentially the
+        second insert's COUNT already sees the first's committed row, so this
+        alone does NOT exercise the TOCTOU -- it just pins the at-cap 429 path.
+        The concurrent hard-bound guarantee is covered by
+        ``test_cap_hard_bound_under_concurrent_inserts``."""
+        cap = 2
+        # Seed cap-1 = 1 live login row.
+        key0 = base64.b64encode(b"seed" + secrets.token_bytes(24)).decode()
+        _seed_challenge(db, "login", key0, key0)
+        assert _count_login_challenges(db, live_only=True) == 1
+
+        c1 = sqlite3.connect(str(db))
+        c2 = sqlite3.connect(str(db))
+        try:
+            k1 = base64.b64encode(b"k1" + secrets.token_bytes(24)).decode()
+            k2 = base64.b64encode(b"k2" + secrets.token_bytes(24)).decode()
+            ins1 = passkey_challenges.store_login_challenge_if_under_cap(c1, k1, k1, cap)
+            ins2 = passkey_challenges.store_login_challenge_if_under_cap(c2, k2, k2, cap)
+        finally:
+            c1.close()
+            c2.close()
+
+        assert ins1 is True   # filled the cap (1 -> 2)
+        assert ins2 is False  # already at cap -> refused (no row)
+        assert _count_login_challenges(db, live_only=True) == cap
+
+    def test_cap_hard_bound_under_concurrent_inserts(self, db: Path) -> None:
+        """AC-5 (genuine TOCTOU guard): two threads, each with its own connection,
+        attempt the guarded insert SIMULTANEOUSLY (synchronized on a barrier) when
+        the live count is one under the cap. Because the cap check and the insert
+        are a SINGLE atomic statement, SQLite serializes the two writes and the
+        loser's COUNT subquery re-evaluates at write time -> exactly ONE insert
+        succeeds and the final live count is exactly `cap`, never cap+1.
+
+        This would FAIL on the old separate-COUNT-then-INSERT shape: both threads'
+        pre-insert COUNT (a lock-free read) could see under-cap and both insert."""
+        import threading
+
+        cap = 2
+        key0 = base64.b64encode(b"seed" + secrets.token_bytes(24)).decode()
+        _seed_challenge(db, "login", key0, key0)  # one under the cap
+        assert _count_login_challenges(db, live_only=True) == 1
+
+        barrier = threading.Barrier(2)
+        results: dict[str, bool] = {}
+
+        def worker(name: str) -> None:
+            conn = sqlite3.connect(str(db), timeout=10.0)
+            conn.execute("PRAGMA busy_timeout=10000")
+            try:
+                key = base64.b64encode(name.encode() + secrets.token_bytes(24)).decode()
+                barrier.wait()  # both threads enter the guarded insert together
+                results[name] = passkey_challenges.store_login_challenge_if_under_cap(
+                    conn, key, key, cap
+                )
+            finally:
+                conn.close()
+
+        t1 = threading.Thread(target=worker, args=("a",))
+        t2 = threading.Thread(target=worker, args=("b",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert sum(1 for inserted in results.values() if inserted) == 1
+        assert _count_login_challenges(db, live_only=True) == cap  # never cap+1
+
+    def test_cap_hard_bound_repeated_calls_insert_exactly_cap(self, db: Path) -> None:
+        """Calling the guarded insert more times than the cap inserts EXACTLY
+        `cap` rows -- the live count is bounded, not best-effort."""
+        cap = 3
+        conn = sqlite3.connect(str(db))
+        inserted = 0
+        try:
+            for _ in range(7):
+                key = base64.b64encode(secrets.token_bytes(24)).decode()
+                if passkey_challenges.store_login_challenge_if_under_cap(conn, key, key, cap):
+                    inserted += 1
+        finally:
+            conn.close()
+
+        assert inserted == cap
+        assert _count_login_challenges(db, live_only=True) == cap
+
+    def test_guard_excludes_expired_from_cap_count(self, db: Path) -> None:
+        """AC-6 at the helper level: expired login rows are swept and do not count
+        toward the cap, so a fresh insert succeeds even at cap-many expired rows."""
+        cap = 2
+        for i in range(2):
+            key = base64.b64encode(f"exp-{i}".encode() + secrets.token_bytes(24)).decode()
+            _seed_challenge(db, "login", key, key, expired=True)
+        conn = sqlite3.connect(str(db))
+        try:
+            key = base64.b64encode(secrets.token_bytes(24)).decode()
+            inserted = passkey_challenges.store_login_challenge_if_under_cap(conn, key, key, cap)
+        finally:
+            conn.close()
+        assert inserted is True
+        assert _count_login_challenges(db, live_only=True) == 1
+        assert _count_login_challenges(db, live_only=False) == 1  # expired swept
 
 
 # ---------------------------------------------------------------------------
@@ -1088,14 +1431,21 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
         return raw_token
 
     def test_verify_redirects_to_prompt_when_no_passkeys(self, db: Path) -> None:
-        """User with no passkeys is redirected to /auth/passkey/prompt (AC-1)."""
+        """User with no passkeys is redirected to /auth/passkey/prompt (AC-1).
+
+        E-254-02 moved the consume+redirect to POST /auth/verify (the GET is now
+        a side-effect-free interstitial), so this exercises the POST path.
+        """
         user_id = _insert_user(db, "nopk@example.com")
         raw_token = self._insert_magic_token(db, user_id)
 
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         assert response.status_code == 302
         assert "/auth/passkey/prompt" in response.headers["location"]
@@ -1104,7 +1454,8 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
         """User with passkeys is redirected directly to /admin/reports (AC-1).
 
         E-238-05 retargeted this redirect off the (quarantined) /dashboard to
-        /admin/reports; this assertion tracks that change.
+        /admin/reports; this assertion tracks that change. E-254-02 moved the
+        consume+redirect to POST /auth/verify.
         """
         user_id = _insert_user(db, "haspk@example.com")
         _insert_passkey_credential(db, user_id)
@@ -1113,7 +1464,10 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
             with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
-                response = client.get(f"/auth/verify?token={raw_token}")
+                response = client.post(
+                    "/auth/verify",
+                    data={"token": raw_token, "csrf_token": _CSRF},
+                )
 
         assert response.status_code == 302
         assert "/admin/reports" in response.headers["location"]

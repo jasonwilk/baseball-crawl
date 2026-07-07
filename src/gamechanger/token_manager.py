@@ -287,7 +287,7 @@ class TokenManager:
             "Accept": "*/*",
             **profile_hdrs,
             **sig_headers,
-            "gc-device-id": self._device_id,
+            "gc-device-id": self._device_id,  # pii-ok
             "gc-token": self._refresh_token,
         }
         if self._profile == "mobile" and self._app_name_mobile:
@@ -333,7 +333,7 @@ class TokenManager:
 
         self._access_token = new_access_token  # pii-ok
         self._access_token_expires_at = new_access_expires
-        self._refresh_token = new_refresh_token
+        self._refresh_token = new_refresh_token  # pii-ok
 
         remaining = new_access_expires - int(time.time())
         logger.debug(
@@ -493,10 +493,10 @@ class TokenManager:
             body=body,
             # No previous_signature_b64 (usePreviousSignature: false)
         )
-        headers: dict[str, str] = {"Accept": "*/*", **profile_hdrs, **sig, "gc-device-id": self._device_id}
+        headers: dict[str, str] = {"Accept": "*/*", **profile_hdrs, **sig, "gc-device-id": self._device_id}  # pii-ok
         response = client.post(url, json=body, headers=headers)
         self._check_login_step_status(response, step_num=2, step_name="client-auth")
-        client_token = self._validate_client_auth_response(response.json())
+        client_token = self._validate_client_auth_response(response.json())  # pii-ok
         return client_token, self._extract_chain_sig(response, step_name="client-auth")
 
     def _login_step3_user_auth(
@@ -535,7 +535,7 @@ class TokenManager:
         )
         headers: dict[str, str] = {
             "Accept": "*/*", **profile_hdrs, **sig,
-            "gc-device-id": self._device_id, "gc-token": client_token,
+            "gc-device-id": self._device_id, "gc-token": client_token,  # pii-ok
         }
         response = client.post(url, json=body, headers=headers)
         self._check_login_step_status(response, step_num=3, step_name="user-auth")
@@ -577,7 +577,7 @@ class TokenManager:
         )
         headers: dict[str, str] = {
             "Accept": "*/*", **profile_hdrs, **sig,
-            "gc-device-id": self._device_id, "gc-token": client_token,
+            "gc-device-id": self._device_id, "gc-token": client_token,  # pii-ok
         }
         response = client.post(url, json=body, headers=headers)
         self._check_login_step_status(response, step_num=4, step_name="password")
@@ -610,13 +610,13 @@ class TokenManager:
         with httpx.Client(timeout=30, trust_env=False) as client:
             client_token, prev_sig2 = self._login_step2_client_auth(client, url, profile_hdrs)
             prev_sig3 = self._login_step3_user_auth(client, url, profile_hdrs, client_token, prev_sig2)
-            new_access_token, new_access_expires, new_refresh_token = self._login_step4_password(
+            new_access_token, new_access_expires, new_refresh_token = self._login_step4_password(  # pii-ok
                 client, url, profile_hdrs, client_token, prev_sig3
             )
 
         self._access_token = new_access_token  # pii-ok
         self._access_token_expires_at = new_access_expires
-        self._refresh_token = new_refresh_token
+        self._refresh_token = new_refresh_token  # pii-ok
 
         remaining = new_access_expires - int(time.time())
         logger.info(
@@ -651,7 +651,7 @@ class TokenManager:
             )
 
         if not self._device_id:
-            new_device_id = secrets.token_hex(16)
+            new_device_id = secrets.token_hex(16)  # pii-ok
             self._device_id = new_device_id
             logger.info("Generated synthetic device ID for %s profile", self._profile)
             env_key = f"GAMECHANGER_DEVICE_ID_{self._profile.upper()}"

@@ -97,18 +97,28 @@ def is_scannable(file_path: str) -> bool:
     return False
 
 
-def _scannability_skip_reason(file_path: str) -> str | None:
+def _scannability_skip_reason(file_path: str, check_exists: bool = True) -> str | None:
     """Return why a file is skipped by the scannability gate, or None if scannable.
 
     The single source of the scannability decision shared by ``scan_file`` and
     ``_count_scannable`` so the two can never diverge. A file is scannable when
-    it is not in a skip path, has a scannable extension, and exists on disk.
+    it is not in a skip path, has a scannable extension, and (by default) exists
+    on disk.
+
+    ``check_exists=False`` OMITS the working-tree existence check and is used by
+    the ``--staged`` path only: a token can be staged as an ADD and then the
+    working-tree copy deleted (``rm``), leaving the blob in the index (listed
+    Added) while ``Path.exists()`` is False. The staged content is read from the
+    blob via ``git show :<path>`` regardless of working-tree existence, so
+    reusing the exists() gate there would SKIP that genuine leak vector (F-H3 /
+    TN-5 exists()-gate footgun). Callers MUST NOT flip this default for the
+    working-tree (``scan_file``) path.
     """
     if should_skip_path(file_path):
         return "skip path"
     if not is_scannable(file_path):
         return "non-scannable extension"
-    if not Path(file_path).exists():
+    if check_exists and not Path(file_path).exists():
         return "does not exist"
     return None
 
@@ -121,28 +131,15 @@ def has_synthetic_marker(lines: list[str]) -> bool:
     return False
 
 
-def scan_file(file_path: str) -> list[Violation]:
-    """Scan a single file for PII and credential patterns.
+def _scan_text(file_path: str, text: str) -> list[Violation]:
+    """Scan already-read text for PII and credential patterns.
 
-    Args:
-        file_path: Path to the file to scan (relative or absolute).
-
-    Returns:
-        List of Violation tuples for any matches found. Empty list if the file
-        is clean, skipped, or cannot be read.
+    The shared post-read scanning body consumed by BOTH the working-tree path
+    (``scan_file``) and the staged-blob path (``scan_staged_file``), so the two
+    apply identical synthetic-marker, ``pii-ok`` suppression, email-allowlist,
+    and pattern logic. ``file_path`` is used only for the reported violation
+    location and log messages -- the bytes come from ``text``.
     """
-    skip_reason = _scannability_skip_reason(file_path)
-    if skip_reason is not None:
-        logger.debug("Skipping (%s): %s", skip_reason, file_path)
-        return []
-
-    path = Path(file_path)
-    try:
-        text = path.read_text(errors="replace")
-    except OSError as e:
-        logger.warning("Could not read %s: %s", file_path, e)
-        return []
-
     lines = text.splitlines()
 
     if has_synthetic_marker(lines):
@@ -180,6 +177,120 @@ def scan_file(file_path: str) -> list[Violation]:
                     )
                 )
 
+    return violations
+
+
+def scan_file(file_path: str) -> list[Violation]:
+    """Scan a single working-tree file for PII and credential patterns.
+
+    Args:
+        file_path: Path to the file to scan (relative or absolute).
+
+    Returns:
+        List of Violation tuples for any matches found. Empty list if the file
+        is clean, skipped, or cannot be read.
+    """
+    skip_reason = _scannability_skip_reason(file_path)
+    if skip_reason is not None:
+        logger.debug("Skipping (%s): %s", skip_reason, file_path)
+        return []
+
+    path = Path(file_path)
+    try:
+        text = path.read_text(errors="replace")
+    except OSError as e:
+        logger.warning("Could not read %s: %s", file_path, e)
+        return []
+
+    return _scan_text(file_path, text)
+
+
+def _read_staged_blob(file_path: str) -> str | None:
+    """Return the STAGED blob content for ``file_path`` via ``git show :<path>``.
+
+    Reads the index blob, NOT the working tree -- so a token staged and then
+    removed from the working tree is still seen (F-H3 staged-blob gap). Returns
+    None (and logs a warning) when the blob cannot be read (no such staged path,
+    git absent). An unreadable blob is a FAIL-CLOSED signal, not a skip: the
+    caller (:func:`scan_staged` -> ``main``) turns any None into a non-zero exit
+    plus an operator-visible refusal, because a credential scanner must never
+    certify a blob it could not read as clean. Other paths' real findings are
+    still reported alongside the refusal.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", f":{file_path}"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=True,
+        )
+        return result.stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        logger.warning("Could not read staged blob for %s: %s", file_path, e)
+        return None
+
+
+def _scan_staged_one(file_path: str) -> tuple[list[Violation], bool]:
+    """Scan one STAGED file's index blob.
+
+    Returns ``(violations, unreadable)`` where ``unreadable`` is True when the
+    staged blob could NOT be read (``git show :<path>`` failed). A gate-skipped
+    path returns ``([], False)``.
+
+    Applies the skip-path and extension gates but NOT the working-tree
+    ``Path.exists()`` gate (TN-5 footgun): the staged content is read from the
+    index blob via ``git show :<path>`` regardless of whether the working-tree
+    copy still exists, so a staged-add-then-``rm`` token is still caught.
+    """
+    skip_reason = _scannability_skip_reason(file_path, check_exists=False)
+    if skip_reason is not None:
+        logger.debug("Skipping staged (%s): %s", skip_reason, file_path)
+        return [], False
+
+    text = _read_staged_blob(file_path)
+    if text is None:
+        # Fail-closed signal (a credential scanner must never certify a blob it
+        # could not read as clean). The warning is already logged by
+        # _read_staged_blob; the caller turns this into a non-zero exit.
+        return [], True
+
+    return _scan_text(file_path, text), False
+
+
+def scan_staged(file_paths: list[str]) -> tuple[list[Violation], list[str]]:
+    """Scan STAGED index blobs, returning ``(violations, unreadable_paths)``.
+
+    ``unreadable_paths`` is the list of staged paths whose blob could not be
+    read; ``main`` fails CLOSED (non-zero exit + operator-visible refusal) on
+    any such path, so the scanner never reports "clean" on content it did not
+    actually scan. Real findings on other paths are still returned.
+    """
+    all_violations: list[Violation] = []
+    unreadable: list[str] = []
+    for file_path in file_paths:
+        fp = file_path.strip()
+        violations, is_unreadable = _scan_staged_one(fp)
+        all_violations.extend(violations)
+        if is_unreadable:
+            unreadable.append(fp)
+    return all_violations, unreadable
+
+
+def scan_staged_file(file_path: str) -> list[Violation]:
+    """Scan a single STAGED file's index blob; return only its violations.
+
+    Thin wrapper over :func:`_scan_staged_one` for callers that only need the
+    findings (the unreadable-blob fail-closed handling lives in ``main`` via
+    :func:`scan_staged`).
+    """
+    violations, _unreadable = _scan_staged_one(file_path)
+    return violations
+
+
+def scan_staged_files(file_paths: list[str]) -> list[Violation]:
+    """Scan multiple STAGED files' index blobs; return only their violations."""
+    violations, _unreadable = scan_staged(file_paths)
     return violations
 
 
@@ -237,16 +348,17 @@ def report_violations(violations: list[Violation]) -> None:
     )
 
 
-def _count_scannable(file_paths: list[str]) -> int:
+def _count_scannable(file_paths: list[str], check_exists: bool = True) -> int:
     """Count files that will actually be scanned (not skipped).
 
-    A file is scannable if it is not in a skip path, has a scannable
-    extension, and exists on disk.
+    A file is scannable if it is not in a skip path and has a scannable
+    extension (and, by default, exists on disk). ``check_exists=False`` mirrors
+    the ``--staged`` gate so a staged-add-then-``rm`` file still counts.
     """
     count = 0
     for file_path in file_paths:
         fp = file_path.strip()
-        if _scannability_skip_reason(fp) is None:
+        if _scannability_skip_reason(fp, check_exists=check_exists) is None:
             count += 1
     return count
 
@@ -296,14 +408,39 @@ def main() -> int:
     if not file_paths:
         return 0
 
-    violations = scan_files(file_paths)
+    # In --staged mode, scan the STAGED index blobs (git show :<path>), not the
+    # working-tree bytes -- a token staged then cleaned from the working tree
+    # must still be caught (F-H3 staged-blob gap).
+    unreadable: list[str] = []
+    if args.staged:
+        violations, unreadable = scan_staged(file_paths)
+    else:
+        violations = scan_files(file_paths)
+
+    exit_code = 0
 
     if violations:
         report_violations(violations)
-        return 1
+        exit_code = 1
 
-    # Print success confirmation if any files were actually scanned
-    scanned = _count_scannable(file_paths)
+    if unreadable:
+        # Fail-CLOSED: a credential scanner must NEVER certify a staged blob it
+        # could not read as clean. Operator-visible on STDOUT (not just the
+        # stderr warning) plus a non-zero exit, so a pre-commit run blocks rather
+        # than passing green on unscanned content. Any real findings above are
+        # still reported -- the unreadable handling does not mask them.
+        for path in unreadable:
+            print(
+                f"[pii-scan] REFUSING to certify clean: unreadable staged blob {path}"
+            )
+        exit_code = 1
+
+    if exit_code:
+        return exit_code
+
+    # Print success confirmation if any files were actually scanned. In --staged
+    # mode the existence gate is omitted (a staged-add-then-rm file still counts).
+    scanned = _count_scannable(file_paths, check_exists=not args.staged)
     if scanned > 0:
         print(
             f"[pii-scan] Scanned {scanned} file(s), 0 violations.",

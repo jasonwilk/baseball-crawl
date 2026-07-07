@@ -96,7 +96,14 @@ async def serve_report(slug: str) -> Response:
         )
         return Response(status_code=404)
 
+    # Revocation-respecting cache policy (E-254-04): reports are ephemeral
+    # (14-day expiry; cleanup_expired_reports() unlinks the HTML and nulls
+    # report_path) and served on a no-auth public-by-slug route. A shared/CDN
+    # cache holding this for an hour would keep serving a report after it was
+    # expired or deleted server-side, undermining revocation. The HTML is a
+    # self-contained frozen snapshot, so there is no shared-cache benefit that
+    # justifies that risk -- `private, no-store` keeps every fetch authoritative.
     return HTMLResponse(
         content=html_content,
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "private, no-store"},
     )

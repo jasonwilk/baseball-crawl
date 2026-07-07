@@ -17,7 +17,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.api.helpers import format_avg, format_date, ip_display, is_production  # noqa: E402
+from src.api.helpers import (  # noqa: E402
+    format_avg,
+    format_date,
+    get_app_env,
+    ip_display,
+    is_production,
+    validate_app_env,
+)
 
 
 class TestIpDisplay:
@@ -83,7 +90,7 @@ class TestFormatAvg:
 
 
 class TestIsProduction:
-    """Tests for is_production() -- the single-source prod-detection seam (E-252-03)."""
+    """Tests for is_production() -- the strict-normalized prod-detection seam (E-254-01)."""
 
     def test_true_when_app_env_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APP_ENV", "production")
@@ -99,9 +106,83 @@ class TestIsProduction:
         assert is_production() is False
 
     def test_false_for_other_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Only the exact string 'production' is production (mirrors the == idiom)."""
+        """A recognized non-production value (staging) is non-production."""
         monkeypatch.setenv("APP_ENV", "staging")
         assert is_production() is False
+
+    @pytest.mark.parametrize(
+        "value", ["production", "Production", "PRODUCTION", " production ", "\tproduction\n"]
+    )
+    def test_true_for_casing_and_whitespace_variants(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """AC-1: casing/whitespace variants of 'production' select production."""
+        monkeypatch.setenv("APP_ENV", value)
+        assert is_production() is True
+
+    def test_false_when_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-1: set-but-empty APP_ENV is non-production (treated as unset)."""
+        monkeypatch.setenv("APP_ENV", "")
+        assert is_production() is False
+
+
+class TestGetAppEnv:
+    """Tests for get_app_env() -- the single APP_ENV normalizer (E-254-01)."""
+
+    def test_strips_and_lowercases(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APP_ENV", "  Production  ")
+        assert get_app_env() == "production"
+
+    def test_unset_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("APP_ENV", raising=False)
+        assert get_app_env() == ""
+
+    def test_empty_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APP_ENV", "   ")
+        assert get_app_env() == ""
+
+
+class TestValidateAppEnv:
+    """Tests for validate_app_env() -- the refuse-to-start startup guard (E-254-01 AC-2)."""
+
+    @pytest.mark.parametrize(
+        "value", ["production", "development", "dev", "test", "staging", "PRODUCTION", " staging "]
+    )
+    def test_recognized_values_do_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """AC-2: any recognized value (any casing/whitespace) passes."""
+        monkeypatch.setenv("APP_ENV", value)
+        validate_app_env()  # must not raise
+
+    def test_unset_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-2: unset APP_ENV proceeds normally (dev posture, not unrecognized)."""
+        monkeypatch.delenv("APP_ENV", raising=False)
+        validate_app_env()  # must not raise
+
+    def test_empty_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-2: set-but-empty APP_ENV proceeds normally (treated as unset)."""
+        monkeypatch.setenv("APP_ENV", "   ")
+        validate_app_env()  # must not raise
+
+    @pytest.mark.parametrize("value", ["prod", "prd", "produciton", "live"])
+    def test_unrecognized_raises_runtimeerror(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """AC-2: a non-empty out-of-set value refuses to start (raises)."""
+        monkeypatch.setenv("APP_ENV", value)
+        with pytest.raises(RuntimeError, match="Unrecognized APP_ENV"):
+            validate_app_env()
+
+    def test_unrecognized_logs_critical(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-2: the refuse-to-start path emits a CRITICAL-level log."""
+        monkeypatch.setenv("APP_ENV", "prod")
+        with caplog.at_level("CRITICAL", logger="src.api.helpers"):
+            with pytest.raises(RuntimeError):
+                validate_app_env()
+        assert any(r.levelname == "CRITICAL" for r in caplog.records)
 
 
 class TestFormatDate:

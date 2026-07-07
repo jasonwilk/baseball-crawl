@@ -46,7 +46,7 @@ GET https://api.team-manager.gc.com/public/teams/{public_id}
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `public_id` | string | Alphanumeric public ID slug (e.g., `"a1GFM9Ku0BbF"`). NOT a UUID. |
+| `public_id` | string | Alphanumeric public ID slug (e.g., `"xXxXxXxXxXxX"`). NOT a UUID. |
 
 ## Headers
 
@@ -73,7 +73,7 @@ Single JSON object with team profile data.
 | `team_season.season` | object | Season identifier |
 | `team_season.record` | object | Win/loss/tie record. Uses **singular keys**: `win`, `loss`, `tie` (NOT `wins`/`losses`/`ties` as in authenticated endpoints). |
 | `avatar_url` | string | Signed CloudFront URL for team avatar. Will expire -- do not cache long-term. |
-| `staff` | array | Array of plain name strings (e.g., `["Jason Smith", "Mike Jones"]`). No roles, no IDs. |
+| `staff` | array | Array of plain name strings (e.g., `["Jane Doe", "John Roe"]`). No roles, no IDs. |
 
 **Record key normalization:** Authenticated `GET /teams/{team_id}` uses plural keys (`wins`/`losses`/`ties`) in a top-level `record` object. This endpoint uses singular keys (`win`/`loss`/`tie`) inside `team_season.record`. Parsers must handle both shapes.
 
@@ -81,18 +81,18 @@ Single JSON object with team profile data.
 
 ```json
 {
-  "id": "a1GFM9Ku0BbF",
-  "name": "Lincoln Rebels 14U",
+  "id": "xXxXxXxXxXxX",
+  "name": "Example Team 14U",
   "sport": "baseball",
   "ngb": "[\"usssa\"]",
   "location": {
-    "city": "Lincoln",
+    "city": "Anytown",
     "state": "NE"
   },
   "age_group": "14U",
   "team_season": {
-    "season": {"year": 2025, "name": "summer"},
-    "record": {"win": 61, "loss": 29, "tie": 2}
+    "season": {"year": 2024, "name": "summer"},
+    "record": {"win": 12, "loss": 8, "tie": 0}
   },
   "avatar_url": "https://media-service.gc.com/...",
   "staff": ["Coach Smith", "Coach Jones"]

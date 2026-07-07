@@ -100,6 +100,53 @@ def store_challenge(
     conn.commit()
 
 
+def store_login_challenge_if_under_cap(
+    conn: sqlite3.Connection,
+    lookup_key: str,
+    challenge: str,
+    cap: int,
+) -> bool:
+    """Atomically store a ``login`` challenge ONLY if under the live-row cap.
+
+    The cap decision and the insert are a SINGLE ``INSERT ... SELECT ... WHERE
+    (count) < cap`` statement, so the COUNT and the INSERT cannot be split by a
+    concurrent writer (SQLite serializes writers under the write lock). This
+    makes the cap a TRUE hard bound: two concurrent options requests can never
+    both insert past ``cap`` (the E-254-03 TOCTOU where a separate COUNT then a
+    separate INSERT let both see ``99 < 100`` and both insert). Scoped strictly
+    to ``kind='login'`` (registration challenges are unaffected, AC-5).
+
+    Expired rows are swept FIRST (AC-6) so stale rows are cleaned up and never
+    count toward the cap; the guard's own COUNT also filters
+    ``expires_at > datetime('now')`` so expired rows are excluded regardless.
+
+    Args:
+        conn: Open SQLite connection.
+        lookup_key: login lookup key (the challenge_b64 itself).
+        challenge: The standard-base64 challenge string.
+        cap: Maximum number of LIVE login rows allowed.
+
+    Returns:
+        True if the challenge was inserted (was under the cap), False if the
+        live login count was already at/over ``cap`` (no row inserted).
+    """
+    sweep_expired(conn)
+    cursor = conn.execute(
+        """
+        INSERT INTO webauthn_challenges (kind, lookup_key, challenge)
+        SELECT ?, ?, ?
+        WHERE (
+            SELECT COUNT(*)
+            FROM webauthn_challenges
+            WHERE kind = ? AND expires_at > datetime('now')
+        ) < ?
+        """,
+        (KIND_LOGIN, lookup_key, challenge, KIND_LOGIN, cap),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def get_challenge(
     conn: sqlite3.Connection,
     kind: str,

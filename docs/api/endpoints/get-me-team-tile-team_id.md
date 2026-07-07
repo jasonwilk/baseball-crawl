@@ -74,13 +74,13 @@ GET https://api.team-manager.gc.com/me/team-tile/{team_id}
 ```json
 {
   "id": "72bb77d8-REDACTED",
-  "name": "Lincoln Rebels 14U",
+  "name": "Example Team 14U",
   "sport": "baseball",
-  "season_year": 2025,
+  "season_year": 2024,
   "season_name": "summer",
   "stat_access_level": "confirmed_full",
   "archived": false,
-  "record": {"wins": 61, "losses": 29, "ties": 2},
+  "record": {"wins": 12, "losses": 8, "ties": 0},
   "badge_count": 0
 }
 ```

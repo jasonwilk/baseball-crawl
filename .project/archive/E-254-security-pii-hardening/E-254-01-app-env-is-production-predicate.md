@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every security-sensitive `APP_ENV` gate in the app reads ONE canonical `is_production()` predicate instead of its own inline, case-sensitive `os.environ.get("APP_ENV", ...)` check. Casing and whitespace variants of `production` correctly select the production posture, and a non-empty but unrecognized value (a typo like `prod`) is caught loudly at startup (CRITICAL log + refuse-to-start) instead of silently selecting the insecure posture at runtime.

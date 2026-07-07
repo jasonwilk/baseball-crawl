@@ -55,6 +55,6 @@ GET https://api.team-manager.gc.com/teams/{team_id}/users/count
 {"count": 243}
 ```
 
-(243 users observed for Lincoln Rebels 14U team `72bb77d8` -- requires at least 3 pages of `/users`.)
+(243 users observed for Example Team 14U team `72bb77d8-REDACTED` -- requires at least 3 pages of `/users`.)
 
 **Discovered:** 2026-03-07. **Confirmed:** 2026-03-07.

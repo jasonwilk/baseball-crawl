@@ -25,7 +25,6 @@ Implementation note:
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 from typing import Any
 from urllib.parse import parse_qs
@@ -33,6 +32,8 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from src.api.helpers import is_production
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ class CSRFMiddleware:
         scope["state"]["csrf_token"] = csrf_cookie
 
         # Intercept outgoing response to set the CSRF cookie
-        is_prod = os.environ.get("APP_ENV", "development") == "production"
+        is_prod = is_production()
         cookie_value = (
             f"{CSRF_COOKIE_NAME}={csrf_cookie}; Path=/; SameSite=Lax"
         )

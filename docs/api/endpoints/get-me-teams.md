@@ -67,7 +67,7 @@ No `gc-user-action` was observed for this endpoint.
 
 Bare JSON array of team objects. No pagination observed (15 teams returned in one response). The response is the same 25-field schema as `GET /teams/{team_id}` with two additions: `user_team_associations` (populated when `include=user_team_associations`) and `badge_count`.
 
-**Observed counts (2026-03-04, Jason's travel ball account):**
+**Observed counts (2026-03-04, the operator's travel ball account):**
 - 15 total teams (8 archived, 7 active)
 - Ages: 8U through 14U, plus "Between 13-18" for Legion
 - Seasons: 2019-2025
@@ -78,7 +78,7 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 | Field | Type | Nullable | Description |
 |-------|------|----------|-------------|
 | `id` | UUID | No | Team UUID. Use this as `team_id` in all team-scoped endpoints. |
-| `name` | string | No | Human-readable team name (e.g., "Lincoln Rebels 14U"). |
+| `name` | string | No | Human-readable team name (e.g., "Example Team 14U"). |
 | `team_type` | string | No | Access/ownership type. All 15 observed: `"admin"`. |
 | `city` | string | No | City of the team. |
 | `state` | string | No | State abbreviation (e.g., `"NE"`). |
@@ -104,8 +104,8 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 | `team_avatar_image` | null | Yes | Team avatar image URL. All 15 observed: `null`. |
 | `team_player_count` | null | Yes | Player count. All 15 observed: `null`. |
 | `created_at` | ISO 8601 | No | Team creation timestamp. |
-| `public_id` | string | No | Short public identifier slug (e.g., `"a1GFM9Ku0BbF"`). Not a UUID. Used in public URLs. |
-| `url_encoded_name` | string | No | URL-safe team name slug (e.g., `"2025-summer-lincoln-rebels-14u"`). |
+| `public_id` | string | No | Short public identifier slug (e.g., `"xXxXxXxXxXxX"`). Not a UUID. Used in public URLs. |
+| `url_encoded_name` | string | No | URL-safe team name slug (e.g., `"2024-summer-example-team-14u"`). |
 | `archived` | boolean | No | Whether the team is archived. 8 of 15 teams archived. |
 | `record` | object | No | Win-loss record: `{wins: int, losses: int, ties: int}`. Always present. |
 | `badge_count` | int | No | All 15 observed: `0`. Purpose unclear. |
@@ -124,16 +124,16 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 ```json
 [
   {
-    "id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4",
-    "name": "Lincoln Rebels 14U",
+    "id": "72bb77d8-REDACTED",
+    "name": "Example Team 14U",
     "team_type": "admin",
-    "city": "Lincoln",
+    "city": "Anytown",
     "state": "NE",
     "country": "United States",
     "age_group": "14U",
     "competition_level": "club_travel",
     "sport": "baseball",
-    "season_year": 2025,
+    "season_year": 2024,
     "season_name": "summer",
     "stat_access_level": "confirmed_full",
     "scorekeeping_access_level": "staff_only",
@@ -156,10 +156,10 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
     "team_avatar_image": null,
     "team_player_count": null,
     "created_at": "2024-11-02T12:34:20.229Z",
-    "public_id": "a1GFM9Ku0BbF",
-    "url_encoded_name": "2025-summer-lincoln-rebels-14u",
+    "public_id": "xXxXxXxXxXxX",
+    "url_encoded_name": "2024-summer-example-team-14u",
     "archived": false,
-    "record": {"wins": 61, "losses": 29, "ties": 2},
+    "record": {"wins": 12, "losses": 8, "ties": 0},
     "badge_count": 0
   }
 ]
@@ -189,7 +189,7 @@ ngb_list = json.loads(team["ngb"])  # first parse: string -> list
 - `team_player_count` is always `null` in observed data. Purpose unknown.
 - `badge_count` is always `0`. Purpose unknown.
 - `user_team_associations` is only populated when `include=user_team_associations` is passed.
-- **Account scope:** The `gc-token` is account-specific. The 2026-03-04 capture returned only Jason's travel ball teams. LSB high school teams require a gc-token from a coaching account with access to those teams.
+- **Account scope:** The `gc-token` is account-specific. The 2026-03-04 capture returned only the operator's travel ball teams. LSB high school teams require a gc-token from a coaching account with access to those teams.
 - No pagination observed. All 15 teams returned in a single response. Behavior for accounts with very large team counts is unknown.
 
 **Discovered:** Pre-2026-03-01. **Schema fully documented:** 2026-03-04.

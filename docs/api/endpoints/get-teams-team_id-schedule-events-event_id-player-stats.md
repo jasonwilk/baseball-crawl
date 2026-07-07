@@ -294,7 +294,7 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 ```json
 {
   "stream_id": "c05a5413-d250-4f28-bd92-efbe67bac348",
-  "team_id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4",
+  "team_id": "72bb77d8-REDACTED",
   "event_id": "1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6",
   "player_stats": {
     "players": {

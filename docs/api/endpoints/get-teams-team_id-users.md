@@ -8,7 +8,7 @@ profiles:
     status: confirmed
     notes: >
       Page 2 (start_at=100) confirmed 2026-03-04 -- 33 records. Page 1 confirmed
-      2026-03-07 against Lincoln Rebels 14U (72bb77d8) -- 100 records. Schema
+      2026-03-07 against Example Team 14U (72bb77d8-REDACTED) -- 100 records. Schema
       consistent across teams.
   mobile:
     status: observed
@@ -139,7 +139,7 @@ Other values (`"inactive"`, `"pending"`, `"removed"`) may exist but have not bee
 
 - **No role information:** Response does not indicate whether a user is a coach, player, parent, or fan. Cross-reference with `/teams/{team_id}/associations` or `/me/teams?include=user_team_associations` for role context.
 - **`active-confirmed` semantics unclear:** Observed on 2/33 records. The distinction from `"active"` is undocumented.
-- **Large teams require multiple pages:** Lincoln Rebels 14U (`72bb77d8`) has 243 total users across at least 3 pages (100+100+43). Cross-reference with `/users/count` before paginating.
-- **Schema confirmed across 2 teams:** Originally captured from team `cb67372e`, re-confirmed 2026-03-07 against team `72bb77d8`.
+- **Large teams require multiple pages:** Example Team 14U (`72bb77d8-REDACTED`) has 243 total users across at least 3 pages (100+100+43). Cross-reference with `/users/count` before paginating.
+- **Schema confirmed across 2 teams:** Originally captured from team `cb67372e-REDACTED`, re-confirmed 2026-03-07 against team `72bb77d8-REDACTED`.
 
 **Discovered:** 2026-03-04. **Multi-page and multi-team confirmed:** 2026-03-07.

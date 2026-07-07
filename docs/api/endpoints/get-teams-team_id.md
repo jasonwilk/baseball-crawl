@@ -94,7 +94,7 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 | `team_avatar_image` | null | Yes | Avatar URL. May be null. |
 | `team_player_count` | null | Yes | Always null observed. |
 | `created_at` | ISO 8601 | No | Team creation timestamp. |
-| `public_id` | string | No | Short alphanumeric public ID slug (e.g., `"a1GFM9Ku0BbF"`). |
+| `public_id` | string | No | Short alphanumeric public ID slug (e.g., `"xXxXxXxXxXxX"`). |
 | `url_encoded_name` | string | No | URL-safe name slug. |
 | `archived` | boolean | No | Whether archived. |
 | `record` | object | No | `{wins: int, losses: int, ties: int}`. |
@@ -110,10 +110,10 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 
 ```json
 {
-  "id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4",
-  "name": "Lincoln Rebels 14U",
+  "id": "72bb77d8-REDACTED",
+  "name": "Example Team 14U",
   "team_type": "admin",
-  "city": "Lincoln",
+  "city": "Anytown",
   "state": "NE",
   "country": "United States",
   "age_group": "14U",
@@ -141,10 +141,10 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
   "team_avatar_image": null,
   "team_player_count": null,
   "created_at": "2024-11-02T12:34:20.229Z",
-  "public_id": "a1GFM9Ku0BbF",
-  "url_encoded_name": "2025-summer-lincoln-rebels-14u",
+  "public_id": "xXxXxXxXxXxX",
+  "url_encoded_name": "2024-summer-example-team-14u",
   "archived": false,
-  "record": {"wins": 61, "losses": 29, "ties": 2}
+  "record": {"wins": 12, "losses": 8, "ties": 0}
 }
 ```
 

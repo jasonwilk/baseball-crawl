@@ -94,7 +94,7 @@ Body schema not captured. Based on the GET /teams/{team_id}/schedule event schem
 {
   "event_type": "game",
   "scheduled_time": "2025-05-15T18:00:00Z",
-  "title": "vs. Lincoln 9U",
+  "title": "vs. Example Team 9U",
   "opponent_id": "{opponent_team_uuid}",
   "is_home": true,
   "location": {

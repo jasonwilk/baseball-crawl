@@ -362,9 +362,9 @@ Both are standard data-stack packages. No additional GC-specific dependencies.
 
 | Claim | Evidence |
 |---|---|
-| Per-game endpoint returns spray data for both teams when called with the owning team's UUID | Fetched 150 BIP events from 4 Freshman Grizzlies games (own team); opponent data present in same response. Asymmetric behavior verified 2026-03-29: participant UUID returns only that team's data. |
+| Per-game endpoint returns spray data for both teams when called with the owning team's UUID | Fetched 150 BIP events from 4 Example Team Freshman games (own team); opponent data present in same response. Asymmetric behavior verified 2026-03-29: participant UUID returns only that team's data. |
 | Opponent access via `progenitor_team_id` | Confirmed 2026-03-09 |
-| Coordinate transform matches GC rendering | Fetched 92 BIP events for Reid Wilkinson (#28, Lincoln Rebels 14U, UUID prefix `77c74470`); Python-rendered chart matched GC's player profile chart visually |
+| Coordinate transform matches GC rendering | Fetched 92 BIP events for Player One (#00, Example Team 14U, UUID prefix `77c74470-REDACTED`); Python-rendered chart matched GC's player profile chart visually |
 | Mobile Accept header works | 206 calls in session `2026-03-11_034739`, all 200 OK |
 | Coordinate calibration source | api-scout analysis of 17,700+ defender position events in session `2026-03-11_034739` |
 | Field geometry source | Extracted from `gamechanger-sabertooth-Bfa6tgrf.js` (session `2026-03-11_032625`) |

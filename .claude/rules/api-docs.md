@@ -181,13 +181,13 @@ Use these approved placeholder values when writing or updating example JSON:
 | Venue/field names | `"Anytown Field"`, `"Example Park"` |
 | Person names (players, coaches, staff, parents) | `"Jane Doe"`, `"Player One"` |
 | Phone numbers | `"+1 (555) 555-0100"`, `"+15550001234"` |
-| UUIDs | `"72bb77d8-REDACTED"` or `"00000000-0000-0000-0000-000000000001"` |
+| UUIDs | `"00000000-REDACTED"` or `"00000000-0000-0000-0000-000000000001"` |
 | Emails | `"user@example.com"` (use `example.com` domain) |
 | public_id slugs | `"xXxXxXxXxXxX"` or similar clearly fake values |
 | url_encoded_name | `"2024-spring-example-team-14u"` |
 | Avatar/media URLs | `"https://media-service.gc.com/example-avatar-url"` |
 
-**UUID scope**: The UUID redaction rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
+**UUID scope**: The UUID redaction rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID). **Bare 8-char UUID prose prefixes count too**: a real prefix mentioned inline in prose (e.g. "the `abc12345…` team"), not just full UUIDs inside JSON, is an identifier and MUST be redacted/wrapped. The `<prefix>-REDACTED` placeholder form is approved, but the placeholder MUST use a SYNTHETIC prefix (e.g. `00000000-REDACTED`) — never a real team's prefix, which would re-embed the identifier the redaction is meant to remove.
 
 ### NOT PII -- Keep As-Is
 

@@ -139,15 +139,15 @@ GameChanger has two opponent entry modes, and this field is the reliable single-
 | Team (role) | Total visible | Linked (`progenitor`) | Manual | % linked |
 |-------------|---------------|------------------------|--------|----------|
 | Bennington D1 Training Reserves (n/a) | 49 | 13 | 36 | 27% |
-| LSB Braxter Construction (fan) | 32 | 16 | 16 | 50% |
-| LSB Epp Foundation Repair Jr (fan) | 54 | 27 | 27 | 50% |
-| LSB Lincoln Hotel Group 18U (fan) | 33 | 25 | 8 | 76% |
-| LSB Five Star Bath Solutions (manager+family) | 23 | 23 | 0 | 100% |
+| LSB Example Team A (fan) | 32 | 16 | 16 | 50% |
+| LSB Example Team B (fan) | 54 | 27 | 27 | 50% |
+| LSB Example Team C 18U (fan) | 33 | 25 | 8 | 76% |
+| LSB Example Team D (manager+family) | 23 | 23 | 0 | 100% |
 | **Aggregate (4 LSB teams)** | **142** | **91** | **51** | **64%** |
 
 A scheduler that relies on `progenitor_team_id` for auto-resolution must therefore plan for a name-search + operator-input fallback path as a first-class case, not an exception -- some teams are fully linked, others are majority-manual. The manual share correlates with how many opponents are **not in GC's searchable team index at all** (e.g., HS varsity programs like "Bellevue West", "Millard West", "Elkhorn South"): these cannot be search-linked by any coach, so they are manual everywhere and unresolvable to a `public_id`.
 
-Ground-truth case: game `b5c0e6c2-REDACTED`'s opponent "Gretna" (root_team_id `a8ab985f-REDACTED`) carries NO `progenitor_team_id` -- confirmed manual entry. (That team also had a separate "Gretna East" entry, also manual -- distinct `root_team_id`.)
+Ground-truth case: game `b5c0e6c2-REDACTED`'s opponent "Anytown" (root_team_id `a8ab985f-REDACTED`) carries NO `progenitor_team_id` -- confirmed manual entry. (That team also had a separate "Anytown East" entry, also manual -- distinct `root_team_id`.)
 
 **Cross-team sibling recovery does NOT help (verified 2026-06-12).** Across the 4 LSB teams, 15 opponent names were shared by 2+ teams, but **0** were manual on one team yet linked on a sibling -- shared names were uniformly linked-everywhere (findable club teams) or manual-everywhere (unindexed HS programs). So a scheduler cannot borrow a sibling team's `progenitor_team_id` to resolve another team's manual entry; the manual entries are unindexed, not merely un-linked-by-this-coach.
 
@@ -155,7 +155,7 @@ Ground-truth case: game `b5c0e6c2-REDACTED`'s opponent "Gretna" (root_team_id `a
 
 **There is NO structural placeholder flag.** Manual records carry only `{root_team_id, owning_team_id, name, is_hidden}` -- the *sole* structural difference from a linked record is the absence of `progenitor_team_id`. No `event_type`, no `is_tbd`, no game-link field exists. Placeholder vs. real-team classification is name-heuristic only.
 
-**The opponent registry is cumulative/historical, NOT schedule-synced.** Most registry-manual names map to no current schedule game (e.g., Braxter: 13/16 manual registry names appear on no scheduled game), and a scheduled game's `pregame_data.opponent_name` often differs from the registry `name` (game: "Gretna Post 216 Reserve" vs registry: "Gretna"). **Resolve opponents from the schedule/game record** (`pregame_data.opponent_name` + `opponent_id` → join to `root_team_id` here → read `progenitor_team_id`), not by iterating the whole registry. The registry is a join target, not the scheduler's work queue.
+**The opponent registry is cumulative/historical, NOT schedule-synced.** Most registry-manual names map to no current schedule game (e.g., Example Team A: 13/16 manual registry names appear on no scheduled game), and a scheduled game's `pregame_data.opponent_name` often differs from the registry `name` (game: "Anytown Post 216 Reserve" vs registry: "Anytown"). **Resolve opponents from the schedule/game record** (`pregame_data.opponent_name` + `opponent_id` → join to `root_team_id` here → read `progenitor_team_id`), not by iterating the whole registry. The registry is a join target, not the scheduler's work queue.
 
 ### progenitor_team_id → public_id bridge (for `bb report generate`)
 

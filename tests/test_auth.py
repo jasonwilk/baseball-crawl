@@ -402,6 +402,46 @@ class TestDevUserEmailProductionGuard:
                 middleware = SessionMiddleware(app=None)  # type: ignore[arg-type]
                 assert middleware is not None
 
+    def test_production_whitespace_variant_with_dev_email_raises(self) -> None:
+        """DEV_USER_EMAIL set + APP_ENV=' production ' -> RuntimeError (E-254-01 AC-6).
+
+        The prior ``.lower()``-only guard let a whitespace-padded 'production'
+        through; the strict-normalized is_production() now trips it.
+        """
+        env = {"DEV_USER_EMAIL": "admin@example.com", "APP_ENV": " production "}
+        with patch.dict("os.environ", env, clear=False):
+            with pytest.raises(RuntimeError, match="DEV_USER_EMAIL"):
+                SessionMiddleware(app=None)  # type: ignore[arg-type]
+
+
+class TestUnrecognizedAppEnvStartupGuard:
+    """SessionMiddleware refuses to start on an unrecognized APP_ENV (E-254-01 AC-2)."""
+
+    def test_unrecognized_app_env_raises_on_init(self) -> None:
+        """A typo'd APP_ENV ('prod') refuses to start (raises) at construction."""
+        with patch.dict("os.environ", {"APP_ENV": "prod"}, clear=False):
+            with pytest.raises(RuntimeError, match="Unrecognized APP_ENV"):
+                SessionMiddleware(app=None)  # type: ignore[arg-type]
+
+    def test_unrecognized_app_env_logs_critical(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The refuse-to-start path emits a CRITICAL-level log."""
+        with patch.dict("os.environ", {"APP_ENV": "prod"}, clear=False):
+            with caplog.at_level("CRITICAL", logger="src.api.helpers"):
+                with pytest.raises(RuntimeError):
+                    SessionMiddleware(app=None)  # type: ignore[arg-type]
+        assert any(r.levelname == "CRITICAL" for r in caplog.records)
+
+    def test_recognized_app_env_starts(self) -> None:
+        """A recognized value (staging) constructs without raising."""
+        env = {"APP_ENV": "staging"}
+        with patch.dict("os.environ", env, clear=False):
+            no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+            with patch.dict("os.environ", no_dev, clear=True):
+                middleware = SessionMiddleware(app=None)  # type: ignore[arg-type]
+                assert middleware is not None
+
 
 # ---------------------------------------------------------------------------
 # Fail closed on missing auth tables tests (E-063-06)

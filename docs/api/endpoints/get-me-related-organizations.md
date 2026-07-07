@@ -94,10 +94,10 @@ Bare JSON array of organization objects. 2 organizations observed.
 [
   {
     "id": "8881846c-REDACTED",
-    "city": "Lincoln",
+    "city": "Anytown",
     "country": "United States",
     "end_date": null,
-    "name": "Lincoln Rebels",
+    "name": "Example Organization",
     "ngb": "[\"usssa\"]",
     "season_name": "summer",
     "season_year": 2025,

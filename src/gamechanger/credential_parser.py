@@ -496,7 +496,7 @@ def _parse_json_credentials(text: str, profile: str = "web") -> dict[str, str]:
         access_obj = data.get("access") or {}
         refresh_obj = data.get("refresh") or {}
         access_token = access_obj.get("data") if isinstance(access_obj, dict) else None
-        refresh_token = refresh_obj.get("data") if isinstance(refresh_obj, dict) else None
+        refresh_token = refresh_obj.get("data") if isinstance(refresh_obj, dict) else None  # pii-ok
         if access_token:
             _route_gc_token(access_token, profile, credentials)
         if refresh_token:

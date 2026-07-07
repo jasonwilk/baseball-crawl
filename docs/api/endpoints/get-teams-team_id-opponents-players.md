@@ -63,7 +63,7 @@ GET https://api.team-manager.gc.com/teams/{team_id}/opponents/players
 
 ## Response
 
-Bare JSON array of player records. 758 records observed for Lincoln Rebels 14U (no pagination triggered for this dataset).
+Bare JSON array of player records. 758 records observed for Example Team 14U (no pagination triggered for this dataset).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -85,11 +85,11 @@ Bare JSON array of player records. 758 records observed for Lincoln Rebels 14U (
 ```json
 {
   "team_id": "6e898958-c6e3-48c7-a97e-e281a35cfc50",
-  "player_id": "68396d70-111c-4593-9df0-849051e1e96a",
+  "player_id": "68396d70-REDACTED",
   "person": {
-    "id": "68396d70-111c-4593-9df0-849051e1e96a",
-    "first_name": "Jackson",
-    "last_name": "Dowling"
+    "id": "68396d70-REDACTED",
+    "first_name": "Player",
+    "last_name": "Two"
   },
   "attributes": {
     "player_number": "10",

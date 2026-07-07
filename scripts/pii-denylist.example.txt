@@ -1,0 +1,39 @@
+# PII denylist -- EXAMPLE / TEMPLATE (committed, PII-FREE).
+#
+# This is the config.example half of a config/config.example split. It documents
+# the denylist FORMAT with deliberately-fake sentinel tokens only; it contains NO
+# real identifier. The REAL denylist lives ONLY in the uncommitted, gitignored
+# secrets/pii-denylist.txt and is supplied to the harness via PII_DENYLIST_FILE.
+#
+# The sentinels below (ZZ__EXAMPLE_* and prefix zzzzzzzz) are intentionally unique
+# so that running in EXAMPLE MODE against real docs cannot false-trip a match --
+# and so a real leak is never masked by an example token. EXAMPLE MODE is always
+# reported INCONCLUSIVE (exit 3); only the real denylist can certify a scrub.
+#
+# Format: <type> <pattern>  (split on the FIRST space)
+#   type=plain  -> grep -rnF   (fixed string; zero matches required)
+#   type=regex  -> grep -rnE   (ERE; zero matches required)
+#   type=prefix -> grep -rn <p> | grep -v "<p>-REDACTED"
+#                  (real UUID prefix; catches full UUIDs + bare prose prefixes,
+#                   allows only the approved "<p>-REDACTED" placeholder)
+# Blank lines and lines starting with '#' are ignored.
+
+# --- person / team / org / event names (real file: plain) ---
+plain ZZ__EXAMPLE_PERSON_FIRSTNAME
+plain ZZ__EXAMPLE_PERSON_SURNAME
+plain ZZ__EXAMPLE_MINOR_NAMEPART
+plain ZZ__EXAMPLE_TEAM_NICKNAME
+plain ZZ__EXAMPLE_OWN_PROGRAM_NAME
+plain ZZ__EXAMPLE_ORG_NAME
+plain ZZ__EXAMPLE_EVENT_SPONSOR
+plain ZZ__EXAMPLE_CITY
+
+# --- public_id slugs (real file: plain 12-char slugs) ---
+plain ZZ__EXAMPLE_PUBLICID1
+plain ZZ__EXAMPLE_PUBLICID2
+
+# --- semi-identifying combination: win-loss record (real file: regex) ---
+regex ZZ__EXAMPLE_WINS, "loss
+
+# --- real UUID prefixes (real file: prefix; 8-char hex) ---
+prefix zzzzzzzz

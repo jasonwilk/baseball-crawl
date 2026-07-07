@@ -53,7 +53,7 @@ GET https://api.team-manager.gc.com/teams/public/{public_id}/access-level
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `public_id` | string | Team public ID slug (e.g., `"a1GFM9Ku0BbF"`) |
+| `public_id` | string | Team public ID slug (e.g., `"xXxXxXxXxXxX"`) |
 
 ## Response
 

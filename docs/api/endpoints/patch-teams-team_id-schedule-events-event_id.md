@@ -88,7 +88,7 @@ Body schema not captured. Based on event fields from `GET /teams/{team_id}/sched
 ```json
 {
   "opponent_id": "{opponent_team_uuid}",
-  "title": "vs. Lincoln 9U",
+  "title": "vs. Example Team 9U",
   "scheduled_time": "2025-05-15T18:00:00Z",
   "is_home": true,
   "location": {

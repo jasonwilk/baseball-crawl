@@ -79,7 +79,7 @@ Bare JSON array of player objects. 20 players returned in a single response (no 
 ```json
 [
   {
-    "id": "77c74470-5d1c-4723-a7e3-348c0ed84e5f",
+    "id": "77c74470-REDACTED",
     "first_name": "A",
     "last_name": "REDACTED",
     "number": "15",

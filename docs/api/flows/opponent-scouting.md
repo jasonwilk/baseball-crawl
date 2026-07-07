@@ -20,7 +20,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 
 **Auth:** None required (no `gc-token`, no `gc-device-id`)
 
-**Input:** `opponent_links.public_id` (e.g., `"DolZd7TTaXj5"`)
+**Input:** `opponent_links.public_id` (e.g., `"xXxXxXxXxXxX"`)
 
 **Output:** Array of completed games. Extract from each record:
 - `id` -- this IS the `game_stream_id` for the boxscore endpoint (step 3). No bridge call needed.
@@ -125,7 +125,7 @@ Skip. If `opponent_links.public_id` is NULL, the scouting chain cannot proceed. 
 ### Boxscore asymmetric keys
 
 The two top-level keys in the boxscore response are:
-- **Scouted team's key**: `public_id` slug (alphanumeric, no dashes, e.g., `"DolZd7TTaXj5"`)
+- **Scouted team's key**: `public_id` slug (alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`)
 - **The other team's key**: UUID (with dashes, e.g., `"72bb77d8-REDACTED"`)
 
 Detection algorithm:
@@ -150,7 +150,7 @@ Save any UUID encountered during the scouting crawl to `teams.gc_uuid` (if colum
 
 ## Season-Stats Forbidden
 
-`GET /teams/{team_id}/season-stats` returns **HTTP 403 Forbidden** for non-owned teams (web profile, confirmed 2026-03-12). This was tested on both Lincoln Southwest Varsity 2025 (followed as fan) and an unfollowed team -- both returned 403.
+`GET /teams/{team_id}/season-stats` returns **HTTP 403 Forbidden** for non-owned teams (web profile, confirmed 2026-03-12). This was tested on both Anytown Eagles Varsity (followed as fan) and an unfollowed team -- both returned 403.
 
 - **3 out of 3 attempts returned 403** with web profile gc-token.
 - Even "follow as fan" membership does NOT grant access -- likely requires coaching staff or admin membership.
@@ -212,7 +212,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 
 | Team | `public_id` | Games | Players | Verified |
 |------|------------|-------|---------|----------|
-| Lincoln Southwest Varsity 2025 | `DolZd7TTaXj5` | 28 | confirmed | 2026-03-12 |
+| Anytown Eagles Varsity | `xXxXxXxXxXxX` | 28 | confirmed | 2026-03-12 |
 | Unfollowed team | `8O8bTolVfb9A` | 24 | 19 | 2026-03-12 |
 
 ---

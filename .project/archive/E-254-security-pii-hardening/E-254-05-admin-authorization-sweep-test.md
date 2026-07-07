@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a sweep test enumerates every route on the admin router and proves that an authenticated non-admin is denied — so a future admin route that ships without the admin gate fails the test rather than silently shipping open.

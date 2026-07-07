@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, magic-link credentials no longer leak through two paths: (1) magic-link verification is a side-effect-free GET that renders an interstitial, with the single-use token consume and session creation moved to a CSRF-protected POST — so mail-provider link scanners can no longer burn the token or receive a live session; and (2) the email stdout fallback no longer logs the live magic-link URL in production.

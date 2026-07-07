@@ -120,6 +120,8 @@ class TestServeReport:
         assert "text/html" in response.headers["content-type"]
 
     def test_cache_control_header(self, setup):
+        """E-254-04 AC-1: a serveable report is returned with a revocation-
+        respecting `private, no-store` cache policy (no `public`, no max-age)."""
         db_path, reports_dir, client = setup
         (reports_dir / "cache-slug.html").write_text("<html></html>", encoding="utf-8")
         _insert_report(db_path, "cache-slug", report_path="reports/cache-slug.html")
@@ -127,7 +129,10 @@ class TestServeReport:
         response = client.get("/reports/cache-slug")
 
         assert response.status_code == 200
-        assert "public" in response.headers.get("cache-control", "")
+        cache_control = response.headers.get("cache-control", "")
+        assert cache_control == "private, no-store"
+        assert "public" not in cache_control
+        assert "max-age" not in cache_control
 
 
 class TestServeReadRace:
@@ -187,7 +192,7 @@ class TestServeReadRace:
 
         assert response.status_code == 200
         assert "<html><body>OK</body></html>" in response.text
-        assert "public" in response.headers.get("cache-control", "")
+        assert response.headers.get("cache-control", "") == "private, no-store"
 
 
 # ---------------------------------------------------------------------------
@@ -448,3 +453,81 @@ class TestAdminReportsSuppressesDashboardNav:
         assert ">Pitching<" not in html
         # AC-4: the page's own Dashboard header link was removed.
         assert 'href="/dashboard"' not in html
+
+
+# ---------------------------------------------------------------------------
+# E-254-04 AC-2: every non-serveable branch still returns 404 (unchanged)
+#
+# The cache-control change touches ONLY the successful-HTML response. This
+# class re-asserts that all serve_report 404 branches are unchanged. The
+# current handler has EIGHT such branches (the story's enumeration of seven
+# predates the E-252-10 OSError/TOCTOU read-failure branch); all eight are
+# exercised here so no branch silently changed.
+# ---------------------------------------------------------------------------
+
+
+class TestServeReport404BranchesUnchanged:
+    """AC-2: all serve_report non-serveable branches still 404 after the header change."""
+
+    def test_db_error_returns_404(self, setup):
+        """Branch 1: a DB error looking up the slug -> 404 (no 500)."""
+        _db_path, _reports_dir, client = setup
+        # Override the fixture's get_connection patch so the lookup raises.
+        with patch(
+            "src.api.routes.reports.get_connection",
+            side_effect=sqlite3.OperationalError("boom"),
+        ):
+            response = client.get("/reports/any-slug")
+        assert response.status_code == 404
+
+    def test_unknown_slug_returns_404(self, setup):
+        """Branch 2: no row for the slug -> 404."""
+        _db_path, _reports_dir, client = setup
+        assert client.get("/reports/does-not-exist").status_code == 404
+
+    def test_non_serveable_status_returns_404(self, setup):
+        """Branch 3: a status outside {ready, no_games} -> 404."""
+        db_path, _reports_dir, client = setup
+        _insert_report(db_path, "gen-branch", status="generating")
+        assert client.get("/reports/gen-branch").status_code == 404
+
+    def test_expired_timestamp_returns_404(self, setup):
+        """Branch 4: a serveable status but past expires_at -> 404."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "exp-branch.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(
+            db_path, "exp-branch", expires_at=_past_iso(1),
+            report_path="reports/exp-branch.html",
+        )
+        assert client.get("/reports/exp-branch").status_code == 404
+
+    def test_invalid_timestamp_returns_404(self, setup):
+        """Branch 5: an unparseable expires_at -> 404 (ValueError/AttributeError)."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "bad-ts.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(
+            db_path, "bad-ts", expires_at="not-a-timestamp",
+            report_path="reports/bad-ts.html",
+        )
+        assert client.get("/reports/bad-ts").status_code == 404
+
+    def test_missing_report_path_returns_404(self, setup):
+        """Branch 6: report_path is NULL -> 404."""
+        db_path, _reports_dir, client = setup
+        _insert_report(db_path, "null-branch", report_path=None)
+        assert client.get("/reports/null-branch").status_code == 404
+
+    def test_missing_file_returns_404(self, setup):
+        """Branch 7: report_path set but the file is absent on disk -> 404."""
+        db_path, _reports_dir, client = setup
+        _insert_report(db_path, "missing-branch", report_path="reports/missing-branch.html")
+        assert client.get("/reports/missing-branch").status_code == 404
+
+    def test_read_failure_returns_404(self, setup):
+        """Branch 8 (E-252-10): file passes is_file() but read_text() raises -> 404."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "read-branch.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(db_path, "read-branch", report_path="reports/read-branch.html")
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError("gone")):
+            response = client.get("/reports/read-branch")
+        assert response.status_code == 404

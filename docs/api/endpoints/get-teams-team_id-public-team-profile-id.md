@@ -8,7 +8,7 @@ profiles:
     status: confirmed
     notes: >
       Single-field response confirmed 2026-03-04 with gc-token. One own-team confirmed
-      (cb67372e -> KCRUFIkaHGXI). OPPONENT UUID RETURNS 403: tested 2026-03-09 with
+      (cb67372e-REDACTED -> xXxXxXxXxXxX). OPPONENT UUID RETURNS 403: tested 2026-03-09 with
       progenitor_team_id 14fd6cb6-43ab-4c61-a26c-5486c949e7b5 (Nighthawks Navy AAA 14U).
       Credentials confirmed valid (GET /me/user returned 200). Access is restricted
       to teams the authenticated user is a member of -- opponents are blocked.
@@ -98,17 +98,17 @@ Single JSON object with one field.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string (slug) | The team's `public_id` slug. 12-character alphanumeric string (e.g., `"KCRUFIkaHGXI"`). Used by all `/public/teams/{public_id}/...` endpoints and `/teams/public/{public_id}/players`. |
+| `id` | string (slug) | The team's `public_id` slug. 12-character alphanumeric string (e.g., `"xXxXxXxXxXxX"`). Used by all `/public/teams/{public_id}/...` endpoints and `/teams/public/{public_id}/players`. |
 
 ## Example Response
 
 ```json
 {
-  "id": "KCRUFIkaHGXI"
+  "id": "xXxXxXxXxXxX"
 }
 ```
 
-(Team UUID `cb67372e-b75d-472d-83e3-4d39b6d85eb2` maps to public_id `"KCRUFIkaHGXI"`)
+(Team UUID `cb67372e-REDACTED` maps to public_id `"xXxXxXxXxXxX"`)
 
 ## ID Chain: UUID to Public API
 

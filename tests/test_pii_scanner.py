@@ -13,15 +13,20 @@ All test data uses obviously fake values:
 
 from __future__ import annotations
 
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
+from src.safety import pii_scanner
 from src.safety.pii_patterns import PLACEHOLDER_EMAILS
 from src.safety.pii_scanner import (
     Violation,
     _count_scannable,
+    _read_staged_blob,
     _scannability_skip_reason,
+    _scan_text,
     has_synthetic_marker,
     is_placeholder_email,
     is_rfc2606_email,
@@ -29,8 +34,18 @@ from src.safety.pii_scanner import (
     main,
     scan_file,
     scan_files,
+    scan_staged_file,
+    scan_staged_files,
     should_skip_path,
 )
+
+# A realistic-length synthetic token value (>16 non-space chars) for credential
+# fixtures. This test file carries the `synthetic-test-data` marker (line 1), so
+# the scanner skips it -- these literals never self-trip the hook.
+_LONG_TOKEN = "eyJhbGciOiJIUzI1NiJ9.ZmFrZS1zeW50aGV0aWMtdG9rZW4tdmFsdWU"
+
+# Repo root for scanning the project's real credential-handling modules.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------
@@ -856,3 +871,311 @@ class TestScannabilityGateEquivalence:
         gate, so a whitespace-padded scannable path still counts."""
         real_py = _write_file(tmp_path, "ws.py", "x = 1\n")
         assert _count_scannable([f"  {real_py}  "]) == 1
+
+
+# ---------------------------------------------------------------------------
+# E-254-06 (F-H3): case-insensitive credential patterns + UPPERCASE env vars
+# ---------------------------------------------------------------------------
+
+
+class TestUppercaseCredentialAssignment:
+    """AC-1: the project's UPPERCASE env-var credential format is detected,
+    across uppercase / lowercase / mixed-case key forms (F-H3)."""
+
+    @pytest.mark.parametrize(
+        "key",
+        ["GC_ACCESS_TOKEN", "GC_CLIENT_TOKEN", "GC_REFRESH_TOKEN", "GC_DEVICE_ID"],
+    )
+    @pytest.mark.parametrize("case", ["upper", "lower", "mixed"])
+    def test_env_token_assignment_flagged(self, tmp_path: Path, key: str, case: str) -> None:
+        if case == "lower":
+            key = key.lower()
+        elif case == "mixed":
+            key = key.title()  # e.g. Gc_Access_Token
+        path = _write_file(tmp_path, "creds.env", f"{key}={_LONG_TOKEN}\n")
+        violations = scan_file(path)
+        assert len(violations) == 1, f"{key} not flagged"
+        assert violations[0].pattern_name == "api_key_assignment"
+
+    def test_uppercase_bearer_flagged(self, tmp_path: Path) -> None:
+        """The bearer_token pattern is also case-insensitive now."""
+        path = _write_file(tmp_path, "auth.txt", f"Authorization: BEARER {_LONG_TOKEN}\n")
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "bearer_token"
+
+
+class TestPatternBroadeningNoFalsePositives:
+    """AC-2: the key-name broadening is token-key-shaped, not a blanket widening,
+    so ordinary prose/short values do not trip it."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "rotate the api_key please\n",           # prose, no assignment
+            "access_token = get_token()\n",          # short value (<16 non-space)
+            "device_id: 42\n",                       # short numeric value
+            "x = 42\n",                              # unrelated assignment
+        ],
+    )
+    def test_clean_lines_not_flagged(self, tmp_path: Path, line: str) -> None:
+        path = _write_file(tmp_path, "code.py", line)
+        assert scan_file(path) == []
+
+
+class TestBenignTokenShapeFalsePositiveClass:
+    """AC-2 regression: the broadened key-name alternation (which MUST stay --
+    it catches the real UPPERCASE credentials) matches benign real-code
+    token-assignment SHAPES too (var-to-fn-call, dict-key, secrets.token_hex).
+    Those lines carry `# pii-ok` in the source; this documents the class and
+    proves `# pii-ok` is the intended remedy, so the false-positive class is
+    caught by a TEST rather than shipping latent into the pre-commit hook."""
+
+    _BENIGN_SHAPES = [
+        "refresh_token = refresh_obj.get('data')\n",          # var <- fn call
+        '"gc-device-id": self._device_id,\n',                 # dict-key mapping to a var
+        "device_id = secrets.token_hex(16)\n",                # generated, not a secret literal
+        "client_token = self._validate_client_auth_response(resp)\n",  # var <- fn call
+    ]
+
+    @pytest.mark.parametrize("shape", _BENIGN_SHAPES)
+    def test_shape_matches_pattern_and_is_suppressible(self, tmp_path: Path, shape: str) -> None:
+        # The shape matches the broadened credential pattern (the class exists);
+        # the broadening staying is what catches real UPPERCASE creds (AC-1).
+        flagged = _write_file(tmp_path, "benign_unsuppressed.py", shape)
+        vs = scan_file(flagged)
+        assert vs and vs[0].pattern_name == "api_key_assignment"
+        # A `# pii-ok` marker cleanly suppresses it (the applied remedy).
+        suppressed = _write_file(
+            tmp_path, "benign_suppressed.py", shape.rstrip("\n") + "  # pii-ok\n"
+        )
+        assert scan_file(suppressed) == []
+
+
+class TestRealCredentialModulesNoFalsePositives:
+    """AC-2 (anti-latent regression): the project's real credential-handling
+    modules must scan clean, so a future unsuppressed benign token-shape line
+    fails THIS test instead of noising/blocking a pre-commit `--staged` scan."""
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "src/gamechanger/token_manager.py",
+            "src/gamechanger/credential_parser.py",
+        ],
+    )
+    def test_credential_module_scans_clean(self, rel_path: str) -> None:
+        path = _REPO_ROOT / rel_path
+        assert path.is_file(), f"{rel_path} not found under repo root"
+        violations = scan_file(str(path))
+        assert violations == [], (
+            f"{rel_path} has unsuppressed benign token-shape lines: "
+            f"{[(v.line_number, v.pattern_name) for v in violations]} -- add # pii-ok"
+        )
+
+
+class TestMarkersStayCaseSensitive:
+    """AC-3: SYNTHETIC_MARKER and the pii-ok marker remain case-sensitive -- a
+    non-canonical case does NOT suppress scanning (only the credential regexes
+    became case-insensitive)."""
+
+    def test_uppercase_synthetic_marker_does_not_suppress(self, tmp_path: Path) -> None:
+        content = f"# SYNTHETIC-TEST-DATA\nGC_ACCESS_TOKEN={_LONG_TOKEN}\n"
+        path = _write_file(tmp_path, "notmarked.env", content)
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "api_key_assignment"
+
+    def test_uppercase_pii_ok_does_not_suppress(self, tmp_path: Path) -> None:
+        content = f"GC_ACCESS_TOKEN={_LONG_TOKEN}  # PII-OK\n"
+        path = _write_file(tmp_path, "creds.env", content)
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "api_key_assignment"
+
+
+# ---------------------------------------------------------------------------
+# E-254-06: staged-blob scanning (--staged reads the index blob, not the tree)
+# ---------------------------------------------------------------------------
+
+
+def _init_git_repo(tmp_path: Path) -> Path:
+    """Init a throwaway git repo in tmp_path (never the project repo, TN-6)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=repo, check=True)
+    return repo
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True)
+
+
+class TestStagedBlobScanning:
+    """AC-4/5/6/7: --staged reads the STAGED index blob via git show :<path>."""
+
+    def test_staged_token_flagged_after_worktree_cleaned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-4: token staged, then the working-tree copy edited clean (file still
+        exists) -> the staged blob is still flagged."""
+        repo = _init_git_repo(tmp_path)
+        (repo / "creds.env").write_text(f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n")
+        _git(repo, "add", "creds.env")
+        # Clean the working tree (file still exists, now token-free).
+        (repo / "creds.env").write_text("GC_ACCESS_TOKEN=\n")
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert "creds.env" in staged
+        violations = scan_staged_files(staged)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "api_key_assignment"
+        assert violations[0].file_path == "creds.env"
+
+    def test_staged_add_then_rm_still_flagged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-5 (exists()-gate footgun): token staged as an ADD, then the
+        working-tree copy DELETED (rm) so Path.exists() is False, but the index
+        still holds the blob (listed Added) -> STILL flagged."""
+        repo = _init_git_repo(tmp_path)
+        (repo / "creds.env").write_text(f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n")
+        _git(repo, "add", "creds.env")
+        (repo / "creds.env").unlink()  # rm the working-tree copy
+        assert not (repo / "creds.env").exists()
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert "creds.env" in staged  # still Added per --diff-filter=ACM
+        violations = scan_staged_files(staged)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "api_key_assignment"
+
+    def test_clean_staged_blob_dirty_worktree_not_flagged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-6 (inverse): a CLEAN staged blob whose working tree is dirty with a
+        token reports NO violation -- staged content is authoritative in --staged."""
+        repo = _init_git_repo(tmp_path)
+        (repo / "creds.env").write_text("GC_ACCESS_TOKEN=\n")  # clean
+        _git(repo, "add", "creds.env")
+        (repo / "creds.env").write_text(f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n")  # dirty tree
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert "creds.env" in staged
+        assert scan_staged_files(staged) == []
+
+    def test_staged_deletion_skipped_without_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-7: a staged file DELETION (git rm) is excluded by --diff-filter=ACM,
+        so it is skipped without error (distinct from AC-5's staged-add-then-rm)."""
+        repo = _init_git_repo(tmp_path)
+        (repo / "notes.env").write_text("GC_ACCESS_TOKEN=\n")  # clean committed file
+        _git(repo, "add", "notes.env")
+        _git(repo, "commit", "-qm", "add notes")
+        _git(repo, "rm", "-q", "notes.env")  # staged deletion
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert "notes.env" not in staged  # D excluded by ACM
+        assert scan_staged_files(staged) == []
+
+
+class TestStagedBlobReadFailure:
+    """AC-8 (fail-CLOSED): an unreadable staged blob (git show :<path> fails)
+    must cause a NON-ZERO exit + an operator-visible STDOUT refusal -- a
+    credential scanner must never certify a blob it could not read as clean.
+    Real findings on other paths are still reported (P2a remediation)."""
+
+    def test_read_staged_blob_missing_returns_none_and_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        repo = _init_git_repo(tmp_path)
+        monkeypatch.chdir(repo)
+        with caplog.at_level("WARNING"):
+            result = _read_staged_blob("never-staged.env")
+        assert result is None
+        assert any("staged blob" in r.message.lower() for r in caplog.records)
+
+    def test_unreadable_blob_fails_closed_and_reports_other_findings(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An unreadable staged blob drives a NON-ZERO exit with a STDOUT refusal,
+        WHILE a second staged token is still reported (exit still reflects other
+        findings; the unreadable handling does not mask them)."""
+        monkeypatch.setattr(
+            "src.safety.pii_scanner.get_staged_files",
+            lambda: ["missing.env", "leak.env"],
+        )
+
+        def fake_blob(path: str) -> str | None:
+            if path == "leak.env":
+                return f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n"
+            return None  # simulate git show failure for missing.env
+
+        monkeypatch.setattr("src.safety.pii_scanner._read_staged_blob", fake_blob)
+        monkeypatch.setattr("sys.argv", ["pii_scanner", "--staged"])
+
+        exit_code = main()
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        # Fail-closed refusal is on STDOUT and names the unreadable path.
+        assert "REFUSING to certify clean" in captured.out
+        assert "missing.env" in captured.out
+        # The other real finding is still reported (stderr), not masked.
+        assert "leak.env" in captured.err
+        # And the clean banner is NOT printed.
+        assert "0 violations" not in captured.err
+
+    def test_unreadable_blob_alone_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Even with NO other findings, a single unreadable staged blob must NOT
+        pass green: non-zero exit + STDOUT refusal, no clean banner."""
+        monkeypatch.setattr(
+            "src.safety.pii_scanner.get_staged_files",
+            lambda: ["unreadable.env"],
+        )
+        monkeypatch.setattr(
+            "src.safety.pii_scanner._read_staged_blob", lambda path: None
+        )
+        monkeypatch.setattr("sys.argv", ["pii_scanner", "--staged"])
+
+        exit_code = main()
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "REFUSING to certify clean" in captured.out
+        assert "unreadable.env" in captured.out
+        assert "0 violations" not in captured.err
+        assert "[PII BLOCKED]" not in captured.err  # no fabricated finding
+
+
+# ---------------------------------------------------------------------------
+# E-254-06 AC-9: performance bar (<1s / 20 files)
+# ---------------------------------------------------------------------------
+
+
+class TestScannerPerformanceBar:
+    """AC-9: the scanner stays under the 1s / 20-file bar (.claude/rules/pii-safety.md)."""
+
+    def test_scans_twenty_files_under_one_second(self, tmp_path: Path) -> None:
+        paths = []
+        for i in range(20):
+            content = (
+                f"# module {i}\n"
+                'def f() -> int:\n    return 42\n'
+                "email placeholder: user@example.com\n"
+                f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n"
+            )
+            paths.append(_write_file(tmp_path, f"file_{i}.py", content))
+        start = time.perf_counter()
+        scan_files(paths)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"scan of 20 files took {elapsed:.3f}s (>1s bar)"

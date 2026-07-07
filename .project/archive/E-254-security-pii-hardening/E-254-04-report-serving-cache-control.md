@@ -4,7 +4,7 @@
 [E-254: Security & PII Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, generated report HTML is served with a cache policy that respects report revocation and expiry — a shared/CDN cache can no longer hold a report for up to an hour after it has been expired or cleaned up.

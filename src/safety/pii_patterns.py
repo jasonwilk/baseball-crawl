@@ -64,16 +64,35 @@ PATTERNS: list[dict[str, str]] = [
     },
     {
         "name": "api_key_assignment",
-        "regex": r'(?:api[_-]?key|secret[_-]?key|access[_-]?token)["\']?\s*[=:]\s*["\']?[^\s"\']{16,}',
-        "description": "API key or secret assignments with long quoted or unquoted values",
+        "regex": (
+            r'(?:api[_-]?key|secret[_-]?key|access[_-]?token|client[_-]?token'
+            r'|refresh[_-]?token|device[_-]?id)'
+            r'["\']?\s*[=:]\s*["\']?[^\s"\']{16,}'
+        ),
+        "description": "API key, secret, or token assignments with long quoted or unquoted values",
     },
 ]
+
+# Credential patterns are compiled case-insensitively (F-H3): the project's own
+# credential format is UPPERCASE env-var assignments (GC_ACCESS_TOKEN=...,
+# GC_CLIENT_TOKEN=..., GC_REFRESH_TOKEN=..., GC_DEVICE_ID=...). Without
+# re.IGNORECASE the key-name alternation only matched lowercase, so a pasted
+# uppercase token passed clean. IGNORECASE is scoped to the credential regexes
+# only -- the email/phone patterns are already case-neutral. The key-name
+# broadening above is deliberately token-key-shaped (NOT a blanket \w+): the
+# value side still requires [=:] plus a 16+ non-space value, so prose like
+# "rotate the api_key" does not match. This STRENGTHENS the control
+# (.claude/rules/pii-safety.md -- never weaken patterns).
+_CASE_INSENSITIVE_PATTERNS: set[str] = {"bearer_token", "api_key_assignment"}
 
 # Pre-compiled patterns for performance. Built once at module load time.
 COMPILED_PATTERNS: list[dict[str, Any]] = [
     {
         "name": p["name"],
-        "pattern": re.compile(p["regex"]),
+        "pattern": re.compile(
+            p["regex"],
+            re.IGNORECASE if p["name"] in _CASE_INSENSITIVE_PATTERNS else 0,
+        ),
         "description": p["description"],
     }
     for p in PATTERNS

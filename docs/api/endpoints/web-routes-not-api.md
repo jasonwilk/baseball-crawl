@@ -27,7 +27,7 @@ The proxy capture likely intercepted web-frontend navigation requests (browser p
 
 ## Path Parameter Notes
 
-- `{public_id}`: Short alphanumeric team slug (e.g., `"a1GFM9Ku0BbF"`). Same slug used in authenticated and public API endpoints.
+- `{public_id}`: Short alphanumeric team slug (e.g., `"xXxXxXxXxXxX"`). Same slug used in authenticated and public API endpoints.
 - `{season-slug}`: A season identifier string (e.g., `"2024-fall"` or similar). Format not confirmed -- not tested further since these paths return 404 on the API domain.
 - `{event_id}`: Schedule event UUID.
 

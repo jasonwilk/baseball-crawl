@@ -33,6 +33,7 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp
 
 from src.api.db import get_connection
+from src.api.helpers import is_production, validate_app_env
 
 logger = logging.getLogger(__name__)
 
@@ -349,10 +350,17 @@ class SessionMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
+        # Refuse to start on an unrecognized APP_ENV (typo like ``prod``) before
+        # any security gate reads it -- catches the fail-open at boot rather than
+        # silently downgrading cookie ``Secure`` at runtime (E-254-01).
+        validate_app_env()
         dev_email = os.environ.get("DEV_USER_EMAIL", "")
         if dev_email:
-            app_env = os.environ.get("APP_ENV", "")
-            if app_env.lower() == "production":
+            # is_production() strict-normalizes casing AND whitespace, so a
+            # variant like ``Production`` or ``" production "`` still trips this
+            # guard (E-254-01 AC-6) -- closing the gap the prior ``.lower()``-only
+            # check left for surrounding whitespace.
+            if is_production():
                 raise RuntimeError(
                     "DEV_USER_EMAIL must not be set in production (APP_ENV=production). "
                     "Remove DEV_USER_EMAIL from the environment before starting the app."

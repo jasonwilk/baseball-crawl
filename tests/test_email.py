@@ -130,6 +130,31 @@ async def test_send_email_no_key_in_production_returns_false(
 
 
 @pytest.mark.asyncio
+async def test_send_email_no_key_in_production_does_not_log_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """E-254-02 AC-7: production + unconfigured Mailgun must NOT log the message
+    body (which, for a magic link, carries the live URL+token). Only an ERROR
+    with no secret material is emitted, and the call returns False.
+    """
+    secret_url = "https://bbstats.ai/auth/verify?token=SUPERSECRETTOKEN123"
+    body = f"Click to log in:\n\n{secret_url}\n\nExpires in 15 minutes."
+    with patch.dict(
+        "os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "production"}, clear=False
+    ):
+        with caplog.at_level("INFO"):  # capture INFO+ so a leaked body would show
+            ok = await send_email("op@example.com", "Your login link", body)
+
+    assert ok is False
+    # The live URL / token must NOT appear anywhere in the logs.
+    assert secret_url not in caplog.text
+    assert "SUPERSECRETTOKEN123" not in caplog.text
+    assert "15 minutes" not in caplog.text
+    # An honest misconfiguration ERROR is still emitted.
+    assert "MAILGUN_API_KEY" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_send_email_no_key_in_development_returns_true() -> None:
     """AC-5: local dev preserved -- no key + development => treated as sent (True)."""
     with patch.dict("os.environ", {"MAILGUN_API_KEY": "", "APP_ENV": "development"}, clear=False):

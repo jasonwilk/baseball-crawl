@@ -8,7 +8,7 @@ profiles:
     status: confirmed
     notes: >
       HTTP 200 for OWN team public_id -- two teams confirmed via HAR 2026-03-11;
-      independently re-confirmed via direct curl 2026-03-12 (public_id DolZd7TTaXj5,
+      independently re-confirmed via direct curl 2026-03-12 (public_id xXxXxXxXxXxX,
       gc-app-name: web). HTTP 403 for OPPONENT team public_id (smgRExWHuBJJ returned
       403, 8+ hits, 2026-03-11). Access restricted to teams the authenticated user
       belongs to.
@@ -134,4 +134,4 @@ Observed: opponent public_id returned 403 on 2026-03-11. Eight consecutive attem
 
 Use `GET /search/opponent-import?name={team_name}&sport=baseball` to find opponent team UUIDs programmatically. The search endpoint does not require team membership and returns UUID in its results.
 
-**Discovered:** 2026-03-07. **Full 200 response confirmed:** 2026-03-11 (HAR capture, two owned teams). **403 for opponent confirmed:** 2026-03-11 (proxy session, 8 consecutive 403s). **Re-confirmed via direct curl:** 2026-03-12 (public_id DolZd7TTaXj5, gc-app-name: web). **Access model refinement (operator-reported):** 2026-03-12 -- restriction is specifically "teams the user follows," not arbitrary authenticated access; same restriction as the forward bridge. Exact association types (coaching staff, admin, followed, bookmarked) not yet independently verified.
+**Discovered:** 2026-03-07. **Full 200 response confirmed:** 2026-03-11 (HAR capture, two owned teams). **403 for opponent confirmed:** 2026-03-11 (proxy session, 8 consecutive 403s). **Re-confirmed via direct curl:** 2026-03-12 (public_id xXxXxXxXxXxX, gc-app-name: web). **Access model refinement (operator-reported):** 2026-03-12 -- restriction is specifically "teams the user follows," not arbitrary authenticated access; same restriction as the forward bridge. Exact association types (coaching staff, admin, followed, bookmarked) not yet independently verified.

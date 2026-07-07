@@ -61,12 +61,12 @@ Single JSON object with 3 top-level keys.
 ```json
 {
   "teams": {
-    "72bb77d8-REDACTED": {"name": "Lincoln Rebels 14U", "sport": "baseball"}
+    "72bb77d8-REDACTED": {"name": "Example Team 14U", "sport": "baseball"}
   },
   "players": {
     "9e5faf37-REDACTED": {
-      "first_name": "Reid",
-      "last_name": "Wilkinson",
+      "first_name": "Player",
+      "last_name": "One",
       "team_id": "103e1cb5-REDACTED"
     }
   },
