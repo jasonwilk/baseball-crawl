@@ -1,11 +1,11 @@
 ---
 name: public-team-profile-season-shape
-description: Cached public-team-profile sample contradicts documented team_season.season.year nesting — season is a bare string, year is flat at team_season.year (UNVERIFIED, single sample)
+description: LIVE-CONFIRMED (2026-07-07) — GET /public/teams/{public_id} returns team_season.season as a bare string and year FLAT at team_season.year, contradicting the doc's team_season.season.year nesting
 metadata:
   type: reference
 ---
 
-# public-team-profile `team_season` shape discrepancy (flag, not yet confirmed)
+# public-team-profile `team_season` shape discrepancy (LIVE-CONFIRMED 2026-07-07)
 
 `GET /public/teams/{public_id}` — the cached sample `data/raw/public-team-profile-sample.json` shows:
 
@@ -23,4 +23,4 @@ This CONTRADICTS:
 
 If the cached sample is current, the real path is `team_season.year` (flat) and `team_season.season` is a season-name string — so both the endpoint doc example and testing.md's example are wrong.
 
-**Status: UNVERIFIED — single cached sample, possibly a stale API version.** Per the never-update-spec-on-single-observation rule, do NOT rewrite the docs until confirmed across ≥3 live calls. This endpoint is PUBLIC (no auth, no gc-signature), so it is cheaply live-verifiable with any valid `public_id`. Surfaced 2026-07-07 during E-255 (CE-5) planning. Feeds claude-architect's testing.md correction — CA must not fix testing.md until this shape is confirmed live.
+**Status: LIVE-CONFIRMED 2026-07-07 (E-255-R-01).** A plain public curl (`GET /public/teams/{public_id}`, 200 OK, no creds) returned `team_season.season` as the bare string `"summer"`, `team_season.year` as the flat int `2025`, and `team_season.record` with singular keys `{win, loss, tie}` — matching the cached sample exactly. The doc's `team_season.season.year` nesting and testing.md's worked example are BOTH wrong; the real path is `team_season.year` (flat) with `team_season.season` a season-name string. Verified fact recorded in `.project/research/E-255-verified-facts.md` (AC-2/G). Feeds E-255-01/02/04's corrections.
