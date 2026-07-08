@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/ROADMAP.md` is internally consistent, the ideas README is swept of moot CANDIDATEs and the unnumbered file is indexed, `docs/E-221-HANDOFF.md` is dispositioned, dead-table retention is captured as an idea, and the stale-READY epics are triaged with recommendations surfaced to the user.

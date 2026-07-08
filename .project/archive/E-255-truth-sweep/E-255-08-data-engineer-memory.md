@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, data-engineer's own memory (`.claude/agent-memory/data-engineer/`) describes current reality: token refresh IS programmatically possible, the backup mechanism is the real one (not Litestream), the Core Entity Model names only existing tables, and the `season_aggregate_writers` note reflects that no live caller writes `full`/`supplemented` rows post-E-239.

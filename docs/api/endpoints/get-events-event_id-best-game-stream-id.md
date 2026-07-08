@@ -24,10 +24,10 @@ related_schemas: []
 see_also:
   - path: /teams/{team_id}/game-summaries
     reason: Alternative for bulk game_stream_id resolution -- preferred for full ingestion (one call per page vs one call per game)
-  - path: /game-stream-processing/{game_stream_id}/boxscore
-    reason: Downstream consumer of game_stream_id resolved by this endpoint
-  - path: /game-stream-processing/{game_stream_id}/plays
-    reason: Downstream consumer of game_stream_id resolved by this endpoint
+  - path: /game-streams/{game_stream_id}/events
+    reason: Downstream consumer of the game_stream.id resolved by this endpoint (raw typed pitch events)
+  - path: /game-stream-processing/{event_id}/boxscore
+    reason: Boxscore takes event_id (this endpoint's INPUT), NOT the game_stream.id it returns -- no bridge needed for boxscore
   - path: /teams/{team_id}/schedule
     reason: Source of event_id values used as path parameter here
 ---
@@ -36,11 +36,13 @@ see_also:
 
 **Status:** CONFIRMED LIVE -- 200 OK. Single-field response confirmed. Last verified: 2026-03-04.
 
-Resolves a schedule `event_id` to the `game_stream_id` required by the boxscore and plays endpoints. This is an ID bridge endpoint -- its only purpose is converting one identifier type to another.
+Resolves a schedule `event_id` to its `game_stream.id`. This is an ID bridge endpoint -- its only purpose is converting one identifier type to another.
 
-**Two paths to `game_stream_id`:**
-1. `GET /teams/{team_id}/game-summaries` (bulk, preferred for full ingestion) -- returns all games with their `game_stream.id` values
-2. This endpoint (on-demand) -- one extra call per game, but avoids paginating game-summaries when you already have an `event_id`
+> **Not needed for boxscore/plays.** Those endpoints take `event_id` directly (= `game_stream.game_id`), which is already this endpoint's INPUT -- and `game_stream.id` returns HTTP 500 on them. The `game_stream.id` this endpoint returns is the path parameter for the raw `GET /game-streams/{game_stream_id}/events` endpoint (typed pitch data) and is one of two ids accepted by the public `GET /public/game-stream-processing/{game_stream_id}/details` endpoint.
+
+**Two paths to `game_stream.id`:**
+1. `GET /teams/{team_id}/game-summaries` (bulk) -- returns all games with their `game_stream.id` values
+2. This endpoint (on-demand) -- one extra call per game when you have an `event_id` but need its `game_stream.id`
 
 ```
 GET https://api.team-manager.gc.com/events/{event_id}/best-game-stream-id
@@ -70,7 +72,7 @@ Single-field JSON object.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `game_stream_id` | UUID | The game stream identifier for use with boxscore and plays endpoints |
+| `game_stream_id` | UUID | The game stream identifier (= `game_stream.id` in game-summaries). Path parameter for `/game-streams/{game_stream_id}/events`; NOT for boxscore/plays (those take `event_id`). |
 
 ## Example Response
 

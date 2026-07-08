@@ -1,7 +1,7 @@
 # IDEA-034: Program CRUD Admin Page
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-08, E-255-06) — moot after the reports-first reframe. The admin surface was trimmed to reports-only (E-239 removed team CRUD, opponent-resolution UI, and program-management surfaces). The reports-first product generates a report for any GameChanger `public_id` without the operator managing `programs` entities, so there is no product need for a program CRUD page. The single seeded `lsb-hs` program suffices, and `programs` is now an inert/FK-load-bearing table (unqueried in app code — see IDEA-091). If a program-management need re-emerges it would be a fresh idea against the then-current surfaces.
 
 ## Summary
 Add an admin UI page for creating, editing, and deleting programs. E-100 created the programs table and seeded one program (Lincoln Standing Bear HS), but the admin UI only has a dropdown for existing programs — no way to create new ones from the UI.

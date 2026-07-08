@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the most cross-referenced context-layer files — `CLAUDE.md`, `.claude/rules/data-model.md`, `.claude/rules/architecture-subsystems.md`, and `.claude/rules/migrations.md` — describe the current reports-first system. No ambient dashboard-as-live references, no deleted machinery presented as live, no phantom migration-number citations, and no stale helper names or "cached boxscore JSON" framing survive except where explicitly framed as history.

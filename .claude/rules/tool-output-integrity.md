@@ -23,14 +23,16 @@ When a target known or expected to be non-empty returns empty, truncated, or gar
 2. **Cross-check via an independent channel** -- e.g., `wc -l` / `wc -c` / `sed -n` / `cat -n`, or a second tool (Read vs. Glob).
 3. **Retry** to obtain a clean result.
 4. **Escalate rather than assert** if a clean result still cannot be obtained.
+5. **Read persisted review/tool findings to completion BEFORE characterizing, summarizing, or triaging them.** A preview, a `head`/`tail`, or a truncated view is not the content; a large output's first screen is not its findings. Never characterize findings, ask to triage them, or co-batch a triage decision with the command that produced them until you have read the full persisted output in your own context. (The E-230 fabrication failure was exactly this -- findings characterized before they were read; the ad-hoc main-session triage context is the thin spot.)
 
 When two channels disagree, **the clean read wins** over a flaky empty or garbled result. A "no files found" Glob is NOT proof of absence under a flaky channel -- confirm absence through a second channel before relying on it.
 
 ## Prohibitions
 
-- **Never assert or relay file content or a tool outcome you have not seen cleanly in your own context.** Report what you observed, not what you expect.
-- **Never co-batch a relay or report with the same-batch command whose output it reports.** A report must describe output already in context from a prior, completed call -- never expected output and never output produced in the same tool batch as the report.
+1. **Never assert or relay file content or a tool outcome you have not seen cleanly in your own context.** Report what you observed, not what you expect.
+2. **Never co-batch a relay or report with the same-batch command whose output it reports.** A report must describe output already in context from a prior, completed call -- never expected output and never output produced in the same tool batch as the report.
+3. **Never rule on a grep / OR-pattern match -- Read and quote the literal line.** A grep hit proves a line matched *something*; it says NOTHING about which alternative of an OR-pattern matched, and an omitted or truncated matching line (`[Omitted long matching line]`) is not evidence of any particular content -- it just means the line was long. grep finds candidates; only a clean Read of the exact line range confirms the current literal text. Never report a defect, rule a claim stale-or-current, or characterize content from a match alone.
 
 ## Related discipline
 
-This generalizes the clean-reread-before-defect discipline in `.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md` (re-read cleanly and quote literal text before reporting a defect; never rule on a grep match) -- a committed memory reminds the PM; this rule binds every agent. It is also the behavioral half of the detect-and-defend layer whose tooling half is the E-231-02 PostToolUse hook (catches empty/truncated/silent-partial-edit) and whose triage-time application is the E-231-03 triage gate. The same caution applies before triaging review findings: read the actual output to completion before characterizing it.
+Prohibition 3 (grep-match) and Response-protocol step 5 (read-findings-first) are promoted from the clean-reread-before-defect discipline in `.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md` -- a committed memory that reminds the PM; the promoted forms above now bind every agent. This rule is also the behavioral half of the detect-and-defend layer whose tooling half is the E-231-02 PostToolUse hook (catches empty/truncated/silent-partial-edit) and whose triage-time application is the E-231-03 triage gate.

@@ -128,11 +128,17 @@ the staged files.
   will also run as a second layer).
 - **PII detected**: Outputs a JSON denial response that blocks the tool call and
   tells Claude why the commit was blocked. The agent receives the scanner output
-  as feedback.
-- **Scanner not installed**: Exits silently (fail open until E-019-03 delivers
-  the scanner).
-- **`jq` not available**: Exits silently (fail open -- `jq` is required to parse
-  the input JSON).
+  (carrying the `[PII BLOCKED]` marker) as feedback.
+- **Scanner infrastructure failure** (scanner crash, missing interpreter, import
+  error -- the scanner exits non-zero with NO `[PII BLOCKED]` marker):
+  **fails CLOSED**. The commit is BLOCKED with a distinct "scanner failed to run
+  (infrastructure error -- NOT a PII detection)" message, because a safety scan
+  that could not complete must not let a commit through. Fix the scanner, then
+  retry. (E-251-04 changed this from the earlier fail-open behavior -- a broken
+  or absent scanner no longer silently passes commits.)
+- **`jq` not available**: Exits silently (fails OPEN). `jq` is required to parse
+  the hook's input JSON, so this single missing dependency is the one remaining
+  fail-open path.
 
 ### Configuration
 

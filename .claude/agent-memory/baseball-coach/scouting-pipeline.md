@@ -1,5 +1,7 @@
 # Scouting Pipeline -- Endpoint Coaching Implications
 
+> **SUPERSEDED (2026-07-08)**: The five dated 2026-03-04 entries below assume `/teams/{team_id}/season-stats` and `/teams/{team_id}/players` work for opponent teams. Confirmed since: `season-stats` is Forbidden (403) for non-owned teams -- it only works for teams the authenticated user manages. The real, working opponent scouting pipeline is: opponent `public_id` -> public schedule (`/public/teams/{public_id}/games`) + public roster (`/teams/public/{public_id}/players`) -> authenticated per-game boxscore -> client-side season aggregation from boxscores. See `docs/api/flows/opponent-scouting.md` for the current pipeline. Entries below are kept as dated research history, not current guidance.
+
 ## Schedule Endpoint -- Coaching Implications (discovered 2026-03-04)
 
 The schedule endpoint provides the full game calendar with coaching-critical metadata:

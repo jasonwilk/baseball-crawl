@@ -69,8 +69,9 @@ Single JSON object with team profile data.
 | `ngb` | **JSON-encoded string** | NGB affiliation. Same double-parse quirk as authenticated endpoints. |
 | `location` | object | Team location (city, state, etc.) |
 | `age_group` | string | Age bracket |
-| `team_season` | object | Current season info with record |
-| `team_season.season` | object | Season identifier |
+| `team_season` | object | Current season info: `season` (name), `year`, and `record` |
+| `team_season.season` | **string** | Season NAME (e.g., `"summer"`, `"spring"`). A bare string -- **NOT an object**. |
+| `team_season.year` | int | Season year (e.g., `2025`). **FLAT** sibling of `season` -- the correct year path is `team_season.year`; there is **no** `team_season.season.year` nesting. |
 | `team_season.record` | object | Win/loss/tie record. Uses **singular keys**: `win`, `loss`, `tie` (NOT `wins`/`losses`/`ties` as in authenticated endpoints). |
 | `avatar_url` | string | Signed CloudFront URL for team avatar. Will expire -- do not cache long-term. |
 | `staff` | array | Array of plain name strings (e.g., `["Jane Doe", "John Roe"]`). No roles, no IDs. |
@@ -91,7 +92,8 @@ Single JSON object with team profile data.
   },
   "age_group": "14U",
   "team_season": {
-    "season": {"year": 2024, "name": "summer"},
+    "season": "summer",
+    "year": 2025,
     "record": {"win": 12, "loss": 8, "tie": 0}
   },
   "avatar_url": "https://media-service.gc.com/...",
@@ -106,6 +108,7 @@ Single JSON object with team profile data.
 - `avatar_url` is a signed CloudFront URL that will expire. Do not cache long-term.
 - `staff` is an array of name strings with no role or UUID information.
 - `ngb` requires double-JSON-parsing.
+- `team_season.season` is a bare season-NAME string and `team_season.year` is a flat integer sibling -- the year is at `team_season.year`, NOT `team_season.season.year` (verified live 2026-07-07). Do not expect a nested `season` object here (the `POST /search` result's `season` object with `{name, year}` is a different endpoint's shape).
 - `team_season` reflects current season only; historical records not accessible via this endpoint.
 
 **Discovered:** 2026-03-04. **Confirmed no-auth:** 2026-03-04.

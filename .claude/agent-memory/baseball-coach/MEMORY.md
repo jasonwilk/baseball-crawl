@@ -8,7 +8,7 @@ Lincoln Standing Bear High School baseball program:
 - 12-15 players per team
 - ~30-game seasons
 - Jason is the system operator; coaching staff are the end consumers
-- Coaches see dashboards and reports -- they do not interact with the system directly
+- Coaches see reports -- they do not interact with the system directly
 
 ## Epic Consultations
 
@@ -62,14 +62,9 @@ High school baseball has small samples. These thresholds are firm:
 - Show what a result looks like: example scouting reports, example query results, example lineup cards
 - Be specific: "Track plate appearance outcomes (H, 2B, 3B, HR, BB, HBP, K, other out) with pitcher handedness, game location, and date" not "track batting stats"
 
-## Multi-Team, Multi-Season Tracking
+## Multi-Team, Multi-Season Tracking (Non-Goal)
 
-Players must be tracked across teams and seasons:
-- A player may appear on LSB Freshman one year, LSB JV the next, Legion in summer, travel ball elsewhere
-- Player identity across teams is a design challenge (same name, different team IDs in GameChanger)
-- Different competition levels must be accounted for (Varsity stats are not equivalent to Freshman stats)
-- Longitudinal tracking enables: development trajectories, regression detection, promotion readiness
-- The data model must support this from day one -- retrofitting cross-team identity is painful
+Cross-team player identity and multi-season/longitudinal tracking are explicitly out of scope -- removed in E-239 (ROADMAP D2, 2026-06-17). Each team-season stands alone; see `docs/ROADMAP.md` and `docs/VISION.md` for the reports-first reframe.
 
 ## Scouting Model
 

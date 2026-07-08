@@ -91,6 +91,8 @@ baseball-crawl/
 
 ## Schema Changes
 
+**Migration numbering note**: E-220-01 squashed every prior migration into a single new `migrations/001_initial_schema.sql` (see "E-100 Fresh-Start Schema Rewrite" below for the earlier squash it superseded). The `Migration 014`/`009`/`007`/`006` entries below predate that rewrite -- those specific files no longer exist standalone; the columns/tables they describe now live in `001_initial_schema.sql`. Current standalone migrations `002`-`010` postdate the E-220 squash and reuse some of the same numbers for unrelated changes (today's `006` is `drop_season_fallback.sql`, `007` is `play_events_pitch_columns.sql`, `009` is `spray_chart_type_unique.sql` -- see [operations.md: Schema Migrations](operations.md#schema-migrations) for the current file-by-file list). The entries below are accurate as history; only the migration *number* no longer maps to a live file for the pre-E-220 entries.
+
 ### E-235: Migration 002 -- Report Generation Run Records
 
 `migrations/002_report_generation_runs.sql` adds a single wide telemetry table:
@@ -140,7 +142,7 @@ The migration is applied automatically on container startup. Existing rows recei
 |----------|-------|
 | `play_events` table | Individual pitch, baserunner, substitution, and other events. Columns: `play_id` (FK to `plays.id`), `event_order`, `event_type`, `pitch_result`, `is_first_pitch`, `raw_template`. UNIQUE on `(play_id, event_order)`. |
 
-Populated by the plays pipeline (removed in E-239). These tables remain in the schema; existing rows are still readable but no new plays data is ingested.
+Populated by the plays pipeline, which is alive -- every report generation runs it (parser in `src/gamechanger/parsers/plays_parser.py`, loader in `src/gamechanger/loaders/plays_loader.py`). E-239 removed the dashboard/member-sync surfaces, not this pipeline; E-245 later repaired its pitch-annotation handling in place (see [operations.md: Schema Migrations](operations.md#schema-migrations), migration 007).
 
 ### E-167: Migration 007 -- Case-Insensitive Name+Season Year Index
 
@@ -251,8 +253,8 @@ Sub-navigation links the Reports and Users pages across all admin views.
 
 - **GameChanger API**: Full endpoint documentation in [docs/api/README.md](../api/README.md) (index) and per-endpoint files in `docs/api/endpoints/`.
 - **HTTP discipline**: Session factory, rate limiting, and header profile in [docs/http-integration-guide.md](../http-integration-guide.md).
-- **Cloudflare setup**: Tunnel creation, Zero Trust policies, and DNS configuration in [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md).
+- **Cloudflare setup**: Tunnel creation, Zero Trust policies, and DNS configuration in [cloudflare-access-setup.md](cloudflare-access-setup.md).
 
 ---
 
-*Last updated: 2026-07-05 | Source: E-250-05 (migration 008 dropped `team_opponents`; corrected `opponent_links` description to remove the dead downstream reference), E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*
+*Last updated: 2026-07-08 | Source: E-250-05 (migration 008 dropped `team_opponents`; corrected `opponent_links` description to remove the dead downstream reference), E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note), E-255-05 (Truth Sweep: fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/; added the migration-numbering note above; corrected the E-195 section's false "plays pipeline removed in E-239" claim -- it is alive, per E-255-R-01)*

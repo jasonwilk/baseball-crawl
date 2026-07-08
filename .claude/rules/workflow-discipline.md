@@ -4,13 +4,23 @@
 
 An epic MUST have status `READY` or `ACTIVE` before any of its stories can be dispatched. A `DRAFT` epic is not dispatchable. The product-manager (PM) sets `READY` after refinement is complete.
 
+## READY Freshness Gate
+
+An epic that has been in `READY` status for **more than 60 days** is **STALE**. Before a stale epic is planned further or dispatched, the PM MUST either **re-confirm it against `docs/ROADMAP.md`** (its premises still hold -- reset the READY date) or **demote it to `DRAFT`** (its premises no longer hold and it needs re-refinement). A stale epic MUST NOT be dispatched until it is re-confirmed. `ACTIVE` epics (already mid-dispatch) are exempt.
+
+**Why:** five epics sat READY 99-122 days on premises the reports-first descope (E-239) had invalidated -- their target surfaces were deleted out from under them (AGENTIC-FLOW-REVIEW §2.2). A READY marker is a standing claim that the plan is still current; past 60 days that claim needs re-checking, not blind trust.
+
+**How staleness is measured:** the age of the epic's READY transition -- the `READY` date recorded in the epic's `## Status` / `## History` section if present, else the date of the most recent commit touching the epic directory (`git log -1 --format=%cs -- epics/E-NNN-slug/`) as a proxy. "More than 60 days" is the trigger; a re-confirmation resets the clock (record the new READY/re-confirmed date so the next check measures from it).
+
+This gate is wired into the Prerequisites of both the plan and implement skills, so a stale READY epic cannot silently proceed on either path.
+
 ## Dispatch Authorization Gate
 
 Marking an epic READY and dispatching it are separate actions. After the PM sets an epic to READY, the PM MUST present the epic to the user and wait for explicit dispatch authorization. Planning and dispatch MUST NOT chain automatically. Phrases like "define the epic," "create the epic," "plan the epic," and "write stories for X" are plan-mode requests -- they do NOT authorize dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 
 ## Consultation Compliance Gate
 
-When the user explicitly requests that PM collaborate with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST invoke that agent via Task tool and incorporate their input before writing stories. If the PM cannot spawn the requested agent (spawning is one-level-deep -- a platform constraint), the PM MUST escalate to the user with specific questions for the named agent. The PM MUST NOT substitute its own judgment for the requested expert's input. The PM MUST NOT skip the consultation because spawning is unavailable. The PM MUST NOT set the epic to READY until the requested consultation is complete.
+When the user explicitly requests that PM collaborate with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST invoke that agent via the `Agent` tool and incorporate their input before writing stories. If the PM cannot spawn the requested agent (spawning is one-level-deep -- a platform constraint), the PM MUST escalate to the user with specific questions for the named agent. The PM MUST NOT substitute its own judgment for the requested expert's input. The PM MUST NOT skip the consultation because spawning is unavailable. The PM MUST NOT set the epic to READY until the requested consultation is complete.
 
 This gate applies to explicit user directives only -- not to the domain-triggered consultations in the PM's Consultation Triggers table, which are advisory.
 
@@ -87,7 +97,7 @@ Epic completion requires a documentation impact assessment per `.claude/rules/do
 
 ## Context-Layer Assessment Gate
 
-Epic completion requires a context-layer impact assessment per `.claude/rules/context-layer-assessment.md`. The main session MUST evaluate all six triggers with explicit per-trigger yes/no verdicts after all stories are DONE and before archiving the epic. All verdicts are recorded in the epic's History section. If any trigger fires, claude-architect is dispatched to codify the findings before the epic can be archived.
+Epic completion requires a context-layer impact assessment per `.claude/rules/context-layer-assessment.md`. The main session MUST evaluate all eight triggers with explicit per-trigger yes/no verdicts after all stories are DONE and before archiving the epic. All verdicts are recorded in the epic's History section. If any trigger fires, claude-architect is dispatched to codify the findings before the epic can be archived.
 
 ## Full-Suite-Green Closure Gate
 

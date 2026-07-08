@@ -12,7 +12,7 @@ After every epic, evaluate whether the work produced conventions, decisions, bou
 
 ## Assessment Triggers
 
-The main session evaluates each trigger with an explicit **yes** or **no** verdict. All six verdicts are recorded in the epic's History section.
+The main session evaluates each trigger with an explicit **yes** or **no** verdict. All eight verdicts are recorded in the epic's History section.
 
 1. **New convention, pattern, or constraint established.** Did the epic introduce a coding pattern, naming convention, file organization rule, or operational constraint that future work should follow?
 2. **Architectural decision with ongoing implications.** Did the epic make a technology choice, integration pattern, or structural decision that affects how future epics are planned or implemented?
@@ -20,13 +20,45 @@ The main session evaluates each trigger with an explicit **yes** or **no** verdi
 4. **Change to agent behavior, routing, or coordination.** Did the epic modify how agents are dispatched, what they can do, how they communicate, or how the closure sequence works?
 5. **Domain knowledge discovered that should influence agent decisions in future epics.** Did the epic surface baseball domain insights, API behavior patterns, or data model knowledge that agents should carry forward?
 6. **New CLI command, workflow, or operational procedure introduced.** Did the epic add a new `bb` subcommand, a new script, a new skill, or a new operational workflow that should be documented in the context layer? If a workflow skill was added, renamed, or retired, also update the `/workflow-help` cheat sheet (`.claude/skills/workflow-help/SKILL.md`) and the CLAUDE.md Workflows section.
+7. **Net context-layer growth offset (counterweight).** Did this epic grow the context layer net-positive (more lines/files added than removed across CLAUDE.md, rules, agents, skills, hooks)? If so, what was compressed, consolidated, or retired to offset it -- or, if nothing, why is the net growth load-bearing? Record the offset (or an explicit "nothing retired, and here is why the growth is load-bearing"). This is a review prompt, NOT a hard line-count or KB cap -- a line budget is density-gameable; the goal is that accretion is a conscious, accounted-for decision rather than the default.
+8. **Reusable behavioral lesson surfaced (promote-to-load-target).** Did a reusable behavioral lesson surface this epic that RECURRED (it also appeared in a prior epic) OR GENERALIZES beyond one agent? If yes, promote it to its correct load target NOW per the Learning-Loop Lifecycle below -- do not leave it stranded in a non-auto-loading topic file. This always-firing closure gate REPLACES the old uncountable "cited across 2+ epics" criterion (which had no counter).
 
 ## Assessment Procedure
 
-1. After all stories are DONE and the documentation assessment is complete, the main session evaluates each of the six triggers above.
+1. After all stories are DONE and the documentation assessment is complete, the main session evaluates each of the eight triggers above.
 2. For each trigger, record an explicit **yes** or **no** verdict in the epic's History section. A blanket "no context-layer impact" without per-trigger verdicts is **not sufficient** -- every trigger must be individually evaluated.
-3. **If any trigger is "yes"**: Spawn `claude-architect` (if not already on the team) to codify the findings in the appropriate context-layer files (CLAUDE.md, `.claude/rules/`, `.claude/agents/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agent-memory/`). The epic MUST NOT be archived until the codification is complete.
+3. **If any trigger is "yes"**: Spawn `claude-architect` (if not already on the team) to codify the findings in the appropriate context-layer files (CLAUDE.md, `.claude/rules/`, `.claude/agents/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agent-memory/`). The epic MUST NOT be archived until the codification is complete. Triggers 7 and 8 additionally invoke the **Learning-Loop Lifecycle** below (offset accounting, promote-to-load-target, deletion-side eviction, memory retirement).
 4. **If all triggers are "no"**: Record the per-trigger verdicts in the epic's History section and proceed to archival.
+
+## Learning-Loop Lifecycle
+
+Triggers 7 and 8 make the context layer prune and re-home knowledge, not only accrete it. When trigger 8 fires (a reusable behavioral lesson surfaced), the lesson is promoted to a load target NOW -- and the load target is chosen by classification, because the failure this closes is "recorded but never recalled" (a high-value lesson left in a non-auto-loading topic file loads for nobody).
+
+### Load-Target Classification
+
+Every codified lesson is typed by who must recall it. Only the last type may terminate in a non-auto-loading file:
+
+| Type | Load target |
+|------|-------------|
+| Universal-behavioral (binds every agent/session) | a `paths: "**"` rule or CLAUDE.md |
+| Role-scoped (one agent's behavior) | that agent's definition, or its `MEMORY.md` top-200 |
+| Path-scoped (fires only for certain files) | a rule with a `paths:` glob |
+| Workflow procedure | the relevant skill under `.claude/skills/**` |
+| Reference-only lookup material | a topic file linked from a `MEMORY.md` index (the ONLY type that may live in a non-auto-loading file, and only for lookup material) |
+
+A lesson that must be recalled by an agent but lands only in a non-auto-loading topic file is the default failure -- "recorded, not recallable." Promotion under trigger 8 means moving it to the auto-loading target its type requires. (The two immediate promotions proving this pipeline landed in `.claude/rules/tool-output-integrity.md`.)
+
+### Deletion-Side Eviction
+
+Symmetry with promotion: for each file, flag, column, table, command, or agent this epic DELETED or RENAMED, grep `.claude/rules/`, `.claude/agents/`, `CLAUDE.md`, and the `MEMORY.md` indexes for references and strike or annotate each as history. Accretion without eviction is how stale identifiers accumulate (the cross-season saga -- the user asked ~5x while passes only leaf-patched -- is the standing proof this direction is missing).
+
+### Memory Retirement
+
+At closure, PM greps its Pending-Work / active-epic memory for the archived epic's ID and retires the entry (an epic left listed as READY/active months after completing is the failure this prevents).
+
+### Cadence, Not Caps
+
+This is a per-epic review cadence, NOT a hard KB or line-count ceiling. The point is that the loop prunes and re-homes as deliberately as it records.
 
 ## Blocking Semantics
 

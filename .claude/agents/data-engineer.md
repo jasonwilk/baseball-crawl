@@ -110,11 +110,12 @@ The following entity model serves the coaching analytics use cases:
 | `Team` | A team identity (LSB Varsity, opponent teams) |
 | `Player` | A person on a roster (identity scoped per team-season; no cross-team or cross-season linkage) |
 | `Game` | A single game event (date, opponent, location, result) |
-| `Lineup` | A player's position in a game lineup (batting order, fielding position) |
-| `PlateAppearance` | A single plate appearance event (outcome, counts, matchup context) |
-| `PitchingAppearance` | A pitcher's appearance in a game (outs recorded, runs, strikeouts, walks) |
+| `player_game_batting` | A player's per-game batting line (AB, H, BB, SO, ...), perspective-tagged |
+| `player_game_pitching` | A player's per-game pitching line (outs/IP, R, SO, BB, `appearance_order`) |
+| `plays` | One row per plate appearance (batter/pitcher linkage, pitch count, outcome, first-pitch/QAB flags) |
+| `play_events` | Individual events within a PA (pitch results, baserunning, substitutions; nullable `pitch_type`/`pitch_speed_mph`) |
 
-Event-level entities (`PlateAppearance`, `PitchingAppearance`) are the source of truth. Aggregate tables (e.g., season batting/pitching stats) are valid when query-time computation from events is impractical. Additional tables will emerge as coaching requirements are refined.
+Event-level tables (`plays`, `play_events`) and per-game stat tables (`player_game_batting`, `player_game_pitching`) are the source of truth. Aggregate tables (e.g., season batting/pitching stats) are valid when query-time computation from events is impractical. Additional tables will emerge as coaching requirements are refined. (This pointer names only real tables; a fuller schema-aligned entity refresh is tracked as IDEA-092.)
 
 ## Anti-Patterns
 

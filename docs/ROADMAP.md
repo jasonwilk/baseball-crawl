@@ -1,7 +1,12 @@
 # Roadmap: Reports-First Architecture
 
 **Date**: 2026-06-12 (rev 2 — review-hardened)
-**Status**: DRAFT — input for epic planning ("plan an epic for X" per slice)
+**Status**: EXECUTED — slices A–E are ALL COMPLETED and archived (see §0 Roadmap Tracking:
+E-234/235/236/237/238/239/240). This document is retained as the reference record of the
+reports-first reframe and its as-planned epic sequence. §4 (Cruft Inventory) and §5 (Proposed
+Epic Sequence) are the AS-PLANNED record — the quarantine/removal verdicts and the D1/D2 plans
+they describe have SHIPPED (D1 = E-238, D2 = E-239); read them as history, with §0 as the
+authoritative current status. (Was `DRAFT` while the sequence was being planned.)
 **Method**: Synthesized from parallel subagent surveys (reports critical-path trace, cruft
 inventory, forward-path gap analysis, regression-guard design) plus the 2026-06-09/10
 architecture assessments (pipeline accuracy, identity model, stability, backlog mining,
@@ -184,6 +189,15 @@ dashboard routes/templates/queries, `user_team_access` gating (admin sees all).
 
 ## 4. Cruft Inventory & Verdicts
 
+> **Executed (2026-07-08, E-255-06):** This inventory is the AS-PLANNED record. The
+> `QUARANTINE → REMOVE` verdicts below were CARRIED OUT — D1 (E-238) quarantined and
+> retargeted navigation, and D2 (E-239) removed the dashboard, member-sync, and
+> opponent-management surfaces (−59k lines). The verdicts read in the future tense
+> ("QUARANTINE → REMOVE") because they were written during planning; treat them as the
+> record of what was decided and shipped, not as pending work. Table rows carrying dated
+> "Update" annotations (e.g. `team_opponents` dropped in migration 008) reflect subsequent
+> changes. §0 is authoritative for current status.
+
 Policy: **quarantine before remove.** Quarantine = mark deprecated, stop maintaining,
 exclude from new-feature parity requirements. Removal happens in a dedicated epic only
 after regression guards are green. Never drop tables in the same epic that removes code.
@@ -215,6 +229,11 @@ maintenance/parity burden those surfaces impose on every future epic (e.g., the
 ---
 
 ## 5. Proposed Epic Sequence
+
+> **Executed (2026-07-08, E-255-06):** All of A–E SHIPPED and are archived — A=E-234, B=E-235,
+> B2=E-236, C=E-237, D1=E-238, D2=E-239, E=E-240 (§0). The epic descriptions below are the
+> AS-PLANNED specs (kept as the design record); where they read as future work ("D2 (removal,
+> after A+B green…)", "FIRST story is…"), that work is DONE. §0 is authoritative for status.
 
 Ordered smallest-safe-step first. Each epic lists risk and the guard that must be green
 before it ships. Epics A and B are prerequisites for everything after them.

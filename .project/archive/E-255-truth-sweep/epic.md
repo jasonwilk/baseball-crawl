@@ -1,7 +1,7 @@
-# E-255: Truth Sweep — Context Layer, API Docs, Runbooks — READY (audit CE-5)
+# E-255: Truth Sweep — Context Layer, API Docs, Runbooks — COMPLETED (audit CE-5)
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- READY 2026-07-07: all 6 domain docket-confirmations folded; internal review (CR spec audit +
      6 holistic) + Codex spec review (3 iterations) complete, all findings folded; quality checklist
      passed. Dispatch is a SEPARATE authorization (this was a "plan with review" trigger, not
@@ -87,15 +87,15 @@ Two things run in the MAIN checkout BEFORE the implement skill creates the epic 
 ## Stories (dispatched set = 01–09)
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-255-01 | CLAUDE.md + data-model.md + arch-subsystems.md + migrations.md truth corrections | TODO | R-01 artifact (team_season shape); + runbook-path coupling w/ 05 (TN-9) | claude-architect |
-| E-255-02 | Rules-file truth corrections + delete agent-browsability doc + hooks README | TODO | R-01 artifact (shape, pitches_7d, E-211), E-255-04 (endpoint count) | claude-architect |
-| E-255-03 | Agent charter corrections + §3 curation-decision codification | TODO | None (ux charter → REPURPOSE, decided) | claude-architect |
-| E-255-04 | `docs/api/` endpoint-doc accuracy corrections | TODO | R-01 artifact (game_stream.id, team_season shape) | api-scout |
-| E-255-05 | Operator runbook executability corrections (2 root runbooks pre-relocated to docs/admin/ in Step 0) | TODO | Step 0 (relocation) + R-01 artifact (recovery command + host-exec form for AC-8/AC-9) | docs-writer |
-| E-255-06 | PM backlog hygiene: ROADMAP consistency + stale-READY triage + artifact disposition | TODO | None | product-manager |
-| E-255-07 | baseball-coach own-memory truth sweep | TODO | None | baseball-coach |
-| E-255-08 | data-engineer own-memory truth sweep | TODO | None | data-engineer |
-| E-255-09 | ux-designer own-memory truth sweep (REPURPOSE branch) | TODO | E-255-03 (refocused charter) | ux-designer |
+| E-255-01 | CLAUDE.md + data-model.md + arch-subsystems.md + migrations.md truth corrections | DONE | R-01 artifact (team_season shape); + runbook-path coupling w/ 05 (TN-9) | claude-architect |
+| E-255-02 | Rules-file truth corrections + delete agent-browsability doc + hooks README | DONE | R-01 artifact (shape, pitches_7d, E-211), E-255-04 (endpoint count) | claude-architect |
+| E-255-03 | Agent charter corrections + §3 curation-decision codification | DONE | None (ux charter → REPURPOSE, decided) | claude-architect |
+| E-255-04 | `docs/api/` endpoint-doc accuracy corrections | DONE | R-01 artifact (game_stream.id, team_season shape) | api-scout |
+| E-255-05 | Operator runbook executability corrections (2 root runbooks pre-relocated to docs/admin/ in Step 0) | DONE | Step 0 (relocation) + R-01 artifact (recovery command + host-exec form for AC-8/AC-9) | docs-writer |
+| E-255-06 | PM backlog hygiene: ROADMAP consistency + stale-READY triage + artifact disposition | DONE | None | product-manager |
+| E-255-07 | baseball-coach own-memory truth sweep | DONE | None | baseball-coach |
+| E-255-08 | data-engineer own-memory truth sweep | DONE | None | data-engineer |
+| E-255-09 | ux-designer own-memory truth sweep (REPURPOSE branch) | DONE | E-255-03 (refocused charter) | ux-designer |
 
 **Cross-story consistency couplings** (must agree — see TN-7 + TN-9): (a) the "Key entities" list appears in THREE files — baseball-coach `coaching-decisions.md` L19 (E-255-07), data-engineer `MEMORY.md` (E-255-08), and the data-engineer.md charter Core Entities pointer (E-255-03, narrow) — all three must name only real tables (`player_game_batting`/`player_game_pitching`/`plays`/`play_events`), never the ghost `Lineup`/`PlateAppearance`/`PitchingAppearance`; (b) the relocated runbook path `docs/admin/production-deployment.md` must be identical in the CLAUDE.md pointer (story 01) and the file move + inbound-ref updates (story 05) — TN-9.
 
@@ -180,6 +180,7 @@ Per Jason's P1b resolution (2026-07-07), the two `docs/` root runbooks are MOVED
 | Codex spec review — iter-1 | 4 | 4 ACCEPT / 0 DISMISS (dispatch-contract deepen; story-05 root-doc conflict; 2 propagation/testability) |
 | Codex spec review — iter-2 | 6 (2 P1 + 3 P2 + 1 P3) | 6 ACCEPT; the 2 recurring P1s escalated to Jason → **P1a** reclassify R-01 as pre-dispatch Step-0 spike, **P1b** MOVE both root runbooks to `docs/admin/` (root-cause fix) |
 | Codex spec review — iter-3 | 3 (2 P1 + 1 P2) | 3 ACCEPT (trigger-7 count propagation across 3 live sites; git-mv → Step 0 for single-specialist dispatch; lifecycle-policy target named). Prior 2 P1s NOT re-raised — converged. |
+| **Codex integration review — Phase 4b (dispatch, 2026-07-08)** | 5 (1 P3 + 4 cross-story consistency) | **5 ACCEPT / 0 DISMISS**. F1 secret-read-guard relative-path bypass→CA; F2 workflow-discipline.md "Task tool"→CA; F3 CLAUDE.md:77 game_stream_id→CA; F4 opponent-scouting "completed games only"→api-scout (accepted+fixed L17/25/33 — endpoint-return vs flow-filter reconciled); F5 coach memory dashboards + banner game_stream_id→coach. Cross-story id-routing/terminology drift outside individual story ACs — the integration layer's catch. |
 
 Domain experts consulted: baseball-coach, api-scout, claude-architect, data-engineer, ux-designer (+ docs-writer). A consistency sweep ran after every incorporation round.
 - 2026-07-07: **Status → READY.** Quality checklist passed; all Open Questions resolved; all review findings across 1 internal + 3 Codex iterations folded and consistency-swept. Dispatch is a separate authorization (this was a "plan with review" trigger). Pre-Dispatch Step 0 (R-01 spike + runbook git mv) and the dispatched set 01–09 are dispatch-time actions, not part of the planning commit.
@@ -187,3 +188,42 @@ Domain experts consulted: baseball-coach, api-scout, claude-architect, data-engi
 - 2026-07-07: **§2.2 stale-READY rule REVERSED to ADOPT** (Jason, same day, after agentic-flow-review §2.2 evidence: five epics READY 99-122 days on invalidated premises). Folded into E-255-06 AC-6: READY >60 days = STALE → PM re-confirms against ROADMAP or demotes to DRAFT; check wired into both plan-skill and implement-skill Prerequisites. Rule-text + SKILL Prerequisite edits are context-layer → routed to claude-architect within E-255-06 (mixed-ownership story; likely rule home `.claude/rules/workflow-discipline.md`). E-255-03 Notes + PM memory synced to the reversal.
 - 2026-07-07: **CA design review — 5 corrections applied, 0 rebuts.** (1) AC-4b trigger-count enumeration expanded 3→5 live sites (added `context-layer-assessment.md:15` + `implement/SKILL.md:483`; struck the "enumeration complete / only three" parenthetical). (2) AC-5b(i) rationale corrected — the grep-match trap is ELEVATED from a cross-ref aside at `tool-output-integrity.md:36` to a first-class Prohibition (it was not "invisible outside PM"). (3) AC-1 now explicitly names the frontmatter `description:` field (line 3, still "coaching dashboard") as part of the refocus. (4) Two surviving SKIP statements reconciled to ADOPT (TN-5 + Open Questions "Resolved by Jason") so the implementer never sees a contradiction. (5) E-256 stub: smoke carve-out must cover both the Test-Execution-Constraint AND Anti-Pattern #5's read-only Bash allowlist; dead-table line de-duped (LIVE `user_team_access` dropped, idea capture deferred to E-255-06 AC-4); smoke doc pointer → `docs/admin/production-deployment.md`.
 - 2026-07-07: Three unhomed AGENTIC-FLOW-REVIEW.md §6 "immediate" items routed in as scope-adds inside existing stories' domains (epic stays READY — CA implements all at dispatch): **item 3** (edit-verify.sh memory-path false-positive carve-out, §4.2) → E-255-02 new AC-7; **item 13** (new `secret-read-guard.sh` denying Read/Bash on `**/.env*` + `secrets/**` except `*.example`, §4.2) → E-255-02 new AC-8 (+ `.claude/settings.json` wiring); **item 15 remainder** (§2.1 model/effort + routing) → E-255-03 new AC-1c: `claude-architect.md` `model: opus`→`opus[1m]`, `api-scout.md` add explicit `effort: medium`, `agent-routing.md` one-line Explore-routing addendum. Item 2 (codex-review tooling) went to E-258 (separate task). File-disjointness of E-255-02/03 preserved (02 = hooks+settings; 03 = agent defs+agent-routing).
+
+### Dispatch (2026-07-08)
+- **Status → ACTIVE**; dispatched set 01–09 executed serially in worktree `/tmp/.worktrees/baseball-crawl-E-255` (Pre-Dispatch Step 0 — R-01 fact spike + the two runbook `git mv` — done in main pre-worktree). All 9 stories DONE, PM-verified per-AC (CR co-verified the non-context-layer stories 02/04/05; 05 needed a CR round-1 rejection + 2 remediation rounds for the plays-module-path slip and the operations.md host-exec class). Cross-story couplings held: **TN-7** ghost-entity list identical across coach memory (07), DE memory (08), DE charter (03) = `player_game_batting`/`player_game_pitching`/`plays`/`play_events`; **TN-9** relocated runbook path `docs/admin/production-deployment.md` identical in CLAUDE.md pointer (01) + the docs-writer move (05); **AC-4↔04** canonical count "120 files (119 endpoints + 1 web-routes reference)" verbatim in README.md, api-scout MEMORY.md, and `api-docs.md`.
+- **Phase 4b — Codex integration review: 5 findings, all VALID/ACCEPTED, 0 dismissed.** These are cross-story consistency drifts that fell between individual story ACs (04's id-routing fix was scoped to `docs/api`, so CLAUDE.md/rules/own-memory id tokens were outside any story's ACs — the integration review is the layer that catches this):
+  - **F1** (P3, security): `secret-read-guard.sh` `cd secrets && cat creds.txt` relative-path bypass → claude-architect hardens the guard + documents the residual limitation.
+  - **F2**: `workflow-discipline.md:23` "Task tool" (contradicts 03's product-manager.md "`Agent` tool") → claude-architect.
+  - **F3**: `CLAUDE.md:77` "same `game_stream_id` as boxscore" (contradicts 04's `event_id` routing) → claude-architect.
+  - **F4**: `opponent-scouting.md:17/:25/:33` "completed games only" (contradicts 04's endpoint doc) → api-scout ACCEPTED + fixed all 3 lines: it was a real mix — the endpoint-return "completed only" claim was STALE (the endpoint returns completed+upcoming), while the flow's filter-to-completed intent is legit; reconciled so the doc distinguishes endpoint-return from flow-filter.
+  - **F5**: baseball-coach `MEMORY.md:11` "dashboards and reports" + `scouting-pipeline.md:3` banner "`game_stream_id`" (the SUPERSEDED banner's boxscore param should be `event_id` per R-01/04) → baseball-coach.
+  Per the implement skill, Codex remediation fixes are not re-reviewed (Phase 4b Step 5); F1 (security control) gets closer scrutiny (CA dry-run evidence + possible CR glance). Remediations are review-authorized (post-review remediation exception) — the 9 stories stay DONE.
+
+### Closure (2026-07-08)
+- **What was accomplished**: A CE-5 truth sweep bringing the context layer, `docs/api/`, operator runbooks, and each agent's own memory into line with the reports-first, single-season reality. Highlights: (1) a pre-dispatch R-01 fact-verification spike (`.project/research/E-255-verified-facts.md`) settling the `game_stream.id`/`event_id` routing, the flat `team_season` shape, `pitches_7d` NULL/0 semantics, the E-211 self-heal overwrite, and the `bb creds`/host-exec command forms from ground truth; (2) CLAUDE.md + 4 rules files + arch-subsystems + migrations corrected (01), remaining rules + `.claude/hooks/README.md` + deletion of `docs/agent-browsability-workflow.md` + two new/hardened hooks — `secret-read-guard.sh` and the `edit-verify.sh` memory carve-out (02); (3) agent charters refocused + the three §3 curation decisions codified (context-growth counterweight = trigger 7, Learning-Loop Lifecycle = trigger 8, agent-roster refocus) (03); (4) `docs/api/` accuracy corrections incl. the ~12-file id-routing consistency sweep + canonical 120-file count (04); (5) operator runbooks made fresh-machine-executable with the two root runbooks relocated to `docs/admin/` (05); (6) PM backlog hygiene — ROADMAP header/§4/§5 reconciled to executed state, ideas README swept + reconciled 1–107, `docs/E-221-HANDOFF.md` deleted, E-193 + E-073 archived (ABANDONED), E-072/E-174/E-175 demoted to DRAFT under the new READY Freshness Gate, dead-table + 4 follow-up ideas captured (06); (7) baseball-coach / data-engineer / ux-designer own-memory sweeps (07/08/09). Ideas IDEA-103..107 captured. Full dispatch review record in the Dispatch Scorecard below.
+- **Step 3 — Documentation assessment**: **Documentation impact handled within the epic.** Story 05 corrected every affected `docs/admin/` runbook and relocated the two root runbooks into `docs/admin/`; the epic corrected docs to match existing reality and introduced no new system feature or schema change. No ADDITIONAL docs-writer dispatch required.
+- **Step 3a — Context-layer assessment (EIGHT triggers, per-trigger verdicts; main-session evaluated, PM-recorded):**
+  1. New convention/pattern/constraint — **YES**: secret-read-guard hook, READY Freshness Gate, edit-verify memory carve-out, Learning-Loop Lifecycle — all codified in-epic (02/03/06); plus an own-memory-worktree dispatch footgun → **codified by claude-architect in `worktree-isolation.md`** (own-memory story deliverables → worktree copy).
+  2. Architectural decision w/ ongoing implications — **NO** (docs relocation is organizational, done in-epic).
+  3. Footgun/failure mode/boundary — **YES**: own-memory story deliverables must edit the worktree copy, not the main-checkout carve-out, during dispatch → codified in `worktree-isolation.md`; secret-read-guard residual limits documented in-hook.
+  4. Agent behavior/routing/coordination — **YES**: stale-READY gate wired into plan+implement Prerequisites; agent-routing Explore addendum; frontmatter model/effort — all codified in-epic (03/06).
+  5. Domain knowledge for future agents — **YES**: R-01 verified facts (game_stream.id/event_id routing, flat team_season shape, pitches_7d NULL/0) — codified into docs/context; the R-01 artifact persists in `.project/research/`.
+  6. New CLI command/workflow — **NO**.
+  7. Context-growth counterweight (trigger 7) — **PASS/offset**: net ≈ +794/-758; the epic retired substantial cruft (deleted agent-browsability doc + E-221-HANDOFF; archived E-193/E-073; dropped phantom migrations + dashboard prose). Growth accounted for.
+  8. Behavioral-lesson closure gate (trigger 8) — **YES**: recurring reusable lesson — "verify a cited file/module/function path exists before approving a doc/prose correction" (the story-05 plays-module-path slip + the Codex F5 banner id slip). Disposition (proportional, Simple First): recorded in **PM own memory** (folded into the closure own-memory pass); the existing `tool-output-integrity.md` clean-reread disciplines cover the spirit and CR operationally enforces it — no new rule needed.
+  → Assessment fires; every fired trigger is codified in-epic, codified by CA in `worktree-isolation.md` (the footgun note), or recorded in PM memory (trigger 8). All codifications complete at closure.
+
+#### Dispatch Review Scorecard (2026-07-08)
+| Pass | Findings | Outcome |
+|------|----------|---------|
+| Per-story CR — E-255-02 | 2 | 2 accepted (secret-read-guard `.env` glob SHOULD-FIX fixed round-2; third E-009-research dangling browsability ref routed to E-255-06 cleanup) |
+| Per-story CR — E-255-04 | 1 | 1 **deferred** → IDEA-107 (endpoint-doc filename path-variable asymmetry — real but out-of-scope cosmetic, not a false positive) |
+| Per-story CR — E-255-05 | 4 (3 rounds) | 4 accepted (plays module-path MUST-FIX in operations.md + architecture.md; operations.md host-exec class ×3 sites incl. the :709/:807 symmetry) |
+| Per-story CR — E-255-06 | 0 | APPROVED round 1 |
+| Context-layer-only stories 01/03/07/08/09 | — | PM-alone AC verification (no CR row per skip condition); story-03 flags ruled inline (AC-5b source-path ACCEPT, DE "dashboards" out-of-scope, Task→Agent CONFIRMED) |
+| CR integration review (Phase 4a) | 1 | 1 accepted (stale link labels) |
+| Codex code review (Phase 4b) | 5 | 5 accepted / 0 dismissed (F4 accepted+fixed by api-scout — opponent-scouting L17/25/33 endpoint-return vs flow-filter reconciled) |
+
+**Totals**: ~13 findings → **12 accepted/fixed, 1 deferred-to-idea (IDEA-107), 0 dismissed**. Every accepted finding was remediated in-worktree and staged; review-authorized remediations left the 9 stories DONE.
+
+Domain experts on the dispatch team: claude-architect, api-scout, docs-writer, product-manager, baseball-coach, data-engineer, ux-designer (+ code-reviewer as the quality gate on non-context-layer stories).

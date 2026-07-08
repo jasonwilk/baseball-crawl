@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 <!-- ux repurpose-or-retire RESOLVED 2026-07-07 by Jason: REPURPOSE. The REPURPOSED ACs below apply;
      the RETIRED branch is retained for record only (moot). -->
 

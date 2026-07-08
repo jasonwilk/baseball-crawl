@@ -14,11 +14,11 @@ What this means in practice:
 
 ## Project Purpose
 
-Coaching analytics platform for **Lincoln Standing Bear High School** baseball program. Extracts data from GameChanger, builds a queryable database for scouting and game preparation, and (later) publishes dashboards for coaching staff.
+Coaching analytics platform for **Lincoln Standing Bear High School** baseball program. Extracts data from GameChanger, builds a queryable database for scouting and game preparation, and generates shareable scouting reports for coaching staff.
 
 **The core value proposition**: Give LSB coaches a competitive advantage through data-driven scouting, lineup optimization, and opponent analysis -- capabilities that most high school programs do not have.
 
-> **Current strategic frame (2026-06-12)**: The product as actually used is reports-first -- generate a one-off scouting report for a GameChanger `public_id` and share the link. The member-team sync, dashboard, and tracked-opponent surfaces were unused and have been **removed** (E-239, the `docs/ROADMAP.md` D2 slice). The forward feature is morning-of-game scheduled reports. Explicit non-goals: cross-team player identity, multi-season rollups, longitudinal tracking. See `docs/ROADMAP.md` for the full reframe, protected core, and epic sequence (A-E). As of the 2026-07-05 "curate the vision" session, `docs/VISION.md` has been reconciled to this reports-first reframe, so `docs/VISION.md` and `docs/ROADMAP.md` now agree on scope (reports-first, single-season, morning-of-game). The Project Purpose / Scope sections below still carry dashboard-era wording from the original multi-surface vision; that CLAUDE.md prose is a separately-tracked truth-sweep item (ROADMAP CE-5), not yet corrected here.
+> **Current strategic frame (2026-06-12)**: The product as actually used is reports-first -- generate a one-off scouting report for a GameChanger `public_id` and share the link. The member-team sync, dashboard, and tracked-opponent surfaces were unused and have been **removed** (E-239, the `docs/ROADMAP.md` D2 slice). The forward feature is morning-of-game scheduled reports. Explicit non-goals: cross-team player identity, multi-season rollups, longitudinal tracking. See `docs/ROADMAP.md` for the full reframe, protected core, and epic sequence (A-E). As of the 2026-07-05 "curate the vision" session, `docs/VISION.md` has been reconciled to this reports-first reframe, so `docs/VISION.md` and `docs/ROADMAP.md` now agree on scope (reports-first, single-season, morning-of-game). The Project Purpose / Scope sections below were reconciled to this reports-first frame in E-255 (CE-5).
 
 ### Scope
 - **Teams**: LSB Freshman, JV, Varsity, Reserve. Legion teams added later.
@@ -26,10 +26,10 @@ Coaching analytics platform for **Lincoln Standing Bear High School** baseball p
 - **Season**: ~30 games per team
 - **Single-season scope**: Each team-season is tracked independently. There is no multi-season rollup, longitudinal cross-season tracking, or cross-team athlete identity (explicit non-goals)
 - **Data sources**: GameChanger API (primary), potentially others later
-- **Users**: Jason (system operator), coaching staff (dashboard consumers)
+- **Users**: Jason (system operator), coaching staff (report consumers)
 
 ### MVP Target
-A queryable database containing team and opponent statistics, sufficient for scouting reports and game prep. Dashboards come after the data layer is solid.
+A queryable database containing team and opponent statistics, sufficient for scouting reports and game prep. Shareable scouting reports are generated on top of that data layer.
 
 ### Deployment Target
 - **Local dev**: `docker compose up` starts the full stack at http://baseball.localhost:8001 (the canonical user-facing URL -- matches APP_URL / the WebAuthn origin; `baseball.localhost` resolves to 127.0.0.1). Direct in-container access (curl, health checks) uses http://localhost:8001, the same app port with a `localhost` Host header.
@@ -37,7 +37,7 @@ A queryable database containing team and opponent statistics, sufficient for sco
 - **Production URL**: `https://bbstats.ai`
 - **Network**: Cloudflare Tunnel for ingress (no exposed ports). App-internal auth via magic links and passkeys (E-023). Cloudflare Access is present but passive (no enforcing policies).
 - **Database**: SQLite at `./data/app.db` (host-mounted, WAL mode, simple file backup via `scripts/backup_db.py`)
-- See `docs/production-deployment.md` for the verified deployment runbook
+- See `docs/admin/production-deployment.md` for the verified deployment runbook
 
 ## Data Philosophy
 
@@ -48,7 +48,7 @@ Every piece of data this project gathers is information already visible to any G
 This guides our data-source decisions:
 - **GameChanger API** (preferred): Programmatic access to the same data shown in the app.
 - **Web scraping** (fallback): Screen-scrape when the API does not cover a data point, but only for data already visible in the UI.
-- **Freshness for coaches**: Coaches think in games, not sync timestamps. Data freshness should be presented as game coverage ("Through [date] ([N] games)"), not system sync dates ("Updated Mar 27"). This applies to dashboards, cards, and any UI showing how current the data is.
+- **Freshness for coaches**: Coaches think in games, not sync timestamps. Data freshness should be presented as game coverage ("Through [date] ([N] games)"), not system sync dates ("Updated Mar 27"). This applies to reports, cards, and any UI showing how current the data is.
 
 ### Operating Principle: Always Get Closer to Byte-Identical Play Ingestion
 
@@ -57,7 +57,7 @@ This guides our data-source decisions:
 This is a direction and a discipline, not a one-time threshold -- quick-scored games, abandoned at-bats, and scorekeeper noise leave an irreducible residual, so a perfect zero is not the bar. See the canonical statement in `docs/VISION.md` ("North Star: Always Get Closer to Byte-Identical Play Ingestion"). The concrete enforcement mechanism (a plays-to-boxscore reconciliation scoreboard, and the rule that ingestion changes must not regress it) is being designed in E-245 and lands when that scoreboard exists; until then, this principle binds intent.
 
 ## Tech Stack
-- Python end-to-end (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) -- crawlers, API, dashboard, migrations, and tests
+- Python end-to-end (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) -- crawlers, API, serving layer, migrations, and tests
 - FastAPI + Jinja2 for the serving layer (server-rendered HTML)
 - SQLite (WAL mode, host-mounted Docker volume at `./data/app.db`) for structured storage
 - Docker Compose for local development and production deployment
@@ -74,7 +74,7 @@ See `.claude/rules/key-metrics.md` for stat definitions, coaching priorities, an
 - The API is undocumented; we maintain our own spec at `docs/api/README.md` (index) and per-endpoint files in `docs/api/endpoints/`
 - API limitations are discovered iteratively -- document everything
 - **Authenticated endpoints** (`/teams/*`, `/me/*`) require `gc-token` + `gc-device-id` headers and must handle auth expiration gracefully. Includes a **UUID-to-public_id bridge** (`GET /teams/{team_id}/public-team-profile-id`) that returns the `public_id` slug for teams the authenticated user manages (returns 403 for non-managed teams). For opponent `public_id` discovery, use the `public_id` field returned directly in schedule and opponent list responses instead.
-- **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (full game schedule -- completed games with final scores AND upcoming/scheduled games, opponents as free-text names only with no `public_id`, home/away; **caution**: returns perspective-specific game IDs -- the same real-world game gets a different `id` depending on which team's schedule is queried, unlike authenticated `game-summaries` which returns stable `event_id`/`game_stream_id`), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
+- **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (full game schedule -- completed games with final scores AND upcoming/scheduled games, opponents as free-text names only with no `public_id`, home/away; **caution**: returns perspective-specific game IDs -- the same real-world game gets a different `id` depending on which team's schedule is queried, unlike authenticated `game-summaries` which returns stable `event_id`/`game_stream_id`), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; the path accepts EITHER the game's `event_id` OR its `game_stream.id` -- both resolve to the same game, and since the authenticated boxscore is keyed by `event_id`, the same `event_id` works here with no `best-game-stream-id` lookup -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details, whose path accepts either the `event_id` or the `game_stream.id`, and may have different field names than authenticated equivalents (see API spec for details).
 - **public_id-to-gc_uuid bridge**: When you have a team's `public_id` but need its `gc_uuid` for authenticated endpoints, use `POST /search` filtered by `public_id` to resolve it. See `.claude/rules/gc-uuid-bridge.md` for the full pattern, storage rules, and edge cases.
 - **Opponent scouting pipeline**: Uses opponent `public_id` to fetch schedules and rosters via public endpoints, then per-game boxscores via authenticated endpoint; season aggregates are computed from boxscores (season-stats endpoint is Forbidden for non-owned teams). No UUID or following required. See `docs/api/flows/opponent-scouting.md`.
 - **Opponent entry duality**: GC has two opponent entry modes -- manual typing (`root_team_id` only) and team lookup (`root_team_id` + `progenitor_team_id`). `progenitor_team_id` present = coach linked via lookup (reliable single-season dedup signal); absent = manual entry. `root_team_id` is a separate namespace from `gc_uuid` -- NEVER store `root_team_id` in the `gc_uuid` column.
@@ -139,7 +139,7 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 
 Reports is the SOLE scouting/delivery surface; see `.claude/rules/architecture-subsystems.md` (Reports Package) for the reports flow's serving rules and conventions.
 See `.claude/rules/data-model.md` for schema design decisions, table conventions, and column semantics.
-See `.claude/rules/admin-ui.md` for admin interface structure, team management flows, and opponent resolution workflow.
+See `.claude/rules/admin-ui.md` for admin interface structure, reports management, and user management.
 
 ## Project Management
 
@@ -173,8 +173,8 @@ This project uses specialized agents coordinated by the product-manager:
 | **api-scout** | | Explores GameChanger API, maintains API spec, manages credential patterns |
 | **data-engineer** | DE | Database schema design, ETL pipelines, SQLite architecture |
 | **software-engineer** | SE | Python implementation, testing, general coding work |
-| **docs-writer** | | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
-| **ux-designer** | | UX/interface designer for coaching dashboard and UI work. Designs layouts, wireframes, component structure, and user flows for server-rendered HTML (Jinja2 + Tailwind). |
+| **docs-writer** | | Documentation specialist for operator and coaching-staff audiences. Writes and maintains admin runbooks and coaching how-tos for the reports and morning-run surfaces in `docs/admin/` and `docs/coaching/`. |
+| **ux-designer** | | UX/interface designer for the reports serving surfaces -- report-layout, trust-surface, and tools-hub IA. Designs layouts, wireframes, component structure, and user flows for server-rendered HTML (Jinja2 + Tailwind). |
 | **code-reviewer** | | Adversarial code reviewer -- verifies ACs and code quality before stories are marked DONE during dispatch. Spawned automatically by the implement skill; does not write or edit code. |
 
 PM discovers requirements, writes epics/stories, and owns status transitions during dispatch. Code-reviewer gates every code story. Any agent identifying future work flags it to PM for idea capture. **Direct-routing exceptions**: `api-scout`, `baseball-coach`, `claude-architect` may be invoked without PM intermediation.

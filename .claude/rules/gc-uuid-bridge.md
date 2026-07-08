@@ -85,13 +85,21 @@ This normalization is lossy (multiple distinct inputs can collapse to the same q
 
 ## Storage Rule
 
-Store the resolved `gc_uuid` only when the team does not already have one:
+**Default (storage-time bridge write):** store the resolved `gc_uuid` only when the team does not already have one:
 
 ```sql
 UPDATE teams SET gc_uuid = ? WHERE id = ? AND gc_uuid IS NULL
 ```
 
-Never overwrite an existing `gc_uuid` -- it may have been set via a more authoritative path (e.g., authenticated team management).
+The default bridge write never overwrites an existing `gc_uuid` -- a member team's `gc_uuid` comes from an authoritative path (authenticated team management) and must be preserved.
+
+**E-211 self-heal carve-out (tracked teams only):** the report generator's `_resolve_gc_uuid_stage` (`src/reports/generator.py`) deliberately RE-RESOLVES and OVERWRITES a *tracked* team's `gc_uuid` on every report run, with NO `gc_uuid IS NULL` guard -- the write is scoped by `AND membership_type = 'tracked'` instead:
+
+```sql
+UPDATE teams SET gc_uuid = ? WHERE id = ? AND membership_type = 'tracked'
+```
+
+This is not a contradiction of the default rule -- it is a different write. A tracked team's stored `gc_uuid` can be a contaminated opponent-perspective boxscore key (E-211), so re-resolving it from the team name + `public_id` each run heals it. **Member `gc_uuid`s are authoritative and are NEVER overwritten** by either path (the self-heal's `membership_type = 'tracked'` guard excludes them; the member branch reuses the stored value as-is).
 
 ## Edge Cases
 

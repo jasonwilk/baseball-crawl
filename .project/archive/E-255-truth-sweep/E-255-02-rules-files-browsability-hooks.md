@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the remaining rules files (`testing.md`, `key-metrics.md`, `gc-uuid-bridge.md`, `api-docs.md`) describe current reality, `.claude/hooks/README.md`'s hook-failure description matches the E-251-04 behavior change, and the obsolete `docs/agent-browsability-workflow.md` is removed (with its lone stale reference in IDEA-010 flagged for PM cleanup). Two agentic-flow-review hook fixes are also folded in (routed here 2026-07-07 as scope-adds in this story's hooks domain): the `edit-verify.sh` memory-path false-positive carve-out and a new `secret-read-guard.sh`.

@@ -127,7 +127,7 @@ own team UUID (from /me/teams)
 For opponent teams, this bridge is blocked. Alternatives:
 - The GC web app URL for a team contains the public_id slug (e.g., `https://web.gc.com/teams/smgRExWHuBJJ`).
 - Per-game line scores are accessible via `game_stream_id` from game-summaries without needing the opponent public_id.
-- The boxscore endpoint uses the game_stream_id directly, not the public_id.
+- The boxscore endpoint uses the `event_id` (from game-summaries or public-games `id`) directly, not the public_id.
 
 ## Cross-References
 

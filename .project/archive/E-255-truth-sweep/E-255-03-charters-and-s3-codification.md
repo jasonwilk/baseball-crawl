@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the agent charters (`ux-designer`, `docs-writer`, `product-manager`, `baseball-coach`, `data-engineer`) describe current responsibilities against surviving surfaces, and the three Jason-approved §3 curation decisions (agent-roster refocus, context-growth counterweight, memory-lifecycle policy) are codified in the context layer.

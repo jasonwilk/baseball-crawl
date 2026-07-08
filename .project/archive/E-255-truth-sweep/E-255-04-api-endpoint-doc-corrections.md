@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the GameChanger endpoint docs under `docs/api/` are factually accurate: the boxscore IP self-contradiction is resolved, the public-games perspective-specific-id caveat is added, the README endpoint count + duplicate row are fixed, the post-search quirk gets a pointer, and the `game_stream.id` corrections + `team_season` shape fix are applied from the E-255-R-01 verified facts. PII is not reintroduced (byte-gate re-run).

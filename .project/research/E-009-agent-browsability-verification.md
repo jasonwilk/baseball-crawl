@@ -4,6 +4,13 @@
 **Story**: E-009-06
 **Author**: general-dev (implementing agent)
 
+> **Historical artifact (annotated 2026-07-08, E-255-06).** This note predates the
+> reports-first reframe. The **dashboard** it verifies (E-009-02/03) was removed in E-239,
+> and the `docs/agent-browsability-workflow.md` it references (e.g. below under "For E-004")
+> was deleted in E-255-02 as an obsolete workflow. It is retained UNCHANGED as a frozen
+> record of what was done at the time — the referenced dashboard, `/dashboard` route, and
+> browsability workflow are no longer live. Do not treat any workflow here as actionable.
+
 ---
 
 ## Summary

@@ -1,7 +1,9 @@
 # E-072: Proxy Session Ingestion Skill
 
 ## Status
-`READY`
+`DRAFT` (demoted from READY 2026-07-08, E-255-06 stale-READY triage)
+
+**Stale-READY triage note**: This epic sat READY ~99–122 days with no dispatch pull. Its premise (a skill to bulk-process a mitmproxy session into documented endpoints + raw captures) is NOT invalidated by the reports-first reframe — the proxy/ingest tooling still exists — but it is a nice-to-have automation, not a ROADMAP slice, and new-endpoint-discovery volume has not justified pulling it in 3-4 months. Demoted to DRAFT per the stale-READY rule (READY >60 days → re-confirm against ROADMAP or demote). Re-promote to READY if proxy-session ingestion volume grows enough to justify the skill; otherwise it can be discarded at a future review. Content preserved; no re-refinement done here.
 
 ## Overview
 Create a new workflow skill that processes an entire mitmproxy session -- identifying unknown endpoints, comparing against documented endpoints, and orchestrating bulk raw data capture with profile-aware headers. This gives the operator a single trigger phrase ("ingest session") to go from a completed proxy capture to documented endpoints and raw data, replacing a manual multi-step process.

@@ -37,9 +37,10 @@ If working outside the devcontainer:
 
 ```bash
 pip install -r requirements.txt
+pip install -e .
 ```
 
-The devcontainer runs this automatically via its `postCreateCommand`.
+The second command installs the project itself in editable mode, which is what puts the `bb` console script on your `PATH`. Without it, `bb` commands below will not resolve. The devcontainer runs both automatically via its `postCreateCommand`.
 
 ## Start the Development Stack
 
@@ -193,4 +194,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-228 (empty reset, admin-sees-all), E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original), E-239 (reports-first reframe: removed dashboard and member-sync references)*
+*Last updated: 2026-07-08 | Source: E-228 (empty reset, admin-sees-all), E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original), E-239 (reports-first reframe: removed dashboard and member-sync references), E-255-05 (Truth Sweep: added the missing `pip install -e .` step so `bb` resolves on PATH after following this guide)*

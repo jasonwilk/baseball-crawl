@@ -22,10 +22,13 @@ were collapsed into ONE canonical module-level function:
 - Wiring (TN-11): `ScoutingLoader._compute_season_aggregates` is now a 1-line delegate to it;
   the two embedded load-path dedup calls pass `recompute_aggregates=False` (new kwarg on
   `dedup_team_players`) so the canonical recompute runs EXACTLY ONCE per load, committed with the
-  dedup sweep. Standalone `recompute_affected_seasons` (CLI `bb data dedup-players`, member-sync
-  Hook-2 `trigger.py`) keeps its signature but now reduces affected tuples to distinct
-  `(team_id, season_id)` scopes and calls `canonical_recompute`. The per-player
-  `recompute_season_batting`/`recompute_season_pitching` functions were REMOVED.
+  dedup sweep. Standalone `recompute_affected_seasons` (CLI `bb data dedup-players`) keeps its
+  signature but now reduces affected tuples to distinct `(team_id, season_id)` scopes and calls
+  `canonical_recompute`. The per-player `recompute_season_batting`/`recompute_season_pitching`
+  functions were REMOVED. **(Verified against current `src/` 2026-07-08:** the live
+  `canonical_recompute` callers are `src/gamechanger/loaders/scouting_loader.py`,
+  `src/db/player_dedup.py`, and `src/cli/data.py` (via `recompute_affected_seasons`). The former
+  member-sync Hook-2 driver `trigger.py` was DELETED in E-239 and no longer exists in `src/`.)
 - Parity guard column set + `parity_consistent.sql` fixture UNCHANGED (TN-7 did not fire —
   superset's parity-checked subset == ScoutingLoader's old set). Stale doc comments repointed.
 - **COUPLING (Codex P1, fixed E-237-03 round 1):** the provenance guard means a member
@@ -78,8 +81,19 @@ THREE writers of `player_season_batting`/`player_season_pitching`, and the two
    - Pitching writes **w, l, sv** (from `decision`) but **OMITS `gs`** — exact inverse.
 
 3. **SeasonStatsLoader** — `_upsert_batting`/`_upsert_pitching`
-   (`src/gamechanger/loaders/season_stats_loader.py:265+`). MEMBER flow only (NOT reports).
+   (`src/gamechanger/loaders/season_stats_loader.py`). MEMBER flow only (NOT reports).
    Straight from season-stats API, `stat_completeness='full'`, full ~50-col wide set.
+   **DELETED in E-239** along with the member-sync surface — `season_stats_loader.py` no longer
+   exists in `src/` (verified 2026-07-08).
+
+**POST-E-239 provenance reality**: with SeasonStatsLoader and member-sync deleted, NO writer
+produces `full`/`supplemented` rows anymore. Those two `stat_completeness` enum values are now
+READ-ONLY — the recompute provenance guard in `src/db/season_aggregates.py` (`_MEMBER_PROVENANCE
+= ("full", "supplemented")`) never deletes/rewrites them, and `src/db/player_dedup.py` still
+ranks them (`_COMPLETENESS_RANK = {"full": 3, "supplemented": 2, "boxscore_only": 1}`) for
+merge-conflict resolution. The only live season-aggregate writer is `canonical_recompute`, which
+writes `boxscore_only` rows exclusively. Do NOT drop the `full`/`supplemented` enum values —
+dropping ripples into the rank map and the parity member-scope exclusion.
 
 ## The footgun
 Because dedup (#2) runs BEFORE ScoutingLoader (#1) in `load_team`, a *merged* player ends up

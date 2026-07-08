@@ -132,7 +132,7 @@ Top-level JSON object with 6 fields.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stream_id` | UUID | The `game_stream_id` for this game -- same ID used in `/boxscore` and `/plays` endpoints. Returned inline so no separate lookup is needed. |
+| `stream_id` | UUID | The `game_stream.id` for this game (path parameter for `/game-streams/{game_stream_id}/events`). NOT the `/boxscore` and `/plays` parameter -- those use `event_id` (also returned inline below). |
 | `team_id` | UUID | Matches the path parameter `team_id` |
 | `event_id` | UUID | Matches the path parameter `event_id` |
 | `player_stats` | object | Per-game stats for THIS specific game |

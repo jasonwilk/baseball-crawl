@@ -4,7 +4,7 @@
 
 - SQLite everywhere. Local dev and production both use SQLite. No D1. No Wrangler.
 - Local dev DB path: `./data/app.db` (host-mounted Docker volume)
-- Production: SQLite in Docker volume with WAL mode + Litestream backup
+- Production: SQLite in Docker volume with WAL mode + simple file backup via `scripts/backup_db.py`
 - Dev/prod parity: `docker compose up` runs the same stack locally and in production
 
 ## Migration Tooling
@@ -14,8 +14,9 @@
   - Three-digit prefix, underscore, descriptive slug, `.sql` extension
 - Migrations are append-only. Never edit an applied migration.
 - Track applied state in a `_migrations` metadata table
-- **Current state (verified 2026-06-14)**: E-220 SQUASHED the schema into `001_initial_schema.sql` (704 lines; old migrations 001–015 archived in `.project/archive/migrations-pre-E220/`), folding all prior migrations and adding `perspective_team_id` as a first-class concept on stat tables. **E-235 added `002_report_generation_runs.sql`** (one wide telemetry row per report generation; FK→reports ON DELETE CASCADE; UNIQUE(report_id)). **E-236 added `003_report_run_count_columns.sql`** (additive ALTER TABLE ADD COLUMN ×4 on report_generation_runs: boxscores_fetched, load_errors, plays_errors, spray_games_with_data — all nullable INTEGER). So `migrations/` now holds `001_*` + `002_*` + `003_*` (verified by glob 2026-06-16). **E-238-06 (in flight in the epic worktree, NOT yet merged to main as of 2026-06-16) adds `004_webauthn_challenge_store.sql`** — TTL'd `webauthn_challenges` table (composite PK (kind, lookup_key); CHECK(kind IN 'login'/'registration'); `expires_at TEXT NOT NULL DEFAULT (datetime('now','+5 minutes'))`; `created_at` default; index `idx_webauthn_challenges_expires_at`) that replaces the in-process passkey challenge dicts in `src/api/routes/auth.py`, fronted by helper `src/api/passkey_challenges.py` (store/get/consume/sweep; sweep-on-write TTL). **Replay safety pattern (Codex P1 / F1 remediation):** under multiple workers, a read-then-delete-later consume is racy (two workers read the same live challenge, both verify, both create sessions). Fix = make the DELETE the ATOMIC ARBITER: `consume_challenge` returns `cursor.rowcount`, and the login verify path creates a session ONLY when consume deleted exactly 1 row (0 ⇒ another worker won ⇒ reject 401). SQLite single-writer (WAL) serialization guarantees exactly one winner. Reusable pattern for any single-use-token-under-concurrency need. **VERIFIED LIVE 2026-07-05 by glob: `migrations/` holds 001–008** — 001_initial_schema, 002_report_generation_runs, 003_report_run_count_columns, 004_webauthn_challenge_store, 005_scheduled_report_runs, 006_drop_season_fallback, 007_play_events_pitch_columns, **008_drop_identity_opponent_season_type.sql (E-250 landed)**. **Next migration is `009`** (E-253's spray chart_type UNIQUE widen = `009_*`). The older "next is 008"/"next is 007"/"next is 005" notes were stale. NOTE: `.claude/rules/migrations.md` STILL says "next is 005" and is STALE; ALWAYS glob the live dir before assigning a number — do not trust either doc.
-  - (Prior 2026-03-26 note claimed 001–005 as separate files — that was pre-squash and is now stale/wrong.)
+- **Current state**: E-220 SQUASHED the schema into `001_initial_schema.sql` (old migrations 001–015 archived in `.project/archive/migrations-pre-E220/`), folding all prior migrations and adding `perspective_team_id` as a first-class concept on stat tables. Since the squash, migrations are added incrementally on top of `001_*` (E-235 report_generation_runs, E-236 run count columns, E-238 webauthn_challenge_store, E-240 scheduled_report_runs, the E-250 identity/opponent/season_type drops, E-253 spray chart_type UNIQUE + game-dedup backstop, etc.).
+- **Do NOT trust any concrete "next migration is NNN" claim** — this line and `.claude/rules/migrations.md` both self-rot. ALWAYS `ls migrations/*.sql` in the live checkout and take max+1 before assigning a number. The glob is the sole authority.
+- **Notable schema notes carried forward**: `webauthn_challenges` (TTL'd, composite PK `(kind, lookup_key)`, CHECK kind IN 'login'/'registration', 5-minute `expires_at` default) fronted by `src/api/passkey_challenges.py`. **Replay-safety pattern (reusable for any single-use-token-under-concurrency need):** make the DELETE the ATOMIC ARBITER — `consume_challenge` returns `cursor.rowcount`, and the privileged action (session create) fires ONLY when consume deleted exactly 1 row (0 ⇒ another worker won ⇒ reject). SQLite single-writer (WAL) serialization guarantees exactly one winner.
 
 ## Schema Conventions
 
@@ -49,12 +50,13 @@
 | `Player` | A unique person (single-season scope; cross-team identity is a permanent non-goal) |
 | `team_rosters` | Junction: which players are on a team in a season (single-season roster membership) |
 | `Game` | A single game event (date, opponent, location, result) |
-| `Lineup` | A player's position in a game lineup (batting order, fielding position) |
-| `PlateAppearance` | A single plate appearance event (outcome, counts, matchup context) |
-| `PitchingAppearance` | A pitcher's appearance in a game (outs recorded, runs, K, BB) |
+| `player_game_batting` | A player's per-game batting line (boxscore-sourced; batting order, positions) |
+| `player_game_pitching` | A player's per-game pitching line (outs recorded, runs, K, BB, pitches; boxscore-sourced) |
+| `plays` | One row per plate appearance (batter/pitcher, pitch count, outcome, pre-computed `is_first_pitch_strike`/`is_qab` flags) |
+| `play_events` | Individual events within a PA (pitch results, baserunner events, substitutions, `pitch_type`/`pitch_speed_mph`) |
 
 ### Key Design Decisions
-- Event-level data (plate appearances) is the source of truth; aggregate tables valid when query-time computation is impractical
+- Event-level data (`plays`/`play_events`) is the source of truth; aggregate tables (`player_season_*`) valid when query-time computation is impractical
 - Cross-team player identity and multi-season rollups are permanent non-goals; `season_id` (year-only) is the single-season partition key. Roster membership lives in `team_rosters` (team_id, player_id, season_id)
 - Opponent data is first-class: same schema structure as own-team data
 - Normalize first; denormalize only for proven performance needs
@@ -62,7 +64,7 @@
 ## Topic File Index
 
 - [endpoint-schema-notes.md](endpoint-schema-notes.md) -- Detailed schema implications for all discovered GameChanger API endpoints (team-detail, /me/teams, player-stats, schedule, public endpoints, opponents, boxscore, plays, roster, bridge endpoints). Response shapes, field types, join keys, normalization guidance, raw sample paths.
-- [etl-patterns.md](etl-patterns.md) -- Token lifetime and ETL scheduling (14-day window), raw-to-processed pipeline, idempotent ingestion, pagination patterns (cursor-based, x-next-page), project file paths for migrations/DB/API spec/stat glossary.
+- [etl-patterns.md](etl-patterns.md) -- Programmatic token refresh (`token_manager.py` + `signing.py`, auto-refresh before expiry), raw-to-processed pipeline, idempotent ingestion, pagination patterns (cursor-based, x-next-page), project file paths for migrations/DB/API spec/stat glossary.
 - [fixture_seed_not_rollup_consistent.md](fixture_seed_not_rollup_consistent.md) -- `tests/fixtures/seed.sql` season aggregates are NOT a literal SUM of its per-game rows; aggregate-parity/recompute tests need a dedicated rollup-consistent fixture (discovered E-234 review).
 - [games_row_vs_stat_rows_coupling.md](games_row_vs_stat_rows_coupling.md) -- A completed `games` row can exist with ZERO player stat rows (loose loader coupling); "games-with-data" counts MUST EXISTS-filter on a perspective-scoped stat row, not COUNT bare completed games (E-235 Codex HIGH).
 - [season_aggregate_writers.md](season_aggregate_writers.md) -- THREE divergent writers of `player_season_*` boxscore_only rows (ScoutingLoader vs dedup recompute disagree: gs vs w/l/sv vs pa/singles/xbh → non-deterministic hybrid rows); canonical set = ScoutingLoader's; PA/XBH are renderer-derived not stored-read (E-237/Epic C).

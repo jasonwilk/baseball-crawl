@@ -1,11 +1,19 @@
 # ETL Patterns, Pagination, and Token Scheduling
 
-## Token Lifetime and ETL Scheduling (confirmed 2026-03-04)
+## Token Refresh (programmatic — no manual capture needed)
 
-- **Token lifetime is 14 days** (JWT `exp - iat = 1,209,600 seconds`). Previous assumption of ~1 hour was wrong.
-- **Implication for ETL**: A single browser capture can power up to 14 days of authenticated API calls. Batch ingestion jobs (opponent scouting across 50+ teams, full season box score crawls) are feasible within a single token lifetime without credential rotation.
-- **Programmatic refresh NOT possible**: The `POST /auth` endpoint requires a `gc-signature` HMAC with an unknown signing key. Token rotation still requires manual browser captures, but at ~2-week intervals rather than hourly.
-- **ETL scheduling recommendation**: Plan ingestion runs as batch jobs within a token's lifetime window. A single token can support the full ingestion pipeline (opponents enumeration -> team-detail per opponent -> season-stats per opponent -> game-summaries -> boxscores -> plays) without expiring mid-run.
+- **Programmatic refresh IS implemented.** The `gc-signature` HMAC-SHA256 algorithm was
+  reverse-engineered (2026-03-07) and lives in `src/gamechanger/signing.py`, using a known
+  Base64 client key. An earlier note here claimed the signing algorithm could not be reproduced
+  and that manual browser captures were the only path — that is FALSE and has been corrected.
+- **`src/gamechanger/token_manager.py`** exchanges the refresh token for a short-lived access
+  token via `POST /auth` (signed by `signing.py`), caches it in memory, and auto-refreshes
+  before expiry (`get_access_token()` refreshes when within the expiry safety margin), with a
+  login fallback for the web profile. Rotated refresh tokens are persisted back to `.env`.
+- **Implication for ETL**: batch ingestion jobs (opponent scouting, full-season box score
+  crawls, the boxscores/plays pipeline) do not need manual browser re-captures — the token
+  manager refreshes transparently mid-run. Do NOT assert a specific token lifetime here (any
+  concrete figure is unmeasured against the current auth flow); rely on the auto-refresh.
 
 ## ETL Patterns
 

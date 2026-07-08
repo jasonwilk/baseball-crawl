@@ -17,6 +17,8 @@ paths:
 | UI/UX design: wireframes, layout specs, component inventories, user flows | `ux-designer` |
 | Code review (automatic -- not routed by story domain) | `code-reviewer` (spawned automatically by the implement skill for every dispatch; not assigned stories) |
 
+**Read-only tracing/diagnosis routes to the built-in `Explore` agent.** A read-only investigation (trace a call path, locate where a behavior lives, answer "where/how is X done") goes to `Explore`, not to a heavier full-tool `general-purpose` spawn. No new investigator agent is needed -- `Explore` already fits.
+
 **Dispatch Team metadata**: Epics may include a `## Dispatch Team` section (between Stories and Technical Notes) that explicitly lists the agents needed for the epic. When this section is present and non-empty, the main session should prefer it over inferring agents from story domains using the table above. When the section is absent or empty, the main session determines required agents from the routing table. The main session retains final routing authority -- the Dispatch Team section is advisory.
 
 **Agent Hint**: Stories may carry an optional `## Agent Hint` field that declares which agent type should implement the story. When an Agent Hint is present, the main session should prefer it over file-path inference from the routing table above. The hint is advisory -- the main session may override it based on team composition, agent availability, or other factors.

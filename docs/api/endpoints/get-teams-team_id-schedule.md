@@ -37,7 +37,7 @@ see_also:
   - path: /events/{event_id}
     reason: Single-event lookup by event UUID
   - path: /events/{event_id}/best-game-stream-id
-    reason: Resolves schedule event_id to game_stream_id for boxscore/plays access
+    reason: Resolves schedule event_id to game_stream.id (for the /game-streams/{game_stream_id}/events endpoint); boxscore/plays take event_id directly
 ---
 
 # GET /teams/{team_id}/schedule

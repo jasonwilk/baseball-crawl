@@ -23,6 +23,8 @@ A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) guards Write and Edit oper
 
 Worktree writes (`/tmp/.worktrees/...`) always pass unconditionally in both modes. The hook intercepts Write and Edit tool calls only (not Bash commands), so git operations are unaffected.
 
+Note: the `.claude/agent-memory/*` carve-out in mode 1 exists for CONSULTATION-mode own-memory writes (no worktree active). A dispatched story whose deliverable IS an agent's own memory MUST instead edit the worktree copy (see Epic Worktree Constraints), so it rides the closure patch.
+
 ## Epic Worktree Constraints
 
 - **No Docker/app CLI**: Do NOT run `docker compose`, `bb data`, `bb creds`, `bb db`, `bb status`, or `bb proxy` commands.
@@ -30,6 +32,7 @@ Worktree writes (`/tmp/.worktrees/...`) always pass unconditionally in both mode
 - **No committing**: Do NOT run `git commit`. The main session produces a single atomic commit at epic closure.
 - **No branch management**: Do NOT run `git merge`, `git rebase`, `git worktree remove`, or `git branch -d/-D`.
 - **No cd to main**: Stay in the epic worktree. Do NOT `cd /workspaces/baseball-crawl`.
+- **Own-memory deliverables go in the worktree**: a dispatched story that writes an agent's own `.claude/agent-memory/<agent>/` files edits the WORKTREE copy, never the main-checkout copy. The worktree-guard own-memory carve-out is for consultation-mode only; using it for a story deliverable bypasses the per-story staging boundary and trips the Step 8 clean-tree preflight.
 - **Use absolute paths**: All file operations use absolute paths under the epic worktree.
 
 Full constraint set (including Bash write prohibitions and pytest limitation) is delivered in your spawn context via the implement skill (`.claude/skills/implement/SKILL.md`).

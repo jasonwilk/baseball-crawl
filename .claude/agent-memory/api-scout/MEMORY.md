@@ -23,7 +23,7 @@ Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` 
 
 ## API Spec Location
 
-Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (120 endpoint files + web-routes reference = 121 total as of 2026-03-12).
+Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (120 files (119 endpoints + 1 web-routes reference) as of 2026-07-08, E-255-04).
 
 ## Exploration Status
 

@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator runbooks live under `docs/admin/` (the two `docs/` root runbooks are relocated there) and are executable end-to-end on a fresh machine: no phantom migration numbers, no false "plays removed" claim, no nonexistent commands, a correct post-reset health-check URL, dashboard-verification steps rewritten to the reports model, and a correct rebuild-procedure description. Two command corrections (recovery command, host-exec form) apply the facts E-255-R-01 verified.

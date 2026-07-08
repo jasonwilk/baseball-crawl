@@ -2,6 +2,7 @@
 name: api-scout
 description: "GameChanger API exploration, endpoint documentation, and credential management specialist. Probes API endpoints, documents responses in the docs/api/ directory structure, and guides credential rotation."
 model: opus
+effort: medium
 color: orange
 memory: project
 tools:

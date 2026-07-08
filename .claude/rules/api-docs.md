@@ -20,7 +20,10 @@ docs/api/
   error-handling.md  # Common HTTP error codes in GC API context
   flows/             # Multi-endpoint integration guides
     opponent-resolution.md
-  endpoints/         # One file per endpoint (89 files)
+    opponent-scouting.md
+    plays-ingestion.md
+    spray-chart-rendering.md
+  endpoints/         # 120 files (119 endpoints + 1 web-routes reference)
     get-me-teams.md
     get-teams-team_id-schedule.md
     post-auth.md
@@ -30,7 +33,7 @@ docs/api/
 ## Loading Discipline
 
 - **MUST** read `docs/api/README.md` first to identify which endpoint files are relevant to the current task.
-- **MUST NOT** glob-read or bulk-load all files in `docs/api/endpoints/`. There are 89 endpoint files totaling thousands of lines -- loading them all wastes context window budget.
+- **MUST NOT** glob-read or bulk-load all files in `docs/api/endpoints/`. There are 120 files (119 endpoints + 1 web-routes reference) totaling thousands of lines -- loading them all wastes context window budget.
 - **MUST** load only the specific endpoint files relevant to the current task.
 - **Exception**: The ingest-endpoint skill workflow (api-scout already knows which file to create/update and does not need the index).
 - Load `docs/api/flows/` docs by name when working on multi-endpoint integration tasks; do NOT bulk-load all flow docs.

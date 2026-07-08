@@ -44,7 +44,8 @@ Before dispatch, verify:
 1. **The target epic exists.** Check that `/epics/E-NNN-slug/epic.md` exists. If not found, search `/epics/` for a directory starting with `E-NNN`. If no match, report to the user: "Epic E-NNN not found in `/epics/`." and stop.
 
 2. **The epic status is `READY` or `ACTIVE`.** Read the epic file and check the `## Status` section.
-   - If `READY` or `ACTIVE`: proceed.
+   - If `READY`: apply the **READY Freshness Gate** (`.claude/rules/workflow-discipline.md`) before proceeding. If the epic has been READY for more than 60 days (see the gate for how age is measured -- READY date if recorded, else last commit touching `epics/E-NNN-slug/`), it is **STALE**: do NOT dispatch. Report to the user that the epic is stale and route to PM to either re-confirm it against `docs/ROADMAP.md` (resetting the READY date) or demote it to `DRAFT`. Dispatch proceeds only after re-confirmation. Otherwise (READY ≤ 60 days): proceed.
+   - If `ACTIVE`: proceed (mid-dispatch; the freshness gate does not apply).
    - If `DRAFT`: refuse. Tell the user: "Epic E-NNN is in DRAFT status. It must be marked READY after refinement is complete before it can be dispatched."
    - If `COMPLETED`: refuse. Tell the user: "Epic E-NNN is already COMPLETED."
    - If `ABANDONED`: refuse. Tell the user: "Epic E-NNN has been ABANDONED."
@@ -480,7 +481,7 @@ Per `.claude/rules/documentation.md`. If any trigger fires, spawn docs-writer be
 
 ### Step 3a: Context-layer assessment
 
-Per `.claude/rules/context-layer-assessment.md`. Six triggers, explicit yes/no verdicts in epic History. If any fires, spawn claude-architect before archiving.
+Per `.claude/rules/context-layer-assessment.md`. Eight triggers, explicit yes/no verdicts in epic History. If any fires, spawn claude-architect before archiving.
 
 ### Step 4: Review ideas backlog
 

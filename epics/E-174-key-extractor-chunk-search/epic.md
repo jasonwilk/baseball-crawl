@@ -1,8 +1,10 @@
 # E-174: Fix Key Extractor to Search Asset Chunks
 
 ## Status
-`READY`
+`DRAFT` (demoted from READY 2026-07-08, E-255-06 stale-READY triage)
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
+
+**Stale-READY triage note**: A real bug fix (`bb creds extract-key` broke ~2026-03-25 when GC moved `EDEN_AUTH_CLIENT_KEY` into code-split asset chunks), but it sat READY ~99–122 days. Its premise is LIVE-GC-dependent and cannot be re-confirmed from the worktree (no creds/live GC): GC may have restructured their build again, and the operator may have routed around it via `bb creds import`. Demoted to DRAFT per the stale-READY rule pending operator/api-scout re-confirmation of TWO questions: (1) is `bb creds extract-key` still broken against the current live GC site? (2) is it still needed, or does `bb creds import` (paste-curl) suffice as the credential path? If still broken AND needed, re-promote to READY and prioritize (it is live-infra). Content preserved.
 
 ## Overview
 Fix `bb creds extract-key` to search code-split asset chunks when the `EDEN_AUTH_CLIENT_KEY` is no longer inlined in the index bundle. As of ~2026-03-25, GameChanger moved the env config object into a code-split asset chunk (`/assets/*.js`), causing the extractor to fail. The existing regex is correct -- it just needs to search additional JS files.

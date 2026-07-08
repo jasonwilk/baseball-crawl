@@ -47,7 +47,7 @@ caveats:
 related_schemas: []
 see_also:
   - path: /game-stream-processing/{game_stream_id}/boxscore
-    reason: Authenticated per-player box score using same game_stream_id (complementary -- details=game level, boxscore=player level)
+    reason: Authenticated per-player box score using the same event_id (complementary -- details=game level, boxscore=player level)
   - path: /teams/{team_id}/game-summaries
     reason: Provides game_stream.id needed for this endpoint's path
   - path: /events/{event_id}/best-game-stream-id
@@ -58,7 +58,7 @@ see_also:
 
 **Status:** CONFIRMED LIVE -- 200 OK. **AUTHENTICATION: NOT REQUIRED.** Last verified: 2026-03-04.
 
-Returns game-level metadata and optional inning-by-inning line scores for a game. Uses the same `game_stream_id` as the authenticated boxscore endpoint. No credentials required.
+Returns game-level metadata and optional inning-by-inning line scores for a game. **Accepts either the game's `event_id` or its `game_stream.id`** in the path -- both resolve to the same game (verified 2026-03-09; see caveat). Passing the same `event_id` used by the authenticated boxscore endpoint works, so no `best-game-stream-id` lookup is needed. No credentials required.
 
 Complementary to the authenticated boxscore:
 - **This endpoint:** Game-level scoring (line score, R/H/E totals)
@@ -72,7 +72,7 @@ GET https://api.team-manager.gc.com/public/game-stream-processing/{game_stream_i
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `game_stream_id` | UUID | Game stream identifier. From `game_stream.id` in game-summaries. Same ID as authenticated boxscore. |
+| `game_stream_id` | UUID | Accepts **either** `event_id` (= `game_stream.game_id`, e.g. the public-games `id`) **or** `game_stream.id` from game-summaries -- both resolve to the same game (see caveat). The authenticated boxscore uses `event_id`, so passing the same `event_id` works here. |
 
 ## Query Parameters
 

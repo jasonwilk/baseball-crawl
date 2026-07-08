@@ -34,9 +34,9 @@ see_also:
   - path: /teams/{team_id}/schedule
     reason: Full event schedule including practices and other events; includes pregame_data.opponent_id
   - path: /game-stream-processing/{game_stream_id}/boxscore
-    reason: Per-player box score -- requires game_stream.id from this endpoint
+    reason: Per-player box score -- path parameter is event_id (top-level field, = game_stream.game_id), NOT game_stream.id
   - path: /game-stream-processing/{game_stream_id}/plays
-    reason: Pitch-by-pitch play log -- requires game_stream.id from this endpoint
+    reason: Pitch-by-pitch play log -- path parameter is event_id (top-level field, = game_stream.game_id), NOT game_stream.id
   - path: /events/{event_id}/best-game-stream-id
     reason: Alternative to this endpoint for resolving event_id to game_stream_id
 ---
@@ -45,11 +45,11 @@ see_also:
 
 **Status:** CONFIRMED LIVE -- 200 OK. 92 total records across 2 pages confirmed. Last verified: 2026-03-04.
 
-Returns game-level summaries for completed games. Each record includes the game's final score, outcome, home/away status, and the critical `game_stream.id` needed for boxscore and plays endpoints. This endpoint is the primary way to discover `game_stream_id` values.
+Returns game-level summaries for completed games. Each record includes the game's final score, outcome, home/away status, and the `event_id` (top-level field, = `game_stream.game_id`) used as the path parameter for the boxscore and plays endpoints. This endpoint is the primary way to discover `event_id` values (it also carries a distinct `game_stream.id` used by the raw `/game-streams/{game_stream_id}/events` endpoint).
 
 **Pagination required:** Send `x-pagination: true` request header. The `x-next-page` response header contains the full URL for the next page. When absent, you are on the last page.
 
-**ID routing note:** The `game_stream.id` field in this response is the parameter needed by `GET /game-stream-processing/{game_stream_id}/boxscore` and `GET /game-stream-processing/{game_stream_id}/plays`. This value is NOT the same as `game_stream.game_id` or `event_id` -- they are different UUIDs.
+**ID routing note:** The path parameter for `GET /game-stream-processing/{event_id}/boxscore` and `GET /game-stream-processing/{event_id}/plays` is the top-level **`event_id`** (= `game_stream.game_id`) -- the SAME id for both endpoints. Do **NOT** use `game_stream.id`: it is a distinct third UUID and returns HTTP 500 (`{"error":"[scheduling] Cannot find event[...]"}`) on those two endpoints -- empirically A/B-tested 2026-03-18 (boxscore) and 2026-03-26 (plays). Note the two remain **different UUIDs** in the response (`event_id` == `game_stream.game_id` != `game_stream.id`); that is a true schema fact, but it does NOT mean boxscore and plays take different ids -- they both take `event_id`. `game_stream.id` is the parameter for the raw `GET /game-streams/{game_stream_id}/events` endpoint (resolved via `/events/{event_id}/best-game-stream-id`).
 
 ```
 GET https://api.team-manager.gc.com/teams/{team_id}/game-summaries
@@ -111,7 +111,7 @@ Bare JSON array of game summary objects. Page size: 50 records max. Final page m
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `id` | UUID | **Game stream identifier.** USE THIS for boxscore and plays endpoints. Always differs from `game_stream.game_id`. |
+| `id` | UUID | **Game stream identifier.** Path parameter for the raw `/game-streams/{game_stream_id}/events` endpoint. Do **NOT** use for boxscore/plays -- those take `event_id` (returns 500 on this UUID). Always differs from `game_stream.game_id`. |
 | `game_id` | UUID | Game identifier. Always equals top-level `event_id`. |
 | `game_status` | string | `"completed"` only observed. |
 | `home_away` | string | `"home"` or `"away"` from owning team's perspective. |
@@ -139,8 +139,9 @@ Bare JSON array of game summary objects. Page size: 50 records max. Final page m
 
 Confirmed across all 92 records:
 - `event_id` == `game_stream.game_id` (always identical)
-- `game_stream.id` != `game_stream.game_id` (always different)
-- Use `game_stream.id` for boxscore and plays endpoints
+- `game_stream.id` != `game_stream.game_id` (always different -- a true schema fact)
+- Use **`event_id`** (= `game_stream.game_id`) for boxscore and plays -- the SAME id for both. `game_stream.id` returns HTTP 500 on those endpoints (A/B-tested 2026-03-18 / 2026-03-26).
+- Use `game_stream.id` for the raw `/game-streams/{game_stream_id}/events` endpoint (or resolve it via `/events/{event_id}/best-game-stream-id`).
 
 ## Example Record
 

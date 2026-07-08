@@ -112,7 +112,7 @@ Optional -- scheduled reports:
 
 | Variable | Value | Notes |
 |----------|-------|-------|
-| `OPERATING_TIMEZONE` | `America/Chicago` | IANA timezone name. Controls the venue-local "today" that `bb report morning-run` defaults its target date to (see [operations.md](admin/operations.md#morning-run-scheduled-reports)); an explicit `--date` still overrides it. Defaults to `America/Chicago` if unset; an invalid value falls back to the default with a logged warning. |
+| `OPERATING_TIMEZONE` | `America/Chicago` | IANA timezone name. Controls the venue-local "today" that `bb report morning-run` defaults its target date to (see [operations.md](operations.md#morning-run-scheduled-reports)); an explicit `--date` still overrides it. Defaults to `America/Chicago` if unset; an invalid value falls back to the default with a logged warning. |
 
 Optional -- Cloudflare management (not needed for tunnel runtime):
 
@@ -138,13 +138,13 @@ Add your GameChanger account credentials to `.env`:
 | `GAMECHANGER_USER_EMAIL` | Your GameChanger account email |
 | `GAMECHANGER_USER_PASSWORD` | Your GameChanger account password |
 
-Then run the credential bootstrap command:
+Then run the credential bootstrap command inside the app container -- the `bb` console script is installed only there (no host-side install step; see the Dockerfile):
 
 ```bash
-bb creds setup web
+docker compose exec app bb creds setup web
 ```
 
-This executes the programmatic login flow using your credentials, stores the resulting session tokens, and verifies API connectivity. For details on the authentication architecture and token lifetimes, see [docs/api/auth.md](api/auth.md).
+This executes the programmatic login flow using your credentials, stores the resulting session tokens, and verifies API connectivity. For details on the authentication architecture and token lifetimes, see [docs/api/auth.md](../api/auth.md).
 
 > **Keep these variables in `.env` for ongoing resilience.** `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` are not just for one-time bootstrap. When the refresh token expires (every 14 days if not renewed sooner), the system uses these credentials to perform the full login flow automatically. If they are absent, expiry causes a `CredentialExpiredError` requiring manual intervention. Retaining them means routine token expiry is handled without operator action.
 
@@ -164,14 +164,14 @@ Replace the email with the actual admin user's email. This is a one-time bootstr
 ## Step 3: Configure Cloudflare Tunnel
 
 Full Cloudflare setup is documented in
-[docs/cloudflare-access-setup.md](cloudflare-access-setup.md). Summary of the steps
+[cloudflare-access-setup.md](cloudflare-access-setup.md). Summary of the steps
 needed before first startup:
 
 > **⚠️ Pre-go-live required**: Before bringing the tunnel live, you MUST remove the two
 > blocking CF Access policies from the `bbstats-ai` Access application. If active policies
-> remain, all non-Jason traffic will be blocked by Cloudflare Access and coaches will be
-> locked out of the dashboard. See the mandatory pre-go-live step in
-> [docs/cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2.
+> remain, all non-Jason traffic will be blocked by Cloudflare Access -- including anyone
+> opening a shared scouting-report link. See the mandatory pre-go-live step in
+> [cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2.
 
 ### 3.1 Create a tunnel and get the token
 
@@ -193,15 +193,15 @@ the DNS CNAME record automatically when you use the Public Hostnames tab.
 
 ### 3.3 Remove blocking CF Access policies (pre-go-live required)
 
-See [docs/cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2 for the
+See [cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2 for the
 full removal procedure. The `bbstats-ai` Access application currently has two active
 blocking policies that must be removed before the tunnel goes live. Skipping this step
-blocks all coaching staff.
+blocks all visitors, including anyone opening a shared scouting-report link.
 
 ### 3.4 Scoped API token (optional)
 
 A scoped management token (`CLOUDFLARE_API_TOKEN`) enables programmatic Cloudflare API
-access (DNS updates, Access config). See [docs/cloudflare-access-setup.md](cloudflare-access-setup.md)
+access (DNS updates, Access config). See [cloudflare-access-setup.md](cloudflare-access-setup.md)
 Section 6 for permissions, creation steps, and the distinction from the tunnel token.
 
 ---
@@ -285,19 +285,20 @@ Expected: HTTP 200 with `{"status": "ok", "db": "connected"}`.
 
 The health endpoint is publicly accessible -- no CF Access authentication or app login required.
 
-### 5.5 Dashboard access
+### 5.5 Admin login and report access
 
-1. Open `https://bbstats.ai` in a browser.
+1. Open `https://bbstats.ai/admin/reports` in a browser.
 2. The app login page loads directly (no CF Access redirect).
 3. Log in via magic link (email) or passkey.
-4. The dashboard should load.
+4. The Reports admin page should load, listing any generated reports.
+5. Generate a report (see [operations.md: Standalone Reports](operations.md#standalone-reports)) and open its `/reports/{slug}` link in a private/incognito window -- it should load with **no login required**. Shared scouting reports are public by design; only `/admin/*` requires authentication.
 
 ### 5.6 Backup script available
 
-Verify the backup script runs cleanly (requires the database to exist from Step 5.1):
+Verify the backup script runs cleanly (requires the database to exist from Step 5.1). The `backup_db.py` script is installed only inside the app container, so run it via `docker compose exec`:
 
 ```bash
-python scripts/backup_db.py
+docker compose exec -T app python scripts/backup_db.py
 ```
 
 Expected output: `Backup saved to /opt/baseball-crawl/data/backups/app-<timestamp>.db`
@@ -405,10 +406,11 @@ the container.
 
 ### Routine backup
 
-Create a timestamped backup at any time:
+Create a timestamped backup at any time. `backup_db.py` is installed only inside the app
+container (no host-side install step), so invoke it via `docker compose exec`:
 
 ```bash
-python scripts/backup_db.py
+docker compose exec -T app python scripts/backup_db.py
 ```
 
 This copies `data/app.db` to `data/backups/app-<timestamp>.db`. The backups directory is
@@ -420,12 +422,12 @@ or add a cron job to prune old backups:
 find data/backups -name "*.db" -mtime +30 -delete
 ```
 
-For a scheduled daily backup, add a cron entry:
+For a scheduled daily backup, add a cron entry that runs the command inside the container:
 
 ```bash
 crontab -e
 # Add:
-0 2 * * * cd /opt/baseball-crawl && python scripts/backup_db.py >> data/backups/backup.log 2>&1
+0 2 * * * cd /opt/baseball-crawl && docker compose exec -T app python scripts/backup_db.py >> data/backups/backup.log 2>&1
 ```
 
 ### Restore from backup
@@ -452,7 +454,7 @@ A healthy database returns `ok` and `wal`.
 When moving the stack to a new server:
 
 1. **Stop the stack** on the old server: `docker compose down`
-2. **Back up the database**: `python scripts/backup_db.py`
+2. **Back up the database**: `docker compose exec -T app python scripts/backup_db.py` (run before Step 1 stops the stack, or start the stack briefly to take the backup)
 3. **Clone the repository on the new server** and follow this runbook through Step 2.3
    (`.env` setup) before copying any data:
    ```bash
@@ -492,4 +494,4 @@ backups only. The active database file (`data/app.db`) is what matters.
 
 ---
 
-*Last updated: 2026-07-06 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var)*
+*Last updated: 2026-07-08 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model)*

@@ -1,7 +1,7 @@
 ---
 name: claude-architect
 description: "Agent infrastructure architect for Claude Code configurations, CLAUDE.md, memory systems, skills, rules, and hooks. Designs and manages the agent ecosystem, ensuring agents are precisely scoped, properly coordinated, and collectively effective."
-model: opus
+model: opus[1m]
 effort: high
 color: yellow
 memory: project

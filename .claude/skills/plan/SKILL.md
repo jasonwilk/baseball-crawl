@@ -51,6 +51,8 @@ Before starting the planning workflow, verify:
    - If continuation: load the existing epic and resume at the appropriate phase (Phase 3 if stories exist, Phase 1 if not).
    - If new epic: proceed with Phase 0.
 
+3. **Apply the READY Freshness Gate to any existing READY epic in scope.** If the planning request continues, refines, or otherwise acts on an epic already in `Status: READY`, check its READY age per the READY Freshness Gate (`.claude/rules/workflow-discipline.md`): if it has been READY for more than 60 days it is **STALE**. Before proceeding, PM MUST either re-confirm it against `docs/ROADMAP.md` (resetting the recorded READY date) or demote it to `DRAFT` for re-refinement. A new-epic planning request with no existing READY epic in scope is unaffected by this check.
+
 ---
 
 ## Phase 0: Team Formation

@@ -55,6 +55,20 @@ if [ -z "$FILE_PATH" ] || [ -z "$VALUE" ]; then
   exit 0
 fi
 
+# --- Agent-memory carve-out (AC-7 / agentic-flow-review §4.2) ----------------
+# The harness injects `originSessionId` (and other) frontmatter into agent-memory
+# files AFTER the Write/Edit returns, so a post-write read can NEVER byte-match
+# the content the tool reported writing -- byte-equality is structurally
+# impossible here and every such block was a false positive (all 11 corpus blocks
+# were this). Skip verification for memory paths: both the harness auto-memory
+# tree (`*/projects/*/memory/*`) and the project agent-memory tree
+# (`*/.claude/agent-memory/*`).
+case "$FILE_PATH" in
+  */projects/*/memory/*|*/.claude/agent-memory/*)
+    exit 0
+    ;;
+esac
+
 # --- Unified content read with transient-retry (AC-3) ----------------------
 # Read the SAME content the presence check will test, up front. After a
 # successful Edit/Write the file should exist and be non-empty (VALUE is
@@ -107,9 +121,13 @@ fi
 
 if [ "$MISMATCH" = "1" ]; then
   # Real-absent / not-landed: file is readable and non-empty, but the written
-  # content did not land as expected -> detect-and-signal (block).
-  jq -n --arg file "$FILE_PATH" \
-    '{decision: "block", reason: ($file + ": new_string not found after Edit/Write — edit did not land")}'
+  # content did not land as expected -> detect-and-signal (block). Include the
+  # byte-length delta (expected content vs. what the file holds) and a recovery
+  # step so the mismatch is actionable, not just flagged (AC-7).
+  VALUE_LEN=${#VALUE}
+  CONTENT_LEN=${#FILE_CONTENT}
+  jq -n --arg file "$FILE_PATH" --arg vlen "$VALUE_LEN" --arg clen "$CONTENT_LEN" \
+    '{decision: "block", reason: ($file + ": new_string not found after Edit/Write — edit did not land (expected content was " + $vlen + " bytes; the file currently holds " + $clen + " bytes). Recovery: re-Read the file and re-apply the Edit/Write; if the file already contains the intended content, the write DID land and this was a transient dark read — retry the operation.")}'
   exit 0
 fi
 

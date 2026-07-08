@@ -41,16 +41,16 @@ setup. **These must be removed before the tunnel goes live** (see Section 2 belo
 2. **"Google Auth Policy (<operator-email>)"** -- allows only <operator-email> via Google Auth
 
 While either policy is active, Cloudflare Access enforces it: all traffic that does not
-match the rule receives a 403 error. Coaches attempting to reach the dashboard will be
-blocked.
+match the rule receives a 403 error -- including anyone opening a shared scouting-report
+link, since reports are public by design.
 
 ---
 
 ## 2. Pre-Go-Live: Remove Blocking Access Policies (Required)
 
 > **This step is mandatory before pointing DNS to the tunnel.** Skipping it means all
-> non-Jason traffic will be blocked by Cloudflare Access -- coaches cannot reach the
-> dashboard.
+> non-Jason traffic will be blocked by Cloudflare Access -- including anyone opening a
+> shared scouting-report link.
 
 1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) -> **Access** ->
    **Applications**.
@@ -61,8 +61,8 @@ blocked.
 6. Save the application.
 
 **Preserve the Access application itself** -- leaving the app shell (with no policies)
-allows future activation of CF Email OTP for coaching staff without any infrastructure
-changes. Only the blocking policies are removed.
+allows future activation of CF Email OTP in front of the admin surface without any
+infrastructure changes (see Section 7.1). Only the blocking policies are removed.
 
 After removal, the `bbstats-ai` Access app has zero policies. All traffic passes through
 to the app's internal authentication.
@@ -207,22 +207,25 @@ in `.env`, and delete the old token.
 > **Reference only.** The following sections document how CF Access applications and
 > policies work. They are **not active for the bbstats.ai deployment** -- the Access
 > app shell has no enforcing policies (see Section 2). Retained here for reference in
-> case CF Access is later enabled (e.g., adding Email OTP for coaching staff).
+> case CF Access is later enabled (e.g., adding Email OTP in front of the admin surface).
 
-### 7.1 Adding a coaching staff policy
+### 7.1 Adding an admin-access policy
 
-To activate CF Access for the dashboard at a later date:
+The only authenticated surface today is `/admin/*` -- shared scouting reports at
+`/reports/{slug}` are public by design and must stay reachable with no login (see 7.3).
+To layer CF Access in front of the admin surface at a later date:
 
 1. Go to **Zero Trust** -> **Access** -> **Applications**.
 2. Open the **bbstats-ai** application and click **Add a Policy**.
-3. Policy name: `Coaching staff`
+3. Policy name: `Admin access`
 4. Action: **Allow**
 5. Add an Include rule:
-   - **Selector**: `Emails ending in` -> your email domain (e.g., `lsb.edu`)
-   - OR **Selector**: `Email` -> specific addresses
-6. Save the policy.
+   - **Selector**: `Email` -> Jason's admin email address(es)
+6. Scope the policy's path to `/admin/*` so it does not gate the public report paths.
+7. Save the policy.
 
-This would redirect all unauthenticated traffic to Cloudflare's email OTP login flow.
+This would redirect unauthenticated `/admin/*` traffic to Cloudflare's email OTP login
+flow, layered in front of the app's own magic-link/passkey login.
 
 ### 7.2 API subdomain (not applicable for bbstats.ai)
 
@@ -232,11 +235,13 @@ Self-hosted application for the new hostname and add a Service Token policy.
 
 ### 7.3 Optional: Public bypass for shared scouting reports
 
-If a specific path (e.g., `/scouting/game-day`) should be shareable without login if
-CF Access is later enabled:
+Reports are already public with no CF Access involved (Section 2 removed the only
+enforcing policies). This bypass only matters if 7.1's admin-access policy is ever
+widened to cover more than `/admin/*` -- in that case, explicitly bypass the report path
+so it stays shareable without login:
 
 1. Open the Access application and click **Add a Policy**.
-2. Action: **Bypass**, Include rule: **Everyone**, path: `/scouting/game-day*`.
+2. Action: **Bypass**, Include rule: **Everyone**, path: `/reports/*`.
 
 Cloudflare evaluates policies top to bottom; place bypass policies above allow policies.
 
@@ -319,12 +324,14 @@ curl -v https://bbstats.ai/health
 
 Expected: HTTP 200 with `{"status": "ok", "db": "connected"}`.
 
-### Dashboard access test
+### Admin login and report access test
 
-1. Open `https://bbstats.ai` in a browser.
+1. Open `https://bbstats.ai/admin/reports` in a browser.
 2. The app login page loads directly (no CF Access redirect).
 3. Log in via magic link (email) or passkey.
-4. The dashboard should load.
+4. The Reports admin page should load.
+5. Open a generated report's `/reports/{slug}` link in a private/incognito window -- it
+   should load with **no login required**.
 
 ---
 
@@ -355,4 +362,4 @@ Expected: HTTP 200 with `{"status": "ok", "db": "connected"}`.
 
 ---
 
-*Last updated: 2026-03-26 | Story: E-157-02*
+*Last updated: 2026-07-08 | Story: E-157-02 (original), E-255-05 (Truth Sweep: rewrote the dashboard-verification steps and the Section 7 reference material to the current admin-login-plus-public-reports model -- there is no coach-facing dashboard login; reports are public links -- and fixed the Section 7.3 bypass path from the deleted `/scouting/game-day*` to `/reports/*`)*

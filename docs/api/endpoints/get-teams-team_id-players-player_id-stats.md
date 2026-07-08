@@ -45,8 +45,8 @@ Returns per-game statistics for one player across all games in the season. Inclu
 GET /teams/{team_id}/players  -> player UUID list
   -> GET /teams/{team_id}/players/{player_id}/stats (this endpoint)
 
-event_id in response == game_stream.game_id in game-summaries (for joining)
-stream_id in response == game_stream.id in game-summaries (for boxscore/plays)
+event_id in response == game_stream.game_id in game-summaries (join key; also the boxscore/plays path parameter)
+stream_id in response == game_stream.id in game-summaries (the /game-streams/{game_stream_id}/events param; NOT boxscore/plays)
 ```
 
 ```

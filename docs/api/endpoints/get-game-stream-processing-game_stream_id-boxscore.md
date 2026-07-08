@@ -47,8 +47,8 @@ see_also:
     reason: Confirmed event_id source (public path) -- `id` field equals event_id (confirmed 2026-03-19); no bridge call needed
   - path: /teams/{team_id}/game-summaries
     reason: Confirmed event_id source -- use `event_id` field (= game_stream.game_id); NOT game_stream.id
-  - path: /game-stream-processing/{game_stream_id}/plays
-    reason: Pitch-by-pitch play data using the same game_stream_id
+  - path: /game-stream-processing/{event_id}/plays
+    reason: Pitch-by-pitch play data using the same event_id path parameter
   - path: /public/game-stream-processing/{game_stream_id}/details
     reason: No-auth inning-by-inning line scores (complementary view of same game)
   - path: /teams/{team_id}/schedule/events/{event_id}/player-stats
@@ -167,7 +167,7 @@ Each group contains:
 - **Batting order:** Implicit in `stats` array order within lineup group. Index 0 = leadoff.
 - **Substitutes:** `is_primary: false` in lineup group. Subs may have `player_text: ""`.
 - **Player names embedded:** No separate `/players` join needed for display names.
-- **`IP` in boxscore is integer outs** (not float innings). `3` = 1 IP, `9` = 3 IP.
+- **`IP` in boxscore is float decimal innings** (e.g., `3.3333...` for 3⅓ IP, `3.6666...` for 3⅔ IP -- see Known Limitations). The loader converts this to integer `ip_outs` on ingest.
 - **`team_stats`:** Use for validation -- should match sum of individual player stats.
 
 ## Known Limitations

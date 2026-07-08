@@ -37,7 +37,7 @@ docker compose down
 docker compose up -d --build app
 ```
 
-For the full Cloudflare Tunnel and Zero Trust Access setup, see [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md).
+For the full Cloudflare Tunnel and Zero Trust Access setup, see [cloudflare-access-setup.md](cloudflare-access-setup.md).
 
 ## Feature Flags
 
@@ -55,7 +55,7 @@ Feature flags are set as environment variables in `.env`. Values `1`, `true`, or
 
 `bb data backfill-appearance-order` populates the `appearance_order` column on existing `player_game_pitching` rows. It walks cached boxscore JSON files on disk to determine the order in which pitchers appeared in each game (1 = starter, 2+ = relievers in order of entry), then updates any row where `appearance_order IS NULL`.
 
-Run this command once after deploying Migration 015 on a database that has historical pitching data:
+Run this command once on a database with historical pitching data written before `appearance_order` was populated at load time (the column has been part of the baseline schema in `migrations/001_initial_schema.sql` since the E-220 schema rewrite):
 
 ```bash
 bb data backfill-appearance-order
@@ -187,7 +187,7 @@ Optional scope filters: `--team-id` and `--season-id` narrow detection to a sing
 
 `bb data reconcile` compares plays-derived stat aggregates against boxscore ground truth and (optionally) corrects pitcher attribution errors. It is an operator diagnostic and repair tool.
 
-**Note**: The plays ingestion pipeline was removed in E-239. Reconciliation applies only to historical data with plays loaded pre-E-239.
+**Note**: The plays ingestion pipeline is alive -- every report generation runs it (parser in `src/gamechanger/parsers/plays_parser.py`, loader in `src/gamechanger/loaders/plays_loader.py`; E-245 repaired pitch-annotation handling in place). Reconciliation applies to any completed game with plays data loaded, current or historical.
 
 **Default mode is dry-run** (detection only): reads plays and boxscore data from the database, computes discrepancies, writes results to `reconciliation_discrepancies`, and prints a summary. No stat data is modified.
 
@@ -415,7 +415,7 @@ Before touching any team data, `morning-run` verifies that GameChanger credentia
 [morning-run] Preflight credential check FAILED — run aborted
 ```
 
-**Action**: refresh credentials (`bb creds import` or `bb creds setup web`) and re-run manually, or wait for the next scheduled run after credentials are restored.
+**Action**: refresh credentials (`bb creds refresh`; if the refresh token itself is dead, `bb creds import` or `bb creds setup web`) and re-run manually, or wait for the next scheduled run after credentials are restored.
 
 A per-team 403 (ForbiddenError) is distinct from a preflight failure and is not treated as an auth expiry: the team is skipped and counted in the `denied` tally, but the run continues for other teams.
 
@@ -442,111 +442,24 @@ Re-running `morning-run` on the same date is safe. For each `(own_team_id, oppon
 
 ---
 
+## Schema Migrations
 
+Migrations are numbered SQL files in `migrations/`, applied automatically in order by `migrations/apply_migrations.py` on every container startup. Applied migrations are tracked by filename in `_migrations` (`sqlite3 data/app.db "SELECT * FROM _migrations;"`), so re-running the app never re-applies one. The current set is `001`-`010`:
 
-### Migration 015: Appearance Order Column
+| Migration | File | What it does |
+|-----------|------|---------------|
+| 001 | `001_initial_schema.sql` | The full schema (E-220 rewrite). Squashed every prior migration -- including the pre-E-220 numbering that some historical epic notes in this repo still cite -- into one baseline file. Covers every table, including `appearance_order`, `plays`/`play_events`, `reconciliation_discrepancies`, and the `spray_charts` columns described below under 009. |
+| 002 | `002_report_generation_runs.sql` | Adds `report_generation_runs` (per-stage report telemetry). See [Report Generation Run Records](#report-generation-run-records) below. |
+| 003 | `003_report_run_count_columns.sql` | Adds four count columns to `report_generation_runs`: `boxscores_fetched`, `load_errors`, `plays_errors`, `spray_games_with_data`. See [Report Generation Run Records](#report-generation-run-records) below. |
+| 004 | `004_webauthn_challenge_store.sql` | Adds `webauthn_challenges`, a TTL'd DB-backed passkey-challenge store. Replaces two in-process module-global dicts so passkey login survives multiple Uvicorn workers and app restarts mid-login. |
+| 005 | `005_scheduled_report_runs.sql` | Adds `scheduled_report_runs` (one row per morning-run scheduled slot, recording resolution outcome and delivery status). See [Morning-Run Scheduled Reports](#morning-run-scheduled-reports) above. |
+| 006 | `006_drop_season_fallback.sql` | Drops the unused `report_generation_runs.season_fallback` column, part of the E-241 cross-season-machinery de-scope. |
+| 007 | `007_play_events_pitch_columns.sql` | Adds `pitch_type` and `pitch_speed_mph` to `play_events`. `bb data reload-annotated-pitches` (above) populates these for historical rows; new rows are populated at load time. |
+| 008 | `008_drop_identity_opponent_season_type.sql` | Drops dead cross-season/identity schema: `players.gc_athlete_profile_id` (the de-scoped cross-team identity anchor), the `team_opponents` table (write-orphaned since E-239), and `seasons.season_type` (a write-only constant column). |
+| 009 | `009_spray_chart_type_unique.sql` | Widens the `spray_charts` UNIQUE constraint to `(event_gc_id, perspective_team_id, chart_type)`. Fixes a bug where the `offensive` and `defensive` rows for the same ball-in-play event collided on the old two-column key, silently dropping the defensive row. No backfill needed -- coverage self-heals on the next report generation. |
+| 010 | `010_game_dedup_backstop.sql` | Adds a partial UNIQUE index on `games(game_stream_id)` (non-null only) as a backstop against a cross-process race (admin UI + CLI + morning-run cron all writing the same SQLite file) that could otherwise create duplicate rows for the same real game. |
 
-Migration `migrations/015_add_appearance_order.sql` adds a single nullable column to `player_game_pitching`:
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `appearance_order` | `INTEGER` (nullable) | Pitcher entry order within a game. 1 = starter; 2, 3, … = relievers in order of entry. NULL on historical rows until backfill runs. |
-
-**Backfill required for historical data**: Rows written before this migration have `appearance_order = NULL`. Run `bb data backfill-appearance-order` once to populate them from cached boxscore JSON. New rows written by the game loader after this migration are populated at load time.
-
-The migration is applied automatically on container startup.
-
-### Migration 012: Reconciliation Discrepancies Schema
-
-Migration `migrations/012_reconciliation_discrepancies.sql` adds the `reconciliation_discrepancies` table and three indexes to support the plays-vs-boxscore reconciliation engine.
-
-**Table: `reconciliation_discrepancies`** (one row per signal per player per team per run)
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | `INTEGER PK` | Auto-increment internal key |
-| `game_id` | `TEXT` | FK to `games(game_id)` |
-| `run_id` | `TEXT` | UUID assigned to each reconciliation run. Groups all rows produced by one `bb data reconcile` invocation. |
-| `team_id` | `INTEGER` | FK to `teams(id)` |
-| `player_id` | `TEXT` | Player identifier. Uses `__game__` sentinel string for game-level signals (not player-scoped). |
-| `signal_name` | `TEXT` | Name of the comparison (e.g., `pitcher_hits`, `batter_strikeouts`, `game_total_runs`) |
-| `category` | `TEXT` | Signal category (`pitcher`, `batter`, or `game`) |
-| `boxscore_value` | `INTEGER` | Boxscore ground-truth value; nullable if absent |
-| `plays_value` | `INTEGER` | Plays-derived aggregate value; nullable if absent |
-| `delta` | `INTEGER` | `plays_value - boxscore_value`; nullable when either source is absent |
-| `status` | `TEXT` | One of `MATCH`, `CORRECTABLE`, `CORRECTED`, `AMBIGUOUS`, `UNCORRECTABLE` |
-| `correction_detail` | `TEXT` | Human-readable description of what was corrected or why correction failed; nullable |
-| `created_at` | `TEXT` | UTC timestamp of the run (`datetime('now')`) |
-
-UNIQUE constraint on `(run_id, game_id, team_id, player_id, signal_name)`.
-
-**Indexes added**:
-
-| Index | Column | Notes |
-|-------|--------|-------|
-| `idx_recon_game_id` | `game_id` | Per-game discrepancy lookups |
-| `idx_recon_run_id` | `run_id` | Per-run result retrieval (used by `--summary`) |
-| `idx_recon_status` | `status` | Status-filtered queries (e.g., all CORRECTABLE rows) |
-
-The migration is applied automatically on container startup. The table is populated solely by `bb data reconcile`.
-
-### Migration 009: Plays and Play Events Schema
-
-Migration `migrations/009_plays_play_events.sql` adds two tables for play-by-play data. The plays ingestion pipeline was removed in E-239; these tables remain in the schema and existing rows remain readable.
-
-**Table: `plays`** (one row per plate appearance)
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | `INTEGER PK` | Auto-increment internal key |
-| `game_id` | `TEXT` | FK to `games(game_id)` |
-| `play_order` | `INTEGER` | Sequential position within the game |
-| `inning` | `INTEGER` | Inning number |
-| `half` | `TEXT` | `'top'` or `'bottom'` |
-| `season_id` | `TEXT` | FK to `seasons(season_id)` |
-| `batting_team_id` | `INTEGER` | FK to `teams(id)` -- the team at bat |
-| `batter_id` | `TEXT` | FK to `players(player_id)` |
-| `pitcher_id` | `TEXT` | FK to `players(player_id)`; nullable (absent on some abandoned PAs) |
-| `outcome` | `TEXT` | Plate-appearance result string (e.g., `'Single'`, `'Strikeout'`) |
-| `pitch_count` | `INTEGER` | Total pitches in the plate appearance |
-| `is_first_pitch_strike` | `INTEGER` | 1 if the first pitch was a strike (FPS); 0 otherwise |
-| `is_qab` | `INTEGER` | 1 if the plate appearance meets Quality At-Bat criteria; 0 otherwise |
-| `home_score` | `INTEGER` | Score at end of plate appearance (nullable) |
-| `away_score` | `INTEGER` | Score at end of plate appearance (nullable) |
-| `did_score_change` | `INTEGER` | 1 if a run scored on this play (nullable) |
-| `outs_after` | `INTEGER` | Outs recorded after this play (nullable) |
-| `did_outs_change` | `INTEGER` | 1 if an out was recorded on this play (nullable) |
-
-UNIQUE constraint on `(game_id, play_order)`.
-
-**Table: `play_events`** (one row per event within a plate appearance)
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | `INTEGER PK` | Auto-increment internal key |
-| `play_id` | `INTEGER` | FK to `plays(id)` |
-| `event_order` | `INTEGER` | Sequence position within the plate appearance |
-| `event_type` | `TEXT` | `'pitch'`, `'baserunner'`, `'substitution'`, or `'other'` |
-| `pitch_result` | `TEXT` | One of `'ball'`, `'strike_looking'`, `'strike_swinging'`, `'foul'`, `'foul_tip'`, `'in_play'`; null for non-pitch events |
-| `is_first_pitch` | `INTEGER` | 1 if this is the first pitch event in the plate appearance |
-| `raw_template` | `TEXT` | Raw GC template string from the API (nullable; useful for debugging) |
-
-UNIQUE constraint on `(play_id, event_order)`.
-
-### Migration 006: Spray Chart Schema Additions
-
-Migration `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (which existed in the base schema but was unpopulated):
-
-| Addition | Type | Purpose |
-|----------|------|---------|
-| `event_gc_id` column | `TEXT` | GC UUID per ball-in-play event. UNIQUE -- enables `INSERT OR IGNORE` idempotency. |
-| `created_at_ms` column | `INTEGER` | API's `createdAt` timestamp in Unix milliseconds. |
-| `season_id` column | `TEXT` | Season identifier (e.g., `2026`). Enables per-season filtering per the fresh-start philosophy. |
-| `idx_spray_charts_event_gc_id` index | UNIQUE | On `event_gc_id`. Enforces idempotency at the DB level. |
-| `idx_spray_charts_player` index | | On `(player_id, team_id, season_id)`. Serves player profile and per-player chart queries. |
-| `idx_spray_charts_game` index | | On `game_id`. Serves game-level spray queries. |
-
-The migration is applied automatically on container startup by `migrations/apply_migrations.py`. The table was unpopulated when this migration was written -- no backfill was needed.
+Full column-level schema history, including the pre-E-220 migration numbering that some epic notes reference, is in [architecture.md: Schema Changes](architecture.md#schema-changes).
 
 ## Standalone Reports
 
@@ -716,7 +629,7 @@ In both cases:
 - The **View** and **Copy link** actions in `/admin/reports` are active — the link is shareable.
 - `bb report generate` exits **0** and prints the shareable URL (prior to E-236 it exited 1 for `no_games` outcomes).
 
-**Hard-FAILED outcome (all boxscores blocked)**: If M > 0 completed games exist but every boxscore fetch returned a blocked/403/auth-expiry response (i.e., `boxscores_fetched = 0` with M > 0), the report **hard-fails** rather than producing a `no_games` page. The `overall_status` is set to `failed`, no shareable page is written, and `bb report generate` exits 1. This is operator-actionable: re-authenticate (`bb creds login`) and re-run, or verify the team's GC access level.
+**Hard-FAILED outcome (all boxscores blocked)**: If M > 0 completed games exist but every boxscore fetch returned a blocked/403/auth-expiry response (i.e., `boxscores_fetched = 0` with M > 0), the report **hard-fails** rather than producing a `no_games` page. The `overall_status` is set to `failed`, no shareable page is written, and `bb report generate` exits 1. This is operator-actionable: re-authenticate (`bb creds refresh`; if the refresh token itself is dead, `bb creds import` or `bb creds setup web`) and re-run, or verify the team's GC access level.
 
 This situation (genuine `no_games`) is normal for early-season teams, teams with a public schedule but no GC scorebook, or an incorrect team URL. It is not a bug.
 
@@ -782,10 +695,10 @@ GameChanger credentials expire frequently. When API calls start failing with aut
 1. Log in to [web.gc.com](https://web.gc.com) in a browser.
 2. Open DevTools -> Network tab -> copy any API request as cURL.
 3. Save to `secrets/gamechanger-curl.txt` (or pass inline with `--curl`).
-4. Run:
+4. Run (the script is installed only inside the app container, so invoke it via `docker compose exec`):
 
 ```bash
-python scripts/refresh_credentials.py
+docker compose exec app python scripts/refresh_credentials.py
 ```
 
 Also available as `bb creds import`.
@@ -793,7 +706,7 @@ Also available as `bb creds import`.
 5. Verify with the smoke test:
 
 ```bash
-python scripts/smoke_test.py
+docker compose exec -T app python scripts/smoke_test.py
 ```
 
 6. If the app is running, restart it to pick up the new `.env` values:
@@ -820,10 +733,10 @@ The Cloudflare Tunnel token (`CLOUDFLARE_TUNNEL_TOKEN`) does not expire unless r
 
 ### Backup
 
-Create a timestamped copy of the database:
+Create a timestamped copy of the database. The script is installed only inside the app container, so invoke it via `docker compose exec`:
 
 ```bash
-python scripts/backup_db.py
+docker compose exec -T app python scripts/backup_db.py
 ```
 
 Also available as `bb db backup`.
@@ -855,7 +768,7 @@ A healthy database returns `ok` and `wal`.
 
 ### Development Database Reset
 
-For local development, drop and recreate the database with seed data:
+For local development, drop and recreate the database. The result is empty -- no seed data is loaded (E-228):
 
 ```bash
 python scripts/reset_dev_db.py
@@ -891,7 +804,7 @@ The health endpoint (`GET /health`) returns 503 when the database is unreachable
 
 ### GameChanger API errors
 
-- **Credential expired**: Run `python scripts/refresh_credentials.py` (or `bb creds import`) and then `python scripts/smoke_test.py`.
+- **Credential expired**: Run `docker compose exec app python scripts/refresh_credentials.py` (or `bb creds import`) and then `docker compose exec -T app python scripts/smoke_test.py`.
 - **Rate limited**: The HTTP session factory handles rate limiting automatically with 1--1.5 second delays between requests. If you hit rate limits, increase the delay: adjust `min_delay_ms` and `jitter_ms` in `src/http/session.py`.
 - **Unknown endpoint error**: Check [docs/api/README.md](../api/README.md) for the current endpoint documentation.
 
@@ -900,7 +813,7 @@ The health endpoint (`GET /health`) returns 503 when the database is unreachable
 - Check cloudflared logs: `docker compose logs cloudflared`.
 - Verify `CLOUDFLARE_TUNNEL_TOKEN` is set in `.env`.
 - In the Cloudflare dashboard (Networks -> Tunnels), the tunnel status should show Healthy.
-- See [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md) for detailed troubleshooting.
+- See [cloudflare-access-setup.md](cloudflare-access-setup.md) for detailed troubleshooting.
 
 ### Database is corrupted
 
@@ -954,4 +867,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-07-06 | Source: E-253 (E-253-11: bb data backfill-game-dates), E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-07-08 | Source: E-253 (E-253-11: bb data backfill-game-dates), E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, bb data scout/dedup/repair-opponents sections; reports-first reframe -- the plays and spray chart pipelines were NOT removed by E-239 and remain live), E-255-05 (Truth Sweep: replaced the phantom Migration 015/012/009/006 write-ups with a Schema Migrations table matching the real 001-010 files; corrected the false "plays pipeline removed in E-239" claim -- it is alive; fixed the `bb creds login` recovery reference -- no such subcommand, `bb creds refresh` first-line with `bb creds import`/`bb creds setup web` fallback; corrected "seed data" to "empty" for `bb db reset`; fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/)*

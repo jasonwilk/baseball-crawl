@@ -1,7 +1,9 @@
 # E-193: Browser Automation Infrastructure
 
 ## Status
-`READY`
+`ABANDONED` (2026-07-08, E-255-06; Jason-decided 2026-07-07)
+
+**Abandonment reason**: The motivating premise is gone. E-193 exists to let agents (especially ux-designer) visually verify UI changes to the coaching **dashboard** — but the dashboard and its member-sync/opponent surfaces were REMOVED in E-239 (reports-first reframe). The surviving UI surface is the server-rendered reports/admin HTML, and ux-designer was refocused (E-255-03) to report-layout/trust-surface/tools-hub IA where text-wireframe artifacts (not live browser snapshots) are the deliverable. The enabling `agent-browser` npm package was never actually installed/adopted in the ~4 months since this epic went READY (READY 99–122 days on an invalidated premise — the stale-READY class this epic's own hygiene sweep is codifying). If a browser-verification need re-emerges for the reports surfaces, it would be a fresh, smaller epic against the then-current tooling. Archived unshipped; no stories were dispatched.
 
 ## Overview
 Enable agents to visually verify UI changes through browser automation, creating tighter design feedback loops. This adds a headless Chrome sidecar to Docker Compose, integrates `agent-browser` knowledge into the context layer, and establishes URL resolution conventions so agents know how to reach the running app.

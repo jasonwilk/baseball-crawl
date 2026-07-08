@@ -1,7 +1,9 @@
 # E-175: Fix `bb creds import` for POST /auth Curl Commands
 
 ## Status
-`READY`
+`DRAFT` (demoted from READY 2026-07-08, E-255-06 stale-READY triage)
+
+**Stale-READY triage note**: A real UX bug fix (`bb creds import` fails for POST /auth curl commands), but it sat READY ~99–122 days, and the auth/credential code has since changed materially (notably E-254's auth hardening — magic-link GET/POST split, passkey/login changes). Demoted to DRAFT per the stale-READY rule pending api-scout/SE re-confirmation that the three cited failure modes (client-token rejection, tokens-in-response-not-request, misleading warning) still reproduce against the CURRENT `bb creds import` / `_resolve_web_token_key` code. If the failures still reproduce, re-promote to READY (re-verifying the cited line references, which will have drifted); if the code changed enough to alter or fix them, replan or archive. Content preserved.
 
 ## Overview
 When an operator copies a `POST /auth` curl command from browser dev tools and runs `bb creds import`, the import fails silently or with a confusing error. This epic adds POST /auth curl detection, HTTP execution to retrieve tokens from the response body, and fixes a misleading warning message that sends users in circles.

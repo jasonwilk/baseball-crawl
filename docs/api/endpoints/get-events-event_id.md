@@ -28,7 +28,7 @@ see_also:
   - path: /bats-starting-lineups/{event_id}
     reason: Lineup linked via pregame_data.lineup_id in this response
   - path: /events/{event_id}/best-game-stream-id
-    reason: Resolves event_id to game_stream_id for boxscore/plays access
+    reason: Resolves event_id to game_stream.id (for the /game-streams/{game_stream_id}/events endpoint); boxscore/plays take event_id directly
 ---
 
 # GET /events/{event_id}

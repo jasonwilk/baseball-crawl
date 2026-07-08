@@ -145,7 +145,7 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/events/{event_id}](endpoints/get-events-event_id.md) | CONFIRMED | req | Single event detail with pregame_data and lineup_id |
-| GET | [/events/{event_id}/best-game-stream-id](endpoints/get-events-event_id-best-game-stream-id.md) | CONFIRMED | req | Resolve event_id to game_stream_id for boxscore/plays access |
+| GET | [/events/{event_id}/best-game-stream-id](endpoints/get-events-event_id-best-game-stream-id.md) | CONFIRMED | req | Resolve event_id to game_stream.id (for /game-streams/{id}/events); boxscore/plays take event_id directly |
 | GET | [/events/{event_id}/highlight-reel](endpoints/get-events-event_id-highlight-reel.md) | CONFIRMED | req | Structured highlight video playlist with pbp_id cross-references |
 | GET | [/game-stream-processing/{game_stream_id}/boxscore](endpoints/get-game-stream-processing-game_stream_id-boxscore.md) | CONFIRMED | req | Per-player batting and pitching lines for both teams |
 | GET | [/game-stream-processing/{event_id}/plays](endpoints/get-game-stream-processing-event_id-plays.md) | CONFIRMED | req | Pitch-by-pitch play log; works for non-managed teams (confirmed 2026-03-26); path param is event_id (NOT game_stream.id) |
@@ -228,7 +228,6 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/announcements/user/read-status](endpoints/get-announcements-user-read-status.md) | CONFIRMED | req | In-app announcement read status for the user |
-| GET | [/me/subscription-information](endpoints/get-me-subscription-information.md) | CONFIRMED | req | Subscription summary (best_subscription, access_level) |
 | GET | [/subscription/details](endpoints/get-subscription-details.md) | CONFIRMED | req | Full subscription with plan, billing info, and dates |
 | GET | [/subscription/recurly/plans](endpoints/get-subscription-recurly-plans.md) | CONFIRMED | req | Available subscription plans with pricing |
 | GET | [/sync-topics/me/updated-topics](endpoints/get-sync-topics-me-updated-topics.md) | CONFIRMED | req | Real-time sync poll cursor (PII in next_cursor field) |
@@ -297,8 +296,8 @@ Multi-endpoint integration guides documenting how endpoints chain together for c
 
 | Count | Source |
 |-------|--------|
-| **121** | Files in `docs/api/endpoints/` (120 endpoint files + web-routes-not-api.md reference) |
-| **121** | Endpoint rows in this index |
+| **120** | 120 files (119 endpoints + 1 web-routes reference) in `docs/api/endpoints/` |
+| **119** | Endpoint rows in this index (one per endpoint file; web-routes-not-api.md is a linked reference, not an endpoint row) |
 | **89** | E-062-R-01 spike inventory count (88 endpoints + 1 web-routes reference file) |
 
 Notes:

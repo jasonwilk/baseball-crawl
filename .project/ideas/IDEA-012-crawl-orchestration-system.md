@@ -1,7 +1,7 @@
 # IDEA-012: Crawl Orchestration and Scheduling System
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-08, E-255-06) — moot after the reports-first reframe. This idea schedules the member-team crawl-and-load cycle (`scripts/crawl.py`/`load.py`/`bootstrap.py`) to keep a standing DB of 4 LSB teams + opponents fresh, with an admin health page. That member-sync pipeline was REMOVED (E-239), the product no longer maintains a standing fresh DB (reports are generated on demand), and the ONLY surviving scheduling need — the morning-of-game report run — was delivered by E-240 (`bb report morning-run`, a cron-invoked CLI). ROADMAP §7 explicitly bars a standing orchestration system ("Host cron invoking a CLI is the ceiling"), and the admin health page is a removed surface.
 
 ## Summary
 A system for scheduling, monitoring, and managing recurring crawl runs -- including credential rotation awareness, run history tracking, error alerting, and automated crawl/load cycles on a schedule.

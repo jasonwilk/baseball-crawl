@@ -14,7 +14,7 @@ Near-term. Promote when networking/mitmproxy docs are touched again or when the 
 
 ## Dependencies & Blockers
 - [ ] Confirm canonical local port map remains: app direct `8001`, app via Traefik `8000`, Traefik dashboard `8180`, mitmproxy `8080`, mitmweb `8081`
-- [ ] Confirm docs scope for this pass (at minimum `docs/admin/getting-started.md` and `docs/agent-browsability-workflow.md`)
+- [ ] Confirm docs scope for this pass (at minimum `docs/admin/getting-started.md`)
 
 ## Open Questions
 - Should this be a one-time patch or a repeatable "docs port audit" checklist in docs standards?
@@ -23,7 +23,8 @@ Near-term. Promote when networking/mitmproxy docs are touched again or when the 
 ## Notes
 Context from mitmproxy troubleshooting identified stale references showing Traefik dashboard at `http://localhost:8080` in:
 - `docs/admin/getting-started.md`
-- `docs/agent-browsability-workflow.md`
+
+(Note: `docs/agent-browsability-workflow.md` was also flagged originally, but that doc was deleted in E-255-02 — the agent-browsability workflow is obsolete — so it is no longer in scope for this pass.)
 
 Related artifact:
 - `MITM-TROUBLESHOOTING.md`

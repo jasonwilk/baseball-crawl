@@ -39,6 +39,13 @@ caveats:
     just completed ones. Upcoming games have `game_status: null` and a future
     `start_ts`; they omit `score`, `game_status` value, and `has_videos_available`
     in observed records. The earlier "completed games only" claim is superseded.
+  - >
+    PERSPECTIVE-SPECIFIC `id`: the `id` returned here is specific to the queried
+    team's schedule -- the SAME real-world game gets a DIFFERENT `id` depending on
+    which team's public schedule you query. Unlike the authenticated
+    `game-summaries` (stable `event_id`/`game_stream_id` per game), this endpoint's
+    `id` cannot be used to dedupe the same game across two teams' schedules. It
+    still works as the boxscore/plays `event_id` for the perspective it came from.
 related_schemas: []
 see_also:
   - path: /game-stream-processing/{game_stream_id}/boxscore
@@ -86,7 +93,7 @@ Bare JSON array of game records (completed and upcoming). 34 records in a single
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | **This IS the `event_id`** used by the boxscore endpoint. Pass directly to `GET /game-stream-processing/{event_id}/boxscore` -- no bridge call needed (confirmed 2026-03-12, terminology corrected 2026-03-19). Equivalent to `event_id` in the authenticated flow (game-summaries); distinct from `event_id` (used by `/games/preview` as a different field name for the same value). |
+| `id` | UUID | **This IS the `event_id`** used by the boxscore and plays endpoints. Pass directly to `GET /game-stream-processing/{event_id}/boxscore` (and `.../plays`) -- no bridge call needed (confirmed 2026-03-12, terminology corrected 2026-03-19). Same value as `event_id` in the authenticated flow (game-summaries) and as the `event_id` field in `/games/preview` (identical value, different field name). **Perspective-specific**: this `id` is specific to the queried team's schedule -- the same real-world game has a different `id` in the opponent's schedule (see Known Limitations). |
 | `opponent_team` | object | Opponent team info. **Carries `name` and optional `avatar_url` ONLY -- no identity ID.** See Opponent Identity below. |
 | `opponent_team.name` | string | Opponent team name (free-text label; not guaranteed to match any GC team record). |
 | `opponent_team.avatar_url` | string or absent | Opponent avatar URL. Present on 11/34 records (2026-06-12). Absent (not null, not empty) when no avatar. |
@@ -172,5 +179,6 @@ This matters for any feature that needs to **machine-resolve** the opponent (e.g
 - **Both completed AND upcoming games appear** (verified 2026-06-12). Upcoming games have `game_status: null`, a future `start_ts`, and omit `score`/`has_videos_available`. (Earlier observation of "completed only" was incomplete -- likely a team with no upcoming games at capture time.) For richer in-progress / live data, the authenticated `GET /teams/{team_id}/game-summaries` may still be preferred, but it returns completed games only.
 - `has_live_stream` is `false` for all observed records.
 - The `id` field is the `event_id` parameter for the boxscore endpoint (confirmed 2026-03-12, terminology corrected 2026-03-19). This is the public-endpoint equivalent of `event_id` in the authenticated flow (game-summaries). `/games/preview` uses `event_id` as the field name for the same value; `/games` uses `id`.
+- **Perspective-specific `id` (do not cross-team dedupe on it).** The `id` is specific to the queried team's public schedule: the same real-world game returns a DIFFERENT `id` when fetched from the opponent's schedule. This is unlike the authenticated `game-summaries`, which returns a stable `event_id`/`game_stream_id` per game. The `id` still works as the boxscore/plays `event_id` for the perspective it came from -- but two teams' schedules cannot be deduped to one game by matching `id`.
 
 **Discovered:** 2026-03-04. **Confirmed no-auth:** 2026-03-04. **Opponent-identity + upcoming-games behavior verified:** 2026-06-12.

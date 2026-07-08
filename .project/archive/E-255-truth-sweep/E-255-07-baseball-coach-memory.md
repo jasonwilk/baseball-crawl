@@ -4,7 +4,7 @@
 [E-255: Truth Sweep — Context Layer, API Docs, Runbooks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, baseball-coach's own memory (`.claude/agent-memory/baseball-coach/`) describes the reports-first, single-season reality: the cross-team/multi-season "from day one" section is replaced with a one-line non-goal note, the ghost entity list in `coaching-decisions.md` names only real tables, and the dated 403 season-stats recipes carry a SUPERSEDED banner.

@@ -14,7 +14,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 >
 > Both coexist in the GC API. The path order determines the auth behavior -- do not swap them.
 
-### Step 1: Get completed game schedule (no auth)
+### Step 1: Get game schedule and filter to completed (no auth)
 
 **Endpoint:** [`GET /public/teams/{public_id}/games`](../endpoints/get-public-teams-public_id-games.md)
 
@@ -22,15 +22,15 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 
 **Input:** `opponent_links.public_id` (e.g., `"xXxXxXxXxXxX"`)
 
-**Output:** Array of completed games. Extract from each record:
-- `id` -- this IS the `game_stream_id` for the boxscore endpoint (step 3). No bridge call needed.
+**Output:** Array of games -- **both completed and upcoming** (upcoming have `game_status: null` and a future `start_ts`; confirmed 2026-06-12). For scouting, filter to `game_status: "completed"` and extract from each completed record:
+- `id` -- this IS the `event_id`, the boxscore/plays path parameter (step 3). No bridge call needed.
 - `score.team`, `score.opponent_team` -- final score
 - `home_away` -- `"home"` or `"away"`
 - `start_ts` -- game date
 - `opponent_team.name` -- opponent name
 
 **Edge cases:**
-- Returns only `game_status: "completed"` games. In-progress or scheduled games are not included. For scouting (stats from completed games) this is exactly what we want.
+- The endpoint returns **both completed and upcoming/scheduled** games (upcoming have `game_status: null` and a future `start_ts`; confirmed 2026-06-12 -- see [get-public-teams-public_id-games.md](../endpoints/get-public-teams-public_id-games.md)). This scouting flow **uses only the completed games** (filter on `game_status == "completed"`) -- stats come from completed games, so that is exactly what we want here; upcoming games are simply skipped by this flow.
 - No pagination observed (28--32 games returned in a single response). If a team has an unusually large history, pagination may be needed -- fall back to the authenticated path (see [Authenticated Fallback](#authenticated-fallback)).
 - `opponent_team.avatar_url` is absent (not null, not empty) when no avatar -- use `.get("avatar_url")`.
 
@@ -65,7 +65,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 
 **Auth:** `gc-token` required
 
-**Input:** `id` from each game record in step 1 (this IS the `game_stream_id` -- no bridge call needed)
+**Input:** `id` from each game record in step 1 (this IS the `event_id` -- no bridge call needed)
 
 **Output:** Per-player batting and pitching lines for both teams. Key points:
 - Top-level keys are team identifiers: one `public_id` slug (no dashes), one UUID (with dashes). Detect via regex.
@@ -188,7 +188,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 **Advantages over public `/games`:**
 - Returns in-progress and upcoming games (not just completed)
 - Documented pagination via `x-next-page` header
-- Returns `game_stream.id` directly (same UUID as the boxscore `game_stream_id`)
+- Returns `event_id` (= `game_stream.game_id`) -- the boxscore/plays path parameter (game-summaries also carries a distinct `game_stream.id`, which is NOT the boxscore/plays param)
 
 **When to use:** Only if public `/games` is insufficient. The public path is preferred for scouting because it requires no UUID and no auth for the schedule step.
 
@@ -201,7 +201,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 | ID | Source | Used in |
 |----|--------|---------|
 | `public_id` | `opponent_links.public_id` | Steps 1 and 2 (primary key for this chain) |
-| `id` from `/public/.../games` | Step 1 response | Step 3 as `game_stream_id` (direct -- no bridge needed) |
+| `id` from `/public/.../games` | Step 1 response | Step 3 as the boxscore `event_id` (direct -- no bridge needed) |
 | Player `id` from roster | Step 2 response | Step 3 cross-reference (player name lookup) |
 | Boxscore UUID key | Step 3 response | Opportunistic UUID storage (`teams.gc_uuid`) |
 | `resolved_team_id` | `opponent_links.resolved_team_id` | NOT required for this chain (saved opportunistically) |

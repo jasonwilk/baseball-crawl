@@ -16,4 +16,4 @@ Decisions established with data-engineer:
 - Innings pitched stored as integer outs (ip_outs): 1 IP = 3 outs. Always.
 - Splits stored as nullable columns (home_obp, away_obp, vs_lhp_obp, vs_rhp_obp), not separate rows
 - FK-safe orphan handling: when a player_id is not in `players`, insert a stub row (first_name='Unknown', last_name='Unknown') before writing the stat row. Log a WARNING for operator backfill.
-- Key entities: Team, Player, Game, Lineup, PlateAppearance, PitchingAppearance (single-season scope; `season_id` is the partition key -- no cross-season identity/rollup table)
+- Key entities: Team, Player, Game, `player_game_batting`, `player_game_pitching`, `plays`, `play_events` (single-season scope; `season_id` is the partition key -- no cross-season identity/rollup table)

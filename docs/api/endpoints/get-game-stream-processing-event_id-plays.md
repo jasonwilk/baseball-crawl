@@ -69,7 +69,7 @@ see_also:
   - path: /game-stream-processing/{event_id}/boxscore
     reason: Per-player box score using the same event_id
   - path: /public/game-stream-processing/{game_stream_id}/details
-    reason: Inning-by-inning line scores (no-auth) using game_stream.id (different ID!)
+    reason: Inning-by-inning line scores (no-auth); accepts either event_id or game_stream.id -- the same event_id works there too
 ---
 
 # GET /game-stream-processing/{event_id}/plays

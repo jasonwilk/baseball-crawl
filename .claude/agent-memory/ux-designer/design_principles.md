@@ -32,16 +32,19 @@ Frame headings as the user's decision, not a system instruction.
 ## 3. Unified Verbs
 
 One verb per action across all pages. Never use synonyms for the same operation.
+This is the durable, surface-agnostic principle — a coach should learn a verb
+once and see it mean the same thing everywhere.
 
-**Current verb assignments**:
-- "Update Stats" — all data refresh actions (replaces "Sync", "Sync Now", "Refresh")
-- "Last Updated" — timestamp label for when data was last refreshed (replaces "Last Synced")
-- "Updating..." — in-progress status for data refresh (replaces "Syncing...", "Running...")
-- "Merge" — combining duplicate teams (replaces "Resolve")
-- "Connect to GameChanger" — linking an opponent to a GC team
-- "Disconnect" — unlinking an opponent
+**No live verb registry today.** The earlier verb assignments (Sync/Update Stats,
+Resolve/Merge, opponent Connect/Disconnect, Last Synced/Last Updated) all
+governed the member-sync and tracked-opponent flows that were removed in E-239,
+so they are not carried here as current guidance. The surviving surfaces (the
+scouting report and the small `/admin/reports` tools-hub) have too few
+repeated-action verbs to warrant a registry yet.
 
-**How to apply**: Before adding a new action label, check this list. If the action maps to an existing verb, use that verb. If it's genuinely new, propose a single verb and add it here.
+**How to apply**: When a shared action verb genuinely recurs across surviving
+surfaces, pick one verb, use it consistently, and start a registry here at that
+point. Do not resurrect the removed-flow verbs above by default.
 
 ## 4. Three Coach Modes
 

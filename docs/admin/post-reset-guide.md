@@ -19,7 +19,7 @@ docker compose up -d --build app
 Verify the app is healthy:
 
 ```bash
-curl -s http://localhost:8000/health
+curl -s http://localhost:8001/health
 ```
 
 Expected: `{"status": "ok", "db": "connected"}`.
@@ -125,4 +125,4 @@ Check container logs: `docker compose logs app`. The most common cause is a migr
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-228 (empty reset, admin-sees-all), E-127-05 (original), E-239 (rewritten to reports-first: removed dashboard step, member-sync step)*
+*Last updated: 2026-07-08 | Source: E-228 (empty reset, admin-sees-all), E-127-05 (original), E-239 (rewritten to reports-first: removed dashboard step, member-sync step), E-255-05 (Truth Sweep: corrected the post-reset health-check URL from :8000 to :8001)*

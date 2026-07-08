@@ -91,19 +91,22 @@ A test whose mock data mirrors a buggy implementation passes vacuously and provi
 
 ### Example: E-147 Finding #2 (API field path divergence)
 
-The GameChanger authenticated team endpoint (`docs/api/endpoints/get-teams-team_id.md`) returns `season_year` as a top-level integer field. The public team endpoint (`docs/api/endpoints/get-public-teams-public_id.md`) nests the year at `team_season.season.year` (inside a `team_season` object containing a `season` sub-object). Code that reads the authenticated endpoint but accesses `data["team_season"]["season"]["year"]` is wrong -- but a test that mocks the response with `{"team_season": {"season": {"year": 2026}}}` will pass, because the mock mirrors the buggy field path instead of the authenticated endpoint's actual schema.
+The GameChanger authenticated team endpoint (`docs/api/endpoints/get-teams-team_id.md`) returns `season_year` as a top-level integer field. The public team endpoint (`docs/api/endpoints/get-public-teams-public_id.md`) carries the year at `team_season.year` -- a FLAT integer sibling of `team_season.season`, where `season` is a bare string (e.g. `"summer"`), NOT an object with a `.year`. **Neither endpoint nests the year at `team_season.season.year`** -- that path is a fabrication. Code that reads either endpoint but accesses `data["team_season"]["season"]["year"]` is wrong -- yet a test that mocks the response with `{"team_season": {"season": {"year": 2026}}}` will pass, because the mock mirrors the buggy (nonexistent) field path instead of either endpoint's actual schema.
 
-**Wrong** -- mock mirrors the implementation's (incorrect) field path:
+**Wrong** -- mock mirrors the implementation's fabricated field path:
 
 ```python
-mock_response = {"team_season": {"season": {"year": 2026}}}  # matches buggy code, not the API
+mock_response = {"team_season": {"season": {"year": 2026}}}  # matches buggy code; NO endpoint returns this nesting
 ```
 
 **Right** -- mock mirrors the API endpoint doc's actual response shape:
 
 ```python
-# Per docs/api/endpoints/get-teams-team_id.md, season_year is top-level
+# Per docs/api/endpoints/get-teams-team_id.md, season_year is top-level (authenticated endpoint):
 mock_response = {"season_year": 2026}
+# Per docs/api/endpoints/get-public-teams-public_id.md, the public endpoint is FLAT
+# (season = bare string, year = flat int sibling, record = {win,loss,tie}):
+mock_response = {"team_season": {"season": "summer", "year": 2026, "record": {"win": 12, "loss": 8, "tie": 0}}}
 ```
 
 Before writing a mock, open the authoritative spec and copy the field structure from there. If the spec and the implementation disagree, the test should fail -- that disagreement is the bug.

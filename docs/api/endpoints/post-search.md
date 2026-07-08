@@ -243,5 +243,6 @@ The `result.id` UUID returned in each search hit is the `progenitor_team_id` use
 - The hyphen variant of Content-Type (`post-search`) has not been tested.
 - `avatar_url` is a signed CloudFront URL with time-limited validity (expiry embedded in the `Policy` parameter). Do not cache these URLs long-term.
 - `location.country` is inconsistent: observed `"United States"`, `"USA"`, and `"US"` across different teams. Consumers should normalize.
+- **Punctuation / curly-apostrophe zero-hit quirk.** A team name containing `/`, a straight apostrophe `'` (U+0027), `%`, or `#` -- or whose indexed name uses a curly apostrophe `'` (U+2019) -- can silently return **zero hits** even though the team is indexed. For team-name lookups, route through the canonical `search_teams_by_name()` helper (which normalizes and retries), not a raw `POST /search`. See `.claude/rules/gc-uuid-bridge.md` (Punctuation Quirk and Apostrophe Trap) for the full quirk and normalization pattern.
 
 **Discovered:** 2026-03-09. **Last confirmed:** 2026-03-29.

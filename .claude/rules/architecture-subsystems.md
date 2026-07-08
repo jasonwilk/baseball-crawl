@@ -31,7 +31,7 @@ When a heavily-called canonical function needs to return MORE (provenance, fallb
 
 ## Canonical Team Deletion (Detail)
 
-`src/reports/generator.py` provides two consolidated deletion paths via common helpers `_delete_game_scoped_data()` and `_delete_team_scoped_data()`: (1) `cascade_delete_team()` -- aggressive, deletes all games involving the team, used by report-deletion cleanup; (2) `cleanup_orphan_teams()` -- safe, only deletes games where the team is the sole participant, used during report generation to clean temporary data. `is_team_eligible_for_cleanup()` enforces 2 guard conditions (Guard 1: `is_active = 0`; Guard 2: no other `reports` row references the team) before any cascade.
+`src/reports/generator.py` provides two consolidated deletion paths via common helpers `_delete_game_scoped_data_for_perspectives()` and `_delete_team_scoped_data()`: (1) `cascade_delete_team()` -- aggressive, deletes all games involving the team, used by report-deletion cleanup; (2) `cleanup_orphan_teams()` -- safe, only deletes games where the team is the sole participant, used during report generation to clean temporary data. `is_team_eligible_for_cleanup()` enforces 2 guard conditions (Guard 1: `is_active = 0`; Guard 2: no other `reports` row references the team) before any cascade.
 
 ## Season_id Derivation (Detail)
 
@@ -91,7 +91,7 @@ The filesystem path (`data/raw/{season}/scouting/{public_id}/`) organizes cached
 
 ## Reconciliation Package
 
-`src/reconciliation/` is a post-load quality pass that cross-references plays data against boxscore data to detect and correct discrepancies (e.g., pitcher attribution errors). It reads from the DB (not raw API data) and operates after loaders have populated the database -- it does NOT belong in `src/gamechanger/`. Entry point: `reconcile_game(conn, game_id, dry_run=True)` in `engine.py` for per-game processing; `reconcile_all(conn, dry_run=True)` for batch. Discrepancy records are always written to `reconciliation_discrepancies` (migration 012); only corrections (e.g., `plays.pitcher_id` updates) are gated by `dry_run=False`. BF boundary correction algorithm: walks plays in `play_order`, assigns pitcher by boxscore appearance order and batters-faced counts; pitcher order extracted from cached boxscore JSON (not DB AUTOINCREMENT).
+`src/reconciliation/` is a post-load quality pass that cross-references plays data against boxscore data to detect and correct discrepancies (e.g., pitcher attribution errors). It reads from the DB (not raw API data) and operates after loaders have populated the database -- it does NOT belong in `src/gamechanger/`. Entry point: `reconcile_game(conn, game_id, dry_run=True)` in `engine.py` for per-game processing; `reconcile_all(conn, dry_run=True)` for batch. Discrepancy records are always written to `reconciliation_discrepancies` (created in `001_initial_schema.sql`); only corrections (e.g., `plays.pitcher_id` updates) are gated by `dry_run=False`. BF boundary correction algorithm: walks plays in `play_order`, assigns pitcher by boxscore appearance order and batters-faced counts; pitcher order is read from the `player_game_pitching.appearance_order` column (populated by the game loader from boxscore JSON pitcher ordering) -- a DB query since E-220, not disk JSON re-read or DB AUTOINCREMENT.
 
 ## LLM Package
 
