@@ -53,7 +53,6 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - Wants all architectural details preserved (stack decisions, metrics, collaboration patterns)
 
 ## Pending Context-Layer Updates
-- `review-cycle-reordering.md` -- Internal reviews (CR + team) before Codex in plan and implement skills; review scorecard pattern for epic History. Approved 2026-03-22, awaiting epic.
 - Play-ingestion fidelity north star (codified 2026-06-28): DIRECTIONAL operating principle added to CLAUDE.md Data Philosophy ("### Operating Principle: Always Get Closer to Byte-Identical Play Ingestion"), cross-refs `docs/VISION.md` north-star section. FORWARD ITEM at E-245 closure: the concrete mechanical-enforcement rule ("play-ingestion changes must not regress the reconciliation scoreboard") lands only once the E-245 scoreboard tool/command actually exists -- context-layer assessment at E-245 closure picks it up. Do NOT author the enforcement rule before the scoreboard exists.
 
 ## Topic File Index

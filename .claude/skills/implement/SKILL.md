@@ -17,7 +17,7 @@ Load this skill when the user says any of:
 - "dispatch story E-NNN-SS", "implement story E-NNN-SS", "execute story E-NNN-SS"
 - Any request that implies dispatching an epic's stories (or a single story) for implementation
 
-**Chaining modifier**: The user may append "and review" or "and codex review" to any trigger phrase (e.g., "implement E-NNN and review", "start E-NNN and codex review"). This chains a code review after implementation completes. See Phase 4.
+**Chaining modifier**: The user may append "and review" or "and codex review" to any trigger phrase (e.g., "implement E-NNN and review", "start E-NNN and codex review"). This adds the optional Codex review pass (Phase 4) after implementation completes. Note: the code-reviewer's Closure CR Integration Review (Phase 5 Step 1c) is **unconditional** and runs on every dispatch regardless of this modifier -- the modifier only gates the Codex pass. See Phase 4 and Phase 5 Step 1c.
 
 **Plan skill handoff**: This skill may also be loaded by the plan skill's Phase 5 when the user used a compound trigger ("plan and dispatch"). In this case, `handoff_from_plan = true` and a planning team is already active. The implement skill reuses the existing team rather than creating a fresh one. See Phase 1 and Phase 2 for handoff-specific paths.
 
@@ -246,6 +246,8 @@ When the implementer reports completion (with `## Files Changed`):
 
 **Post-story path verification**: Check every file path in the implementer's `## Files Changed` section. Every path MUST start with the epic worktree pattern (`/tmp/.worktrees/baseball-crawl-E-NNN/`). If any path starts with `/workspaces/baseball-crawl/` (main checkout) or any other unexpected prefix, STOP and escalate to the user before proceeding. This catches agents that accidentally worked in the wrong directory.
 
+**AC×surface enumeration**: When verifying a *conditional* AC -- one that applies "only when X" / "for Y" / a vocabulary mapping -- PM (and the code-reviewer, for code stories) applies the same per-surface enumeration: verify the AC holds at every render/call/error path, not just the first happy path. This is the AC-verification-side companion to the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
+
 1. **Check context-layer-only skip condition.** If the story modifies ONLY context-layer files (`.claude/agents/`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/`, `CLAUDE.md`) and no Python code, route to PM for AC verification and status update. The code-reviewer is skipped for context-layer-only stories -- PM verifies ACs alone. After PM confirms ACs pass, proceed to the staging boundary (Step 5a). If PM rejects ACs, route feedback to the implementer for revision.
 
 2. **Route code stories to the code-reviewer AND PM.** For stories that touch Python code or any non-context-layer files, send the work to both in parallel. Code-reviewer template:
@@ -323,60 +325,13 @@ After PM marks a story DONE, check for newly unblocked stories (stories whose bl
 
 ---
 
-## Phase 4: Optional Review Chain
+## Phase 4: Optional Codex Review
 
-If the user specified the "and review" modifier (e.g., "implement E-NNN and review"), run Phase 4a (CR integration review) followed by Phase 4b (Codex code review). If the modifier was not specified, skip this phase and proceed directly to Phase 5.
+If the user specified the "and review" modifier (e.g., "implement E-NNN and review"), run a Codex review against the epic worktree diff as a systematic validation pass. If the modifier was not specified, skip this phase and proceed directly to Phase 5 -- the **Closure CR Integration Review** (Phase 5 Step 1c) is UNCONDITIONAL and runs on every dispatch path regardless.
 
-### Phase 4a: Code-Reviewer Integration Review
+**Codex-first ordering**: Codex runs HERE, before the Phase 5 Closure CR Integration Review, so that the code-reviewer adjudicates a real finding list (Codex's findings plus the post-remediation diff) in a single pass instead of approving the epic and then reversing itself when Codex later surfaces issues (the approve-then-reverse failure seen in E-239, E-251, E-253). On the default (no-"and review") path Codex is skipped and only the unconditional Closure CR Integration Review runs, so there is never a reversal -- the ordering fix only bites when both run.
 
-After all stories are verified DONE, Phase 4a runs a holistic code-reviewer pass over the full epic diff. Per-story CR (Phase 3) reviews changes in isolation; the integration review catches cross-story interactions, naming inconsistencies, import conflicts, and architectural issues that only appear when stories are combined.
-
-**Surface-removal epics**: when the epic DELETES a route, surface, or widely-used symbol, the integration review MUST repo-wide grep each removed route/symbol across ALL tests (not just story-touched files) — removed surfaces commonly leave generic usages in untouched test files (e.g. a deleted route used as an authenticated-200 probe) that per-story review cannot see, and that otherwise surface only at the full-suite-green gate.
-
-Phase 4a is skipped if the "and review" modifier was not specified.
-
-#### Step 1: Generate the full epic diff
-
-Run from the epic worktree:
-
-```
-cd <epic-worktree-path> && git diff main
-```
-
-If the diff is empty (no changes relative to main), report "No changes in epic worktree to review" and skip to Phase 5.
-
-#### Step 2: Build the story manifest
-
-Assemble a story manifest from the epic's Stories table: list each story ID, title, and a one-line summary of what it implemented (drawn from the story's Description or the implementer's completion report). This gives the code-reviewer cross-story context without requiring it to read every story file.
-
-#### Step 3: Route to code-reviewer
-
-Send the integration review assignment to the code-reviewer via `SendMessage` with: the epic worktree path, story manifest (IDs, titles, one-line summaries), full Technical Notes, Goals and Success Criteria, and the full epic diff (from Step 1). Include "Review round: 1 of 2 (circuit breaker)" and instructions to focus on cross-story interactions, naming consistency, import conflicts, and architectural issues.
-
-**Large epic handling**: If the diff exceeds ~3,000 lines, replace inline diff with a per-story file summary (file paths, modified/new status, +/- line counts). Generate from cross-referencing each story's `## Files Changed` with `git diff --stat main`. The reviewer can request specific file contents from the main session.
-
-#### Step 4: Triage, remediation, and circuit breaker
-
-Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings **one at a time** (serial, not parallel). For each finding: spawn an implementer, wait for completion, stage with `git add -A`, then proceed to the next finding. Select agent type via the routing table. Spawn WITHOUT `isolation: "worktree"`. Provide the **remediation spawn context**:
-
-```
-You are a [agent-type] subagent spawned for post-review remediation.
-Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
-Constraints: Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/`. No git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
-Remediation authorized by post-review remediation exception in workflow-discipline.md.
-Finding to remediate: [finding details]
-Fix and report with ## Files Changed (absolute paths) and ## Test Results.
-```
-
-PM records dispositions. If NOT APPROVED, send Round 2 to the code-reviewer with round 1 findings and updated diff. Max 2 rounds -- if round 2 still has MUST FIX, escalate to the user: (a) fix, (b) retry (resets breaker), (c) override to Phase 4b, (d) abandon.
-
-After integration review completes (clean, remediated, or user override), proceed to Phase 4b.
-
-### Phase 4b: Codex Code Review
-
-After Phase 4a completes (whether CR findings were remediated, the review was clean, or it was skipped), Phase 4b runs a Codex review against the epic worktree diff as a systematic final validation pass. This uses a degradation chain: headless first, prompt-generation fallback on failure.
-
-Phase 4b is skipped if the "and review" modifier was not specified.
+This phase uses a degradation chain: headless codex first, prompt-generation fallback on failure.
 
 #### Step 1: Attempt headless codex review
 
@@ -410,9 +365,9 @@ When headless codex succeeds with findings:
 
 1. Present the full codex findings to the user.
 2. Classify each finding as **valid** or **invalid** using the same triage rules as Phase 3 Step 5 item 3.
-3. Remediate valid findings using the same spawn mechanics as Phase 4a Step 4 (remediation spawn context). Stage fixes with `git add -A`.
+3. Remediate valid findings using the **Remediation Spawn Context** (defined at the start of Phase 5). Stage fixes with `git add -A`.
 4. PM records dispositions in the epic's History section.
-5. **Remediation fixes are NOT re-reviewed**. After remediation, proceed to Phase 5.
+5. **Codex does NOT re-review its own remediation** -- the Phase 5 Closure CR Integration Review is the adjudicating pass over the post-remediation diff. After remediation, proceed to Phase 5.
 6. **Circuit breaker (2 rounds)**: If round 2 still has unresolved findings, escalate to the user: (a) fix it themselves, (b) retry (resets breaker), (c) override and proceed to Phase 5, (d) abandon.
 
 #### Step 4: Prompt-generation fallback (graceful degradation)
@@ -425,9 +380,24 @@ After Codex review completes (clean, remediated, skipped, or user override), pro
 
 ## Phase 5: Closure Sequence
 
-**Phase boundary**: Phase 4 handles all per-story and integration review logic. Phase 5 handles closure mechanics (status updates, assessments, commit, archive) plus the two closure-time verification passes that can only run at closure: the conditional invariant audit (Step 1a) and the unconditional full-suite-green gate (Step 1b). No *per-story* review logic belongs in Phase 5 -- those passes are not a re-review of individual stories but the final whole-epic verification before COMPLETED.
+**Phase boundary**: Phase 4 handles the optional Codex review (gated on "and review"). Phase 5 handles closure mechanics (status updates, assessments, commit, archive) plus the three closure-time verification passes: the conditional invariant audit (Step 1a), the unconditional **Closure CR Integration Review** (Step 1c -- the last pre-merge review), and the unconditional full-suite-green gate (Step 1b, executed post-merge at Step 8 sub-step 5). These are whole-epic verification passes, not a re-review of individual stories.
 
-When all stories are verified DONE (and the optional review chain is complete), execute the following closure sequence in order.
+When all stories are verified DONE (and the optional Codex review is complete), execute the following closure sequence in order.
+
+### Remediation Spawn Context
+
+Several closure passes remediate findings by spawning an implementer into the epic worktree: the Phase 4 Codex review, the Step 1a invariant audit, the Step 1c Closure CR Integration Review, and the Step 1b full-suite green gate. They ALL use the single spawn context defined here -- defined once, at the start of Phase 5, so its definition does not live behind the now-conditional Phase 4. Every consumer references it by the name **"Remediation Spawn Context."**
+
+Remediate valid findings **one at a time** (serial, not parallel). For each finding: spawn an implementer, wait for completion, stage with `git add -A`, then proceed to the next finding. Select agent type via the routing table. Spawn WITHOUT `isolation: "worktree"`.
+
+```
+You are a [agent-type] subagent spawned for post-review remediation.
+Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
+Constraints: Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/`. No git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
+Remediation authorized by post-review remediation exception in workflow-discipline.md.
+Finding to remediate: [finding details]
+Fix and report with ## Files Changed (absolute paths) and ## Test Results.
+```
 
 **Before spinning down the team:**
 
@@ -437,7 +407,53 @@ Confirm all stories are DONE. Per-story AC verification was performed by PM duri
 
 ### Step 1a: Invariant audit (conditional)
 
-If the epic introduced a **cross-cutting invariant** -- a new NOT NULL column on a stat or core table, a new required FK dimension, a new pattern every helper or call site must honor -- spawn the code-reviewer for a single full-codebase invariant audit pass (see Invariant Audit Mode in `.claude/agents/code-reviewer.md`). Per-story CR cannot see helpers in files no story touched; this audit closes that gap. Triage findings using the same rules as Phase 3 Step 5 item 3, remediate valid findings via the Phase 4a Step 4 remediation spawn context, and stage with `git add -A`. The main session decides whether the epic introduced an invariant from epic scope (NOT NULL FK, new required field, structural pattern) -- if unsure, ask the user. Skip this step for epics that did not introduce a new invariant.
+If the epic introduced a **cross-cutting invariant** -- a new NOT NULL column on a stat or core table, a new required FK dimension, a new pattern every helper or call site must honor -- spawn the code-reviewer for a single full-codebase invariant audit pass (see Invariant Audit Mode in `.claude/agents/code-reviewer.md`). Per-story CR cannot see helpers in files no story touched; this audit closes that gap. Triage findings using the same rules as Phase 3 Step 5 item 3, remediate valid findings via the **Remediation Spawn Context**, and stage with `git add -A`.
+
+**Mechanical trigger checklist** -- every trigger is evaluable from a **permitted artifact** (the diff or the Technical Notes), so the main session, which is barred from reading source, can fire the audit without inspecting code. The audit FIRES when any of the following holds:
+
+- a **NOT NULL or FK migration in the diff** -- a `migrations/*.sql` file in `git diff --cached main` that adds a `NOT NULL` column or a `FOREIGN KEY` / `REFERENCES` clause; OR
+- a **canonical-helper signature change declared in the epic/story Technical Notes** -- a Technical-Notes statement that a CLAUDE.md "canonical" seam function's signature changed (e.g. `ensure_team_row`, `ensure_player_row`, `canonical_recompute`, `resolve_db_path`, `ensure_season_row`); OR
+- a **new required field on a core INSERT, as declared in the epic/story Technical Notes** -- a Technical-Notes statement that every INSERT path into a stat/core table must now supply a new mandatory field.
+
+A core-INSERT field change that is ABSENT from the Technical Notes is itself a planning gap (the Technical Notes are the artifact the main session reads); surface it rather than silently skipping. For any case these triggers do not cleanly cover, the existing **"if unsure, ask the user"** fallback is the backstop. Skip this step for epics that fire none of the triggers and introduced no new invariant.
+
+### Step 1c: Closure CR Integration Review (unconditional)
+
+This is the **last pre-merge review** and runs on **every** dispatch path -- unlike the Phase 4 Codex review, it is NOT gated on "and review". It is a holistic code-reviewer pass over the full epic diff in the **epic worktree**, positioned AFTER the Step 1a invariant audit (so it sees all prior remediation -- Codex's from Phase 4 and the invariant audit's -- plus the final combined diff) and BEFORE the Step 8 closure merge. Per-story CR (Phase 3) reviews changes in isolation; this integration review catches cross-story interactions, naming inconsistencies, import conflicts, and architectural issues that only appear when stories are combined.
+
+**Why unconditional, and why after Codex**: a plain "implement E-NNN" -- the documented default -- previously closed with NO combined-diff reviewer at all, because both the integration review and Codex were gated on "and review". Making this pass unconditional closes that gap. And because Codex (Phase 4) runs first, the code-reviewer adjudicates Codex's finding list plus the post-remediation diff in one pass, instead of approving the epic and then reversing itself when Codex surfaces issues (E-239 / E-251 / E-253).
+
+**Context-layer epics**: context-layer-only stories skip per-story CR by design (Phase 3 Step 5 item 1), so this unconditional closure pass is where a context-layer epic gets its combined-diff review. The doc-sweep rule (`.claude/rules/doc-sweep.md`) auto-loads for the code-reviewer whenever the diff touches matching doc/context-layer files (via CR's Step-2 rule-glob mechanism), requiring a semantic read plus synonym expansion rather than a token-grep-only sweep.
+
+**Surface-removal epics**: when the epic DELETES a route, surface, or widely-used symbol, this review MUST repo-wide grep each removed route/symbol across ALL tests (not just story-touched files) — removed surfaces commonly leave generic usages in untouched test files (e.g. a deleted route used as an authenticated-200 probe) that per-story review cannot see, and that otherwise surface only at the full-suite-green gate.
+
+#### Generate the full epic diff
+
+Run from the epic worktree:
+
+```
+cd <epic-worktree-path> && git diff main
+```
+
+If the diff is empty (no changes relative to main), report "No changes in epic worktree to review" and proceed to Step 1b.
+
+#### Build the story manifest
+
+Assemble a story manifest from the epic's Stories table: list each story ID, title, and a one-line summary of what it implemented (drawn from the story's Description or the implementer's completion report). This gives the code-reviewer cross-story context without requiring it to read every story file.
+
+#### Route to code-reviewer
+
+Send the integration review assignment to the code-reviewer via `SendMessage` with: the epic worktree path, story manifest (IDs, titles, one-line summaries), full Technical Notes, Goals and Success Criteria, and the full epic diff. Include "Review round: 1 of 2 (circuit breaker)" and instructions to focus on cross-story interactions, naming consistency, import conflicts, and architectural issues. PM applies the same AC×surface enumeration described in the AC verification note (Phase 3 Step 5); see the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
+
+**Large epic handling**: If the diff exceeds ~3,000 lines, replace inline diff with a per-story file summary (file paths, modified/new status, +/- line counts). Generate from cross-referencing each story's `## Files Changed` with `git diff --stat main`. The reviewer can request specific file contents from the main session.
+
+#### Triage, remediation, and circuit breaker
+
+Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings via the **Remediation Spawn Context** (defined at the start of Phase 5).
+
+PM records dispositions. If NOT APPROVED, send Round 2 to the code-reviewer with round 1 findings and the updated diff. Max 2 rounds -- if round 2 still has MUST FIX, escalate to the user: (a) fix, (b) retry (resets breaker), (c) override to Step 1b, (d) abandon.
+
+After the Closure CR Integration Review completes (clean, remediated, or user override), proceed to Step 1b.
 
 ### Step 1b: Full-suite green gate (unconditional)
 
@@ -445,7 +461,7 @@ Every epic closure is gated on a green full test suite -- `python -m pytest test
 
 **Why it runs in Step 8, not here.** The per-story "no pytest in the worktree" rule (the Phase 3 Step 5 item 2 code-reviewer template and `.claude/agents/code-reviewer.md` Test Execution Constraint) exists because the editable install's meta path finder makes worktree pytest test **main's** `src/`, not the worktree's changes -- so a worktree run is misleading. The only point at which pytest is authoritative for *this epic* is after Step 8's `git apply --3way` patches the epic's accumulated changes onto main. Running the gate here (before Step 8) would test main's *pre-epic* code -- meaningless. The reconciliation is therefore real, not a loophole: the per-story ban stands, and the one authoritative full-suite run happens at closure, in main, after the merge.
 
-**Mechanics live in Step 8.** The actual `python -m pytest tests/` invocation is wired into the Step 8 closure sequence (a sub-step between `git apply --3way` and the commit approval gate): the code-reviewer runs the suite against the main checkout once the epic's changes are applied, and a red suite **aborts the closure commit** and routes the failures into the Phase 4a remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the Phase 4a Step 4 remediation spawn context (in the epic worktree), re-stage and re-apply, then re-run `python -m pytest tests/` until it reports 0 failed. The 2-round circuit breaker applies: if the suite is still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
+**Mechanics live in Step 8.** The actual `python -m pytest tests/` invocation is wired into the Step 8 closure sequence (a sub-step between `git apply --3way` and the commit approval gate): the code-reviewer runs the suite against the main checkout once the epic's changes are applied, and a red suite **aborts the closure commit** and routes the failures into the closure remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the **Remediation Spawn Context** (in the epic worktree), re-stage and re-apply, then re-run `python -m pytest tests/` until it reports 0 failed. The 2-round circuit breaker applies: if the suite is still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
 
 **Where and when the COMPLETED status flip happens.** PM authors the COMPLETED status transition in the **epic worktree's** `epic.md` (not the main checkout), during Step 8 sub-step 3 staging -- *before* sub-step 4 generates and applies the closure patch. This placement is forced by the `.claude/hooks/worktree-guard.sh` hook: while the epic worktree exists (dispatch is active), the hook blocks PM Write/Edit to the main checkout (except `.claude/agent-memory/*`), so PM cannot flip COMPLETED in main -- but PM *can* freely edit the worktree `epic.md`, and that flip rides the closure patch into main via sub-step 4's `git apply --3way`. Because the flip is authored in the worktree before sub-step 3, COMPLETED is *set on disk* before this gate runs at sub-step 5. That is intentional and safe: the binding invariant is enforced on the **commit**, not the on-disk string. **The closure commit MUST NOT happen until `python -m pytest tests/` reports 0 failed in main with the epic applied** (or the user explicitly overrides per the circuit breaker). A red gate aborts the commit *and* reverts the applied patch (sub-step 5 failure path), so the worktree's COMPLETED flip never reaches committed main -- COMPLETED is never *finalized* on a red suite. Step 2 performs all other closure bookkeeping (Stories table, History entry, scorecard, Step 3/3a assessments); only the COMPLETED flip itself is authored later, at sub-step 3 in the worktree.
 
@@ -466,12 +482,12 @@ Route to PM, who performs:
 |---|---|---|---|
 | Per-story CR -- E-NNN-01 | N | N | N |
 | Per-story CR -- E-NNN-02 | N | N | N |
-| CR integration review | N | N | N |
+| Closure CR Integration Review | N | N | N |
 | Codex code review | N | N | N |
 | **Total** | **N** | **N** | **N** |
 ```
 
-Only include rows for review passes that actually ran. Per-story CR rows show aggregated finding totals across all review rounds for that story (e.g., if round 1 had 3 MUST FIX and round 2 had 1, the row shows 4 findings total). CR integration and Codex rows show findings from Phase 4a and 4b respectively. If the "and review" modifier was not specified, omit Phase 4 rows. Reconstruct finding counts from triage summaries recorded during each story's review loop and Phase 4 reviews.
+Only include rows for review passes that actually ran. Per-story CR rows show aggregated finding totals across all review rounds for that story (e.g., if round 1 had 3 MUST FIX and round 2 had 1, the row shows 4 findings total). The Closure CR Integration Review row shows findings from Phase 5 Step 1c (it is unconditional, so this row always appears); the Codex row shows findings from Phase 4. If the "and review" modifier was not specified, omit the Codex row only -- the Closure CR Integration Review still ran. Reconstruct finding counts from triage summaries recorded during each story's review loop and the closure review passes.
 
 - Record any notable implementation details, decisions, or deviations in the epic's Technical Notes or History. Keep sensitive information out of epic files.
 
@@ -556,7 +572,7 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
 
 5. **Full-suite green gate (`python -m pytest tests/`):** This is the authoritative execution of the Phase 5 Step 1b closure gate -- it runs here because the epic's changes are now applied to main (after sub-step 4) and pytest is finally authoritative for this epic. Spawn the code-reviewer to run `cd /workspaces/baseball-crawl && python -m pytest tests/`. It is **unconditional** (runs on every closure).
    - **0 failed**: the applied patch (sub-step 4) already carries the worktree's COMPLETED flip authored at sub-step 3 -- the green gate has passed, so that COMPLETED flip is now cleared to be committed. Proceed to sub-step 6.
-   - **Any failures**: do NOT commit. The applied patch (sub-step 4) carries the worktree's COMPLETED flip, so reverting the patch reverts COMPLETED along with it -- COMPLETED is never *committed* on a red suite. At this point sub-step 4's `git apply --3way` is the only main-checkout change (the archive rename in sub-step 6 and PM memory update in sub-step 7 have NOT run yet), so the minimal reset is `cd /workspaces/baseball-crawl && git reset HEAD && git apply -R --3way /tmp/E-NNN-epic.patch` (unstage, then symmetrically reverse the applied patch). Use `git apply -R`, NOT `git checkout -- .`: the reverse-apply reverses the patch INCLUDING any files it created, so the subsequent re-apply after remediation does not error on already-present/untracked files. `git checkout -- .` would only restore tracked files to HEAD and would leave patch-created untracked files (e.g. a new migration) behind, deadlocking the re-apply. The reverse-apply also restores main's `epic.md` to its ACTIVE on-disk status. Do NOT run the archive-undo `git mv` from sub-step 9 reject path (c) -- there is no archive rename to undo at sub-step 5, and that `git mv` would fail on a non-existent directory. Then route the failures into the Phase 4a remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the Phase 4a Step 4 remediation spawn context (in the epic worktree), then re-run the closure sequence from sub-step 3 (re-stage, re-diff, re-apply) and re-run pytest until it reports 0 failed. The 2-round circuit breaker applies: if still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
+   - **Any failures**: do NOT commit. The applied patch (sub-step 4) carries the worktree's COMPLETED flip, so reverting the patch reverts COMPLETED along with it -- COMPLETED is never *committed* on a red suite. At this point sub-step 4's `git apply --3way` is the only main-checkout change (the archive rename in sub-step 6 and PM memory update in sub-step 7 have NOT run yet), so the minimal reset is `cd /workspaces/baseball-crawl && git reset HEAD && git apply -R --3way /tmp/E-NNN-epic.patch` (unstage, then symmetrically reverse the applied patch). Use `git apply -R`, NOT `git checkout -- .`: the reverse-apply reverses the patch INCLUDING any files it created, so the subsequent re-apply after remediation does not error on already-present/untracked files. `git checkout -- .` would only restore tracked files to HEAD and would leave patch-created untracked files (e.g. a new migration) behind, deadlocking the re-apply. The reverse-apply also restores main's `epic.md` to its ACTIVE on-disk status. Do NOT run the archive-undo `git mv` from sub-step 9 reject path (c) -- there is no archive rename to undo at sub-step 5, and that `git mv` would fail on a non-existent directory. Then route the failures into the closure remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the **Remediation Spawn Context** (in the epic worktree), then re-run the closure sequence from sub-step 3 (re-stage, re-diff, re-apply) and re-run pytest until it reports 0 failed. The 2-round circuit breaker applies: if still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
 
    This run is a **hard precondition on the closure commit**: the closure commit (sub-step 10) MUST NOT proceed until `python -m pytest tests/` reports 0 failed in the main checkout with the epic's changes applied (or the user explicitly overrides per the circuit breaker). This is the authoritative execution of the Phase 5 Step 1b gate -- not an advisory check.
 
@@ -641,11 +657,11 @@ Phase 3: Serial coordination loop (one story at a time)
   -> staging boundary: `git add -A` -> PM marks DONE -> cascade to next story
   |
   v
-Phase 4 (if "and review"): 4a CR integration review + 4b Codex code review (headless -> prompt fallback)
-  Both use triage + remediation in epic worktree, 2-round circuit breakers
+Phase 4 (if "and review"): Codex code review only (headless -> prompt fallback)
+  Codex-first: it runs BEFORE the Phase 5 Closure CR Integration Review; triage + remediation in epic worktree, 2-round circuit breaker
   |
   v
-Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1b full-suite-green gate (`python -m pytest tests/` in main, unconditional; reds -> Phase 4a remediation loop) -> PM completes epic -> doc + context-layer assessments -> summary
+Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1c Closure CR Integration Review (unconditional, pre-merge, last pre-merge review) -> Step 1b full-suite-green gate (`python -m pytest tests/` in main, unconditional, executed post-merge at Step 8 sub-step 5; reds -> Remediation Spawn Context remediation loop) -> PM completes epic -> doc + context-layer assessments -> summary
   -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
   -> closure merge and commit (patch -> dry-run -> apply -> archive mv -> PM memory -> approval gate -> single commit)
   -> worktree cleanup -> shut down PM (teardown automatic on session exit)
@@ -659,8 +675,8 @@ Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1b full-suite-gree
 - **Epic not found / DRAFT / COMPLETED / ABANDONED / BLOCKED**: Report status to user and stop. Do not search the archive for completed epics.
 - **No eligible stories**: Report to user (all BLOCKED or all DONE).
 - **Spawn fails**: Follow Dispatch Failure Protocol (`workflow-discipline.md`) -- report and ask, do not improvise.
-- **No uncommitted changes for review**: Phase 4a handles (skip to Phase 5 -- if no diff for CR, Codex also has nothing to review).
-- **Codex timeout/failure**: Phase 4b degrades to prompt-generation fallback.
+- **No uncommitted changes for review**: the Closure CR Integration Review (Phase 5 Step 1c) reports "No changes in epic worktree to review" and proceeds to Step 1b; if Codex (Phase 4) ran, it likewise has nothing to review.
+- **Codex timeout/failure**: Phase 4 degrades to prompt-generation fallback.
 - **CR or PM context fills**: Respawn with fresh state summary. No data lost (work products persist on disk).
 
 ---

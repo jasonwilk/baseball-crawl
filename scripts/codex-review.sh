@@ -18,6 +18,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUBRIC_FILE="${REPO_ROOT}/.project/codex-review.md"
 
+# The Bug Pattern Checklist and Security checklist are single-sourced from the
+# code-reviewer agent definition at prompt-assembly time (a live read), so the
+# Codex prompt never drifts from CR's rubric. Resolved from REPO_ROOT (the main
+# checkout) -- NOT --workdir, which redirects only the git diff, never the
+# rubric source. The delimiter markers are the extraction contract documented
+# in code-reviewer.md itself.
+CR_RUBRIC_FILE="${REPO_ROOT}/.claude/agents/code-reviewer.md"
+BUG_PATTERN_START="<!-- BUG-PATTERN-CHECKLIST:START -->"
+BUG_PATTERN_END="<!-- BUG-PATTERN-CHECKLIST:END -->"
+SECURITY_START="<!-- SECURITY-CHECKLIST:START -->"
+SECURITY_END="<!-- SECURITY-CHECKLIST:END -->"
+
+# Deterministic result file: the review output is tee'd here so the read-receipt
+# gate (codex-review skill Step 4) reads a stable file instead of a manual
+# stdout redirect. In /tmp to avoid any git/worktree interaction.
+RESULT_FILE="/tmp/codex-review-$(date +%s).txt"
+
 WORKDIR=""
 
 usage() {
@@ -27,7 +44,9 @@ Usage: $(basename "$0") [--workdir <path>] <mode> [args]
 Options:
   --workdir <path>     Run git commands from the specified directory instead of
                        the script's own REPO_ROOT. In 'uncommitted' mode, the
-                       diff is generated as 'git diff main' from <path>.
+                       diff is generated as 'git diff --diff-filter=ACMR main'
+                       from <path> (pure deletions are excluded so they do not
+                       exhaust Codex's budget on large removal epics).
 
 Modes:
   uncommitted          Review staged, unstaged, and untracked changes
@@ -61,15 +80,70 @@ if [[ ! -f "${RUBRIC_FILE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Assemble prompt: embedded rubric + diff + review request
-# Both the rubric and the diff are embedded directly in the prompt so that
-# codex in --ephemeral mode can access them without repository file access.
+# Verify the code-reviewer rubric and its delimiter markers honor the full
+# contract code-reviewer.md declares (E-258-01 AC-5): each of the four markers
+# appears EXACTLY ONCE, and each START precedes its matching END. Fail closed
+# otherwise -- extract_block() would silently take only the first of duplicated
+# markers, or emit an EMPTY block on an END-before-START pair, shipping a
+# partial/empty checklist instead of failing. The Codex prompt must carry the
+# Bug Pattern and Security checklists from exactly one source (the CR rubric),
+# never zero and never partial.
+# ---------------------------------------------------------------------------
+if [[ ! -f "${CR_RUBRIC_FILE}" ]]; then
+    echo "Error: code-reviewer rubric not found: ${CR_RUBRIC_FILE}" >&2
+    exit 1
+fi
+for _marker in "${BUG_PATTERN_START}" "${BUG_PATTERN_END}" "${SECURITY_START}" "${SECURITY_END}"; do
+    _count=$(grep -cF -- "${_marker}" "${CR_RUBRIC_FILE}" || true)
+    if [[ "${_count}" -ne 1 ]]; then
+        echo "Error: delimiter marker must appear exactly once in ${CR_RUBRIC_FILE} (found ${_count}): ${_marker}" >&2
+        echo "The single-source Codex rubric extraction requires the delimiter contract (exactly one START and one END per pair, START before END; see code-reviewer.md)." >&2
+        exit 1
+    fi
+done
+for _pair in "${BUG_PATTERN_START}|${BUG_PATTERN_END}" "${SECURITY_START}|${SECURITY_END}"; do
+    _start="${_pair%%|*}"
+    _end="${_pair##*|}"
+    _sl=$(grep -nF -- "${_start}" "${CR_RUBRIC_FILE}" | head -1 | cut -d: -f1 || true)
+    _el=$(grep -nF -- "${_end}" "${CR_RUBRIC_FILE}" | head -1 | cut -d: -f1 || true)
+    if [[ -z "${_sl}" || -z "${_el}" || "${_sl}" -ge "${_el}" ]]; then
+        echo "Error: delimiter START must precede its END in ${CR_RUBRIC_FILE} (START line=${_sl:-none}, END line=${_el:-none}): ${_start}" >&2
+        exit 1
+    fi
+done
+
+# ---------------------------------------------------------------------------
+# Extract the content between two literal delimiter markers (exclusive of the
+# marker lines) from a file. Uses awk index() (literal substring match), so the
+# HTML-comment markers' special characters need no escaping. Prints nothing if
+# the markers are absent -- callers validate marker presence up front.
+# ---------------------------------------------------------------------------
+extract_block() {
+    local start="$1" end="$2" file="$3"
+    awk -v s="${start}" -v e="${end}" '
+        index($0, e) { exit }
+        grab { print }
+        index($0, s) { grab = 1 }
+    ' "${file}"
+}
+
+# ---------------------------------------------------------------------------
+# Assemble prompt: embedded rubric + single-sourced CR checklists + diff +
+# review request. Everything is embedded directly in the prompt so that codex
+# in --ephemeral mode can access it without repository file access. The Bug
+# Pattern and Security checklists are read live from code-reviewer.md at
+# assembly time (single source of truth), so the Codex prompt cannot drift from
+# CR's rubric.
 # ---------------------------------------------------------------------------
 assemble_review_prompt() {
     local diff_content="$1"
     local mode_label="$2"
     local rubric_content
     rubric_content="$(cat "${RUBRIC_FILE}")"
+    local bug_pattern_block
+    bug_pattern_block="$(extract_block "${BUG_PATTERN_START}" "${BUG_PATTERN_END}" "${CR_RUBRIC_FILE}")"
+    local security_block
+    security_block="$(extract_block "${SECURITY_START}" "${SECURITY_END}" "${CR_RUBRIC_FILE}")"
 
     echo "CODE-REVIEW REQUEST"
     echo ""
@@ -77,12 +151,20 @@ assemble_review_prompt() {
     echo "${rubric_content}"
 
     echo ""
+    echo "CODE-REVIEWER BUG PATTERN CHECKLIST (single-sourced live from code-reviewer.md)"
+    echo "${bug_pattern_block}"
+
+    echo ""
+    echo "CODE-REVIEWER SECURITY CHECKLIST (single-sourced live from code-reviewer.md)"
+    echo "${security_block}"
+
+    echo ""
     echo "CHANGES TO REVIEW (mode: ${mode_label})"
     echo "${diff_content}"
 
     echo ""
     echo "Instructions:"
-    echo "1. Review the changes above against the rubric. Follow its Review Priorities in order."
+    echo "1. Review the changes above against the rubric and both checklists. Follow the Review Priorities in order."
     echo "2. Cite file and line number for every finding."
     echo "3. Group findings by priority level."
     echo "4. If the review is clean, state explicitly: \"No findings.\""
@@ -129,9 +211,13 @@ generate_uncommitted_diff() {
     local diff_output=""
 
     if [[ -n "${WORKDIR}" ]]; then
-        # Epic worktree mode: all changes relative to main (staged + unstaged)
+        # Epic worktree mode: all changes relative to main (staged + unstaged).
+        # Default to --diff-filter=ACMR (added/copied/modified/renamed) so pure
+        # deletions do not consume Codex's budget on large removal epics and
+        # degrade the review to static-only (E-239's 2.57M-char diff dropped to
+        # ~445K under ACMR). Deletions have no content to review.
         local worktree_diff
-        worktree_diff="$(run_git diff main 2>/dev/null || true)"
+        worktree_diff="$(run_git diff --diff-filter=ACMR main 2>/dev/null || true)"
         if [[ -n "${worktree_diff}" ]]; then
             diff_output+="${worktree_diff}"$'\n'
         fi
@@ -185,6 +271,30 @@ if [[ "${CODEX_SANDBOX_OFF:-}" == "1" ]]; then
     CODEX_SANDBOX_ARGS=(--sandbox danger-full-access)
 fi
 
+# ---------------------------------------------------------------------------
+# Run the review: pipe the assembled prompt to codex, tee the streamed output
+# to the deterministic RESULT_FILE (so the read-receipt gate reads a stable
+# file, not a manual stdout redirect), and emit a receipt to stdout. Output
+# still streams live. set -o pipefail is preserved: codex's exit code (the
+# rightmost non-zero) propagates through the zero-exit tee; we capture it,
+# print the receipt regardless of pass/fail, then return it so the script's
+# exit status still reflects codex.
+# ---------------------------------------------------------------------------
+run_codex_review() {
+    local diff_content="$1" mode_label="$2"
+    local rc=0
+    assemble_review_prompt "${diff_content}" "${mode_label}" \
+        | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" - \
+        | tee "${RESULT_FILE}" || rc=$?
+    echo ""
+    echo "RESULT_FILE=${RESULT_FILE}"
+    if [[ -f "${RESULT_FILE}" ]]; then
+        wc -l "${RESULT_FILE}"
+        echo "tail -n1: $(tail -n1 "${RESULT_FILE}")"
+    fi
+    return "${rc}"
+}
+
 case "${MODE}" in
     uncommitted)
         DIFF_CONTENT="$(generate_uncommitted_diff)"
@@ -196,7 +306,7 @@ case "${MODE}" in
         if [[ -n "${WORKDIR}" ]]; then
             MODE_LABEL="uncommitted (workdir: ${WORKDIR})"
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "${MODE_LABEL}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
+        run_codex_review "${DIFF_CONTENT}" "${MODE_LABEL}"
         ;;
     base)
         BRANCH="${2:-}"
@@ -209,7 +319,7 @@ case "${MODE}" in
             echo "No diff against '${BRANCH}' to review."
             exit 0
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "base ${BRANCH}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
+        run_codex_review "${DIFF_CONTENT}" "base ${BRANCH}"
         ;;
     commit)
         SHA="${2:-}"
@@ -222,7 +332,7 @@ case "${MODE}" in
             echo "Error: could not retrieve commit '${SHA}'." >&2
             exit 1
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "commit ${SHA}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
+        run_codex_review "${DIFF_CONTENT}" "commit ${SHA}"
         ;;
     *)
         if [[ -z "${MODE}" ]]; then
