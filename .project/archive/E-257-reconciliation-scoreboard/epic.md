@@ -1,7 +1,11 @@
 # E-257: Plays→Boxscore Reconciliation Scoreboard (productization)
 
 ## Status
-`READY`
+`COMPLETED`
+<!-- COMPLETED 2026-07-09 — all 3 stories DONE + PM AC-verified + CR-approved; closure
+     documentation (docs/admin/operations.md) and context-layer codification (CLAUDE.md)
+     landed; rides the closure patch and finalizes only on a green Step 8 full-suite gate. -->
+**Completed date:** 2026-07-09
 <!-- READY set 2026-07-09 after Phase 5: all consultation questions resolved, internal review
      (CR spec audit + holistic team) and 2 Codex iterations triaged (all findings accepted, 0
      dismissed), consistency swept. READY date starts the 60-day freshness clock
@@ -50,9 +54,9 @@ This epic is the *measurement + gate* artifact. It is DISTINCT from the *correct
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-257-01 | Scoreboard core + CLI (human table + `--json`) | TODO | None | - |
-| E-257-02 | Committed baseline snapshot + one-way ratchet regression gate | TODO | E-257-01 | - |
-| E-257-03 | Report-time plausibility WARNING guard for headline rates | TODO | None | - |
+| E-257-01 | Scoreboard core + CLI (human table + `--json`) | DONE | None | data-engineer |
+| E-257-02 | Committed baseline snapshot + one-way ratchet regression gate | DONE | E-257-01 | data-engineer |
+| E-257-03 | Report-time plausibility WARNING guard for headline rates | DONE | None | software-engineer |
 
 ## Dispatch Team
 - data-engineer
@@ -105,8 +109,21 @@ The original AC ("a test asserts the definitions match the E-245 baseline verbat
 - 2026-07-08: Codex spec-review iteration 1 (4 findings, all P2/P3 propagation/consistency drift from the Phase-3 rewrites) — ALL ACCEPTED: baseline-doc mirror annotation added to E-257-01 Files+AC-7c; perspective-only sub-line propagated to E-257-01 AC-3; epic Success Criteria + E-257-02 description destaled off "verbatim"/"any axis counter increases"; +5 same-class "verbatim→code-canonical" survivors reworded. Sweep clean.
 - 2026-07-09: Codex spec-review iteration 2 (3 findings incl. one P1) — ALL ACCEPTED (DE consulted on P1+P2). P1: E-257-02 restated for the implementer/operator split (implementer owns gate code + synthetic-fixture tests; `.project/baselines/reconciliation-scoreboard.json` MOVED off the implementer create-list → operator-produced closure artifact, since the live DB is absent from worktrees) + NEW DE-surfaced baseline-absent bootstrap AC (E-257-02 AC-8: distinct non-zero exit + actionable message, never crash/silent-0). P2: residual label pinned to EXACTLY `{AB, H}` batting (E-257-01 AC-3 + TN-3). P3: concrete test filenames (`tests/fixtures/recon_scoreboard_seed.sql`, `tests/fixtures/recon_scoreboard_baseline.json`, `tests/test_script_entry_points.py`). Codex iteration 2 = circuit breaker.
 - 2026-07-09: Set **READY** (Phase 5) — user-authorized. All review passes triaged and incorporated; consistency swept clean; zero open questions. Dispatch remains a separate user authorization.
+- 2026-07-09: Dispatch authorized; epic set **ACTIVE**.
+- 2026-07-09: **Context-layer assessment (8 triggers, explicit per-trigger verdict):**
+  1. New convention/pattern/constraint — **YES.** The reconciliation gate is a new operational convention: one-way ratchet, committed-JSON baseline, manual-operator-diagnostic binding (NOT CI), operator-owns-every-snapshot (no agent auto-refresh). → claude-architect codifying.
+  2. Architectural decision with ongoing implications — **YES.** CLAUDE.md's Operating Principle said the enforcement mechanism "lands when that scoreboard exists / binds intent"; it now exists (`bb report reconcile-scoreboard` + ratchet gate), so the principle now binds mechanically. → claude-architect updating.
+  3. Footgun/failure-mode/boundary — **YES.** Operator-owns-baseline (real baseline absent from worktrees; implementer/operator split); `team_fps_pct` is stored as a FRACTION (0–1), not a percent (guard compares 0.30–0.75); exit-code map (0 pass / 1 regression / 3 baseline-absent). → claude-architect noting the load-bearing ones.
+  4. Agent behavior/routing/coordination — **NO.**
+  5. Domain knowledge for future agents — **YES.** The canonical plays-derived stat-definition constants now live in `src/reports/recon_scoreboard.py` and the E-245 baseline doc MIRRORS them (source-of-truth flipped; code canonical). → claude-architect.
+  6. New CLI command/workflow/procedure — **YES.** `bb report reconcile-scoreboard` (+`--json`, `--update-baseline`) + the operator baseline-snapshot procedure. → CLAUDE.md Commands (claude-architect). No new skill → no /workflow-help change.
+  7. Net context-layer growth offset — **accounted; net growth is load-bearing and largely self-offsetting (claude-architect).** The Operating-Principle edit is a near byte-neutral REPLACEMENT (forward-looking "lands when the scoreboard exists" caveat → "mechanism now exists / binds mechanically"); the Commands entry is a required new-command doc (a shipped operator command must be documented); the one genuinely additive block is the new Architecture "Reconciliation-scoreboard conventions (E-257)" bullet, justified because it pins the stat-def source-of-truth flip (a future stat-def editor would otherwise get it backwards) and the never-CI / operator-owned-baseline discipline. Nothing stale to compress for a larger offset without losing signal.
+  8. Reusable behavioral lesson (promote-to-load-target) — **NO.** No strongly recurring/generalizing behavioral lesson surfaced this epic.
+  **Fired: 1, 2, 3, 5, 6 → claude-architect dispatched into the worktree for CLAUDE.md codification.**
+- 2026-07-09: **Documentation assessment (PM):** FIRES — triggers 1 (a new operator command ships) and 5 (an epic completes that changes how the operator interacts with the system). E-257 adds the standing `bb report reconcile-scoreboard` diagnostic (+`--json`, `--update-baseline`) and a recurring operator baseline procedure (establish the initial committed baseline, re-snapshot after a legitimate ingestion improvement, review the JSON diff, commit). The AC-7 in-command `--help` is the self-contained quick reference, but a `docs/admin/operations.md` runbook section is ALSO warranted — that file already homes every peer `bb data`/`bb report` operator diagnostic (`bb data reconcile`, `bb report morning-run`, etc.), and operators discover standing diagnostics there, not by guessing a command exists. Target: `docs/admin/operations.md`, new section under Data Maintenance for `bb report reconcile-scoreboard` + the baseline lifecycle. **Caution for docs-writer: do NOT conflate `bb report reconcile-scoreboard` (this epic's plays-vs-boxscore MEASUREMENT scoreboard) with the existing `bb data reconcile` (the corrective reconciliation ENGINE, IDEA-062/E-198) — they are distinct per the epic Non-Goals / TN-6.** docs-writer dispatch owed before archive.
+- 2026-07-09: Dispatch complete — all three stories DONE, PM AC-verified PASS, CR-approved. Shipped: (1) the standing `bb report reconcile-scoreboard` operator diagnostic (`src/reports/recon_scoreboard.py` pure core + `src/cli/report.py` subcommand) — per-stat plays-vs-boxscore fidelity table + three axis counters (`dropped_pitch_events` / `no_plays_units` / `self_games`), with a stable `--json` machine surface E-256's closure smoke consumes; (2) the committed-baseline + one-way ratchet regression gate (`--update-baseline`, `self_games` hard-zero, baseline-absent bootstrap exit 3) that makes CLAUDE.md's north-star Operating Principle bind mechanically; (3) the report-time TEAM-level plausibility WARNING guard (`_check_rate_plausibility` in `src/reports/generator.py`, FPS 30–75% / P-PA 3.0–4.5) reproducing the operator's human-eyeball catch at render time. AC-8 subprocess smoke is satisfied-pending-merge (validated at the Step 8 full-suite gate). **Operator closure step owed:** Jason produces + commits the initial `.project/baselines/reconciliation-scoreboard.json` via `--update-baseline` against the live DB (NOT an implementer deliverable — live DB absent from worktrees).
 
-### Review Scorecard
+### Review Scorecard (Planning / Spec Review)
 All findings across every pass were ACCEPTED (0 dismissed) — consistent with the "fix all real findings, dismiss only false positives" discipline; none were false positives.
 
 | Review Pass | Findings | Accepted | Dismissed |
@@ -116,6 +133,17 @@ All findings across every pass were ACCEPTED (0 dismissed) — consistent with t
 | Codex iteration 1 | 4 | 4 | 0 |
 | Codex iteration 2 | 3 (+1 DE-surfaced bootstrap AC added in triage) | 3 (+1) | 0 |
 | **Total** | **24 raw findings (+1 emergent AC)** | **24 (+1)** | **0** |
+
+### Review Scorecard (Dispatch / Implementation)
+Per-story code review (2 rounds each) + the unconditional closure CR integration review. No Codex row — this was a plain "implement" dispatch (no "and review" modifier), so the Codex Phase-4 pass was not run. All findings accepted/fixed, 0 dismissed.
+
+| Review Pass | Findings | Accepted | Dismissed |
+|-------------|---------:|---------:|----------:|
+| Per-story CR — E-257-01 | 4 (1 MUST-FIX + 3 SHOULD-FIX; round 2 clean) | 4 | 0 |
+| Per-story CR — E-257-02 | 4 (3 SHOULD-FIX round 1 + 1 trivial doc SHOULD round 2) | 4 | 0 |
+| Per-story CR — E-257-03 | 1 (1 SHOULD-FIX; round 2 clean) | 1 | 0 |
+| Closure CR Integration Review | 1 (1 SHOULD-FIX — exit-code doc clarification) | 1 | 0 |
+| **Total** | **10** | **10** | **0** |
 
 Reconciliation notes:
 - **Convergence-dedup (internal iter 1):** CR and the holistic team converged on 3 finding-pairs — C1 (SE-F1 + CR-M2, plausibility guard → team-level), C2 (DE-F1 + SE-F3, stat-def drift guard → code-canonical constants), C3 (SE-F4 + CR-S3, per-stat JSON key stability). After convergence-dedup the 17 raw internal findings collapsed to **13 unique incorporated items**.

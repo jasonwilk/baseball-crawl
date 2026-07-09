@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
+import subprocess
 from contextlib import closing
 
 import typer
@@ -17,6 +19,19 @@ from src.gamechanger.opponent_ladder import METHOD_NO_PRESENCE, METHOD_OPERATOR
 from src.gamechanger.team_resolver import resolve_team
 from src.gamechanger.url_parser import parse_team_url
 from src.reports.aggregate_parity import verify_aggregates
+from src.reports.recon_scoreboard import (
+    EXIT_BASELINE_ABSENT,
+    EXIT_BASELINE_MALFORMED,
+    EXIT_REGRESSION,
+    BaselineError,
+    ScoreboardResult,
+    compute_scoreboard,
+    default_baseline_path,
+    evaluate_gate,
+    load_baseline,
+    to_json_dict,
+    write_baseline,
+)
 from src.api.db import get_connection
 from src.db.paths import resolve_db_path
 from src.reports.generator import (
@@ -200,6 +215,186 @@ def verify_aggregates_cmd() -> None:
         f"{result.cells_compared} cells compared."
     )
     raise typer.Exit(code=1)
+
+
+def _render_scoreboard_table(result: ScoreboardResult) -> None:
+    """Render the human-readable scoreboard (fidelity table + axis counters).
+
+    Batting AB/H rows carry the abandoned-PA / quick-scored residual label
+    (never suppressed, AC-3); the perspective-only split is shown as a
+    display-only sub-line under the ``no_plays_units`` counter (TN-5).
+    """
+    table = Table(title="Plays-vs-Boxscore Reconciliation Scoreboard")
+    table.add_column("Side", style="bold")
+    table.add_column("Stat")
+    table.add_column("Exact%", justify="right")
+    table.add_column("abs-Δ", justify="right")
+    table.add_column("Fidelity units", justify="right")
+    table.add_column("Note")
+
+    for side, stats in (("pitching", result.pitching), ("batting", result.batting)):
+        for s in stats:
+            note = (
+                "known residual — quick-scored/abandoned-PA noise"
+                if s.is_residual
+                else ""
+            )
+            table.add_row(
+                side,
+                s.stat,
+                f"{s.exact_pct:.1f}%",
+                str(s.abs_delta),
+                str(s.fidelity_units),
+                note,
+            )
+
+    console.print(table)
+    console.print("[bold]Axis counters[/bold] (north-star trend-toward-zero):")
+    console.print(f"  dropped_pitch_events: {result.dropped_pitch_events}")
+    console.print(f"  no_plays_units:       {result.no_plays_units}")
+    console.print(
+        f"      of which perspective-only misses: "
+        f"{result.perspective_only_misses} (display-only)"
+    )
+    console.print(f"  self_games:           {result.self_games}")
+
+
+def _current_git_sha() -> str:
+    """Best-effort full (40-char) git SHA for the baseline metadata header.
+
+    Records the commit a baseline snapshot was taken at (provenance only -- the
+    gate diff ignores the metadata header).  Never raises: a baseline snapshot
+    must not fail because git is unavailable; falls back to ``"unknown"``.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return "unknown"
+
+
+@app.command(name="reconcile-scoreboard")
+def reconcile_scoreboard_cmd(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the scoreboard as a stable JSON block to stdout (JSON only; no table).",
+    ),
+    update_baseline: bool = typer.Option(
+        False,
+        "--update-baseline",
+        help="Overwrite the committed baseline JSON with this run (then commit the diff).",
+    ),
+) -> None:
+    """Measure plays-vs-boxscore fidelity and gate it against a committed baseline.
+
+    Computes the plays-derived stat fidelity (perspective-scoped, excluding
+    no-plays units) and the ``dropped_pitch_events`` / ``no_plays_units`` /
+    ``self_games`` axis counters from the live DB -- the standing, repeatable
+    form of the E-245 ``recon.sql`` baseline.  Read-only on the database.
+
+    GATE (the north-star ratchet): a fresh run diffs against the committed
+    baseline JSON and exits NON-ZERO when a gated number regressed -- any gated
+    stat's abs-Δ rose (batting {AB,H,BB,SO}, pitching {H,SO,BB}), either
+    ratcheted axis counter (dropped_pitch_events, no_plays_units) rose, OR
+    self_games > 0 (a hard zero -- always an opponent-resolution bug). The
+    ratchet is one-way: a fix that shrinks a number never trips it, and
+    hold-steady passes. BF and HBP are shown as context but not gated.
+
+    FIRST USE (establish the baseline): the gate has nothing to diff against
+    until a baseline is committed. Run against the live DB:
+
+        bb report reconcile-scoreboard --update-baseline
+
+    then commit the written .project/baselines/reconciliation-scoreboard.json.
+    Until that file exists the gate exits non-zero (code 3) with a bootstrap
+    message rather than passing silently.
+
+    ONGOING (after an ingestion change): run the gate before/after the change and
+    read the diff. If a fix LEGITIMATELY improved a number, re-snapshot with
+    --update-baseline, review the JSON commit diff (the human review point), and
+    commit it so the improved number becomes the new floor. No agent
+    auto-refreshes the baseline.
+
+    With ``--json``, emits ONLY the stable JSON block to stdout (table
+    suppressed; gate verdict + violations go to stderr) so ``json.loads(stdout)``
+    is safe. Exit codes: 0 pass, 1 gated regression or run precondition failure
+    (e.g. database not found), 3 baseline absent, 4 baseline malformed.
+    """
+    db_path = resolve_db_path()
+    if not db_path.exists():
+        err_console.print(f"[red]Database not found:[/red] {db_path}")
+        raise typer.Exit(code=1)
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        result = compute_scoreboard(conn)
+        game_count = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+
+    baseline_path = default_baseline_path()
+
+    # --- Refresh mode: overwrite the baseline for an operator-reviewed commit --
+    if update_baseline:
+        metadata = {
+            "git_sha": _current_git_sha(),
+            "db_game_count": game_count,
+            "snapshot_date": date.today().isoformat(),
+        }
+        write_baseline(baseline_path, result, metadata)
+        console.print(f"[green]Baseline updated[/green] at {baseline_path}")
+        console.print("Review the JSON commit diff, then commit it.")
+        return
+
+    # --- View surface ---------------------------------------------------------
+    values = to_json_dict(result)
+    if json_output:
+        # AC-4b: ONLY the JSON object on stdout -- no Rich table -- so a
+        # consumer's json.loads(stdout) never breaks on interleaved text.
+        typer.echo(json.dumps(values, indent=2))
+    else:
+        _render_scoreboard_table(result)
+
+    # --- Gate -----------------------------------------------------------------
+    try:
+        baseline = load_baseline(baseline_path)
+    except BaselineError as exc:
+        # A present-but-corrupt baseline (unparseable JSON, or missing a gated
+        # value) -- actionable message + a DISTINCT non-zero code, symmetric with
+        # the absent-baseline handling below. Never a raw traceback.
+        err_console.print(
+            f"[red]Committed baseline is malformed or incomplete[/red] ({exc}) — "
+            "re-run `bb report reconcile-scoreboard --update-baseline` against the "
+            "live DB to regenerate it, then commit."
+        )
+        raise typer.Exit(code=EXIT_BASELINE_MALFORMED)
+    if baseline is None:
+        # AC-8: no committed baseline yet -- actionable message + DISTINCT
+        # non-zero code (never a crash, never a silent exit 0 that would let an
+        # ungated run masquerade as passing).
+        err_console.print(
+            f"[red]No committed baseline yet[/red] at {baseline_path} — run "
+            "`bb report reconcile-scoreboard --update-baseline` against the live "
+            "DB to establish one, then commit it."
+        )
+        raise typer.Exit(code=EXIT_BASELINE_ABSENT)
+
+    gate = evaluate_gate(values, baseline)
+    if not gate.passed:
+        err_console.print("[red]Reconciliation gate FAILED[/red] — regressed:")
+        for violation in gate.violations:
+            err_console.print(f"  • {violation.describe()}")
+        raise typer.Exit(code=EXIT_REGRESSION)
+
+    # Pass verdict only in table mode -- keep --json stdout pure JSON.
+    if not json_output:
+        console.print(
+            "[green]Reconciliation gate passed[/green] (no gated regression)."
+        )
 
 
 def _apply_opponent_mapping(

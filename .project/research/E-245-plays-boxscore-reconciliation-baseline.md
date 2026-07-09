@@ -49,6 +49,15 @@ Plays-derived stat definitions used (from `plays.outcome`):
 - SO = `Strikeout` + `Dropped 3rd Strike`; BB = `Walk` + `Intentional Walk`;
   H = `Single`+`Double`+`Triple`+`Home Run`; HBP = `Hit By Pitch`; BF/PA = row count;
   AB = PA − (BB + IBB + HBP + Sac Bunt + Sac Fly + Catcher's Interference).
+
+> **Source-of-truth flip (E-257-01, TN-7):** these stat definitions are now
+> productized as the code-canonical module-level constants in
+> `src/reports/recon_scoreboard.py` (`HIT_OUTCOMES` / `SO_OUTCOMES` /
+> `BB_OUTCOMES` / `HBP_OUTCOMES` / `AB_EXCLUSION_OUTCOMES`), pinned by
+> `tests/test_recon_scoreboard.py`. `recon_scoreboard.py` is the AUTHORITATIVE
+> source; this doc now MIRRORS it. If the definitions change, change the code
+> constants first and update this line to match — do not let this reference go
+> stale.
 - All main boxscore stats are fully populated (0 NULLs in pgp.bf/so/bb/h/ip_outs and
   pgb.ab/h/bb/so/hbp), so reconciliation is clean.
 

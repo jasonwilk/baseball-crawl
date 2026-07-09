@@ -1305,6 +1305,68 @@ def _query_plays_team_stats(
     }
 
 
+# ── Report-time plausibility guard (E-257-03 / TN-4) ─────────────────────
+#
+# Fast render-time range-check on the TEAM-level headline rates. Complements
+# (does not replace) the offline reconciliation scoreboard: it reproduces the
+# operator's human-eyeball catch -- an 18x-off FPS shipped once was caught only
+# by the operator -- at generation time. Advisory only: emits a WARNING naming
+# the out-of-range rate; never blocks the render, auto-clamps, or discards.
+# TEAM aggregates ONLY -- per-pitcher/per-batter rows are intentionally NOT
+# checked (a legitimate small-sample reliever can be a real 0%/100% FPS;
+# per-player flagging would flood the log and conflict with
+# .claude/rules/display-philosophy.md "never flag small samples").
+# ``team_fps_pct`` is a FRACTION (0-1); the bound is expressed as a fraction and
+# rendered as a percent in the message.  Bounds are coach-confirmed (TN-4).
+_FPS_PCT_MIN = 0.30
+_FPS_PCT_MAX = 0.75
+_PITCHES_PER_PA_MIN = 3.0
+_PITCHES_PER_PA_MAX = 4.5
+
+
+def _check_rate_plausibility(team_rates: dict) -> list[str]:
+    """Range-check the team headline rates; return out-of-range messages.
+
+    Pure comparison over already-computed values -- no query, no side effect.
+    ``team_fps_pct`` is a fraction (0-1); ``team_pitches_per_pa`` is a raw
+    pitches/PA rate. A ``None`` rate (no charted data) is skipped, not flagged.
+    Returns an empty list when every present rate is within its plausible band.
+    """
+    messages: list[str] = []
+
+    fps = team_rates.get("team_fps_pct")
+    if fps is not None and not (_FPS_PCT_MIN <= fps <= _FPS_PCT_MAX):
+        messages.append(
+            f"team_fps_pct {fps * 100:.1f}% outside expected range "
+            f"{_FPS_PCT_MIN * 100:.0f}-{_FPS_PCT_MAX * 100:.0f}% "
+            "-- review before sharing"
+        )
+
+    ppa = team_rates.get("team_pitches_per_pa")
+    if ppa is not None and not (
+        _PITCHES_PER_PA_MIN <= ppa <= _PITCHES_PER_PA_MAX
+    ):
+        messages.append(
+            f"team_pitches_per_pa {ppa:.2f} outside expected range "
+            f"{_PITCHES_PER_PA_MIN:.1f}-{_PITCHES_PER_PA_MAX:.1f} "
+            "-- review before sharing"
+        )
+
+    return messages
+
+
+def _log_rate_plausibility_warnings(data: dict, slug: str) -> None:
+    """Emit an operator WARNING per out-of-range TEAM headline rate.
+
+    Thin wrapper over the pure :func:`_check_rate_plausibility` so the render
+    call site is a single call and the wiring itself is unit-testable without a
+    full ``generate_report()`` drive. Advisory only -- logging a WARNING never
+    blocks the render or mutates the value.
+    """
+    for msg in _check_rate_plausibility(data):
+        logger.warning("Report %s: %s", slug, msg)
+
+
 # ── Tier-2 enrichment status (operator observability, E-233-04) ──────────
 #
 # Structured statuses distinguishing the three Tier-2 outcomes so an operator
@@ -2460,6 +2522,13 @@ class _ReportGeneration:
                 "spray_available": bool(spray_charts),
                 "degraded_confidence": degraded_confidence,
             }
+
+            # Report-time plausibility guard (E-257-03 / TN-4): advisory WARNING
+            # when a TEAM headline rate is out of the coach-confirmed band. Never
+            # blocks the render or mutates the value -- reproduces the operator's
+            # human-eyeball catch at generation time.
+            _log_rate_plausibility_warnings(data, slug)
+
             html = render_report(data)
 
             # Save HTML to disk

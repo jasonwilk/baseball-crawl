@@ -16,6 +16,8 @@ import src.reports.generator as _gen
 from src.reports.generator import (
     GenerationResult,
     _SprayOutcome,
+    _check_rate_plausibility,
+    _log_rate_plausibility_warnings,
     cascade_delete_team,
     cleanup_orphan_teams,
     _crawl_and_load_spray,
@@ -4795,3 +4797,116 @@ def test_plays_scope_empty_game_ids_returns_empty(db):
     assert team_empty == _EMPTY_PLAYS_TEAM
     # AC-3: the empty payload is a fresh copy, not the shared constant object.
     assert team_empty is not _EMPTY_PLAYS_TEAM
+
+
+class TestCheckRatePlausibility:
+    """E-257-03 / TN-4: report-time plausibility WARNING guard.
+
+    Fast unit tests over the pure helper (AC-4) -- NOT a full generate_report()
+    drive (avoids the disk-backed-fixture deadlock gotcha in testing.md). A thin
+    caller-side test confirms the messages reach WARNING via the module logger.
+    ``team_fps_pct`` is a FRACTION (0-1); bounds are 0.30-0.75 and P/PA 3.0-4.5.
+    """
+
+    # ── Out-of-range: each rate flagged (AC-1) ───────────────────────────
+    def test_fps_pct_above_max_flagged(self):
+        # 0.912 == 91.2% -- an 18x-off-shaped headline, well above the 75% ceiling.
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": 0.912, "team_pitches_per_pa": 3.8}
+        )
+        assert len(msgs) == 1
+        assert "team_fps_pct" in msgs[0]
+        assert "91.2%" in msgs[0]
+        assert "30-75%" in msgs[0]
+        assert "review before sharing" in msgs[0]
+
+    def test_fps_pct_below_min_flagged(self):
+        # 0.20 == 20%, below the widened 30% floor.
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": 0.20, "team_pitches_per_pa": 3.8}
+        )
+        assert len(msgs) == 1
+        assert "team_fps_pct" in msgs[0]
+        assert "20.0%" in msgs[0]
+
+    def test_pitches_per_pa_above_max_flagged(self):
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": 0.55, "team_pitches_per_pa": 5.5}
+        )
+        assert len(msgs) == 1
+        assert "team_pitches_per_pa" in msgs[0]
+        assert "5.50" in msgs[0]
+        assert "3.0-4.5" in msgs[0]
+        assert "review before sharing" in msgs[0]
+
+    def test_pitches_per_pa_below_min_flagged(self):
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": 0.55, "team_pitches_per_pa": 1.5}
+        )
+        assert len(msgs) == 1
+        assert "team_pitches_per_pa" in msgs[0]
+        assert "1.50" in msgs[0]
+
+    def test_both_out_of_range_yields_two_messages(self):
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": 0.912, "team_pitches_per_pa": 1.5}
+        )
+        assert len(msgs) == 2
+
+    # ── In-range / boundary: no false alarm (AC-2) ───────────────────────
+    def test_both_in_range_no_messages(self):
+        assert _check_rate_plausibility(
+            {"team_fps_pct": 0.55, "team_pitches_per_pa": 3.8}
+        ) == []
+
+    def test_bounds_are_inclusive(self):
+        # Exactly at each edge is in-range (inclusive comparison).
+        assert _check_rate_plausibility(
+            {"team_fps_pct": 0.30, "team_pitches_per_pa": 3.0}
+        ) == []
+        assert _check_rate_plausibility(
+            {"team_fps_pct": 0.75, "team_pitches_per_pa": 4.5}
+        ) == []
+
+    # ── None rates (no charted data) are skipped, not flagged (AC-2) ──────
+    def test_none_rates_are_skipped(self):
+        assert _check_rate_plausibility(
+            {"team_fps_pct": None, "team_pitches_per_pa": None}
+        ) == []
+
+    def test_missing_keys_are_skipped(self):
+        # A partial/absent mapping does not raise and flags nothing.
+        assert _check_rate_plausibility({}) == []
+
+    def test_one_none_one_out_of_range(self):
+        # None FPS skipped; the out-of-range P/PA still flags.
+        msgs = _check_rate_plausibility(
+            {"team_fps_pct": None, "team_pitches_per_pa": 5.5}
+        )
+        assert len(msgs) == 1
+        assert "team_pitches_per_pa" in msgs[0]
+
+    # ── Caller-side: the REAL wiring helper logs at WARNING (AC-4) ───────
+    # Exercises the actual call-site helper the generator invokes (not a
+    # re-implemented loop), so removing/breaking the guard call fails a test.
+    # Still no full generate_report() drive (deadlock gotcha avoided).
+    def test_out_of_range_messages_logged_at_warning(self, caplog):
+        import logging
+
+        slug = "empire-netting-abc123"
+        data = {"team_fps_pct": 0.912, "team_pitches_per_pa": 1.5}
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            _log_rate_plausibility_warnings(data, slug)
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 2
+        assert all(slug in r.getMessage() for r in warnings)
+
+    def test_in_range_emits_no_warning(self, caplog):
+        import logging
+
+        data = {"team_fps_pct": 0.55, "team_pitches_per_pa": 3.8}
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            _log_rate_plausibility_warnings(data, "in-range-slug")
+
+        assert [r for r in caplog.records if r.levelname == "WARNING"] == []

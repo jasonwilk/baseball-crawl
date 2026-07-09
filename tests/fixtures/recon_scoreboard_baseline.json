@@ -1,0 +1,26 @@
+{
+  "metadata": {
+    "git_sha": "synthetic-fixture-not-a-real-snapshot",
+    "db_game_count": 2,
+    "snapshot_date": "2026-07-08"
+  },
+  "pitching": {
+    "BF":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "SO":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "BB":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "H":   {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "HBP": {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false}
+  },
+  "batting": {
+    "AB":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": true},
+    "H":   {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": true},
+    "BB":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "SO":  {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false},
+    "HBP": {"exact_pct": 100.0, "abs_delta": 0, "fidelity_units": 1, "exact_units": 1, "is_residual": false}
+  },
+  "axis_counters": {
+    "dropped_pitch_events": 2,
+    "no_plays_units": 3,
+    "self_games": 0
+  }
+}

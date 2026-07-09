@@ -11,11 +11,18 @@ Pattern mirrors tests/test_cli.py lines 92-158 (the bb console script tests).
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+
+_bb_installed = pytest.mark.skipif(
+    shutil.which("bb") is None, reason="bb console script not installed"
+)
 
 
 def _run_help(script_name: str) -> subprocess.CompletedProcess[str]:
@@ -99,4 +106,29 @@ def test_smoke_test_help_exits_0() -> None:
         f"smoke_test.py --help failed with exit code {result.returncode}\n"
         f"stdout: {result.stdout}\n"
         f"stderr: {result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E-257-01 AC-8: bb report reconcile-scoreboard --help (console-script subprocess)
+# ---------------------------------------------------------------------------
+
+
+@_bb_installed
+def test_bb_reconcile_scoreboard_help_exits_0() -> None:
+    """bb report reconcile-scoreboard --help works as a console script (exit 0).
+
+    Runs the real ``bb`` entry point in a subprocess so the reconcile-scoreboard
+    import chain (recon_scoreboard -> plays_parser) is exercised outside pytest's
+    inherited sys.path -- catching ModuleNotFoundError / import-time failures the
+    in-process CliRunner tests miss.
+    """
+    result = subprocess.run(
+        ["bb", "report", "reconcile-scoreboard", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"bb report reconcile-scoreboard --help failed with exit code "
+        f"{result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )

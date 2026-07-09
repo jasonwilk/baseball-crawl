@@ -254,6 +254,66 @@ Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned,
 
 **Idempotency**: Each run is identified by a `run_id` UUID. Results are upserted into `reconciliation_discrepancies` using the UNIQUE constraint on `(run_id, game_id, team_id, player_id, signal_name)`. Re-running on the same games produces a new `run_id` and new rows.
 
+### Reconciliation Scoreboard (`bb report reconcile-scoreboard`)
+
+*Last updated: 2026-07-09 | Source: E-257 (reconciliation scoreboard)*
+
+`bb report reconcile-scoreboard` is the standing, repeatable **measurement** of how faithfully the plays-derived stats reconstruct GameChanger's official box scores -- the concrete metric behind CLAUDE.md's north-star Operating Principle ("Always Get Closer to Byte-Identical Play Ingestion"). It replaces the one-off manual `recon.sql` baseline from E-245 with a standing command. Read-only: it never writes to the database.
+
+**Do not confuse this with `bb data reconcile` above.** They measure/do different things:
+
+| | `bb data reconcile` | `bb report reconcile-scoreboard` |
+|---|---|---|
+| Purpose | Corrective **engine** -- detects and (optionally) fixes pitcher attribution errors | **Measurement + gate** -- tracks plays-vs-boxscore fidelity over time and blocks a regression |
+| Writes to the DB? | Yes, in `--execute` mode (reassigns `plays.pitcher_id`) | Never -- always read-only |
+| Output | Per-game/per-signal discrepancy detail, stored in `reconciliation_discrepancies` | A fidelity scoreboard (per-stat exact% / abs-Δ) + three axis counters, diffed against a committed baseline |
+
+**What it computes**: per-stat fidelity for pitching (`BF`, `SO`, `BB`, `H`, `HBP`) and batting (`AB`, `H`, `BB`, `SO`, `HBP`) -- each as `exact%` (share of units where the plays-derived value equals the boxscore value) and `abs-Δ` (sum of absolute differences) -- plus three axis counters, the north-star "trend toward zero" targets:
+
+| Axis counter | Meaning |
+|---|---|
+| `dropped_pitch_events` | Annotated pitches stranded as `event_type='other'` (the E-245 parser gap) |
+| `no_plays_units` | Boxscore units (pitcher or batter) with zero matching plays rows -- the coverage gap |
+| `self_games` | Games where `home_team_id == away_team_id` -- an opponent-resolution failure |
+
+Batting `AB` and `H` are labeled in the table as carrying a known residual (quick-scored/abandoned-PA scorekeeper noise) -- this label is informational and is never suppressed.
+
+**Commands**:
+
+```bash
+# Human-readable table + gate verdict
+bb report reconcile-scoreboard
+
+# Machine-readable JSON to stdout (table suppressed; gate verdict goes to stderr)
+bb report reconcile-scoreboard --json
+
+# Overwrite the committed baseline with this run's values
+bb report reconcile-scoreboard --update-baseline
+```
+
+**The gate**: every non-`--update-baseline` run diffs the fresh scoreboard against a committed baseline JSON at `.project/baselines/reconciliation-scoreboard.json` and exits non-zero on a regression. It is a **one-way ratchet** -- only a *worsening* number trips it; an improvement or holding steady always passes. It fires on:
+- A rise in abs-Δ for any gated stat: batting `{AB, H, BB, SO}`, pitching `{H, SO, BB}`.
+- A rise in either ratcheted axis counter: `dropped_pitch_events`, `no_plays_units`.
+- `self_games > 0` -- gated as a **hard zero**, independent of the baseline (a self-game is always a bug, never an acceptable floor).
+
+`BF` and `HBP` are shown in the table as context but are not gated. Pitch-level fidelity is covered via the `dropped_pitch_events` counter rather than blended into the stat ratchet.
+
+**Baseline lifecycle** (the operator owns every snapshot -- no agent auto-refreshes the baseline):
+
+1. **First use**: the gate has nothing to diff against until a baseline exists. Run `bb report reconcile-scoreboard --update-baseline` against the live DB, review the written `.project/baselines/reconciliation-scoreboard.json`, and commit it. Until this file is committed, every gated run exits non-zero (code 3) with a bootstrap message rather than passing silently.
+2. **Ongoing**: run the gate before and after any ingestion, parser, or reconciliation change. If a fix legitimately improved a number, re-snapshot with `--update-baseline`, review the JSON commit diff (this diff is the human review point -- it shows exactly which floor moved and by how much), and commit it so the improved number becomes the new floor.
+
+**Exit codes**:
+
+| Code | Meaning |
+|---|---|
+| `0` | Pass -- no gated regression |
+| `1` | Gated regression, OR a run precondition failed (e.g. database not found) |
+| `3` | No committed baseline exists yet (first-use bootstrap) |
+| `4` | Committed baseline is present but malformed or missing an expected value |
+
+**When to run**: this is a manual operator diagnostic, not a CI gate -- the live database is not available in CI. Run it around any change to play ingestion, parsing, or reconciliation logic, per CLAUDE.md's Operating Principle that every such change must move plays-derived stats closer to (never further from) GameChanger's official box scores.
+
 ## Morning-Run Scheduled Reports
 
 *Last updated: 2026-06-20 | Source: E-240 (morning-run scheduled reports)*
@@ -476,6 +536,23 @@ bb report generate <public_id>
 ```
 
 Reports expire 14 days after generation. After expiry, the link returns a 404 and the row is eligible for cleanup.
+
+### Report Plausibility Warnings
+
+*Last updated: 2026-07-09 | Source: E-257 (E-257-03)*
+
+At generation time, the report generator range-checks the team-level headline pitching/batting rates and logs an operator-facing WARNING (via the `logging` module) when a rate falls outside a plausible band:
+
+- First-pitch-strike% outside 30-75%
+- Pitches-per-PA outside 3.0-4.5
+
+The WARNING names the rate, its value, and the expected range, ending with "review before sharing." It is **advisory only** -- the report still renders and ships unchanged; there is no auto-clamp and no render block.
+
+**What to do**: treat a WARNING as "double-check this report before sharing it," not as an error to fix. It reproduces the human-eyeball catch that first flagged an 18x-off first-pitch-strike rate in a shipped report -- open the report and confirm the flagged rate looks right (or investigate the underlying game data) before handing it to a coach.
+
+**Scope**: the check covers team aggregate rates only -- not per-pitcher or per-batter rows -- by design, since per-player checking would flag legitimate small-sample relievers as false positives.
+
+This guard complements, and does not replace, the batch [Reconciliation Scoreboard](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) diagnostic above: the scoreboard measures fidelity across the whole database on a schedule the operator controls, while this guard flags a single implausible report the moment it is generated.
 
 ### Listing Reports
 
