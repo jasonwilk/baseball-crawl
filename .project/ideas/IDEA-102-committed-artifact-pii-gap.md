@@ -1,7 +1,20 @@
 # IDEA-102: Close the committed-artifact PII gap (planning/idea/epic files are ungated)
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+<!-- Promoted to E-256 (2026-07-09), story E-256-14. The "cheapest lever" open question below
+     (extend the byte-gate to sweep epics/ + .project/ against the real denylist) is exactly the
+     E-256-14 deliverable, resolved as: git checkout-index snapshot of the staged trees + one
+     check_doc_pii.sh invocation per tree, no SKIP_PATHS change, no script change. The scanner-angle
+     open question was resolved AGAINST removing epics//.project/ from SKIP_PATHS (the two gates catch
+     disjoint classes — see E-256 Technical Notes §6). The positive no-real-PII-in-artifacts rule
+     direction remains a residual for a future PII-hygiene pass (relates to IDEA-096/104). -->
+<!-- The `# pii-ok` staged-blob residual (a real GC_REFRESH_TOKEN=<real> # pii-ok line is staged,
+     scanned, and certified clean) is a SEPARATE gap. CA RULED (2026-07-09) that CLAUDE.md §4g does
+     NOT close it (§4g is a dispatch-time human control, not a structural gate — "the same category
+     error as accepting Cloudflare as CSRF mitigation"). Captured as IDEA-112 (measurement-first
+     suppressor narrowing). NOT part of E-256-14. -->
+
 
 ## Summary
 Real PII (names, UUIDs, public_ids) can be written into committed NON-`docs/api/` artifacts — idea files, epic/story files, PM/agent notes, decision logs — with NO automated gate to catch it. Two independent holes leave these files unprotected:
