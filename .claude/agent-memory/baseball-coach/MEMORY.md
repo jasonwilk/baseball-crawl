@@ -16,6 +16,7 @@ Lincoln Standing Bear High School baseball program:
 - [E-235 trust block design + review (2026-06-13)](e235_trust_block_review.md) -- Signal set, severity tiers, operator/coach split, no-games message, and AC-2 defect found in holistic review
 - [E-236 integrity hardening review (2026-06-14/15)](e236_integrity_hardening_review.md) -- no_games two-case copy, Option A confirm, partial-stage operator-only, SQ1 hard failure, 403/404 reconciliation (M=0 filter already handles no-scorebook teams)
 - [E-240 morning reports discovery (2026-06-17)](e240_morning_reports_discovery.md) -- Expiry Option A recommended, three-way outcome surfacing, scheduled email UX requirements, hard gates vs soft flags, wrong-opponent mitigation
+- [E-257 reconciliation scoreboard review (2026-07-08)](e257_reconciliation_scoreboard_review.md) -- Equal-weight AB/H/BB/SO as headline fidelity metric (not BF/FPS), exempt-but-display abandoned-PA residual, FPS plausibility floor widened to 30%
 
 ## Key Reference Documents
 
