@@ -44,8 +44,14 @@ See CLAUDE.md HTTP Request Discipline section.
 - Session factory: `src/http/session.py`, function `create_session()`
 - **NEVER create raw `httpx.Client()` or `requests.Session()` directly** -- always use `create_session()`
 
+## Working as a Dispatched Subagent
+
+- [dispatch-git-gotchas.md](dispatch-git-gotchas.md) -- `git rm` stages the deletion, hiding it from CR's unstaged `git diff` (hid 97 lines in E-256-03); new untracked files are invisible to `git diff --stat`; mid-epic the baseline is `git show :<file>`, never `HEAD:<file>`
+- [feedback_dead_symbol_deletion.md](feedback_dead_symbol_deletion.md) -- A lint-flagged unused binding can be an unfinished intent (found the WebAuthn `exclude_credentials` gap, E-256-08). Check for evidence outside the code; delete by literal block, never by symbol name (two `all_dates`, one live)
+
 ## Topic File Index
 
 - [endpoint-parsing-notes.md](endpoint-parsing-notes.md) -- Detailed parsing guidance for all GameChanger API endpoints: token health check, credential management (two-token architecture, JWT fields, headers), team-detail, pagination, player-stats, schedule (location polymorphism, full-day format), opponents (three UUID semantics), boxscore (asymmetric keys, sparse extras, batting order), plays (UUID templates, pitch sequences, lineup changes, edge cases), bridge endpoints, roster (URL pattern warning), public endpoints (no-auth client, record key normalization, avatar_url patterns)
 - [app-conventions.md](app-conventions.md) -- Database conventions (ip_outs, FK-safe orphans, splits), security rules, FastAPI patterns (response_model=None, Form, middleware), auth system (E-023: SessionMiddleware, magic links, DEV_USER_EMAIL bypass), test database pattern (auth-aware schema)
-- [testing-gotchas.md](testing-gotchas.md) -- In an epic worktree `pytest` loads WORKTREE src (validates refactors directly) but plain `python` loads MAIN/editable — exploit the asymmetry for pre-vs-post diffs; never trust a `pytest | tail` exit code (capture real RC); the `db` fixture is `:memory:` in test_report_plays.py but disk-backed in test_report_generator.py, so `db.backup()` onto the same path deadlocks
+- [module-global-seams.md](module-global-seams.md) -- Moving a function re-binds every module global it reads (`get_connection`, `_REPO_ROOT`) to the NEW module — detaching test patches. A seam behind a swallowed exception detaches with ZERO failures. Inject the dependency; never use failures as the search method.
+- [testing-gotchas.md](testing-gotchas.md) -- In an epic worktree `pytest` loads WORKTREE src (`_EditableFinder` is appended after `PathFinder`; needs `tests/__init__.py` + repo root on `sys.path`) — the spawn note says otherwise and is wrong; never trust a `pytest | tail` exit code (capture real RC); three ways a tool silently reports zero (`$(git ls-files)` doesn't word-split; ruff `include` filters walks not explicit paths; `.pyc` invisible to `git status`); ruff parses `# noqa` in prose; `db.backup()` onto the same path deadlocks in test_report_generator.py

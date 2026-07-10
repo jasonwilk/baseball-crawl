@@ -1,5 +1,9 @@
 # Code Reviewer Agent Memory
 
+## Measured Tool Behavior
+- [Tool gotchas](tool_gotchas.md) — tools that silently return the wrong answer: `checkout-index` and skip-worktree, ruff's `include` walk-filter, unsplit `$files` exiting 0, `git show HEAD:` mid-epic, `fnmatch` and `**`, `core.quotePath`, `git diff` blind to untracked.
+- [Worktree pytest loads the WORKTREE's src/](worktree_pytest_loads_the_worktree_src.md) — MEASURED: `PathFinder` precedes the appended `_EditableFinder`, and pytest puts the repo root on `sys.path[0]` because `tests/__init__.py` exists. The Test Execution Constraint in my own agent definition is FALSE. Two conditions carry it; verify before relying.
+
 ## Invariant Audit Patterns
 - [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).
 - [Spec audit: distrust "sole/canonical producer" claims](spec_audit_sibling_producer.md) — grep src/ for literal output forms + sibling `_derive_*`/`_ensure_*` helpers before trusting an epic's enumerated producer set (E-241: crawler `_derive_season_id` falsified "no code path produces YYYY-suffix" + broke migration durability).
@@ -9,6 +13,7 @@
 - [Spec audit: a column-DROP story asserting full-suite-green can't defer fixture cleanup](spec_audit_column_drop_fixture_atomicity.md) — a dropped column breaks all its INSERT fixtures atomically; if cleanup is assigned downstream while the drop story asserts pytest-green, that's a MUST-FIX scope/dependency finding. Grep `tests/` (incl. fixtures/*.sql) for the dropped element and count files (E-250: season_type in 29 files + 2 SQL fixtures).
 
 ## Refactor/Extraction Review Patterns
+- [A moved function resolves its NEW module's globals — every such name is a detached test seam](moved_function_resolves_new_module_globals.md) — implementers catch the constants and miss `get_connection`; trace INDIRECT call paths, and note a swallowing `try/except` at the call site makes "suite green" independent of "seam attached" (E-256-04: 43 tests would have hit the live 17MB dev DB).
 - [Extraction scope gap = a CALLER's existing characterization suite](refactor_extraction_caller_test_scope.md) — when a story relocates a seam, the unrun test is usually a caller's pre-existing transport-mocked suite that directly exercises the changed function; grep tests/ for the changed function + module, flag any importer not in the run list as MUST FIX (it's often the committed pre-vs-post pin the HARD gate rests on). E-247-03: test_report_generator.py's ~17 _resolve_gc_uuid tests.
 - [Removing an early-return before a recompute/dedup tail: prove no-op on a POPULATED DB](recompute_tail_noop_populated_db.md) — a fresh-DB no-op test is necessary but NOT sufficient; canonical_recompute DELETE+re-INSERTs from ALL existing per-game rows and dedup can merge, so on a populated/out-of-sync DB (post-backfill stale aggregates, pre-existing dupes) the unconditional tail mutates data. Demand a populated-DB characterization test; under a stat HARD gate, restore the early-return. (E-247-01 F1, caught by Codex Phase 4b after I missed it.)
 
