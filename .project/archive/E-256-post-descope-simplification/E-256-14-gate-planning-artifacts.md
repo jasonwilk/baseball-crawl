@@ -4,7 +4,7 @@
 [E-256: Post-Descope Simplification & Foundations](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the pre-commit hook runs `scripts/check_doc_pii.sh` (the literal-identifier denylist byte-gate) against staged `epics/` and `.project/` trees, closing the committed-artifact PII gap for the identifier class the pattern scanner structurally cannot detect (names, UUIDs, public_ids). This is the promotion of **IDEA-102**.
@@ -18,7 +18,13 @@ This is flow-review item 12b, and it **promotes IDEA-102** (`.project/ideas/IDEA
 - [ ] **AC-3**: Given `scripts/check_doc_pii.sh`, when this story is complete, then it is **NOT modified** — no `--staged` mode, no multi-tree argument; its single-directory contract, self-test, and four exit codes all survive (the wrapper lives in the hook, per Technical Notes §8).
 - [ ] **AC-4**: Given `src/safety/pii_patterns.py`, when this story is complete, then it is **NOT modified** — `SKIP_PATHS` still contains `epics/` and `.project/` (Technical Notes §6); a `git diff` shows zero changes to that file.
 - [ ] **AC-5**: Given a fresh clone with the denylist absent (the default, since `secrets/pii-denylist.txt` is gitignored), when a commit stages a planning artifact, then the hook does not block it (exit 3 announced) — the fresh clone remains committable.
-- [ ] **AC-6**: Given a staged planning artifact containing a denylisted identifier and a present real denylist, when the commit is attempted, then the hook blocks it (exit 1).
+- [ ] **AC-6** (PM-amended pre-dispatch, 2026-07-10): Given a staged planning artifact containing a denylisted identifier and a present denylist, when the commit is attempted, then the hook blocks it (exit 1).
+
+  **⚠️ MANDATORY — do NOT satisfy this AC with a real identifier.** Read literally, AC-6 asks you to write a **real denylisted identifier** (a real name, UUID, or `public_id`) into a test fixture in order to prove the gate keeps real identifiers out. **That commits the exact PII the gate exists to prevent, in the test for the gate.** It is a closed loop of the most literal kind, and it would be caught only by the gate it is testing — after the commit.
+
+  **Use the mechanism the repo already ships:** set `PII_DENYLIST_FILE` to a temporary denylist containing a **fabricated** identifier, or use the committed fake-sentinel `scripts/pii-denylist.example.txt`. The staged artifact under test carries the **same fabricated** identifier. Never `secrets/pii-denylist.txt`; never a real identifier — not in a fixture, not in a heredoc, not in an assertion message, not in a test name.
+
+  **AC-5 has the mirror-image hazard and is safe by construction**: it asserts the *absence* of a denylist (exit 3), so it needs no identifier at all. If satisfying AC-5 requires you to write one, you have misread it.
 
 ## Technical Approach
 CA designs the hook wrapper (per `feedback_domain_expert_designs`). The `git checkout-index` snapshot is the load-bearing design element — a working-tree grep in a commit hook is a false-pass hazard worse than the exit-3 inconclusive (Technical Notes §8). The hook lives in `.githooks/pre-commit` (where `.githooks/pre-commit:21` already runs the pattern scanner via `--stdin`). Cleanup the `mktemp -d` (`rm -rf`) unconditionally.

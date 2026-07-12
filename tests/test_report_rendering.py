@@ -769,3 +769,58 @@ class TestTotalBasesFormulaEquality:
         assert _total_bases({}) == 0
         assert _total_bases({"h": 2}) == 2  # 2 singles
         assert _total_bases({"h": 1, "hr": 1}) == 4  # a lone HR (h counts it)
+
+
+class TestGeneratedDateAgreesWithItself:
+    """E-256-05 AC-6: every rendered generation date is the venue-local one.
+
+    The coach sees the word "Generated" three times (the pitching annotation,
+    the trust-block line, the footer) plus a bare header date. E-256-05 moved the
+    rest-day anchor to the venue-local date; if the *display* sites kept slicing
+    the UTC instant, an evening report would disagree with itself about the day
+    it was generated -- two saying 07-09 and two saying 07-10. A uniform error is
+    invisible; a skew tells the coach the report is broken and gives him no way
+    to know which half to trust.
+
+    Falsifying input: a late-UTC `generated_at` whose UTC date is the NEXT day.
+    Restore `generated_at[:10]` at the header or the footer and the UTC date
+    reappears in the rendered HTML.
+
+    `expires_at` is deliberately still a UTC slice: an expiry is a UTC instant,
+    not a game-day anchor, and it carries no "Generated" label to disagree with.
+    """
+
+    _LATE_UTC = "2026-07-10T02:30:00Z"   # 21:30 on 07-09 in America/Chicago
+    _LOCAL = "2026-07-09"
+    _UTC_SLICE = "2026-07-10"
+
+    @pytest.fixture
+    def html(self) -> str:
+        return render_report(
+            _base_data(
+                generated_at=self._LATE_UTC,
+                expires_at="2026-07-24T02:30:00Z",
+                generation_date=self._LOCAL,
+            )
+        )
+
+    def test_utc_date_appears_nowhere(self, html: str) -> None:
+        """No rendered date is the UTC slice of the generation instant."""
+        assert self._UTC_SLICE not in html
+
+    def test_header_shows_the_local_date(self, html: str) -> None:
+        """:498 -- the bare header date, raw ISO by design (no format_date)."""
+        assert f'<div class="report-date">{self._LOCAL}</div>' in html
+
+    def test_footer_shows_the_local_date(self, html: str) -> None:
+        """:865 -- the footer, raw ISO by design."""
+        assert f"Generated {self._LOCAL}" in html
+
+    def test_the_two_format_date_sites_show_the_local_date(self, html: str) -> None:
+        """:665 and :855 -- rendered through the format_date filter."""
+        assert "Generated Jul 9" in html      # pitching annotation
+        assert "Generated: Jul 9" in html     # trust-block line
+
+    def test_expires_at_is_still_a_utc_slice(self, html: str) -> None:
+        """An expiry is a UTC instant, not a game-day anchor -- untouched."""
+        assert "Expires 2026-07-24" in html

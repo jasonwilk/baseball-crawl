@@ -426,3 +426,99 @@ def check_connection() -> bool:
     except sqlite3.Error:
         logger.exception("Database health check failed")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Season stat fetches (E-256-04 / TN-14 -- DE's relocation contract)
+# ---------------------------------------------------------------------------
+# Relocated VERBATIM out of ``src/reports/generator.py``'s ``_query_batting`` /
+# ``_query_pitching``. These are the PURE fetch halves; the presentation halves
+# (``_apply_name_cascade``, ``_compute_pitching_rates``) deliberately stay in
+# ``src/reports/`` -- dragging them here would make ``db.py`` import the report
+# layer while ``generator.py`` already imports FROM here, closing an import
+# cycle. The fetch-only split is what keeps the graph acyclic, not merely tidy.
+#
+# So ``get_season_pitching`` returns the RAW SUM columns and NOT the display
+# strings ``era`` / ``k9`` / ``whip`` / ``strike_pct``, which ``_compute_pitching_rates``
+# writes in the wrapper.
+#
+# E-259 rewrites ONLY the SQL bodies below (against ``player_game_*``, adding the
+# ``perspective_team_id`` filter and reproducing the ORDER BY over the new
+# projection). The move being *pure* is what makes that diff a legible
+# old-SQL-vs-new-SQL comparison, so do not "clean up" this SQL.
+
+
+def get_season_batting(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> list[dict]:
+    """Fetch raw season batting rows for a team-season (no presentation)."""
+    rows = conn.execute(
+        """
+        SELECT
+            p.player_id,
+            p.first_name || ' ' || p.last_name AS name,
+            COALESCE(psb.gp, 0) AS games,
+            COALESCE(psb.ab, 0) AS ab,
+            COALESCE(psb.h, 0) AS h,
+            COALESCE(psb.doubles, 0) AS doubles,
+            COALESCE(psb.triples, 0) AS triples,
+            COALESCE(psb.hr, 0) AS hr,
+            COALESCE(psb.rbi, 0) AS rbi,
+            COALESCE(psb.bb, 0) AS bb,
+            COALESCE(psb.so, 0) AS so,
+            COALESCE(psb.sb, 0) AS sb,
+            COALESCE(psb.cs, 0) AS cs,
+            COALESCE(psb.hbp, 0) AS hbp,
+            COALESCE(psb.shf, 0) AS shf,
+            tr.jersey_number
+        FROM player_season_batting psb
+        JOIN players p ON p.player_id = psb.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = psb.player_id
+            AND tr.team_id = psb.team_id
+            AND tr.season_id = psb.season_id
+        WHERE psb.team_id = ? AND psb.season_id = ?
+        ORDER BY
+            (COALESCE(psb.ab, 0) + COALESCE(psb.bb, 0)
+             + COALESCE(psb.hbp, 0) + COALESCE(psb.shf, 0)) DESC,
+            p.last_name ASC
+        """,
+        (team_id, season_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_season_pitching(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> list[dict]:
+    """Fetch raw season pitching rows for a team-season (no computed rates)."""
+    rows = conn.execute(
+        """
+        SELECT
+            p.player_id,
+            p.first_name || ' ' || p.last_name AS name,
+            COALESCE(psp.gp_pitcher, 0) AS games,
+            COALESCE(psp.ip_outs, 0) AS ip_outs,
+            COALESCE(psp.h, 0) AS h,
+            COALESCE(psp.er, 0) AS er,
+            COALESCE(psp.bb, 0) AS bb,
+            COALESCE(psp.so, 0) AS so,
+            COALESCE(psp.pitches, 0) AS pitches,
+            COALESCE(psp.total_strikes, 0) AS total_strikes,
+            p.throws,
+            tr.jersey_number,
+            psp.gs
+        FROM player_season_pitching psp
+        JOIN players p ON p.player_id = psp.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = psp.player_id
+            AND tr.team_id = psp.team_id
+            AND tr.season_id = psp.season_id
+        WHERE psp.team_id = ? AND psp.season_id = ?
+        ORDER BY
+            COALESCE(psp.ip_outs, 0) DESC,
+            p.last_name ASC
+        """,
+        (team_id, season_id),
+    ).fetchall()
+    return [dict(r) for r in rows]

@@ -34,11 +34,8 @@ from src.reports.recon_scoreboard import (
 )
 from src.api.db import get_connection
 from src.db.paths import resolve_db_path
-from src.reports.generator import (
-    cleanup_expired_reports,
-    generate_report,
-    list_reports,
-)
+from src.reports.generator import generate_report
+from src.reports.lifecycle import cleanup_expired_reports, list_reports
 
 app = typer.Typer(
     help="Scouting report generation and management.",
@@ -79,15 +76,20 @@ def generate(
     #               hard failure -- the link renders the coach-facing message)
     #   failed   -> hard failure, exit 1
     if result.outcome == "ready":
-        console.print(f"\n[green]Report generated successfully![/green]")
+        console.print("\n[green]Report generated successfully![/green]")
         console.print(f"  Title: {result.title}")
         console.print(f"  URL:   {result.url}")
+        # E-256-05 / AC-4. Machine-assertable shape for the Step 1d smoke
+        # (E-256-11): the literal prefix "Reference date:" followed by an
+        # ISO-8601 YYYY-MM-DD, which must equal today in the operating timezone.
+        if result.reference_date:
+            console.print(f"  Reference date: {result.reference_date}")
     elif result.outcome == "no_games":
         # Distinguish M=0 ("no games on record") from M>0/N=0 ("games were
         # played, but no box score data") so the operator message is honest --
         # mirrors the coach page's two-case copy (Phase 4b MEDIUM). N is 0 in
         # both no_games cases; M (completed_games) is the discriminator.
-        console.print(f"\n[yellow]No games to report yet.[/yellow]")
+        console.print("\n[yellow]No games to report yet.[/yellow]")
         m = result.completed_games
         if m:  # M > 0: games played, box-score data missing.
             console.print(
@@ -98,7 +100,7 @@ def generate(
             console.print("  No games on record for this team this season.")
         console.print(f"  URL:   {result.url}")
     else:
-        err_console.print(f"\n[red]Report generation failed.[/red]")
+        err_console.print("\n[red]Report generation failed.[/red]")
         err_console.print(f"  Error: {result.error_message}")
         raise typer.Exit(code=1)
 

@@ -9,16 +9,16 @@ Tests cover:
 - AC-3 (old): Idempotency via INSERT OR IGNORE
 - AC-4 (old): Stub player inserted for resolvable-but-unknown player_id
 - AC-5 (old): Null spray_chart_data games skipped with INFO log
-- AC-6 (old): load_all() scans scouting spray dirs and loads each
 - AC-7 (old): Games not in DB are skipped at DEBUG level (not an error)
 - AC-1 (E-165-01): Unresolvable players are skipped (not inserted, no stub)
 - AC-3 (E-165-01): Per-game DEBUG summary emitted only when unresolvable players exist
 - AC-5 (E-165-01): New tests -- unresolvable skip, DEBUG summary, mixed scenario
+
+All tests drive the loader through its in-memory ``load_from_data`` entry point.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -84,8 +84,6 @@ _OPP_GC_UUID = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
 _OWN_GC_UUID = "11112222-3333-4444-5555-666677778888"
 # DB season_id is derived from team metadata (season_year=2025, no program).
 _SEASON_ID = "2025"
-# Crawl-path season_id (used for file directory construction).
-_CRAWL_SEASON_ID = "2025-spring-hs"
 _GAME_ID = "event-game-001"
 _PLAYER_A = "player-aaa-001"
 _PLAYER_B = "player-bbb-002"
@@ -224,26 +222,13 @@ def _make_spray_json(
     }
 
 
-def _write_spray_file(
-    tmp_path: Path,
-    season_id: str,
-    public_id: str,
-    game_id: str,
-    payload: dict,
-) -> Path:
-    dest = tmp_path / season_id / "scouting" / public_id / "spray" / f"{game_id}.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(payload), encoding="utf-8")
-    return dest
-
-
 # ---------------------------------------------------------------------------
 # AC-1: Correct columns stored
 # ---------------------------------------------------------------------------
 
 
-def test_load_dir_inserts_correct_columns(
-    db: sqlite3.Connection, tmp_path: Path
+def test_load_from_data_inserts_correct_columns(
+    db: sqlite3.Connection,
 ) -> None:
     """BIP event is inserted with correct game_id, player_id, team_id, chart_type, etc."""
     _seed_season(db)
@@ -254,10 +239,8 @@ def test_load_dir_inserts_correct_columns(
     _seed_roster(db, _PLAYER_A, opp_id)  # player belongs to scouted team
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     row = db.execute(
         "SELECT game_id, player_id, team_id, chart_type, play_result, play_type, "
@@ -279,7 +262,7 @@ def test_load_dir_inserts_correct_columns(
 
 
 def test_defensive_chart_type_is_stored(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Defense section produces chart_type='defensive'."""
     _seed_season(db)
@@ -295,10 +278,8 @@ def test_defensive_chart_type_is_stored(
             "defense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]},
         }
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     row = db.execute("SELECT chart_type FROM spray_charts LIMIT 1").fetchone()
     assert row is not None
@@ -311,7 +292,7 @@ def test_defensive_chart_type_is_stored(
 
 
 def test_team_resolved_via_public_id_not_gc_uuid(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """team_id is resolved by public_id, not gc_uuid."""
     _seed_season(db)
@@ -323,29 +304,20 @@ def test_team_resolved_via_public_id_not_gc_uuid(
     _seed_roster(db, _PLAYER_A, opp_id)  # player belongs to scouted team
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 1
     row = db.execute("SELECT team_id FROM spray_charts LIMIT 1").fetchone()
     assert row[0] == opp_id
 
 
-def test_unknown_public_id_skips_directory(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """Directory for a public_id not in teams table produces empty result."""
+def test_unknown_public_id_skips_load(db: sqlite3.Connection) -> None:
+    """A public_id not in the teams table produces an empty result."""
     _seed_season(db)
-    _write_spray_file(
-        tmp_path, _SEASON_ID, "unknown-pub-id", _GAME_ID, _make_spray_json()
-    )
 
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(
-        tmp_path / _SEASON_ID / "scouting" / "unknown-pub-id" / "spray"
-    )
+    result = loader.load_from_data({_GAME_ID: _make_spray_json()}, "unknown-pub-id")
 
     assert result.loaded == 0
     assert result.errors == 0
@@ -357,10 +329,10 @@ def test_unknown_public_id_skips_directory(
 # ---------------------------------------------------------------------------
 
 
-def test_reloading_same_file_produces_zero_new_inserts(
-    db: sqlite3.Connection, tmp_path: Path
+def test_reloading_same_data_produces_zero_new_inserts(
+    db: sqlite3.Connection,
 ) -> None:
-    """Running load_dir twice on the same files inserts no duplicates."""
+    """Running load_from_data twice on the same payload inserts no duplicates."""
     _seed_season(db)
     opp_id = _seed_team(db, public_id=_PUBLIC_ID)
     own_id = _seed_team(db, name="Own")
@@ -369,12 +341,10 @@ def test_reloading_same_file_produces_zero_new_inserts(
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
-    spray_dir = tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
-    result1 = loader.load_dir(spray_dir)
-    result2 = loader.load_dir(spray_dir)
+    result1 = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
+    result2 = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result1.loaded == 1
     assert result2.loaded == 0
@@ -388,7 +358,7 @@ def test_reloading_same_file_produces_zero_new_inserts(
 
 
 def test_offense_and_defense_same_event_both_persist(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """AC-2/AC-4: with migration 009 applied, regenerating the spray load for a
     game whose event has BOTH offensive and defensive data stores both rows.
@@ -414,12 +384,8 @@ def test_offense_and_defense_same_event_both_persist(
             "defense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]},
         },
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(
-        tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
-    )
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 2
     assert result.errors == 0
@@ -436,7 +402,7 @@ def test_offense_and_defense_same_event_both_persist(
 
 
 def test_real_unique_collision_is_error_not_idempotent_skip(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """AC-3: a genuine UNIQUE collision is distinguished from a true no-op.
 
@@ -467,13 +433,9 @@ def test_real_unique_collision_is_error_not_idempotent_skip(
             "defense": {},
         },
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.WARNING):
-        result = loader.load_dir(
-            tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
-        )
+        result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 1
     assert result.errors == 1
@@ -498,7 +460,7 @@ def test_real_unique_collision_is_error_not_idempotent_skip(
 
 
 def test_resolvable_unknown_player_gets_stub_row(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Player in team_rosters but not in players table receives a stub players row."""
     _seed_season(db)
@@ -516,10 +478,8 @@ def test_resolvable_unknown_player_gets_stub_row(
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json(player_id=_PLAYER_A)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 1
     row = db.execute(
@@ -537,7 +497,7 @@ def test_resolvable_unknown_player_gets_stub_row(
 
 
 def test_null_spray_chart_data_skipped_with_info(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """File with spray_chart_data=null is skipped; nothing inserted."""
     _seed_season(db)
@@ -546,11 +506,10 @@ def test_null_spray_chart_data_skipped_with_info(
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
 
     payload = _make_spray_json(null_spray_data=True)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.INFO, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 0
     assert result.errors == 0
@@ -559,96 +518,28 @@ def test_null_spray_chart_data_skipped_with_info(
 
 
 # ---------------------------------------------------------------------------
-# AC-6 (old): load_all scans scouting spray dirs
+# LoadResult contract for an empty-payload no-op load
 # ---------------------------------------------------------------------------
 
 
-def test_load_all_processes_all_opponents(
-    db: sqlite3.Connection, tmp_path: Path
+def test_load_from_data_empty_payload_returns_empty_result(
+    db: sqlite3.Connection,
 ) -> None:
-    """load_all() processes spray files across multiple opponents and seasons."""
+    """An empty spray payload for a KNOWN team returns an empty LoadResult.
+
+    The team is seeded deliberately: without it the call takes the unknown-
+    ``public_id`` early return (already pinned by
+    ``test_unknown_public_id_skips_load``) and this would assert nothing about
+    the empty-payload path.
+    """
     _seed_season(db)
-    pub_a = "opp-a"
-    pub_b = "opp-b"
-    id_a = _seed_team(db, name="Opp A", public_id=pub_a)
-    id_b = _seed_team(db, name="Opp B", public_id=pub_b)
-    own_id = _seed_team(db, name="Own")
-
-    game_a = "event-game-a"
-    game_b = "event-game-b"
-    _seed_game(db, game_a, home_team_id=id_a, away_team_id=own_id)
-    _seed_game(db, game_b, home_team_id=id_b, away_team_id=own_id)
-    _seed_player(db, _PLAYER_A)
-    _seed_roster(db, _PLAYER_A, id_a)
-    _seed_roster(db, _PLAYER_A, id_b)
-
-    _write_spray_file(
-        tmp_path, _SEASON_ID, pub_a, game_a,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]}, "defense": {}}},
-    )
-    _write_spray_file(
-        tmp_path, _SEASON_ID, pub_b, game_b,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_2)]}, "defense": {}}},
-    )
+    _seed_team(db, public_id=_PUBLIC_ID)
 
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_all(tmp_path)
-
-    assert result.loaded == 2
-    assert result.errors == 0
-
-
-def test_load_all_with_public_id_filter(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """load_all(public_id=...) only loads the specified opponent's files."""
-    _seed_season(db)
-    pub_a = "opp-a"
-    pub_b = "opp-b"
-    id_a = _seed_team(db, name="Opp A", public_id=pub_a)
-    id_b = _seed_team(db, name="Opp B", public_id=pub_b)
-    own_id = _seed_team(db, name="Own")
-
-    game_a = "event-game-a"
-    game_b = "event-game-b"
-    _seed_game(db, game_a, home_team_id=id_a, away_team_id=own_id)
-    _seed_game(db, game_b, home_team_id=id_b, away_team_id=own_id)
-    _seed_player(db, _PLAYER_A)
-    _seed_roster(db, _PLAYER_A, id_a)
-    _seed_roster(db, _PLAYER_A, id_b)
-
-    _write_spray_file(
-        tmp_path, _SEASON_ID, pub_a, game_a,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_1)]}, "defense": {}}},
-    )
-    _write_spray_file(
-        tmp_path, _SEASON_ID, pub_b, game_b,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [_make_spray_event(_EVENT_GC_2)]}, "defense": {}}},
-    )
-
-    loader = ScoutingSprayChartLoader(db)
-    result = loader.load_all(tmp_path, public_id=pub_a)
-
-    assert result.loaded == 1
-    assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 1
-
-
-def test_load_all_returns_load_result_instance(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """load_all always returns a LoadResult instance."""
-    loader = ScoutingSprayChartLoader(db)
-    result = loader.load_all(tmp_path)
+    result = loader.load_from_data({}, _PUBLIC_ID)
     assert isinstance(result, LoadResult)
-
-
-def test_load_all_no_dirs_returns_empty_result(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """load_all with no spray dirs returns empty LoadResult (not an error)."""
-    loader = ScoutingSprayChartLoader(db)
-    result = loader.load_all(tmp_path)
     assert result.loaded == 0
+    assert result.skipped == 0
     assert result.errors == 0
 
 
@@ -658,7 +549,7 @@ def test_load_all_no_dirs_returns_empty_result(
 
 
 def test_game_not_in_db_is_skipped_at_debug(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Spray events for a game_id not in games table are skipped without error."""
     _seed_season(db)
@@ -666,11 +557,9 @@ def test_game_not_in_db_is_skipped_at_debug(
     # Intentionally NO game row seeded
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 0
     assert result.errors == 0
@@ -678,16 +567,14 @@ def test_game_not_in_db_is_skipped_at_debug(
 
 
 def test_game_not_in_db_does_not_count_as_error(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Missing game row is a defensive skip (not counted in errors)."""
     _seed_season(db)
     _seed_team(db, public_id=_PUBLIC_ID)
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.errors == 0
 
@@ -698,7 +585,7 @@ def test_game_not_in_db_does_not_count_as_error(
 
 
 def test_empty_defenders_stored_with_null_coords(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Empty defenders array (over-the-fence HR) stored with NULL x/y/position/error."""
     _seed_season(db)
@@ -715,10 +602,8 @@ def test_empty_defenders_stored_with_null_coords(
             "defense": {},
         }
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 1
     row = db.execute("SELECT x, y, fielder_position, error FROM spray_charts LIMIT 1").fetchone()
@@ -729,7 +614,7 @@ def test_empty_defenders_stored_with_null_coords(
 
 
 def test_defender_missing_location_skipped(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Event with defender present but no location x/y is skipped."""
     _seed_season(db)
@@ -751,17 +636,15 @@ def test_defender_missing_location_skipped(
     payload = {
         "spray_chart_data": {"offense": {_PLAYER_A: [bad_event]}, "defense": {}}
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 0
     assert result.skipped == 1
 
 
 def test_event_missing_id_field_is_skipped(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Spray event without 'id' field is skipped and counted."""
     _seed_season(db)
@@ -775,17 +658,15 @@ def test_event_missing_id_field_is_skipped(
     payload = {
         "spray_chart_data": {"offense": {_PLAYER_A: [bad_event]}, "defense": {}}
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 0
     assert result.skipped == 1
 
 
 def test_player_team_resolved_via_roster(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Player found in team_rosters is assigned their actual team_id."""
     _seed_season(db)
@@ -797,17 +678,15 @@ def test_player_team_resolved_via_roster(
     _seed_roster(db, _PLAYER_A, own_id)
 
     payload = _make_spray_json(player_id=_PLAYER_A)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     row = db.execute("SELECT team_id FROM spray_charts LIMIT 1").fetchone()
     assert row[0] == own_id
 
 
 def test_multi_game_across_season(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Multiple game files in spray dir are all loaded."""
     _seed_season(db)
@@ -822,27 +701,22 @@ def test_multi_game_across_season(
 
     ev1 = _make_spray_event(_EVENT_GC_1)
     ev2 = _make_spray_event(_EVENT_GC_2)
-    _write_spray_file(
-        tmp_path, _SEASON_ID, _PUBLIC_ID, game_1,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [ev1]}, "defense": {}}},
-    )
-    _write_spray_file(
-        tmp_path, _SEASON_ID, _PUBLIC_ID, game_2,
-        {"spray_chart_data": {"offense": {_PLAYER_A: [ev2]}, "defense": {}}},
-    )
 
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data(
+        {
+            game_1: {"spray_chart_data": {"offense": {_PLAYER_A: [ev1]}, "defense": {}}},
+            game_2: {"spray_chart_data": {"offense": {_PLAYER_A: [ev2]}, "defense": {}}},
+        },
+        _PUBLIC_ID,
+    )
 
     assert result.loaded == 2
     assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 2
 
 
-def test_season_id_derived_from_team_metadata(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """season_id in spray_charts row comes from team metadata, not the directory path."""
-    crawl_season = "2024-fall-hs"
+def test_season_id_derived_from_team_metadata(db: sqlite3.Connection) -> None:
+    """season_id in spray_charts row comes from team metadata, not the payload."""
     # Team has season_year=2025 (default from _seed_team), so DB season_id = "2025".
     db.execute(
         "INSERT OR IGNORE INTO seasons (season_id, name, year) "
@@ -857,15 +731,13 @@ def test_season_id_derived_from_team_metadata(
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json()
-    # File written under a DIFFERENT crawl-path season than the DB season_id.
-    _write_spray_file(tmp_path, crawl_season, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / crawl_season / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     row = db.execute("SELECT season_id FROM spray_charts LIMIT 1").fetchone()
     assert row is not None
-    # DB season_id comes from team metadata, not the crawl path.
+    # DB season_id comes from team metadata, not the crawl payload.
     assert row[0] == _SEASON_ID
 
 
@@ -875,7 +747,7 @@ def test_season_id_derived_from_team_metadata(
 
 
 def test_unresolvable_player_events_are_skipped(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """Player not in team_rosters: all events skipped, no spray row, no stub player row."""
     _seed_season(db)
@@ -885,10 +757,8 @@ def test_unresolvable_player_events_are_skipped(
     # _PLAYER_UNKNOWN not seeded in players or team_rosters
 
     payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
-    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 0
     assert result.skipped == 1
@@ -900,7 +770,7 @@ def test_unresolvable_player_events_are_skipped(
 
 
 def test_unresolvable_player_no_per_player_warning(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Unresolvable player emits no per-player WARNING; only a DEBUG summary is used."""
     _seed_season(db)
@@ -910,11 +780,9 @@ def test_unresolvable_player_no_per_player_warning(
     # _PLAYER_UNKNOWN not in team_rosters
 
     payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     # No per-player WARNING for unresolvable player (TN-4)
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -923,7 +791,7 @@ def test_unresolvable_player_no_per_player_warning(
 
 
 def test_per_game_debug_summary_emitted_when_unresolvable(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """When a game has unresolvable players, exactly one DEBUG summary line is emitted."""
     _seed_season(db)
@@ -933,11 +801,9 @@ def test_per_game_debug_summary_emitted_when_unresolvable(
     # _PLAYER_UNKNOWN not in team_rosters
 
     payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     debug_lines = [
         r for r in caplog.records
@@ -948,7 +814,7 @@ def test_per_game_debug_summary_emitted_when_unresolvable(
 
 
 def test_no_debug_summary_when_all_players_resolvable(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """When all players are resolvable, no unresolvable-player DEBUG line is emitted."""
     _seed_season(db)
@@ -959,11 +825,9 @@ def test_no_debug_summary_when_all_players_resolvable(
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json(player_id=_PLAYER_A)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     debug_lines = [
         r for r in caplog.records
@@ -973,7 +837,7 @@ def test_no_debug_summary_when_all_players_resolvable(
 
 
 def test_mixed_resolvable_and_unresolvable_players(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Game with resolvable and unresolvable players: correct counts, one DEBUG summary."""
     _seed_season(db)
@@ -993,11 +857,9 @@ def test_mixed_resolvable_and_unresolvable_players(
             "defense": {},
         }
     }
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
     loader = ScoutingSprayChartLoader(db)
     with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+        result = loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     assert result.loaded == 1    # _PLAYER_A's event inserted
     assert result.skipped == 1   # _PLAYER_UNKNOWN's event skipped
@@ -1018,7 +880,7 @@ def test_mixed_resolvable_and_unresolvable_players(
 
 
 def test_scouting_spray_rows_have_perspective_team_id(
-    db: sqlite3.Connection, tmp_path: Path
+    db: sqlite3.Connection,
 ) -> None:
     """AC-2: Every scouting spray row has perspective_team_id set to the scouted team's PK."""
     _seed_season(db)
@@ -1029,10 +891,9 @@ def test_scouting_spray_rows_have_perspective_team_id(
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     row = db.execute(
         "SELECT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
@@ -1042,9 +903,7 @@ def test_scouting_spray_rows_have_perspective_team_id(
     assert row[0] == opp_id, f"Expected perspective_team_id={opp_id} (scouted team), got {row[0]}"
 
 
-def test_scouting_spray_two_perspectives_coexist(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
+def test_scouting_spray_two_perspectives_coexist(db: sqlite3.Connection) -> None:
     """AC-3: Same event_gc_id from two different scouting perspectives coexists."""
     _seed_season(db)
     opp_id = _seed_team(db, public_id=_PUBLIC_ID, gc_uuid=_OPP_GC_UUID)
@@ -1057,9 +916,8 @@ def test_scouting_spray_two_perspectives_coexist(
     payload = _make_spray_json()
 
     # Load from scouted team perspective.
-    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_from_data({_GAME_ID: payload}, _PUBLIC_ID)
 
     # Create a second scouted team with a different public_id.
     opp2_public_id = "opp-public-id-002"
@@ -1068,8 +926,7 @@ def test_scouting_spray_two_perspectives_coexist(
     _seed_game(db, _GAME_ID + "-2", home_team_id=own_id, away_team_id=opp2_id)
 
     payload2 = _make_spray_json()
-    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, opp2_public_id, _GAME_ID + "-2", payload2)
-    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / opp2_public_id / "spray")
+    loader.load_from_data({_GAME_ID + "-2": payload2}, opp2_public_id)
 
     rows = db.execute(
         "SELECT DISTINCT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
@@ -1086,34 +943,6 @@ def test_scouting_spray_two_perspectives_coexist(
 
 class TestScoutingSprayPerspectiveGate:
     """E-223-03 AC-2/AC-3/AC-4: Whole-game perspective gate for scouting spray."""
-
-    def test_skips_already_loaded_perspective_via_load_dir(
-        self, db: sqlite3.Connection, tmp_path: Path
-    ) -> None:
-        """AC-2/AC-4: load_dir skips game when perspective already loaded."""
-        own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
-        opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
-        _seed_season(db)
-        _seed_game(db, _GAME_ID, own_id, opp_id)
-        _seed_player(db, _PLAYER_A)
-        _seed_roster(db, _PLAYER_A, opp_id)
-
-        event1 = _make_spray_event(_EVENT_GC_1)
-        event2 = _make_spray_event(_EVENT_GC_2)
-        payload = _make_spray_json(_PLAYER_A, events=[event1, event2])
-        spray_dir = tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
-        _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
-        loader = ScoutingSprayChartLoader(db)
-        result1 = loader.load_dir(spray_dir)
-        assert result1.loaded == 2
-
-        # Second load: perspective gate should fire
-        result2 = loader.load_dir(spray_dir)
-        assert result2.skipped == 1, (
-            f"Expected game-level skip (1), got skipped={result2.skipped}"
-        )
-        assert result2.loaded == 0
 
     def test_skips_already_loaded_perspective_via_load_from_data(
         self, db: sqlite3.Connection
@@ -1238,14 +1067,14 @@ class TestScoutingSprayPerspectiveGate:
 
 
 # ---------------------------------------------------------------------------
-# E-247-01: non-list-event drift resolution (AC-2 / AC-3)
+# E-247-01: non-list-event handling (AC-2 / AC-3)
 # ---------------------------------------------------------------------------
 #
-# The in-memory (_load_game_data) and disk (_load_game_file) paths previously
-# disagreed on a malformed (non-list) ``events`` value: the disk path logged a
-# WARNING, the in-memory path skipped silently.  Collapsing the twins unified
-# this to a single LOG-then-skip behavior in the shared core.  These tests pin
-# the chosen behavior on BOTH entry points.
+# A malformed (non-list) ``events`` value is LOGGED as a WARNING and skipped,
+# never crashed on.  E-247-01 chose this behavior when it collapsed the twin
+# in-memory/disk paths, which had disagreed (the disk path warned, the in-memory
+# path skipped silently); E-256-01 then deleted the disk path entirely, so this
+# test pins the behavior on the sole remaining entry point.
 
 
 def _make_non_list_events_payload() -> dict:
@@ -1287,26 +1116,3 @@ def test_non_list_events_logs_warning_via_load_from_data(
     assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 0
 
 
-def test_non_list_events_logs_warning_via_load_dir(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """AC-2/AC-3: the disk path routes through the same core and logs the same WARNING."""
-    own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
-    opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
-    _seed_season(db)
-    _seed_game(db, _GAME_ID, own_id, opp_id)
-
-    _write_spray_file(
-        tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, _make_non_list_events_payload()
-    )
-
-    loader = ScoutingSprayChartLoader(db)
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
-
-    assert result.skipped == 1
-    assert result.loaded == 0
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert any(
-        "is not a list" in r.message and _PLAYER_A in r.message for r in warnings
-    ), "Expected a WARNING about the non-list events value"

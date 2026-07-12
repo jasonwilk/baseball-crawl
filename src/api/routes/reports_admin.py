@@ -13,12 +13,11 @@ All routes require admin access, granted via the ``ADMIN_EMAIL`` env var
 imports the canonical ``user_is_admin`` predicate from ``src.api.auth`` so
 exactly one copy of the admin check exists.
 
-This module deliberately imports NONE of the deletion-set modules
-(``src.pipeline.trigger``, ``src.gamechanger.bridge``,
-``src.gamechanger.team_resolver``, ``src.db.merge``) -- it was extracted out of
-the former ``src/api/routes/admin.py`` precisely to sever those coupling chains
-(E-239-01).  The dead team-management, opponent-resolution, and program-admin
-routes did NOT carry over.
+This module was extracted out of the former ``src/api/routes/admin.py`` precisely
+to sever its coupling chains onto the E-239 deletion set (E-239-01); the dead
+team-management, opponent-resolution, and program-admin routes did NOT carry
+over.  Every module in that deletion set has since been removed outright (E-239,
+E-246, E-256), so those chains can no longer be re-formed by accident.
 
 Routes:
     GET  /admin/users                 -- List all users
@@ -50,6 +49,7 @@ from src.api.auth import user_is_admin
 from src.api.db import get_connection, list_reports_with_runs
 from src.api.helpers import get_app_url
 from src.gamechanger.url_parser import parse_team_url
+from src.util.timezone import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -537,10 +537,7 @@ def _get_all_reports() -> list[dict[str, Any]]:
     ``error_message`` was already selected here.
     Run columns are NULL for legacy reports with no run row (LEFT join).
     """
-    # Shared UTC-iso helper (E-247-05 AC-4) -- identical format to all callers.
-    from src.reports.generator import _utcnow_iso
-
-    now = _utcnow_iso()
+    now = utcnow_iso()
     base_url = get_app_url()
     with closing(get_connection()) as conn:
         result = list_reports_with_runs(conn)
@@ -575,7 +572,10 @@ def _delete_report(report_id: int) -> None:
     checks guard conditions and cascade-deletes the team and all dependent
     data when the team is not independently tracked.
     """
-    from src.reports.generator import (
+    # E-256-04 / TN-13: the deletion cascade lives in the client-free lifecycle
+    # module, so this path no longer pulls httpx/jinja2 in transitively through
+    # the generation stack just to delete a team.
+    from src.reports.lifecycle import (
         cascade_delete_team,
         is_team_eligible_for_cleanup,
     )

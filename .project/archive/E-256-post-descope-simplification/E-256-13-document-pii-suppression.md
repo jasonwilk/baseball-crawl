@@ -4,7 +4,7 @@
 [E-256: Post-Descope Simplification & Foundations](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/pii-safety.md` honestly documents the two PII-scanner suppression mechanisms, their true scope (both suppress ALL patterns including credentials, not just shape heuristics), and a **choice hierarchy** telling authors which instrument to reach for. It also records that the `tests/**` shape-exemption was rejected on evidence and that a real credential behind either marker is a MUST FIX.

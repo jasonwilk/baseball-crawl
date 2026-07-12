@@ -75,7 +75,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     # also rides the opportunistic cleanup_expired_reports path at report-generation
     # time; startup covers the restart case.)
     try:
-        from src.reports.generator import reap_stale_generating_reports
+        from src.reports.lifecycle import reap_stale_generating_reports
 
         reaped = reap_stale_generating_reports()
         if reaped.reaped:

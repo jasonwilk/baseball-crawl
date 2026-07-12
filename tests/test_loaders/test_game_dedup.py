@@ -1,6 +1,6 @@
 """Tests for game dedup logic in GameLoader (E-216-01).
 
-Verifies that GameLoader.load_file() detects when a game already exists
+Verifies that GameLoader.load_payload() detects when a game already exists
 for the same date and team pair (in either home/away order) and reuses
 the existing game_id for all stat upserts.
 
@@ -15,7 +15,6 @@ Test coverage:
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -113,7 +112,7 @@ def _make_loader(db: sqlite3.Connection) -> GameLoader:
         db,
         owned_team_ref=TeamRef(id=pk, gc_uuid=_OWN_TEAM_UUID, public_id=_OWN_TEAM_SLUG),
     )
-    # ensure_season_row is normally called by load_all(); load_file() skips it.
+    # ScoutingLoader normally ensures the season row; load_payload() skips it.
     ensure_season_row(db, loader._season_id)
     return loader
 
@@ -205,16 +204,9 @@ def _make_boxscore() -> dict:
     }
 
 
-def _write_boxscore(tmp_path: Path, data: dict, stream_id: str = _STREAM_ID_1) -> Path:
-    dest = tmp_path / f"{stream_id}.json"
-    dest.write_text(json.dumps(data), encoding="utf-8")
-    return dest
-
-
 def _load_first_game(
     db: sqlite3.Connection,
     loader: GameLoader,
-    tmp_path: Path,
     *,
     start_time: str | None = None,
     owning_score: int = 5,
@@ -228,8 +220,7 @@ def _load_first_game(
         owning_score=owning_score,
         opponent_score=opponent_score,
     )
-    path = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_1)
-    loader.load_file(path, summary)
+    loader.load_payload(_make_boxscore(), summary)
 
 
 # ---------------------------------------------------------------------------
@@ -238,17 +229,16 @@ def _load_first_game(
 
 
 def test_dedup_reuses_existing_game_id(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """When a game already exists for the same date and team pair, the new
     boxscore reuses the existing game_id -- no duplicate games row created."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path)
+    _load_first_game(db, loader)
 
     # Second load: different event_id, same date/teams/score.
     summary2 = _make_summary(event_id=_EVENT_ID_2, game_stream_id=_STREAM_ID_2)
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 1, f"Expected 1 game row (dedup), got {game_count}"
@@ -258,7 +248,7 @@ def test_dedup_reuses_existing_game_id(
 
 
 def test_dedup_collapse_still_works_with_backstop_index(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """E-253-05 AC-4: with migration 010's partial UNIQUE backstop active, the
     existing SELECT-then-INSERT cross-perspective collapse still yields ONE row
@@ -271,13 +261,12 @@ def test_dedup_collapse_still_works_with_backstop_index(
     """
     _apply_migration_010(db)
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path)  # game_stream_id = _STREAM_ID_1
+    _load_first_game(db, loader)  # game_stream_id = _STREAM_ID_1
 
     # Second perspective of the same real game: different event_id + stream_id,
     # same date/teams/score -> dedup collapses to the canonical row.
     summary2 = _make_summary(event_id=_EVENT_ID_2, game_stream_id=_STREAM_ID_2)
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
     row = db.execute("SELECT game_id, game_stream_id FROM games").fetchone()
@@ -286,15 +275,14 @@ def test_dedup_collapse_still_works_with_backstop_index(
 
 
 def test_dedup_stats_use_canonical_game_id(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Stat rows are keyed to the existing (canonical) game_id, not the new one."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path)
+    _load_first_game(db, loader)
 
     summary2 = _make_summary(event_id=_EVENT_ID_2, game_stream_id=_STREAM_ID_2)
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     batting_ids = db.execute(
         "SELECT DISTINCT game_id FROM player_game_batting"
@@ -313,13 +301,13 @@ def test_dedup_stats_use_canonical_game_id(
 
 
 def test_dedup_order_insensitive_team_matching(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Dedup detects the match even when home/away are swapped between the
     existing game and the incoming boxscore."""
     loader = _make_loader(db)
     # First game: own team is HOME.
-    _load_first_game(db, loader, tmp_path)
+    _load_first_game(db, loader)
 
     # Second game: own team is AWAY (swapped perspective), same date and teams.
     summary2 = _make_summary(
@@ -329,8 +317,7 @@ def test_dedup_order_insensitive_team_matching(
         owning_score=5,
         opponent_score=2,
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 1, f"Expected dedup to 1 game, got {game_count}"
@@ -342,20 +329,19 @@ def test_dedup_order_insensitive_team_matching(
 
 
 def test_doubleheader_different_start_time_no_dedup(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Two games on the same date between the same teams with different
     start_time values are NOT deduped (doubleheader)."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path, start_time="2025-05-10T14:00:00.000Z")
+    _load_first_game(db, loader, start_time="2025-05-10T14:00:00.000Z")
 
     summary2 = _make_summary(
         event_id=_EVENT_ID_2,
         game_stream_id=_STREAM_ID_2,
         start_time="2025-05-10T18:00:00.000Z",
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 2, f"Expected 2 games (doubleheader), got {game_count}"
@@ -367,13 +353,13 @@ def test_doubleheader_different_start_time_no_dedup(
 
 
 def test_doubleheader_different_score_null_start_time_no_dedup(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """When start_time is NULL on both sides but total scores differ,
     the games are NOT deduped (doubleheader distinguished by score)."""
     loader = _make_loader(db)
     # First: 5-2 (total 7), no start_time.
-    _load_first_game(db, loader, tmp_path, owning_score=5, opponent_score=2)
+    _load_first_game(db, loader, owning_score=5, opponent_score=2)
 
     # Second: 3-1 (total 4), no start_time.
     summary2 = _make_summary(
@@ -383,8 +369,7 @@ def test_doubleheader_different_score_null_start_time_no_dedup(
         opponent_score=1,
         start_time=None,
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 2, f"Expected 2 games (doubleheader by score), got {game_count}"
@@ -396,12 +381,12 @@ def test_doubleheader_different_score_null_start_time_no_dedup(
 
 
 def test_null_start_time_same_score_triggers_dedup(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """When start_time is NULL on both sides and score totals match,
     the game IS deduped."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path, owning_score=5, opponent_score=2)
+    _load_first_game(db, loader, owning_score=5, opponent_score=2)
 
     # Second: same 5-2 score, no start_time.
     summary2 = _make_summary(
@@ -411,8 +396,7 @@ def test_null_start_time_same_score_triggers_dedup(
         opponent_score=2,
         start_time=None,
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 1, f"Expected dedup to 1 game, got {game_count}"
@@ -424,17 +408,16 @@ def test_null_start_time_same_score_triggers_dedup(
 
 
 def test_dedup_logs_info_message(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture,
 ) -> None:
     """An INFO-level log message identifies both game_ids on dedup redirect."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path)
+    _load_first_game(db, loader)
 
     summary2 = _make_summary(event_id=_EVENT_ID_2, game_stream_id=_STREAM_ID_2)
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
 
     with caplog.at_level(logging.INFO, logger="src.gamechanger.loaders.game_loader"):
-        loader.load_file(path2, summary2)
+        loader.load_payload(_make_boxscore(), summary2)
 
     dedup_msgs = [r for r in caplog.records if "Dedup" in r.message]
     assert len(dedup_msgs) >= 1, "Expected at least one Dedup INFO log message"
@@ -450,11 +433,11 @@ def test_dedup_logs_info_message(
 
 
 def test_different_date_no_dedup(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Games on different dates between the same teams are NOT deduped."""
     loader = _make_loader(db)
-    _load_first_game(db, loader, tmp_path)
+    _load_first_game(db, loader)
 
     # Second game on a different date.
     summary2 = _make_summary(
@@ -462,8 +445,7 @@ def test_different_date_no_dedup(
         game_stream_id=_STREAM_ID_2,
         game_date="2025-05-11",
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     game_count = db.execute("SELECT COUNT(*) FROM games").fetchone()[0]
     assert game_count == 2
@@ -478,7 +460,7 @@ _STREAM_ID_3 = "stream-ccc-003"
 
 
 def test_dedup_skips_ambiguous_finds_real_match(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """When multiple same-date/team-pair rows exist and one is ambiguous
     (NULL start_time/scores) while another is a real match, the dedup
@@ -487,7 +469,7 @@ def test_dedup_skips_ambiguous_finds_real_match(
 
     # Load game 1: has start_time, score 5-2.
     _load_first_game(
-        db, loader, tmp_path,
+        db, loader,
         start_time="2025-05-10T14:00:00.000Z",
         owning_score=5,
         opponent_score=2,
@@ -501,8 +483,7 @@ def test_dedup_skips_ambiguous_finds_real_match(
         owning_score=0,
         opponent_score=0,
     )
-    path2 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_2)
-    loader.load_file(path2, summary2)
+    loader.load_payload(_make_boxscore(), summary2)
 
     # Should have 2 games now (game 1 and game 2 are distinct -- different
     # start_time and different scores).
@@ -517,8 +498,7 @@ def test_dedup_skips_ambiguous_finds_real_match(
         owning_score=5,
         opponent_score=2,
     )
-    path3 = _write_boxscore(tmp_path, _make_boxscore(), stream_id=_STREAM_ID_3)
-    loader.load_file(path3, summary3)
+    loader.load_payload(_make_boxscore(), summary3)
 
     # Still 2 games -- game 3 deduped into game 1.
     assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 2
@@ -536,7 +516,7 @@ def test_dedup_skips_ambiguous_finds_real_match(
 
 
 def test_cross_perspective_dedup_ignores_start_time_mismatch(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """When two tracked teams' scouts load the same real game with identical
     scores but different start_time values, the second load must dedup via
@@ -552,7 +532,7 @@ def test_cross_perspective_dedup_ignores_start_time_mismatch(
     """
     loader_a = _make_loader(db)
     _load_first_game(
-        db, loader_a, tmp_path,
+        db, loader_a,
         start_time="2025-05-10T14:00:00.000Z",
         owning_score=11,
         opponent_score=1,
@@ -616,14 +596,14 @@ def test_cross_perspective_dedup_ignores_start_time_mismatch(
 
 
 def test_cross_perspective_no_dedup_when_scores_disagree(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Cross-perspective candidates with mismatched score totals are NOT
     deduped. Score disagreement across perspectives is a data-quality signal
     worth surfacing as distinct rows, not silently collapsed."""
     loader_a = _make_loader(db)
     _load_first_game(
-        db, loader_a, tmp_path,
+        db, loader_a,
         start_time="2025-05-10T14:00:00.000Z",
         owning_score=11,
         opponent_score=1,
@@ -664,7 +644,7 @@ def test_cross_perspective_no_dedup_when_scores_disagree(
 
 
 def test_cross_perspective_no_dedup_when_scoreline_differs_but_total_matches(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """A real doubleheader where two distinct games happen to have the same
     total score (e.g. 11-1 and 10-2 both total 12) must NOT be collapsed.
@@ -676,7 +656,7 @@ def test_cross_perspective_no_dedup_when_scoreline_differs_but_total_matches(
     """
     loader_a = _make_loader(db)
     _load_first_game(
-        db, loader_a, tmp_path,
+        db, loader_a,
         start_time="2025-05-10T14:00:00.000Z",
         owning_score=11,
         opponent_score=1,

@@ -4,7 +4,7 @@
 [E-256: Post-Descope Simplification & Foundations](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the epic's `docs/admin/` operator documentation is updated in one docs-writer-owned pass: (1) a required, scheduled backup step that writes OFF the live-DB disk; (2) the Step 1d closure-smoke procedure reference in `production-deployment.md`; (3) the corrected `architecture.md` seeds line; and (4) eviction of the `backfill-appearance-order` runbook section (AC-6, the `docs/admin/` slice of the epic's backfill eviction). This is the single home for the epic's `docs/admin/` edits, consolidated here per CA's Q1 routing rule (docs/admin is docs-writer's domain, so the cross-domain edits from stories 06, 11, and 02 land here rather than as ACs in non-docs-writer stories).

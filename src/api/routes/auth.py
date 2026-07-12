@@ -637,18 +637,6 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
 
     rp_id = _get_webauthn_rp_id()
 
-    # Fetch existing credentials to exclude from registration options.
-    existing_creds: list[bytes] = []
-    try:
-        with closing(get_connection()) as conn:
-            cursor = conn.execute(
-                "SELECT credential_id FROM passkey_credentials WHERE user_id = ?",
-                (user_id,),
-            )
-            existing_creds = [row[0] for row in cursor.fetchall()]
-    except sqlite3.Error:
-        logger.exception("DB error fetching existing passkey credentials for user %d", user_id)
-
     registration_options = generate_registration_options(
         rp_id=rp_id,
         rp_name="Baseball Stats",

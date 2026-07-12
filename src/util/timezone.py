@@ -117,3 +117,29 @@ def derive_local_date(start_datetime: str | None, tz_name: str | None) -> str | 
                 tz_name,
             )
     return dt.date().isoformat()
+
+
+# The canonical wire format for timestamps this project WRITES (E-256-03).
+# Second precision, no fractional part. Load-bearing: ``reports.generated_at``
+# and ``reports.expires_at`` are compared LEXICALLY (not parsed) -- by
+# ``cleanup_expired_reports``' SQL ``expires_at < ?``, by the stale-'generating'
+# reaper's ``generated_at < ?``, and by the plain string ``<`` / ``>`` in
+# ``reports_admin`` and ``morning_run``. Lexical order equals chronological
+# order ONLY while every operand shares one format, so both sides of those
+# comparisons must be produced from this constant.
+#
+# Do NOT confuse this with GameChanger's WIRE format (``...T16:00:00.000Z``,
+# seen in ``start_ts`` / ``last_scoring_update``), which we only ever READ.
+UTC_ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def utcnow_iso() -> str:
+    """Return the current UTC instant as a :data:`UTC_ISO_FORMAT` string.
+
+    The single implementation (E-256-03). It replaces the two divergent private
+    ``_utcnow_iso`` copies in ``src.reports.generator`` and
+    ``src.gamechanger.crawlers.scouting``, which differed by a constant
+    ``".000"`` fractional part -- enough to invert lexical ordering between two
+    same-second timestamps, since ``"."`` (0x2E) sorts before ``"Z"`` (0x5A).
+    """
+    return datetime.now(timezone.utc).strftime(UTC_ISO_FORMAT)

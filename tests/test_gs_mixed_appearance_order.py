@@ -10,10 +10,18 @@ recompute derives games-started (``gs``) with:
 
 so in a MIXED scope (some rows populated, some legacy NULL) the ``MAX`` is
 non-NULL and the NULL rows fall through the inner CASE to 0 -- they count as
-definite NON-starts and can silently UNDERCOUNT served GS until a backfill +
-recompute runs. That behavior is documented as intentional and self-heals at
-generation time; these tests PIN it so a future refactor cannot silently change
-it without failing here.
+definite NON-starts and can silently UNDERCOUNT served GS. That behavior is
+documented as intentional and self-heals at generation time; these tests PIN it
+so a future refactor cannot silently change it without failing here.
+
+HISTORICAL NOTE (E-256-02): the original remediation for an undercounting mixed
+scope was ``bb data backfill-appearance-order`` -> ``canonical_recompute`` ->
+``bb report verify-aggregates``.  That command is DELETED and no backfill
+mechanism remains: the live DB holds zero NULL ``appearance_order`` rows and the
+game loader populates the column on every load, so a mixed scope can no longer
+arise from ingestion.  These tests still stand -- they pin the recompute's
+CASE-expression semantics for the legacy rows a stale DB may still carry, and
+the self-heal at generation time is now the only remedy.
 
 Per ``.claude/rules/data-model.md`` ("Idempotent-recompute characterization
 tests need a populated, stale-disagreeing fixture"), each test seeds a stored
@@ -118,7 +126,8 @@ def test_mixed_appearance_order_null_rows_count_as_zero(db: sqlite3.Connection) 
     assert games_tracked == 3, "all three game rows are tracked"
     assert gs == 1, (
         "documented mixed-scope semantics: only appearance_order=1 rows count; "
-        "the legacy NULL row contributes 0 (silent undercount until backfill)"
+        "the legacy NULL row contributes 0 (silent undercount; self-heals at "
+        "generation time -- see the module docstring's HISTORICAL NOTE)"
     )
 
 

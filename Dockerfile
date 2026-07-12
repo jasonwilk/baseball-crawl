@@ -35,10 +35,7 @@ RUN useradd --uid 1000 --create-home --shell /bin/bash appuser
 # Create the data directory inside the image as a mount point fallback.
 # At runtime, docker compose mounts ./data here, shadowing this directory.
 # Owned by appuser so the non-root process can read/write the SQLite database.
-RUN mkdir -p ./data/seeds && chown -R appuser:appuser ./data
-
-# Copy seed data so it is available inside the container.
-COPY data/seeds/ ./data/seeds/
+RUN mkdir -p ./data && chown -R appuser:appuser ./data
 
 # Ensure appuser owns the entire /app tree (source + data).
 RUN chown -R appuser:appuser /app

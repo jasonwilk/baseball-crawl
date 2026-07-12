@@ -5,9 +5,12 @@ Fallback: python -m src.cli
 
 Sub-command groups:
   bb creds   -- credential management (import, check)
-  bb data    -- reconcile, dedup-players, backfill-appearance-order
+  bb data    -- reconcile, dedup-players, backfill-game-dates,
+                reload-annotated-pitches, fix-self-games
   bb proxy   -- proxy report, endpoints, refresh-headers, review
   bb db      -- database backup, reset
+  bb report  -- generate, list, cleanup, verify-aggregates,
+                reconcile-scoreboard, morning-run, map-opponent
   bb status  -- system health check (top-level command)
 """
 

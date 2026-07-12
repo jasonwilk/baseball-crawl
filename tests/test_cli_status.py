@@ -34,8 +34,6 @@ def _invoke_status(
     *,
     web_result: tuple[int, str] = (0, "valid -- logged in as Jason Smith"),
     mobile_result: tuple[int, str] = (0, "valid -- logged in as Jason Smith"),
-    crawled_at: str | None = "2026-03-05T14:30:00Z",
-    total_files: int = 47,
     db_exists: bool = True,
     db_display: str = "data/app.db (2.4 MB)",
     sessions: dict | None = None,
@@ -49,9 +47,6 @@ def _invoke_status(
 
     with (
         patch("src.cli.status.check_single_profile", side_effect=fake_check_single),
-        patch(
-            "src.cli.status._get_last_crawl", return_value=(crawled_at, total_files)
-        ),
         patch(
             "src.cli.status._get_db_info", return_value=(db_exists, db_display)
         ),
@@ -119,33 +114,6 @@ class TestCredentialDisplay:
         """All valid creds result in exit 0."""
         result = _invoke_status()
         assert result.exit_code == 0
-
-
-# ---------------------------------------------------------------------------
-# Last crawl display
-# ---------------------------------------------------------------------------
-
-
-class TestLastCrawlDisplay:
-    """AC-3: last crawl info display."""
-
-    def test_manifest_present_shows_timestamp_and_files(self) -> None:
-        """When manifest present, shows formatted timestamp and file count."""
-        result = _invoke_status(crawled_at="2026-03-05T14:30:00Z", total_files=47)
-        assert result.exit_code == 0
-        assert "2026-03-05 14:30:00" in result.output
-        assert "47 files" in result.output
-
-    def test_manifest_absent_shows_never(self) -> None:
-        """When no manifest, shows 'never'."""
-        result = _invoke_status(crawled_at=None, total_files=0)
-        assert result.exit_code == 0
-        assert "never" in result.output
-
-    def test_last_crawl_label_present(self) -> None:
-        """'Last crawl:' label always appears."""
-        result = _invoke_status()
-        assert "Last crawl:" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +261,11 @@ class TestProxyConnectivityDisplay:
         result = _invoke_status(proxy_results=proxy_results)
         assert "[XX]" in result.output
         assert "error" in result.output.lower()
-        # The rest of the status output is still present (AC-5)
-        assert "Last crawl:" in result.output
+        # The rest of the status output is still present (AC-5). The former
+        # "Last crawl:" panel was removed in E-256-03; the surviving panels
+        # below carry the same assertion.
         assert "Database:" in result.output
+        assert "Proxy sessions:" in result.output
 
     def test_proxy_pass_unverified_shows_warn_indicator(self) -> None:
         """AC-2: PASS_UNVERIFIED outcome shows [!!] indicator."""
@@ -439,7 +409,6 @@ class TestExitCodes:
         sessions = {"total": 1, "unreviewed": 0, "latest_id": "s1", "latest_ts": None}
         result = _invoke_status(
             db_exists=True,
-            crawled_at="2026-03-05T14:30:00Z",
             sessions=sessions,
         )
         assert result.exit_code == 0
@@ -455,11 +424,6 @@ class TestExitCodes:
     def test_missing_db_alone_exits_0(self) -> None:
         """Missing database alone does NOT cause exit 1."""
         result = _invoke_status(db_exists=False)
-        assert result.exit_code == 0
-
-    def test_no_manifest_alone_exits_0(self) -> None:
-        """Missing manifest alone does NOT cause exit 1."""
-        result = _invoke_status(crawled_at=None, total_files=0)
         assert result.exit_code == 0
 
     def test_no_sessions_alone_exits_0(self) -> None:
@@ -502,64 +466,6 @@ class TestFormatCrawledAt:
     def test_no_trailing_z(self) -> None:
         result = status_module._format_crawled_at("2026-03-05T14:30:00Z")
         assert not result.endswith("Z")
-
-
-class TestGetLastCrawl:
-    """Unit tests for _get_last_crawl with real temp files."""
-
-    def test_no_manifests_returns_none(self, tmp_path: Path) -> None:
-        """Empty raw data dir returns (None, 0)."""
-        with patch.object(status_module, "_RAW_DATA_ROOT", tmp_path):
-            ts, total = status_module._get_last_crawl()
-        assert ts is None
-        assert total == 0
-
-    def test_single_manifest_returns_data(self, tmp_path: Path) -> None:
-        """Single manifest returns its crawled_at and file count."""
-        season_dir = tmp_path / "2026"
-        season_dir.mkdir()
-        manifest = {
-            "crawled_at": "2026-03-05T14:30:00Z",
-            "season": "2026",
-            "crawlers": {
-                "roster": {"files_written": 20, "files_skipped": 0, "errors": 0},
-                "schedule": {"files_written": 27, "files_skipped": 0, "errors": 0},
-            },
-        }
-        (season_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        with patch.object(status_module, "_RAW_DATA_ROOT", tmp_path):
-            ts, total = status_module._get_last_crawl()
-        assert ts == "2026-03-05T14:30:00Z"
-        assert total == 47
-
-    def test_multiple_manifests_returns_latest(self, tmp_path: Path) -> None:
-        """With multiple manifests, returns the one with the latest crawled_at."""
-        for season, ts, files in [
-            ("2025", "2025-10-01T10:00:00Z", 10),
-            ("2026", "2026-03-05T14:30:00Z", 47),
-        ]:
-            d = tmp_path / season
-            d.mkdir()
-            manifest = {
-                "crawled_at": ts,
-                "season": season,
-                "crawlers": {"roster": {"files_written": files, "files_skipped": 0, "errors": 0}},
-            }
-            (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        with patch.object(status_module, "_RAW_DATA_ROOT", tmp_path):
-            ts, total = status_module._get_last_crawl()
-        assert ts == "2026-03-05T14:30:00Z"
-        assert total == 47
-
-    def test_malformed_manifest_skipped(self, tmp_path: Path) -> None:
-        """Malformed manifest is skipped without crashing."""
-        season_dir = tmp_path / "2026"
-        season_dir.mkdir()
-        (season_dir / "manifest.json").write_text("NOT JSON", encoding="utf-8")
-        with patch.object(status_module, "_RAW_DATA_ROOT", tmp_path):
-            ts, total = status_module._get_last_crawl()
-        assert ts is None
-        assert total == 0
 
 
 class TestGetProxySessions:

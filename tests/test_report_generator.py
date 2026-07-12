@@ -18,8 +18,6 @@ from src.reports.generator import (
     _SprayOutcome,
     _check_rate_plausibility,
     _log_rate_plausibility_warnings,
-    cascade_delete_team,
-    cleanup_orphan_teams,
     _crawl_and_load_spray,
     _create_report_row,
     _query_batting,
@@ -32,11 +30,20 @@ from src.reports.generator import (
     _resolve_gc_uuid,
     _update_report_failed,
     _update_report_ready,
+    generate_report,
+)
+
+# E-256-04 / TN-13: the lifecycle + deletion stack moved to the client-free
+# src/reports/lifecycle.py. Tests that exercise the reaper or the expiry sweep
+# must also patch `src.reports.lifecycle._REPO_ROOT` / `._REPORTS_DIR`, because
+# those functions now read *lifecycle's* module globals.
+from src.reports.lifecycle import (
     CleanupResult,
     ReaperResult,
     STALE_GENERATING_SECONDS,
+    cascade_delete_team,
     cleanup_expired_reports,
-    generate_report,
+    cleanup_orphan_teams,
     list_reports,
     reap_stale_generating_reports,
 )
@@ -1210,7 +1217,7 @@ class TestListReportsWithRunsJoin:
         run columns (it selected neither before), decorated with url/is_expired."""
         import sqlite3 as _sqlite3
 
-        import src.reports.generator as gen
+        import src.reports.lifecycle as gen  # list_reports moved here (E-256-04)
         from tests.conftest import load_real_schema
 
         db_path = tmp_path / "cli_list.db"
@@ -1398,7 +1405,7 @@ class TestQueryHelpers:
 class TestListReportsFunction:
     """Test the list_reports query function."""
 
-    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.lifecycle.get_connection")
     def test_list_reports_returns_sorted(self, mock_get_conn, db):
         team_id = _seed_team(db)
         _create_report_row(
@@ -1438,7 +1445,7 @@ class TestCrawlAndLoadSpray:
         db,
         tmp_path,
     ):
-        """Happy path: crawler.crawl_team + loader.load_all are called."""
+        """Happy path: crawler.crawl_team + loader.load_from_data are called."""
         db_path = str(tmp_path / "test.db")
 
         def _fresh_conn():
@@ -2582,6 +2589,129 @@ class TestScoutingLoaderCreatedSetThreading:
         gen.created_team_ids = {5, 10, 11}  # 5 == report team
         gen._compute_orphans()
         assert gen.orphan_ids == {10, 11}
+
+
+class TestRestDayReferenceDateIsVenueLocal:
+    """E-256-05: the rest-day / workload reference date is venue-local, not UTC.
+
+    `generated_at` is a UTC instant. Slicing its first ten characters yields the
+    UTC calendar date, which after ~19:00 America/Chicago has already rolled to
+    tomorrow. An evening generation therefore computed pitcher rest days and the
+    7-day `pitches_7d` window against a date the coach has not reached yet.
+
+    The falsifying input is a late-UTC `generated_at`: 2026-07-10T02:30:00Z is
+    2026-07-09 at 21:30 in the operating timezone. Every consumer must see
+    2026-07-09. Restore any `generated_at[:10]` at any consumer and that consumer
+    sees 2026-07-10 instead -- which is exactly the partial-fix failure this
+    story's caller-audit exists to catch.
+    """
+
+    _LATE_UTC = "2026-07-10T02:30:00Z"   # 21:30 on 07-09 in America/Chicago
+    _LOCAL = "2026-07-09"
+    _UTC_SLICE = "2026-07-10"            # what the bug produced
+
+    def _run_stage(self, db, tmp_path, monkeypatch):
+        """Drive the real `_query_render_save` and capture what each consumer got."""
+        from datetime import date as _date
+
+        from src.reports.generator import _ReportGeneration
+
+        monkeypatch.setenv("OPERATING_TIMEZONE", "America/Chicago")
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
+
+        team_id = _seed_team(db)
+        _seed_season(db)
+        db.commit()
+
+        # The stage opens (and `closing()`s) several connections; hand it a fresh
+        # one each time so it never closes the fixture's.
+        def _fresh_conn():
+            conn = sqlite3.connect(str(tmp_path / "test.db"))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        self._date = _date
+
+        captured: dict[str, object] = {}
+
+        def _fake_workload(t, s, ref, *, db=None):
+            captured["workload_ref"] = ref
+            return {}
+
+        def _fake_history(t, s, *, db=None):
+            return [{"player_id": "p1", "game_date": "2026-07-01"}]
+
+        def _fake_profiles(rows):
+            return {"p1": {}}
+
+        def _fake_prediction(profiles, history, *, reference_date, workload, league):
+            captured["prediction_ref"] = reference_date
+            return None
+
+        def _fake_tier2(pred, rows, *, team_name, team_record, reference_date, public_id):
+            captured["tier2_ref"] = reference_date
+            return None, None
+
+        def _capture_render(data):
+            captured["render_generation_date"] = data["generation_date"]
+            return "<html></html>"
+
+        gen = _ReportGeneration("https://web.gc.com/teams/abc")
+        gen.team_id = team_id
+        gen.season_id = "2026"
+        gen.report_id = 1
+        gen.slug = "ref-date"
+        gen.generated_at = self._LATE_UTC
+        gen.expires_at = "2026-07-24T02:30:00Z"
+        gen.team_info = {"name": "Test Tigers"}
+        gen.title = "Test Tigers"
+        gen.public_id = "abc123"
+
+        with (
+            patch("src.reports.generator.get_connection", side_effect=_fresh_conn),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.get_pitching_workload", _fake_workload),
+            patch("src.reports.generator.get_pitching_history", _fake_history),
+            patch("src.reports.generator.build_pitcher_profiles", _fake_profiles),
+            patch("src.reports.starter_prediction.compute_starter_prediction", _fake_prediction),
+            patch("src.reports.generator._run_tier2_enrichment", _fake_tier2),
+            patch("src.reports.generator.render_report", _capture_render),
+            patch("src.reports.generator._update_report_ready"),
+            patch("src.reports.generator._update_run_record"),
+            patch("src.reports.generator._finalize_run_record"),
+        ):
+            result = gen._query_render_save()
+
+        return result, captured
+
+    def test_all_consumers_receive_the_venue_local_date(self, db, tmp_path, monkeypatch):
+        """AC-1/AC-3: every consumer of the reference date sees the LOCAL date."""
+        result, captured = self._run_stage(db, tmp_path, monkeypatch)
+        assert result.outcome == "ready", result.error_message
+        local = self._date.fromisoformat(self._LOCAL)
+
+        # 1. the 7-day pitches_7d window (a string; SQL date(ref, '-6 days'))
+        assert captured["workload_ref"] == self._LOCAL
+        # 2. rest-day math in the starter prediction (a date)
+        assert captured["prediction_ref"] == local
+        # 3. rest-day math in the Tier-2 enrichment (a date)
+        assert captured["tier2_ref"] == local
+        # 4. the coach-facing "Generated <date>" footer
+        assert captured["render_generation_date"] == self._LOCAL
+
+        # None of them saw the UTC slice.
+        assert self._UTC_SLICE not in {
+            captured["workload_ref"],
+            str(captured["prediction_ref"]),
+            str(captured["tier2_ref"]),
+            captured["render_generation_date"],
+        }
+
+    def test_result_carries_the_reference_date(self, db, tmp_path, monkeypatch):
+        """AC-4: the ready result surfaces the date `bb report generate` prints."""
+        result, _ = self._run_stage(db, tmp_path, monkeypatch)
+        assert result.reference_date == self._LOCAL
 
 
 class TestCleanupOrphanTeams:
@@ -4306,11 +4436,18 @@ class TestQualityGatesFlags:
 
 
 def _iso_offset_days(days: int) -> str:
-    """Return an ISO-8601 UTC timestamp ``days`` from now (negative = past)."""
+    """Return an ISO-8601 UTC timestamp ``days`` from now (negative = past).
+
+    Uses the canonical ``UTC_ISO_FORMAT`` rather than a local literal: this
+    builds the same ``expires_at`` strings the app writes, and a divergent copy
+    would keep passing against a format the code no longer emits (E-256-03).
+    """
     from datetime import datetime, timedelta, timezone
 
+    from src.util.timezone import UTC_ISO_FORMAT
+
     dt = datetime.now(timezone.utc) + timedelta(days=days)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.strftime(UTC_ISO_FORMAT)
 
 
 def _insert_report_row(
@@ -4361,9 +4498,9 @@ class TestCleanupExpiredReports:
         )
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=self._fresh_conn_factory(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             result = cleanup_expired_reports()
 
@@ -4391,9 +4528,9 @@ class TestCleanupExpiredReports:
         )
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=self._fresh_conn_factory(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             result = cleanup_expired_reports()
 
@@ -4430,9 +4567,9 @@ class TestCleanupExpiredReports:
             return real_unlink(self, *args, **kwargs)
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=self._fresh_conn_factory(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
             patch.object(Path, "unlink", flaky_unlink),
         ):
             result = cleanup_expired_reports()
@@ -4460,9 +4597,9 @@ class TestCleanupExpiredReports:
         _insert_report_row(db, "nopath", team_id, _iso_offset_days(-5), None)
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=self._fresh_conn_factory(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             result = cleanup_expired_reports()
 
@@ -4484,6 +4621,114 @@ class TestCleanupExpiredReports:
         assert result.success is False
         # Proves generation ran past the swallowed cleanup error to the parser.
         assert "UUID" in (result.error_message or "")
+
+
+class TestCleanupConnectionSeam:
+    """E-256-04 (CR round 1): generate_report must INJECT its connection into the
+    opportunistic sweep, not let the sweep resolve one from lifecycle's globals.
+
+    `get_connection` is a module global. Once `cleanup_expired_reports` moved to
+    `src/reports/lifecycle.py`, a no-arg call resolved `lifecycle.get_connection`
+    -- the REAL `data/app.db` -- while every generation test sandboxes only
+    `generator.get_connection`. `generate_report` swallows all cleanup exceptions
+    by design, so the detachment could never surface as a test failure: the sweep
+    would silently run against production data, unlinking real report HTML.
+
+    Both assertions below are falsifying inputs. Revert the fix (call
+    `cleanup_expired_reports()` with no argument) and BOTH fail: the lifecycle
+    connection factory gets called, and the expired file survives because the
+    sweep read a different database.
+    """
+
+    def test_generate_report_injects_connection_into_cleanup(self, db, tmp_path):
+        team_id = _seed_team(db)
+        file_path = _write_report_file(tmp_path, "seam1")
+        _insert_report_row(
+            db, "seam1", team_id, _iso_offset_days(-1), "reports/seam1.html"
+        )
+
+        def _sandbox_conn():
+            conn = sqlite3.connect(str(tmp_path / "test.db"))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        with (
+            # The ONLY connection seam a generation test patches.
+            patch("src.reports.generator.get_connection", side_effect=_sandbox_conn),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            # Left deliberately UNPATCHED-as-a-factory: if the sweep reaches for
+            # this, it has escaped the caller's sandbox.
+            patch("src.reports.lifecycle.get_connection") as lifecycle_get_connection,
+            # Short-circuit the pipeline; this test is about the sweep only.
+            patch("src.reports.generator._ReportGeneration") as mock_pipeline,
+        ):
+            mock_pipeline.return_value.run.return_value = GenerationResult(
+                success=False, error_message="stub"
+            )
+            generate_report("https://web.gc.com/teams/abc123")
+
+        # 1. The sweep never opened its own connection -- it used the injected one.
+        lifecycle_get_connection.assert_not_called()
+
+        # 2. It therefore acted on the caller's database: the expired file is gone
+        #    and its report_path is NULLed.
+        assert not file_path.exists()
+        verify = _sandbox_conn()
+        row = verify.execute(
+            "SELECT report_path FROM reports WHERE slug = ?", ("seam1",)
+        ).fetchone()
+        verify.close()
+        assert row is not None      # row kept
+        assert row[0] is None       # report_path NULLed
+
+    def test_borrowed_connection_row_factory_is_restored(self, db, tmp_path):
+        """E-256-04 (CR round 2): a BORROWED connection is caller-owned state.
+
+        Both sweeps set `row_factory = sqlite3.Row` for their own reads. When they
+        owned the connection that died with it; a borrowed one outlives the call.
+        `_conn_scope` saves and restores it, so the borrow is non-destructive.
+
+        Falsifying input: drop the save/restore and the caller's row_factory comes
+        back as `sqlite3.Row` instead of the sentinel it set.
+        """
+        def _sentinel_factory(cursor, row):  # noqa: ARG001 -- identity is the point
+            return row
+
+        borrowed = sqlite3.connect(str(tmp_path / "test.db"))
+        borrowed.row_factory = _sentinel_factory
+        try:
+            with patch("src.reports.lifecycle._REPO_ROOT", tmp_path):
+                # Exercises BOTH nested scopes: cleanup forwards `conn` to the
+                # reaper, so the connection is borrowed twice before returning.
+                cleanup_expired_reports(borrowed)
+
+            assert borrowed.row_factory is _sentinel_factory
+        finally:
+            borrowed.close()
+
+    def test_owned_connection_needs_no_restore(self, db, tmp_path):
+        """The `conn=None` branch opens and closes its own connection, so there is
+        nothing to restore -- and no caller state to damage.
+
+        Also pins the open-and-close COUNT: cleanup forwards `None` to the reaper,
+        so each opens its own. That is the pre-move behaviour the CLI and
+        app-startup callers still rely on.
+        """
+        opened = []
+
+        def _factory():
+            conn = sqlite3.connect(str(tmp_path / "test.db"))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            opened.append(conn)
+            return conn
+
+        with (
+            patch("src.reports.lifecycle.get_connection", side_effect=_factory),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+        ):
+            cleanup_expired_reports()
+
+        assert len(opened) == 2  # reaper, then cleanup
 
 
 class TestReapStaleGenerating:
@@ -4509,9 +4754,9 @@ class TestReapStaleGenerating:
         self._insert_generating(db, "stale1", team_id, _iso_offset_days(-1))
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=lambda: self._fresh_conn(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             result = reap_stale_generating_reports()
 
@@ -4532,9 +4777,9 @@ class TestReapStaleGenerating:
         self._insert_generating(db, "fresh1", team_id, _iso_offset_days(0))  # now
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=lambda: self._fresh_conn(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             result = reap_stale_generating_reports()
 
@@ -4553,9 +4798,9 @@ class TestReapStaleGenerating:
         self._insert_generating(db, "viacleanup", team_id, _iso_offset_days(-1))
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=lambda: self._fresh_conn(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             cleanup_expired_reports()  # the opportunistic trigger
 
@@ -4576,12 +4821,12 @@ class TestReapStaleGenerating:
         assert orphan.exists()
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=lambda: self._fresh_conn(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
             # The reaper resolves the orphan via the named _REPORTS_DIR constant
             # (computed from _REPO_ROOT at import time), so redirect it too.
-            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.lifecycle._REPORTS_DIR", tmp_path / "data" / "reports"),
         ):
             result = reap_stale_generating_reports()
 
@@ -4605,9 +4850,9 @@ class TestReapStaleGenerating:
         db.commit()
 
         with (
-            patch("src.reports.generator.get_connection",
+            patch("src.reports.lifecycle.get_connection",
                   side_effect=lambda: self._fresh_conn(tmp_path)),
-            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
         ):
             first = reap_stale_generating_reports()
             second = reap_stale_generating_reports()

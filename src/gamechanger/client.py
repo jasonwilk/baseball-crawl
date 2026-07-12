@@ -43,7 +43,7 @@ from src.gamechanger.exceptions import (  # noqa: F401 -- re-exported for caller
     LoginFailedError,
     RateLimitError,
 )
-from src.gamechanger.token_manager import AuthSigningError, TokenManager
+from src.gamechanger.token_manager import TokenManager
 from src.http.session import create_session, resolve_proxy_from_dict
 
 # Default fallback when Retry-After header cannot be parsed as an integer.

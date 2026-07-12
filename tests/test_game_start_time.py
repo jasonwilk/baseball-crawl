@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -70,12 +69,13 @@ def own_team_ref() -> TeamRef:
 
 
 class TestScoutingLoaderStartTime:
-    """Scouting loader passes start_time/timezone from games.json through GameSummaryEntry."""
+    """Scouting loader passes start_time/timezone from the crawled games list
+    through GameSummaryEntry."""
 
     def test_games_index_populates_start_time_fields(
         self, db: sqlite3.Connection
     ) -> None:
-        """_build_games_index creates entries with start_time and timezone."""
+        """_build_games_index_from_data creates entries with start_time and timezone."""
         loader = ScoutingLoader(db)
         games_data = [
             {
@@ -87,16 +87,11 @@ class TestScoutingLoaderStartTime:
                 "timezone": "America/Chicago",
             }
         ]
-        games_path = Path("/tmp/test_games.json")
-        games_path.write_text(json.dumps(games_data), encoding="utf-8")
 
-        try:
-            index = loader._build_games_index(games_path)
-            entry = index["game-001"]
-            assert entry.start_time == "2025-04-26T16:00:00.000Z"
-            assert entry.timezone == "America/Chicago"
-        finally:
-            games_path.unlink(missing_ok=True)
+        index = loader._build_games_index_from_data(games_data)
+        entry = index["game-001"]
+        assert entry.start_time == "2025-04-26T16:00:00.000Z"
+        assert entry.timezone == "America/Chicago"
 
     def test_games_index_handles_missing_start_fields(
         self, db: sqlite3.Connection
@@ -112,16 +107,11 @@ class TestScoutingLoaderStartTime:
                 # no start_ts or timezone
             }
         ]
-        games_path = Path("/tmp/test_games2.json")
-        games_path.write_text(json.dumps(games_data), encoding="utf-8")
 
-        try:
-            index = loader._build_games_index(games_path)
-            entry = index["game-002"]
-            assert entry.start_time is None
-            assert entry.timezone is None
-        finally:
-            games_path.unlink(missing_ok=True)
+        index = loader._build_games_index_from_data(games_data)
+        entry = index["game-002"]
+        assert entry.start_time is None
+        assert entry.timezone is None
 
 
 # ---------------------------------------------------------------------------
@@ -220,11 +210,10 @@ class TestGameLoaderPreservesStartTime:
         assert row[0] is None
         assert row[1] is None
 
-    def test_load_file_passes_start_time_from_summary(
-        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path
+    def test_load_payload_passes_start_time_from_summary(
+        self, db: sqlite3.Connection, own_team_ref: TeamRef
     ) -> None:
-        """GameLoader.load_file passes start_time/timezone from GameSummaryEntry through."""
-        # Create a minimal boxscore file
+        """GameLoader.load_payload passes start_time/timezone from GameSummaryEntry through."""
         boxscore = {
             "OwnTeamSlug": {
                 "stats": [{"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "SO": 1}],
@@ -237,8 +226,6 @@ class TestGameLoaderPreservesStartTime:
                 "lineup": [],
             },
         }
-        bs_path = tmp_path / "stream-400.json"
-        bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
 
         summary = GameSummaryEntry(
             event_id="game-400",
@@ -253,7 +240,7 @@ class TestGameLoaderPreservesStartTime:
         )
 
         loader = GameLoader(db=db, owned_team_ref=own_team_ref)
-        loader.load_file(bs_path, summary)
+        loader.load_payload(boxscore, summary)
 
         row = db.execute(
             "SELECT start_time, timezone FROM games WHERE game_id = 'game-400'"
@@ -270,7 +257,6 @@ class TestGameLoaderPreservesStartTime:
 def _load_summary(
     db: sqlite3.Connection,
     own_team_ref: TeamRef,
-    tmp_path: Path,
     *,
     game_id: str,
     stream_id: str,
@@ -290,8 +276,6 @@ def _load_summary(
             "lineup": [],
         },
     }
-    bs_path = tmp_path / f"{stream_id}.json"
-    bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
     summary = GameSummaryEntry(
         event_id=game_id,
         game_stream_id=stream_id,
@@ -303,7 +287,7 @@ def _load_summary(
         start_time=last_scoring_update,
         timezone=timezone,
     )
-    GameLoader(db=db, owned_team_ref=own_team_ref).load_file(bs_path, summary)
+    GameLoader(db=db, owned_team_ref=own_team_ref).load_payload(boxscore, summary)
     db.commit()
     row = db.execute(
         "SELECT game_date FROM games WHERE game_id = ?", (game_id,)
@@ -316,7 +300,7 @@ class TestGameDateLocalDerivation:
     next UTC day (the old ``last_scoring_update[:10]`` slice)."""
 
     def test_evening_game_uses_local_date_not_next_utc_day(
-        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path
+        self, db: sqlite3.Connection, own_team_ref: TeamRef
     ) -> None:
         """AC-2: 2026-06-21T03:00Z == 2026-06-20 22:00 America/Chicago (CDT).
 
@@ -324,7 +308,7 @@ class TestGameDateLocalDerivation:
         ``2026-06-20``.
         """
         game_date = _load_summary(
-            db, own_team_ref, tmp_path,
+            db, own_team_ref,
             game_id="game-eve", stream_id="stream-eve",
             last_scoring_update="2026-06-21T03:00:00.000Z",
             timezone="America/Chicago",
@@ -335,7 +319,7 @@ class TestGameDateLocalDerivation:
         )
 
     def test_missing_timezone_falls_back_to_operating_seam(
-        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path,
+        self, db: sqlite3.Connection, own_team_ref: TeamRef,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """AC-3: no game timezone -> operating-tz seam (default America/Chicago).
@@ -347,7 +331,7 @@ class TestGameDateLocalDerivation:
         """
         monkeypatch.delenv("OPERATING_TIMEZONE", raising=False)
         game_date = _load_summary(
-            db, own_team_ref, tmp_path,
+            db, own_team_ref,
             game_id="game-noz", stream_id="stream-noz",
             last_scoring_update="2026-06-21T03:00:00.000Z",
             timezone=None,
@@ -355,7 +339,7 @@ class TestGameDateLocalDerivation:
         assert game_date == "2026-06-20"
 
     def test_operating_timezone_env_override_applies_on_fallback(
-        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path,
+        self, db: sqlite3.Connection, own_team_ref: TeamRef,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """AC-3: the fallback honors an OPERATING_TIMEZONE override (proves the
@@ -366,7 +350,7 @@ class TestGameDateLocalDerivation:
         """
         monkeypatch.setenv("OPERATING_TIMEZONE", "America/New_York")
         game_date = _load_summary(
-            db, own_team_ref, tmp_path,
+            db, own_team_ref,
             game_id="game-ny", stream_id="stream-ny",
             last_scoring_update="2026-06-21T04:30:00.000Z",
             timezone=None,
@@ -374,11 +358,11 @@ class TestGameDateLocalDerivation:
         assert game_date == "2026-06-21"
 
     def test_absent_instant_falls_back_to_sentinel(
-        self, db: sqlite3.Connection, own_team_ref: TeamRef, tmp_path: Path
+        self, db: sqlite3.Connection, own_team_ref: TeamRef
     ) -> None:
         """An empty last_scoring_update preserves the '1900-01-01' sentinel."""
         game_date = _load_summary(
-            db, own_team_ref, tmp_path,
+            db, own_team_ref,
             game_id="game-none", stream_id="stream-none",
             last_scoring_update="",
             timezone="America/Chicago",

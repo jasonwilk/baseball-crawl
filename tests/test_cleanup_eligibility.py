@@ -17,7 +17,7 @@ import sqlite3
 
 import pytest
 
-from src.reports.generator import is_team_eligible_for_cleanup
+from src.reports.lifecycle import is_team_eligible_for_cleanup
 from tests.conftest import load_real_schema
 
 

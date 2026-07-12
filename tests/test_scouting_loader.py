@@ -2,19 +2,20 @@
 
 Covers:
 - AC-13: Roster upsert into players / team_rosters
-- AC-13: Delegation to GameLoader.load_file() for boxscore loading
+- AC-13: Delegation to GameLoader.load_payload() for boxscore loading
 - AC-13: Season aggregate computation (counting stat sums, rate stats NOT stored)
 - AC-13: Idempotency (double-load produces no duplicates)
 - AC-13: scouting_runs metadata (status, first_fetched / last_checked)
 - AC-13: UUID opportunism (gc_uuid stub creation when discovered)
 - AC-8: FK-safe stub player pattern
 
-All tests use SQLite in-memory databases via tmp_path. No real network calls.
+All tests use SQLite in-memory databases via tmp_path and drive the loader
+through its in-memory ``load_team(crawl_result)`` entry point. No real network
+calls.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,8 +59,6 @@ _PUBLIC_ID = "opp-slug-abc123"
 # GC UUID used as gc_uuid for the team row so GameLoader._ensure_team_row
 # resolves back to the same INTEGER PK.
 _GC_UUID = "aaaabbbb-cccc-dddd-eeee-ffff00000001"
-# Crawl-path season_id (used for file directory construction).
-_CRAWL_SEASON_ID = "2025-spring-hs"
 # DB season_id (derived from team metadata: season_year=2025, no program).
 _SEASON_ID = "2025"
 _PLAYER_1 = "player-uuid-001"
@@ -83,21 +82,17 @@ def _insert_team(
     return cursor.lastrowid
 
 
-def _make_roster(tmp_path: Path, public_id: str, season_id: str) -> Path:
-    """Write a minimal roster.json and return the scouting dir."""
-    scouting_dir = tmp_path / "raw" / season_id / "scouting" / public_id
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-    roster = [
+def _make_roster() -> list[dict]:
+    """Return a minimal two-player roster payload."""
+    return [
         {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
         {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
     ]
-    (scouting_dir / "roster.json").write_text(json.dumps(roster), encoding="utf-8")
-    return scouting_dir
 
 
-def _make_games_json(scouting_dir: Path, game_id: str) -> None:
-    """Write games.json with one completed game."""
-    games = [
+def _make_games(game_id: str) -> list[dict]:
+    """Return a public games payload with one completed game."""
+    return [
         {
             "id": game_id,
             "game_status": "completed",
@@ -106,23 +101,18 @@ def _make_games_json(scouting_dir: Path, game_id: str) -> None:
             "score": {"team": 5, "opponent_team": 3},
         }
     ]
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
 
 
 _OPP_UUID = "11112222-3333-4444-5555-aaaabbbbcccc"
 
 
 def _make_boxscore(
-    scouting_dir: Path,
-    game_id: str,
     own_key: str,
     opp_key: str = _OPP_UUID,
     player_id: str = _PLAYER_1,
-) -> None:
-    """Write a minimal boxscore JSON with one batting player."""
-    bs_dir = scouting_dir / "boxscores"
-    bs_dir.mkdir(parents=True, exist_ok=True)
-    boxscore = {
+) -> dict:
+    """Return a minimal boxscore payload with one batting player."""
+    return {
         own_key: {
             "players": [
                 {"id": player_id, "first_name": "John", "last_name": "Doe", "number": "14"}
@@ -147,7 +137,37 @@ def _make_boxscore(
             "groups": [],
         },
     }
-    (bs_dir / f"{game_id}.json").write_text(json.dumps(boxscore), encoding="utf-8")
+
+
+def _crawl_result(
+    team_id: int,
+    *,
+    roster: list[dict] | None = None,
+    games: list[dict] | None = None,
+    boxscores: dict[str, dict] | None = None,
+) -> SimpleNamespace:
+    """Build a ``ScoutingCrawlResult``-shaped payload for ``load_team``."""
+    return SimpleNamespace(
+        team_id=team_id,
+        roster=_make_roster() if roster is None else roster,
+        games=games if games is not None else [],
+        boxscores=boxscores if boxscores is not None else {},
+    )
+
+
+def _one_game_crawl(
+    team_id: int,
+    game_id: str,
+    *,
+    opp_key: str = _OPP_UUID,
+    player_id: str = _PLAYER_1,
+) -> SimpleNamespace:
+    """Crawl result with the standard roster, one completed game, one boxscore."""
+    return _crawl_result(
+        team_id,
+        games=_make_games(game_id),
+        boxscores={game_id: _make_boxscore(_PUBLIC_ID, opp_key=opp_key, player_id=player_id)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,14 +176,12 @@ def _make_boxscore(
 
 
 def test_roster_upserted_into_players(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Roster players are upserted into the players table."""
     team_pk = _insert_team(db)
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_crawl_result(team_pk))
 
     rows = db.execute("SELECT player_id FROM players").fetchall()
     player_ids = {r[0] for r in rows}
@@ -171,15 +189,56 @@ def test_roster_upserted_into_players(
     assert _PLAYER_2 in player_ids
 
 
+def test_seasons_row_created_automatically(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """The seasons row is created before any FK-dependent insert.
+
+    Ported from ``test_game_loader.py`` in E-256-01: ``GameLoader.load_all``
+    used to call ``ensure_season_row``; on the surviving in-memory path that
+    responsibility lives in ``ScoutingLoader._load_team_core``.
+    """
+    team_pk = _insert_team(db)
+    assert db.execute("SELECT COUNT(*) FROM seasons;").fetchone()[0] == 0
+
+    loader.load_team(_crawl_result(team_pk))
+
+    row = db.execute(
+        "SELECT season_id FROM seasons WHERE season_id = ?;", (_SEASON_ID,)
+    ).fetchone()
+    assert row is not None
+
+
+def test_boxscore_without_games_entry_is_skipped(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """A boxscore whose game_stream_id has no games entry increments ``skipped``.
+
+    Ported from ``test_game_loader.py::test_load_result_skipped_when_no_summary``
+    in E-256-01: the summary-lookup miss used to live in ``GameLoader.load_all``;
+    it now lives in ``ScoutingLoader._load_boxscores``.
+    """
+    team_pk = _insert_team(db)
+
+    result = loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=[],  # no games entry for the boxscore below
+            boxscores={"orphan-game": _make_boxscore(_PUBLIC_ID)},
+        )
+    )
+
+    assert result.skipped == 1
+    assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 0
+
+
 def test_roster_upserted_into_team_rosters(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Roster players are linked in team_rosters with correct season and jersey."""
     team_pk = _insert_team(db)
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_crawl_result(team_pk))
 
     rows = db.execute(
         "SELECT player_id, jersey_number FROM team_rosters WHERE team_id = ? AND season_id = ?",
@@ -192,27 +251,28 @@ def test_roster_upserted_into_team_rosters(
 
 
 # ---------------------------------------------------------------------------
-# AC-13: Delegation to GameLoader.load_file()
+# AC-13: Delegation to GameLoader.load_payload()
 # ---------------------------------------------------------------------------
 
 
 def test_boxscore_loading_delegates_to_game_loader(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """ScoutingLoader delegates boxscore loading to GameLoader.load_file()."""
+    """ScoutingLoader delegates boxscore loading to GameLoader.load_payload()."""
     team_pk = _insert_team(db)
     game_id = "game-stream-001"
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key="11112222-3333-4444-5555-aaaabbbbcccc")
+    boxscore = _make_boxscore(_PUBLIC_ID)
+    crawl_result = _crawl_result(
+        team_pk, games=_make_games(game_id), boxscores={game_id: boxscore},
+    )
 
     with patch("src.gamechanger.loaders.scouting_loader.GameLoader") as MockGameLoader:
         mock_gl = MagicMock()
         from src.gamechanger.loaders import LoadResult
-        mock_gl.load_file.return_value = LoadResult(loaded=2)
+        mock_gl.load_payload.return_value = LoadResult(loaded=2)
         MockGameLoader.return_value = mock_gl
 
-        loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        loader.load_team(crawl_result)
 
         expected_team_ref = TeamRef(id=team_pk, gc_uuid=_GC_UUID, public_id=_PUBLIC_ID)
         MockGameLoader.assert_called_once_with(
@@ -220,11 +280,10 @@ def test_boxscore_loading_delegates_to_game_loader(
             owned_team_ref=expected_team_ref,
             created_team_ids=loader._created_team_ids,
         )
-        mock_gl.load_file.assert_called_once()
-        # First arg should be the boxscore path.
-        call_args = mock_gl.load_file.call_args
-        bs_path = call_args.args[0]
-        assert bs_path.name == f"{game_id}.json"
+        mock_gl.load_payload.assert_called_once()
+        # First arg should be the in-memory boxscore payload.
+        call_args = mock_gl.load_payload.call_args
+        assert call_args.args[0] == boxscore
         # Second arg should be a GameSummaryEntry.
         summary = call_args.args[1]
         assert isinstance(summary, GameSummaryEntry)
@@ -237,17 +296,13 @@ def test_boxscore_loading_delegates_to_game_loader(
 
 
 def test_season_aggregates_computed_from_game_rows(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Season batting aggregates are computed from player_game_batting rows."""
     team_pk = _insert_team(db)
     game_id = "game-stream-agg-001"
-    opp_uuid = "11112222-3333-4444-5555-aaaabbbbcccc"
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid, player_id=_PLAYER_1)
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_one_game_crawl(team_pk, game_id))
 
     # Verify player_game_batting row exists.
     game_row = db.execute(
@@ -272,17 +327,14 @@ def test_season_aggregates_computed_from_game_rows(
 
 
 def test_rate_stats_not_stored_in_season_batting(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """player_season_batting does not have an avg or obp column (rate stats computed at display time)."""
     team_pk = _insert_team(db)
     game_id = "game-stream-rate-001"
     opp_uuid = "22223333-4444-5555-6666-aaaabbbbcccc"
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid, player_id=_PLAYER_1)
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=opp_uuid))
 
     cursor = db.execute("PRAGMA table_info(player_season_batting);")
     columns = {row[1] for row in cursor.fetchall()}
@@ -297,18 +349,15 @@ def test_rate_stats_not_stored_in_season_batting(
 
 
 def test_double_load_no_duplicates(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Loading the same data twice produces no duplicate rows in any table."""
     team_pk = _insert_team(db)
     game_id = "game-stream-dup-001"
     opp_uuid = "33334444-5555-6666-7777-aaaabbbbcccc"
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid, player_id=_PLAYER_1)
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=opp_uuid))
+    loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=opp_uuid))
 
     player_count = db.execute("SELECT COUNT(*) FROM players WHERE player_id = ?", (_PLAYER_1,)).fetchone()[0]
     assert player_count == 1
@@ -339,18 +388,13 @@ def test_double_load_no_duplicates(
 
 
 def test_stub_player_created_for_unknown_player_in_boxscore(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Unknown player IDs in boxscores get stub rows (first_name='Unknown')."""
     team_pk = _insert_team(db)
     game_id = "game-stream-stub-001"
     opp_uuid = "44445555-6666-7777-8888-aaaabbbbcccc"
     unknown_player = "unknown-player-uuid-xyz"
-    scouting_dir = tmp_path / "raw" / _SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-
-    # Minimal roster (no roster.json -- test stub creation from boxscore only).
-    (scouting_dir / "roster.json").write_text("[]", encoding="utf-8")
 
     games = [
         {
@@ -360,10 +404,6 @@ def test_stub_player_created_for_unknown_player_in_boxscore(
             "score": {"team": 3, "opponent_team": 1},
         }
     ]
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
-
-    bs_dir = scouting_dir / "boxscores"
-    bs_dir.mkdir(parents=True, exist_ok=True)
     boxscore = {
         _PUBLIC_ID: {
             "players": [],
@@ -382,9 +422,11 @@ def test_stub_player_created_for_unknown_player_in_boxscore(
         },
         opp_uuid: {"players": [], "groups": []},
     }
-    (bs_dir / f"{game_id}.json").write_text(json.dumps(boxscore), encoding="utf-8")
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    # Empty roster -- test stub creation from the boxscore only.
+    loader.load_team(
+        _crawl_result(team_pk, roster=[], games=games, boxscores={game_id: boxscore})
+    )
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?", (unknown_player,)
@@ -400,7 +442,7 @@ def test_stub_player_created_for_unknown_player_in_boxscore(
 
 
 def test_loader_creates_opponent_row_without_gc_uuid(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """E-211: When an opponent UUID key appears in a boxscore, a teams row is created
     with gc_uuid=NULL (not the boxscore key)."""
@@ -408,11 +450,7 @@ def test_loader_creates_opponent_row_without_gc_uuid(
     game_id = "game-stream-uuid-opp-001"
     uuid_key = "55556666-7777-8888-aaaa-bbbbcccc0005"
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=uuid_key, player_id=_PLAYER_1)
-
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=uuid_key))
 
     # No team row should have gc_uuid == uuid_key (UUID contamination fix).
     row_by_uuid = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
@@ -429,7 +467,7 @@ def test_loader_creates_opponent_row_without_gc_uuid(
 
 
 def test_loader_uuid_opportunism_does_not_create_duplicate(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """If a teams row already has gc_uuid set, no duplicate is created."""
     team_pk = _insert_team(db)
@@ -443,11 +481,7 @@ def test_loader_uuid_opportunism_does_not_create_duplicate(
     )
     db.commit()
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=uuid_key, player_id=_PLAYER_1)
-
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=uuid_key))
 
     # Only one row with that gc_uuid should exist.
     count = db.execute(
@@ -1058,13 +1092,12 @@ def test_aggregate_idempotent_with_updated_game_data(
 _OPP_NAME_SCOUTING = "Kearney Mavericks 14U"
 
 
-def _make_games_json_with_opponent_name(
-    scouting_dir: Path,
+def _make_games_with_opponent_name(
     game_id: str,
     opponent_name: str = _OPP_NAME_SCOUTING,
-) -> None:
-    """Write games.json with opponent_team.name populated."""
-    games = [
+) -> list[dict]:
+    """Return a games payload with opponent_team.name populated."""
+    return [
         {
             "id": game_id,
             "game_status": "completed",
@@ -1074,49 +1107,42 @@ def _make_games_json_with_opponent_name(
             "opponent_team": {"name": opponent_name},
         }
     ]
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
 
 
 def test_build_opponent_name_index_reads_opponent_team_name(
-    loader: ScoutingLoader, tmp_path: Path
+    loader: ScoutingLoader,
 ) -> None:
-    """_build_opponent_name_index() extracts opponent_team.name per game."""
-    scouting_dir = tmp_path / "scouting" / "team-slug"
-    scouting_dir.mkdir(parents=True, exist_ok=True)
+    """_build_opponent_name_index_from_data() extracts opponent_team.name per game."""
     game_id = "game-stream-name-001"
-    _make_games_json_with_opponent_name(scouting_dir, game_id, "Nighthawks Navy")
+    games = _make_games_with_opponent_name(game_id, "Nighthawks Navy")
 
-    index = loader._build_opponent_name_index(scouting_dir / "games.json")
+    index = loader._build_opponent_name_index_from_data(games)
 
     assert index.get(game_id) == "Nighthawks Navy"
 
 
-def test_build_opponent_name_index_missing_file_returns_empty(
-    loader: ScoutingLoader, tmp_path: Path
+def test_build_opponent_name_index_empty_games_returns_empty(
+    loader: ScoutingLoader,
 ) -> None:
-    """AC-3: _build_opponent_name_index() returns empty dict when games.json is absent."""
-    index = loader._build_opponent_name_index(tmp_path / "no_such_games.json")
-    assert index == {}
+    """An empty games payload yields an empty opponent-name index."""
+    assert loader._build_opponent_name_index_from_data([]) == {}
 
 
 def test_build_opponent_name_index_missing_opponent_team_field(
-    loader: ScoutingLoader, tmp_path: Path
+    loader: ScoutingLoader,
 ) -> None:
     """Games without opponent_team.name are skipped gracefully (no KeyError)."""
-    scouting_dir = tmp_path / "scouting" / "team-no-opp"
-    scouting_dir.mkdir(parents=True, exist_ok=True)
     games = [{"id": "game-no-name", "game_status": "completed"}]
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
 
-    index = loader._build_opponent_name_index(scouting_dir / "games.json")
+    index = loader._build_opponent_name_index_from_data(games)
 
     assert index == {}
 
 
-def test_load_team_creates_opponent_row_with_name_from_games_json(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+def test_load_team_creates_opponent_row_with_name_from_games(
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """AC-2: load_team() creates opponent team row with name from games.json.
+    """AC-2: load_team() creates opponent team row with the name from the games payload.
 
     E-211: Opponent row is created with gc_uuid=NULL; looked up by name.
     """
@@ -1124,11 +1150,13 @@ def test_load_team_creates_opponent_row_with_name_from_games_json(
     game_id = "game-stream-opp-name-001"
     opp_uuid = "aa11bb22-cc33-dd44-ee55-ff66aabb0099"
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json_with_opponent_name(scouting_dir, game_id, _OPP_NAME_SCOUTING)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid)
-
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=_make_games_with_opponent_name(game_id),
+            boxscores={game_id: _make_boxscore(_PUBLIC_ID, opp_key=opp_uuid)},
+        )
+    )
 
     # E-211: gc_uuid should NOT be set for opponent rows.
     row_by_uuid = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (opp_uuid,)).fetchone()
@@ -1143,10 +1171,11 @@ def test_load_team_creates_opponent_row_with_name_from_games_json(
     assert row[0] is None, "gc_uuid must be NULL"
 
 
-def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+def test_load_team_fallback_to_uuid_when_games_has_no_name(
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """AC-3: load_team() falls back to UUID as name when games.json lacks opponent_team.name.
+    """AC-3: load_team() falls back to UUID as name when the games payload lacks
+    opponent_team.name.
 
     E-211: The UUID string is used as the team name, but NOT stored as gc_uuid.
     """
@@ -1154,8 +1183,7 @@ def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
     game_id = "game-stream-no-name-001"
     opp_uuid = "bb22cc33-dd44-ee55-ff66-001122334455"
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    # games.json without opponent_team.name.
+    # Games payload without opponent_team.name.
     games = [
         {
             "id": game_id,
@@ -1165,10 +1193,14 @@ def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
             "score": {"team": 3, "opponent_team": 1},
         }
     ]
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid)
 
-    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    result = loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=games,
+            boxscores={game_id: _make_boxscore(_PUBLIC_ID, opp_key=opp_uuid)},
+        )
+    )
 
     assert result.errors == 0
     # E-211: UUID used as name fallback, but gc_uuid column stays NULL.
@@ -1181,7 +1213,7 @@ def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
 
 
 def test_load_team_deduplicates_opponent_by_name_on_reload(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """E-211: Re-running load_team() deduplicates opponents by name+season_year.
 
@@ -1192,12 +1224,15 @@ def test_load_team_deduplicates_opponent_by_name_on_reload(
     game_id = "game-stream-heal-001"
     opp_uuid = "cc33dd44-ee55-ff66-aa77-112233445566"
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json_with_opponent_name(scouting_dir, game_id, _OPP_NAME_SCOUTING)
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid)
+    def _crawl() -> SimpleNamespace:
+        return _crawl_result(
+            team_pk,
+            games=_make_games_with_opponent_name(game_id),
+            boxscores={game_id: _make_boxscore(_PUBLIC_ID, opp_key=opp_uuid)},
+        )
 
     # First load.
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_crawl())
     first_row = db.execute(
         "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
         (_OPP_NAME_SCOUTING,),
@@ -1205,7 +1240,7 @@ def test_load_team_deduplicates_opponent_by_name_on_reload(
     assert first_row is not None, "First load should create opponent row"
 
     # Second load with same data.
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_crawl())
     second_row = db.execute(
         "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
         (_OPP_NAME_SCOUTING,),
@@ -1229,7 +1264,7 @@ _OTHER_OPP_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 def test_uuid_only_boxscore_does_not_store_gc_uuid(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """E-211: UUID-only boxscore creates opponent rows WITHOUT gc_uuid contamination.
 
@@ -1240,18 +1275,18 @@ def test_uuid_only_boxscore_does_not_store_gc_uuid(
     team_pk = _insert_team(db, gc_uuid=_SCOUTED_GC_UUID)
     game_id = "game-uuid-only-gc-known-001"
 
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json_with_opponent_name(scouting_dir, game_id, "Real Opponent FC")
-
-    bs_dir = scouting_dir / "boxscores"
-    bs_dir.mkdir(parents=True, exist_ok=True)
     boxscore = {
         _SCOUTED_GC_UUID: {"players": [], "groups": []},
         _OTHER_OPP_UUID: {"players": [], "groups": []},
     }
-    (bs_dir / f"{game_id}.json").write_text(json.dumps(boxscore), encoding="utf-8")
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=_make_games_with_opponent_name(game_id, "Real Opponent FC"),
+            boxscores={game_id: boxscore},
+        )
+    )
 
     # With UUID contamination fix, no team rows should have gc_uuid == _OTHER_OPP_UUID.
     opp_row_by_uuid = db.execute(
@@ -1273,18 +1308,17 @@ def test_uuid_only_boxscore_does_not_store_gc_uuid(
 
 
 # ---------------------------------------------------------------------------
-# E-197-03 AC-9: USSSA team gets correct DB season_id despite HS crawl path
+# E-197-03 AC-9: USSSA team gets the team-derived DB season_id
 # ---------------------------------------------------------------------------
 
 
 def test_usssa_team_gets_correct_db_season_id(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """A team crawled under a compound crawl-path gets the year-only '2025' in the DB.
+    """A USSSA team gets the year-only '2025' season_id in the DB.
 
-    Demonstrates the path-vs-DB decoupling: files live under the crawl-path
-    season_id (``2025-spring-hs``) but DB inserts use the team-derived
-    year-only season_id (``2025``).
+    The DB season_id is derived from team metadata (``season_year`` + program),
+    never from the crawl payload.
     """
     # Set up a USSSA program and team
     db.execute(
@@ -1303,14 +1337,14 @@ def test_usssa_team_gets_correct_db_season_id(
     ).fetchone()[0]
     db.commit()
 
-    # Files are stored under "2025-spring-hs" (the HS crawl path).
-    crawl_season = "2025-spring-hs"
-    scouting_dir = _make_roster(tmp_path, usssa_public_id, crawl_season)
     game_id = "game-usssa-001"
-    _make_games_json(scouting_dir, game_id)
-    _make_boxscore(scouting_dir, game_id, own_key=usssa_public_id)
-
-    loader.load_team(scouting_dir, usssa_pk, crawl_season)
+    loader.load_team(
+        _crawl_result(
+            usssa_pk,
+            games=_make_games(game_id),
+            boxscores={game_id: _make_boxscore(usssa_public_id)},
+        )
+    )
 
     # Roster should be tagged with the team-derived season_id.
     roster_row = db.execute(
@@ -1580,15 +1614,15 @@ def test_pitching_aggregates_filter_by_perspective(
 
 
 # ---------------------------------------------------------------------------
-# E-247-01: in-memory vs disk path equivalence (HARD GATE -- stats integrity)
+# E-247-01: golden stat rows for the scouting loader (HARD GATE -- stats integrity)
 # ---------------------------------------------------------------------------
 #
 # Characterization test (golden fixture): pins the stat rows produced by the
-# scouting loader and asserts that the in-memory (load_team(crawl_result)) and
-# disk (load_team(scouting_dir)) paths produce byte-identical output on the
-# same payload.  The golden values below were captured from the pre-refactor
-# code; the collapse of the twin in-memory/disk methods must reproduce them
-# exactly.  If equivalence cannot be proven, the story is cut -- not shipped.
+# scouting loader on a representative payload.  The golden values below were
+# captured from the pre-E-247 code and must be reproduced exactly.  E-256-01
+# deleted the disk twin, so the disk-vs-in-memory equivalence assertion that
+# used to sit here is gone; the golden pin remains and is what guards the
+# surviving in-memory path.
 
 
 def _e247_games() -> list[dict]:
@@ -1704,33 +1738,6 @@ def _e247_load_in_memory(db: sqlite3.Connection) -> int:
     return team_pk
 
 
-def _e247_load_from_disk(db: sqlite3.Connection, tmp_path: Path) -> int:
-    """Seed a team and load the same payload via the disk path."""
-    team_pk = _insert_team(db)
-    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-    (scouting_dir / "roster.json").write_text(
-        json.dumps(
-            [
-                {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
-                {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    (scouting_dir / "games.json").write_text(json.dumps(_e247_games()), encoding="utf-8")
-    bs_dir = scouting_dir / "boxscores"
-    bs_dir.mkdir(parents=True, exist_ok=True)
-    (bs_dir / "e247-game-1.json").write_text(
-        json.dumps(_e247_boxscore(_PUBLIC_ID)), encoding="utf-8"
-    )
-    (bs_dir / "e247-game-2.json").write_text(
-        json.dumps(_e247_boxscore(_PUBLIC_ID)), encoding="utf-8"
-    )
-    ScoutingLoader(db).load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-    return team_pk
-
-
 def test_e247_in_memory_matches_golden(
     db: sqlite3.Connection,
 ) -> None:
@@ -1758,37 +1765,6 @@ def test_e247_in_memory_matches_golden(
         ("e247-game-2", _PLAYER_2, team_pk, team_pk, 15, 4, 2, 2, 1, 7, 1),
     ]
     assert len(snap["games"]) == 2
-
-
-def test_e247_disk_path_matches_in_memory(
-    tmp_path: Path,
-) -> None:
-    """AC-4: the disk path produces byte-identical stat rows to the in-memory path.
-
-    Both paths load the same payload into freshly-migrated databases seeded in
-    the same order, so the integer team PKs align and the snapshots must be
-    equal table-for-table.
-    """
-    mem_db_path = tmp_path / "mem.db"
-    run_migrations(db_path=mem_db_path)
-    mem_db = sqlite3.connect(str(mem_db_path))
-    mem_db.execute("PRAGMA foreign_keys=ON;")
-    _e247_load_in_memory(mem_db)
-    mem_snap = _e247_snapshot(mem_db)
-    mem_db.close()
-
-    disk_db_path = tmp_path / "disk.db"
-    run_migrations(db_path=disk_db_path)
-    disk_db = sqlite3.connect(str(disk_db_path))
-    disk_db.execute("PRAGMA foreign_keys=ON;")
-    _e247_load_from_disk(disk_db, tmp_path)
-    disk_snap = _e247_snapshot(disk_db)
-    disk_db.close()
-
-    for table in mem_snap:
-        assert disk_snap[table] == mem_snap[table], (
-            f"disk vs in-memory mismatch in {table}"
-        )
 
 
 def test_e247_in_memory_empty_boxscores_skips_tail_fresh_db(
@@ -1926,87 +1902,54 @@ def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
 
 
 # ---------------------------------------------------------------------------
-# E-247-01 F2: disk-path malformed roster.json keeps errors=1
+# E-247-01 F2: an ABSENT roster is not an error (missing != malformed)
 # ---------------------------------------------------------------------------
 
 
-def test_e247_disk_malformed_roster_counts_error(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+def test_empty_roster_is_not_an_error(
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """F2: a PRESENT-but-malformed roster.json on the disk path yields errors=1.
+    """An empty roster loads cleanly with errors=0 -- missing is NOT malformed.
 
-    Restores the pre-refactor ``_load_roster`` semantics, which returned
-    ``LoadResult(errors=1)`` for an unreadable / non-array roster file.
+    Ported from the deleted ``test_e247_disk_missing_roster_no_error`` in
+    E-256-01: the disk path's "roster.json not found" branch is gone, but the
+    outcome it guarded survives at ``_load_roster_from_data``'s empty-roster
+    early return.  Its siblings (``_malformed_roster``, ``_non_array_roster``)
+    correctly died with the disk-only ``extra_errors`` read-error mechanism.
+
+    Without this test the empty-roster branch runs in two other tests but no
+    test asserts its error-free contract.
     """
     team_pk = _insert_team(db)
-    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-    # Malformed JSON (not parseable).
-    (scouting_dir / "roster.json").write_text("{ this is not valid json", encoding="utf-8")
-    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
 
-    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    result = loader.load_team(
+        _crawl_result(team_pk, roster=[], games=[], boxscores={})
+    )
 
-    assert result.errors == 1, f"Expected errors=1 for malformed roster, got {result.errors}"
-    # Nothing was loaded from the bad roster.
+    assert result.errors == 0, f"Expected errors=0 for an empty roster, got {result.errors}"
     assert db.execute(
         "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (team_pk,)
     ).fetchone()[0] == 0
 
 
-def test_e247_disk_non_array_roster_counts_error(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """F2: a PRESENT roster.json that is valid JSON but not an array -> errors=1."""
-    team_pk = _insert_team(db)
-    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-    (scouting_dir / "roster.json").write_text('{"not": "a list"}', encoding="utf-8")
-    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
-
-    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-
-    assert result.errors == 1, f"Expected errors=1 for non-array roster, got {result.errors}"
-
-
-def test_e247_disk_missing_roster_no_error(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """F2 guard against over-correction: a MISSING roster.json keeps errors=0.
-
-    The pre-refactor ``_load_roster_section`` "not found" branch returned an
-    empty, error-free result -- missing must NOT be conflated with malformed.
-    """
-    team_pk = _insert_team(db)
-    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-    # No roster.json written.
-    (scouting_dir / "games.json").write_text("[]", encoding="utf-8")
-
-    result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-
-    assert result.errors == 0, f"Expected errors=0 for missing roster, got {result.errors}"
-
-
 # ---------------------------------------------------------------------------
-# E-253 Round-1 remediation: public-path parity with the authenticated path
+# E-253 Round-1 remediation: _opt_int NULL-preservation on the public path
 # (E-253-04 sentinel preservation + E-253-06 AC-3 missing-score None handling)
+#
+# E-256-01 AC-6: these are the surviving home of the ``_opt_int`` semantic that
+# used to be asserted against the deleted ``_parse_summary_record``. They assert
+# it against ``_build_games_index_from_data``, which re-implements it inline.
 # ---------------------------------------------------------------------------
-
-
-def _write_games(scouting_dir: Path, games: list[dict]) -> None:
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
 
 
 def test_public_missing_start_ts_preserves_sentinel_game_date(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Round-1 F1: a completed PUBLIC game with no start_ts/end_ts keeps the
     '1900-01-01' sentinel game_date -- it is NOT fabricated as
     '1900-01-01T00:00:00Z' and then localized backward to '1899-12-31'."""
     team_pk = _insert_team(db)
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _write_games(scouting_dir, [
+    games = [
         {
             "id": "g-no-ts",
             "game_status": "completed",
@@ -2014,10 +1957,15 @@ def test_public_missing_start_ts_preserves_sentinel_game_date(
             "score": {"team": 5, "opponent_team": 3},
             # no start_ts / end_ts -> no recoverable instant
         }
-    ])
-    _make_boxscore(scouting_dir, "g-no-ts", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+    ]
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=games,
+            boxscores={"g-no-ts": _make_boxscore(_PUBLIC_ID)},
+        )
+    )
 
     game_date = db.execute(
         "SELECT game_date FROM games WHERE game_id = 'g-no-ts'"
@@ -2029,13 +1977,12 @@ def test_public_missing_start_ts_preserves_sentinel_game_date(
 
 
 def test_public_missing_scores_stored_as_null(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """Round-1 F2: a completed PUBLIC game with no score stores NULL home/away
-    score (not coerced to 0), matching _parse_summary_record (E-253-06)."""
+    """Round-1 F2 / E-256-01 AC-6: a completed PUBLIC game with no score stores
+    NULL home/away score via ``_opt_int`` (not coerced to 0)."""
     team_pk = _insert_team(db)
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _write_games(scouting_dir, [
+    games = [
         {
             "id": "g-noscore",
             "game_status": "completed",
@@ -2043,10 +1990,15 @@ def test_public_missing_scores_stored_as_null(
             "start_ts": "2025-04-10T18:00:00Z",
             # no "score" key -> missing scores
         }
-    ])
-    _make_boxscore(scouting_dir, "g-noscore", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+    ]
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=games,
+            boxscores={"g-noscore": _make_boxscore(_PUBLIC_ID)},
+        )
+    )
 
     row = db.execute(
         "SELECT home_score, away_score FROM games WHERE game_id = 'g-noscore'"
@@ -2054,23 +2006,60 @@ def test_public_missing_scores_stored_as_null(
     assert row == (None, None), "missing public scores must be NULL, not 0"
 
 
+def test_public_genuine_zero_score_preserved(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """E-256-01 AC-6: a real 0 score (present, value 0) stays 0 -- only a MISSING
+    score becomes NULL. Ported from the deleted ``_parse_summary_record`` test so
+    ``_opt_int``'s present-zero branch keeps its coverage on the surviving path."""
+    team_pk = _insert_team(db)
+    games = [
+        {
+            "id": "g-zero",
+            "game_status": "completed",
+            "home_away": "home",
+            "start_ts": "2025-04-10T18:00:00Z",
+            "score": {"team": 0, "opponent_team": 0},
+        }
+    ]
+
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=games,
+            boxscores={"g-zero": _make_boxscore(_PUBLIC_ID)},
+        )
+    )
+
+    row = db.execute(
+        "SELECT home_score, away_score FROM games WHERE game_id = 'g-zero'"
+    ).fetchone()
+    assert row == (0, 0), "a genuine 0-0 must be preserved, not nulled"
+
+
 def test_public_scoreless_doubleheader_stays_two_rows(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
+    loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
     """Round-1 F2 (E-253-06 AC-3 on the public path): two same-date, same-team
     public games both missing scores AND start_ts do NOT collapse -- pre-fix,
     both coerced to 0-0 with equal totals and the natural-key dedup redirected
     the second onto the first."""
     team_pk = _insert_team(db)
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _write_games(scouting_dir, [
+    games = [
         {"id": "dh-1", "game_status": "completed", "home_away": "home"},
         {"id": "dh-2", "game_status": "completed", "home_away": "home"},
-    ])
-    _make_boxscore(scouting_dir, "dh-1", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
-    _make_boxscore(scouting_dir, "dh-2", own_key=_PUBLIC_ID, opp_key=_OPP_UUID)
+    ]
 
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=games,
+            boxscores={
+                "dh-1": _make_boxscore(_PUBLIC_ID),
+                "dh-2": _make_boxscore(_PUBLIC_ID),
+            },
+        )
+    )
 
     game_ids = {
         r[0] for r in db.execute("SELECT game_id FROM games").fetchall()

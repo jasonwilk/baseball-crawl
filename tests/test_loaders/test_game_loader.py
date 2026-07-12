@@ -16,8 +16,8 @@ Tests cover all acceptance criteria:
 
 from __future__ import annotations
 
-import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -75,8 +75,8 @@ def _make_summary(
     event_id: str = _EVENT_ID,
     game_stream_id: str = _GAME_STREAM_ID,
     home_away: str | None = "home",
-    owning_score: int = 5,
-    opponent_score: int = 2,
+    owning_score: int | None = 5,
+    opponent_score: int | None = 2,
     opponent_id: str = _OPP_TEAM_ID,
 ) -> _GameSummaryEntry:
     return _GameSummaryEntry(
@@ -182,48 +182,6 @@ def _make_boxscore(
     }
 
 
-def _write_boxscore(tmp_path: Path, data: dict, game_stream_id: str = _GAME_STREAM_ID) -> Path:
-    """Write a boxscore JSON file at the conventional path."""
-    dest = tmp_path / f"{game_stream_id}.json"
-    dest.write_text(json.dumps(data), encoding="utf-8")
-    return dest
-
-
-def _write_team_dir(
-    tmp_path: Path,
-    team_id: str = _OWN_TEAM_ID,
-    season: str = _SEASON_ID,
-    summaries: list[dict] | None = None,
-    boxscores: dict[str, dict] | None = None,
-) -> Path:
-    """Set up a team directory with game_summaries.json and games/ subdir."""
-    team_dir = tmp_path / season / "teams" / team_id
-    team_dir.mkdir(parents=True, exist_ok=True)
-
-    # Write game_summaries.json
-    if summaries is None:
-        summaries = [
-            {
-                "event_id": _EVENT_ID,
-                "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-                "home_away": "home",
-                "owning_team_score": 5,
-                "opponent_team_score": 2,
-                "last_scoring_update": "2025-05-10T19:39:58.788Z",
-            }
-        ]
-    (team_dir / "game_summaries.json").write_text(json.dumps(summaries), encoding="utf-8")
-
-    # Write boxscore files
-    if boxscores is not None:
-        games_dir = team_dir / "games"
-        games_dir.mkdir(exist_ok=True)
-        for gsid, data in boxscores.items():
-            (games_dir / f"{gsid}.json").write_text(json.dumps(data), encoding="utf-8")
-
-    return team_dir
-
-
 def _insert_own_team(
     db: sqlite3.Connection,
     gc_uuid: str = _OWN_TEAM_ID,
@@ -244,7 +202,23 @@ def _insert_own_team(
 def _make_loader(db: sqlite3.Connection, gc_uuid: str = _OWN_TEAM_ID) -> GameLoader:
     from src.gamechanger.types import TeamRef
     pk = _insert_own_team(db, gc_uuid=gc_uuid)
-    return GameLoader(db, owned_team_ref=TeamRef(id=pk, gc_uuid=gc_uuid, public_id=_OWN_TEAM_SLUG))
+    loader = GameLoader(db, owned_team_ref=TeamRef(id=pk, gc_uuid=gc_uuid, public_id=_OWN_TEAM_SLUG))
+    # ScoutingLoader ensures the season row in production; load_payload does not.
+    ensure_season_row(db, loader._season_id)
+    return loader
+
+
+def _load_game(
+    loader: GameLoader,
+    boxscore: dict,
+    summary: _GameSummaryEntry | None = None,
+    opponent_name: str | None = None,
+) -> LoadResult:
+    """Load one in-memory boxscore through the loader's sole entry point."""
+    return loader.load_payload(
+        boxscore, summary if summary is not None else _make_summary(),
+        opponent_name=opponent_name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,32 +226,30 @@ def _make_loader(db: sqlite3.Connection, gc_uuid: str = _OWN_TEAM_ID) -> GameLoa
 # ---------------------------------------------------------------------------
 
 
-def test_game_record_inserted_into_games_table(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-1: load_all inserts a games row with correct event_id."""
+def test_game_record_inserted_into_games_table(db: sqlite3.Connection) -> None:
+    """AC-1: load_payload inserts a games row with correct event_id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute("SELECT game_id FROM games WHERE game_id = ?;", (_EVENT_ID,)).fetchone()
     assert row is not None, f"Expected games row for event_id={_EVENT_ID}"
 
 
-def test_game_record_has_correct_season_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_game_record_has_correct_season_id(db: sqlite3.Connection) -> None:
     """AC-1: game row has correct season_id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute("SELECT season_id FROM games WHERE game_id = ?;", (_EVENT_ID,)).fetchone()
     assert row is not None
     assert row[0] == _SEASON_ID
 
 
-def test_game_record_has_correct_game_date(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_game_record_has_correct_game_date(db: sqlite3.Connection) -> None:
     """AC-1: game_date is the venue-LOCAL calendar date of last_scoring_update.
 
     Since E-253-04 the loader derives game_date via ``derive_local_date`` (the
@@ -287,23 +259,21 @@ def test_game_record_has_correct_game_date(db: sqlite3.Connection, tmp_path: Pat
     unchanged.
     """
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute("SELECT game_date FROM games WHERE game_id = ?;", (_EVENT_ID,)).fetchone()
     assert row is not None
     assert row[0] == "2025-05-10"
 
 
-def test_game_record_has_correct_scores(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_game_record_has_correct_scores(db: sqlite3.Connection) -> None:
     """AC-1: home_score and away_score populated correctly."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT home_score, away_score FROM games WHERE game_id = ?;", (_EVENT_ID,)
@@ -319,13 +289,12 @@ def test_game_record_has_correct_scores(db: sqlite3.Connection, tmp_path: Path) 
 # ---------------------------------------------------------------------------
 
 
-def test_batting_line_inserted_for_own_player(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_line_inserted_for_own_player(db: sqlite3.Connection) -> None:
     """AC-2: player_game_batting row created for own team player."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT ab, h, rbi, bb, so FROM player_game_batting WHERE player_id = ? AND game_id = ?;",
@@ -335,13 +304,12 @@ def test_batting_line_inserted_for_own_player(db: sqlite3.Connection, tmp_path: 
     assert row == (3, 2, 1, 1, 0)
 
 
-def test_pitching_line_inserted_with_ip_outs_conversion(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_pitching_line_inserted_with_ip_outs_conversion(db: sqlite3.Connection) -> None:
     """AC-2: IP=5 in boxscore -> ip_outs=15 in DB (1 IP = 3 outs)."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT ip_outs, h, er, bb, so FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
@@ -355,14 +323,13 @@ def test_pitching_line_inserted_with_ip_outs_conversion(db: sqlite3.Connection, 
     assert row[4] == 7   # SO
 
 
-def test_load_all_twice_is_idempotent(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-2: Running load_all twice produces same DB state (no duplicates)."""
+def test_load_payload_twice_is_idempotent(db: sqlite3.Connection) -> None:
+    """AC-2: Running load_payload twice produces same DB state (no duplicates)."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
+    _load_game(loader, boxscore)
 
     game_count = db.execute("SELECT COUNT(*) FROM games;").fetchone()[0]
     batting_count = db.execute("SELECT COUNT(*) FROM player_game_batting;").fetchone()[0]
@@ -374,13 +341,12 @@ def test_load_all_twice_is_idempotent(db: sqlite3.Connection, tmp_path: Path) ->
     assert pitching_count == 2
 
 
-def test_batting_extras_zero_filled_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_extras_zero_filled_when_absent(db: sqlite3.Connection) -> None:
     """AC-2: Extras (2B, 3B, HR, SB) default to 0 when not in extra[] array."""
     boxscore = _make_boxscore(batting_extra=[])  # no extras
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT doubles, triples, hr, sb FROM player_game_batting WHERE player_id = ? AND game_id = ?;",
@@ -390,17 +356,16 @@ def test_batting_extras_zero_filled_when_absent(db: sqlite3.Connection, tmp_path
     assert row == (0, 0, 0, 0)
 
 
-def test_batting_extras_populated_from_extra_array(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_extras_populated_from_extra_array(db: sqlite3.Connection) -> None:
     """AC-2: 2B and SB are read from the extra[] array correctly."""
     batting_extra = [
         {"stat_name": "2B", "stats": [{"player_id": _PLAYER_OWN_1, "value": 2}]},
         {"stat_name": "SB", "stats": [{"player_id": _PLAYER_OWN_1, "value": 1}]},
     ]
     boxscore = _make_boxscore(batting_extra=batting_extra)
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT doubles, sb FROM player_game_batting WHERE player_id = ? AND game_id = ?;",
@@ -416,40 +381,26 @@ def test_batting_extras_populated_from_extra_array(db: sqlite3.Connection, tmp_p
 # ---------------------------------------------------------------------------
 
 
-def test_load_all_returns_load_result(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-3: load_all returns a LoadResult instance."""
+def test_load_payload_returns_load_result(db: sqlite3.Connection) -> None:
+    """AC-3: load_payload returns a LoadResult instance."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert isinstance(result, LoadResult)
 
 
-def test_load_all_counts_loaded_records(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_load_payload_counts_loaded_records(db: sqlite3.Connection) -> None:
     """AC-3: loaded count = 1 game + 2 batting rows + 2 pitching rows = 5."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     # 1 (game) + 1 (own batter) + 1 (own pitcher) + 1 (opp batter) + 1 (opp pitcher)
     assert result.loaded == 5
     assert result.errors == 0
-
-
-def test_load_result_skipped_when_no_summary(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-3: Files without a matching game-summaries entry increment skipped."""
-    # Write a boxscore file with no matching entry in summaries.
-    team_dir = _write_team_dir(tmp_path, summaries=[], boxscores={_GAME_STREAM_ID: _make_boxscore()})
-    loader = _make_loader(db)
-
-    result = loader.load_all(team_dir)
-
-    assert result.skipped == 1
-    assert result.loaded == 0
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +408,7 @@ def test_load_result_skipped_when_no_summary(db: sqlite3.Connection, tmp_path: P
 # ---------------------------------------------------------------------------
 
 
-def test_unknown_player_gets_stub_row(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_unknown_player_gets_stub_row(db: sqlite3.Connection) -> None:
     """AC-4: A player_id not in players table gets a stub row before stat insert."""
     unknown_player = "player-completely-unknown-xxx"
     boxscore = _make_boxscore(
@@ -471,10 +422,9 @@ def test_unknown_player_gets_stub_row(db: sqlite3.Connection, tmp_path: Path) ->
         ],
         own_pitching=[],
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?;",
@@ -486,7 +436,7 @@ def test_unknown_player_gets_stub_row(db: sqlite3.Connection, tmp_path: Path) ->
 
 
 def test_unknown_player_logs_debug(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """AC-4: DEBUG is logged when a stub player row is created via ensure_player_row."""
     import logging
@@ -503,16 +453,15 @@ def test_unknown_player_logs_debug(
         ],
         own_pitching=[],
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
     with caplog.at_level(logging.DEBUG, logger="src.db.players"):
-        loader.load_all(team_dir)
+        _load_game(loader, boxscore)
 
     assert unknown_player in caplog.text
 
 
-def test_known_player_does_not_get_overwritten(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_known_player_does_not_get_overwritten(db: sqlite3.Connection) -> None:
     """AC-4: Pre-existing player row is not overwritten by stub logic."""
     # Pre-insert a real player record.
     db.execute(
@@ -522,10 +471,9 @@ def test_known_player_does_not_get_overwritten(db: sqlite3.Connection, tmp_path:
     db.commit()
 
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT first_name FROM players WHERE player_id = ?;", (_PLAYER_OWN_1,)
@@ -535,31 +483,23 @@ def test_known_player_does_not_get_overwritten(db: sqlite3.Connection, tmp_path:
 
 
 # ---------------------------------------------------------------------------
-# AC-5: Same game under multiple team directories -> same DB state
+# AC-5: Same game loaded from two team perspectives -> same DB state
 # ---------------------------------------------------------------------------
 
 
-def test_same_game_from_two_team_dirs_is_idempotent(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-5: Loading the same game from two team directories upserts correctly."""
-    boxscore = _make_boxscore()
-
-    # Team A's directory
-    team_dir_a = _write_team_dir(
-        tmp_path, team_id="team-aaa", boxscores={_GAME_STREAM_ID: boxscore}
-    )
-    # Team B's directory (same game, different team_id)
-    team_dir_b = _write_team_dir(
-        tmp_path, team_id="team-bbb", boxscores={_GAME_STREAM_ID: boxscore}
-    )
-
+def test_same_game_from_two_teams_is_idempotent(db: sqlite3.Connection) -> None:
+    """AC-5: Loading the same game from two team perspectives upserts correctly."""
     from src.gamechanger.types import TeamRef
+
+    boxscore = _make_boxscore()
     pk_a = _insert_own_team(db, gc_uuid="team-aaa", public_id="slug-aaa")
     pk_b = _insert_own_team(db, gc_uuid=_OWN_TEAM_ID)
     loader_a = GameLoader(db, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-aaa", public_id="slug-aaa"))
     loader_b = GameLoader(db, owned_team_ref=TeamRef(id=pk_b, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
+    ensure_season_row(db, loader_a._season_id)
 
-    loader_a.load_all(team_dir_a)
-    loader_b.load_all(team_dir_b)
+    loader_a.load_payload(boxscore, _make_summary())
+    loader_b.load_payload(boxscore, _make_summary())
 
     count = db.execute("SELECT COUNT(*) FROM games WHERE game_id = ?;", (_EVENT_ID,)).fetchone()[0]
     assert count == 1
@@ -570,14 +510,13 @@ def test_same_game_from_two_team_dirs_is_idempotent(db: sqlite3.Connection, tmp_
 # ---------------------------------------------------------------------------
 
 
-def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection) -> None:
     """AC-6: Own team identified by public_id slug (alphanumeric, no dashes)."""
     # Own team uses a slug, opponent uses UUID (default boxscore)
     boxscore = _make_boxscore(own_key="y24fFdnr3RAN", opp_key=_OPP_TEAM_ID)
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert result.errors == 0
     # Own batting player should have team_id = INTEGER PK of own team
@@ -589,13 +528,12 @@ def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection, tmp_path: 
     assert row[0] == own_pk
 
 
-def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection) -> None:
     """AC-6: Opponent identified by UUID key (36 chars with dashes)."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT team_id FROM player_game_batting WHERE player_id = ?;", (_PLAYER_OPP_1,)
@@ -611,23 +549,13 @@ def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection, tmp_path: 
 # ---------------------------------------------------------------------------
 
 
-def test_home_away_home_sets_own_team_as_home(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_home_away_home_sets_own_team_as_home(db: sqlite3.Connection) -> None:
     """AC-7: home_away='home' -> own team is home_team_id."""
     boxscore = _make_boxscore()
-    summaries = [
-        {
-            "event_id": _EVENT_ID,
-            "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-            "home_away": "home",
-            "owning_team_score": 7,
-            "opponent_team_score": 3,
-            "last_scoring_update": "2025-05-10T20:00:00Z",
-        }
-    ]
-    team_dir = _write_team_dir(tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: boxscore})
+    summary = _make_summary(home_away="home", owning_score=7, opponent_score=3)
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore, summary)
 
     row = db.execute(
         "SELECT home_team_id, away_team_id, home_score, away_score FROM games WHERE game_id = ?;",
@@ -642,23 +570,13 @@ def test_home_away_home_sets_own_team_as_home(db: sqlite3.Connection, tmp_path: 
     assert row[3] == 3              # away score
 
 
-def test_home_away_away_sets_opponent_as_home(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_home_away_away_sets_opponent_as_home(db: sqlite3.Connection) -> None:
     """AC-7: home_away='away' -> opponent is home_team_id, own team is away."""
     boxscore = _make_boxscore()
-    summaries = [
-        {
-            "event_id": _EVENT_ID,
-            "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-            "home_away": "away",
-            "owning_team_score": 4,
-            "opponent_team_score": 9,
-            "last_scoring_update": "2025-06-01T20:00:00Z",
-        }
-    ]
-    team_dir = _write_team_dir(tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: boxscore})
+    summary = _make_summary(home_away="away", owning_score=4, opponent_score=9)
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore, summary)
 
     row = db.execute(
         "SELECT home_team_id, away_team_id, home_score, away_score FROM games WHERE game_id = ?;",
@@ -673,23 +591,13 @@ def test_home_away_away_sets_opponent_as_home(db: sqlite3.Connection, tmp_path: 
     assert row[3] == 4              # away score (own)
 
 
-def test_home_away_none_defaults_to_own_team_as_home(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_home_away_none_defaults_to_own_team_as_home(db: sqlite3.Connection) -> None:
     """AC-7: home_away=None defaults own team to home (with warning logged)."""
     boxscore = _make_boxscore()
-    summaries = [
-        {
-            "event_id": _EVENT_ID,
-            "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-            "home_away": None,
-            "owning_team_score": 5,
-            "opponent_team_score": 2,
-            "last_scoring_update": "2025-07-04T20:00:00Z",
-        }
-    ]
-    team_dir = _write_team_dir(tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: boxscore})
+    summary = _make_summary(home_away=None)
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore, summary)
 
     row = db.execute(
         "SELECT home_team_id FROM games WHERE game_id = ?;", (_EVENT_ID,)
@@ -704,20 +612,19 @@ def test_home_away_none_defaults_to_own_team_as_home(db: sqlite3.Connection, tmp
 # ---------------------------------------------------------------------------
 
 
-def test_teams_rows_created_before_game_insert(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_teams_rows_created_before_game_insert(db: sqlite3.Connection) -> None:
     """AC-8: teams rows for both home and away are created automatically.
 
     E-211: Opponent team row has gc_uuid=NULL (not the boxscore key).
     """
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
 
     # No teams rows before loader is created.
     count_before = db.execute("SELECT COUNT(*) FROM teams;").fetchone()[0]
     assert count_before == 0
 
     loader = _make_loader(db)  # inserts own team as FK prerequisite
-    loader.load_all(team_dir)  # inserts opponent team as FK prerequisite
+    _load_game(loader, boxscore)  # inserts opponent team as FK prerequisite
 
     teams = db.execute("SELECT gc_uuid, name FROM teams;").fetchall()
     gc_uuids = {row[0] for row in teams}
@@ -728,30 +635,12 @@ def test_teams_rows_created_before_game_insert(db: sqlite3.Connection, tmp_path:
     assert len(teams) >= 2, "At least own + opponent team rows expected"
 
 
-def test_seasons_row_created_automatically(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-8: seasons row is created for season_id before game insert."""
-    boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    loader = _make_loader(db)
-
-    count_before = db.execute("SELECT COUNT(*) FROM seasons;").fetchone()[0]
-    assert count_before == 0
-
-    loader.load_all(team_dir)
-
-    row = db.execute(
-        "SELECT season_id FROM seasons WHERE season_id = ?;", (_SEASON_ID,)
-    ).fetchone()
-    assert row is not None
-
-
-def test_load_succeeds_with_no_pre_existing_fk_rows(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_load_succeeds_with_no_pre_existing_fk_rows(db: sqlite3.Connection) -> None:
     """AC-8: Load completes without FK errors even with empty tables."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert result.errors == 0
 
@@ -761,41 +650,16 @@ def test_load_succeeds_with_no_pre_existing_fk_rows(db: sqlite3.Connection, tmp_
 # ---------------------------------------------------------------------------
 
 
-def test_no_games_dir_returns_empty_result(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """No games/ subdirectory: load_all returns LoadResult with all zeros."""
-    team_dir = _write_team_dir(tmp_path)  # no boxscores
+def test_non_dict_payload_returns_error(db: sqlite3.Connection) -> None:
+    """A payload that is not a JSON object returns errors=1."""
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
-
-    assert result.loaded == 0
-    assert result.skipped == 0
-    assert result.errors == 0
-
-
-def test_missing_summaries_file_returns_error(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """Missing game_summaries.json returns errors=1."""
-    team_dir = tmp_path / _SEASON_ID / "teams" / _OWN_TEAM_ID
-    team_dir.mkdir(parents=True)
-    # No game_summaries.json written.
-    loader = _make_loader(db)
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload(["not", "a", "dict"], _make_summary())
 
     assert result.errors == 1
 
 
-def test_nonexistent_boxscore_file_returns_error(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """load_file with nonexistent path returns errors=1."""
-    loader = _make_loader(db)
-    summary = _make_summary()
-
-    result = loader.load_file(Path("/nonexistent/path/file.json"), summary)
-
-    assert result.errors == 1
-
-
-def test_batting_row_missing_player_id_is_skipped(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_row_missing_player_id_is_skipped(db: sqlite3.Connection) -> None:
     """Batting row without player_id is skipped; load continues."""
     boxscore = _make_boxscore(
         own_batting=[
@@ -806,10 +670,9 @@ def test_batting_row_missing_player_id_is_skipped(db: sqlite3.Connection, tmp_pa
         ],
         own_pitching=[],
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert result.skipped == 1
     # Valid batting row was still loaded.
@@ -817,17 +680,16 @@ def test_batting_row_missing_player_id_is_skipped(db: sqlite3.Connection, tmp_pa
     assert count >= 1
 
 
-def test_ip_zero_converts_to_zero_ip_outs(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_ip_zero_converts_to_zero_ip_outs(db: sqlite3.Connection) -> None:
     """IP=0 converts to ip_outs=0."""
     boxscore = _make_boxscore(
         own_pitching=[
             {"player_id": _PLAYER_OWN_P1, "stats": {"IP": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "SO": 0}}
         ]
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT ip_outs FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
@@ -837,7 +699,7 @@ def test_ip_zero_converts_to_zero_ip_outs(db: sqlite3.Connection, tmp_path: Path
     assert row[0] == 0
 
 
-def test_ip_one_third_converts_to_one_out(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_ip_one_third_converts_to_one_out(db: sqlite3.Connection) -> None:
     """IP=3.333... (3⅓ innings = 10 outs) converts correctly via round(float*3).
 
     The old int() truncation would have given 3*3=9 outs (wrong).
@@ -847,10 +709,9 @@ def test_ip_one_third_converts_to_one_out(db: sqlite3.Connection, tmp_path: Path
             {"player_id": _PLAYER_OWN_P1, "stats": {"IP": 3.3333333333333335, "H": 3, "R": 1, "ER": 1, "BB": 1, "SO": 4}}
         ]
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT ip_outs FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
@@ -860,7 +721,7 @@ def test_ip_one_third_converts_to_one_out(db: sqlite3.Connection, tmp_path: Path
     assert row[0] == 10, f"3⅓ IP should be 10 outs, got {row[0]}"
 
 
-def test_ip_two_thirds_converts_to_two_outs(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_ip_two_thirds_converts_to_two_outs(db: sqlite3.Connection) -> None:
     """IP=3.666... (3⅔ innings = 11 outs) converts correctly via round(float*3).
 
     The old int() truncation would have given 3*3=9 outs (wrong).
@@ -870,10 +731,9 @@ def test_ip_two_thirds_converts_to_two_outs(db: sqlite3.Connection, tmp_path: Pa
             {"player_id": _PLAYER_OWN_P1, "stats": {"IP": 3.6666666666666665, "H": 2, "R": 0, "ER": 0, "BB": 0, "SO": 5}}
         ]
     )
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT ip_outs FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
@@ -883,46 +743,27 @@ def test_ip_two_thirds_converts_to_two_outs(db: sqlite3.Connection, tmp_path: Pa
     assert row[0] == 11, f"3⅔ IP should be 11 outs, got {row[0]}"
 
 
-def test_multiple_games_in_one_team_dir(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """Multiple boxscore files in one team directory are all loaded."""
-    stream1 = "stream-001"
-    stream2 = "stream-002"
-    event1 = "event-001"
-    event2 = "event-002"
-
-    summaries = [
-        {
-            "event_id": event1,
-            "game_stream": {"id": stream1, "opponent_id": _OPP_TEAM_ID},
-            "home_away": "home",
-            "owning_team_score": 5,
-            "opponent_team_score": 2,
-            "last_scoring_update": "2025-05-10T19:00:00Z",
-        },
-        {
-            "event_id": event2,
-            "game_stream": {"id": stream2, "opponent_id": _OPP_TEAM_ID},
-            "home_away": "away",
-            "owning_team_score": 3,
-            "opponent_team_score": 1,
-            "last_scoring_update": "2025-05-11T19:00:00Z",
-        },
-    ]
-    team_dir = _write_team_dir(
-        tmp_path,
-        summaries=summaries,
-        boxscores={
-            stream1: _make_boxscore(),
-            stream2: _make_boxscore(),
-        },
-    )
+def test_multiple_games_for_one_team(db: sqlite3.Connection) -> None:
+    """Multiple boxscore payloads for one team are all loaded."""
     loader = _make_loader(db)
 
-    result = loader.load_all(team_dir)
+    summary1 = _make_summary(
+        event_id="event-001", game_stream_id="stream-001",
+        home_away="home", owning_score=5, opponent_score=2,
+    )
+    summary2 = _make_summary(
+        event_id="event-002", game_stream_id="stream-002",
+        home_away="away", owning_score=3, opponent_score=1,
+    )
+    summary2 = replace(summary2, last_scoring_update="2025-05-11T19:00:00Z")
+
+    result1 = loader.load_payload(_make_boxscore(), summary1)
+    result2 = loader.load_payload(_make_boxscore(), summary2)
 
     count = db.execute("SELECT COUNT(*) FROM games;").fetchone()[0]
     assert count == 2
-    assert result.errors == 0
+    assert result1.errors == 0
+    assert result2.errors == 0
 
 
 # ---------------------------------------------------------------------------
@@ -944,7 +785,7 @@ def _insert_team_no_uuid(
     return cur.lastrowid
 
 
-def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection) -> None:
     """AC-3: GameLoader with gc_uuid=None (scouting path) does not create phantom team row.
 
     Verifies:
@@ -959,12 +800,12 @@ def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection, tmp_path: Path
         db,
         owned_team_ref=TeamRef(id=pk, gc_uuid=None, public_id=_OWN_TEAM_SLUG),
     )
+    ensure_season_row(db, loader._season_id)
 
     # Boxscore uses slug key for own team (standard layout for authenticated member teams)
     boxscore = _make_boxscore(own_key=_OWN_TEAM_SLUG, opp_key=_OPP_TEAM_ID)
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
 
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert result.errors == 0
 
@@ -1158,13 +999,12 @@ def _make_full_boxscore() -> dict:
     }
 
 
-def test_batting_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_r_stored_from_main_stats(db: sqlite3.Connection) -> None:
     """AC-8/9: Batting R from main stats is stored in player_game_batting.r."""
     boxscore = _make_full_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT r FROM player_game_batting WHERE player_id = ? AND game_id = ?",
@@ -1174,13 +1014,12 @@ def test_batting_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Path
     assert row[0] == 2
 
 
-def test_batting_tb_hbp_cs_stored_from_extras(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_tb_hbp_cs_stored_from_extras(db: sqlite3.Connection) -> None:
     """AC-9: TB, HBP, CS from extras array are stored correctly."""
     boxscore = _make_full_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT tb, hbp, cs FROM player_game_batting WHERE player_id = ? AND game_id = ?",
@@ -1192,13 +1031,12 @@ def test_batting_tb_hbp_cs_stored_from_extras(db: sqlite3.Connection, tmp_path: 
     assert row[2] == 1   # cs
 
 
-def test_batting_shf_e_stored_when_present(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_shf_e_stored_when_present(db: sqlite3.Connection) -> None:
     """AC-9: SHF and E store integer values when present in extras."""
     boxscore = _make_full_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT shf, e FROM player_game_batting WHERE player_id = ? AND game_id = ?",
@@ -1209,14 +1047,13 @@ def test_batting_shf_e_stored_when_present(db: sqlite3.Connection, tmp_path: Pat
     assert row[1] == 1   # e
 
 
-def test_batting_shf_e_null_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_shf_e_null_when_absent(db: sqlite3.Connection) -> None:
     """AC-9: SHF and E are NULL when not present in extras (nullable columns)."""
     # Default boxscore has no extras -- SHF and E will be absent.
     boxscore = _make_boxscore(batting_extra=[])
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT shf, e FROM player_game_batting WHERE player_id = ? AND game_id = ?",
@@ -1227,13 +1064,12 @@ def test_batting_shf_e_null_when_absent(db: sqlite3.Connection, tmp_path: Path) 
     assert row[1] is None, f"e should be NULL when absent, got {row[1]}"
 
 
-def test_batting_hbp_cs_zero_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_hbp_cs_zero_when_absent(db: sqlite3.Connection) -> None:
     """AC-9: HBP and CS are 0 when not present in extras (sparse but confirmed in API)."""
     boxscore = _make_boxscore(batting_extra=[])
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT hbp, cs FROM player_game_batting WHERE player_id = ? AND game_id = ?",
@@ -1244,13 +1080,12 @@ def test_batting_hbp_cs_zero_when_absent(db: sqlite3.Connection, tmp_path: Path)
     assert row[1] == 0, f"cs should be 0 when absent, got {row[1]}"
 
 
-def test_pitching_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_pitching_r_stored_from_main_stats(db: sqlite3.Connection) -> None:
     """AC-10: Pitching R from main stats is stored in player_game_pitching.r."""
     boxscore = _make_full_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT r FROM player_game_pitching WHERE player_id = ? AND game_id = ?",
@@ -1260,13 +1095,12 @@ def test_pitching_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Pat
     assert row[0] == 2
 
 
-def test_pitching_new_extras_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_pitching_new_extras_stored(db: sqlite3.Connection) -> None:
     """AC-10: WP, HBP, pitches, total_strikes, BF from extras are stored correctly."""
     boxscore = _make_full_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT wp, hbp, pitches, total_strikes, bf "
@@ -1281,14 +1115,13 @@ def test_pitching_new_extras_stored(db: sqlite3.Connection, tmp_path: Path) -> N
     assert row[4] == 24   # bf
 
 
-def test_pitching_extras_zero_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_pitching_extras_zero_when_absent(db: sqlite3.Connection) -> None:
     """AC-10: Pitching sparse extras (WP, HBP, pitches) are 0 when not in extras."""
     # Use default boxscore -- own pitcher has no extras array.
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT wp, hbp, pitches, total_strikes, bf "
@@ -1303,13 +1136,12 @@ def test_pitching_extras_zero_when_absent(db: sqlite3.Connection, tmp_path: Path
     assert row[4] == 0, f"bf should be 0 when absent, got {row[4]}"
 
 
-def test_game_stream_id_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_game_stream_id_stored(db: sqlite3.Connection) -> None:
     """AC-11: games.game_stream_id is populated from GameSummaryEntry.game_stream_id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT game_stream_id FROM games WHERE game_id = ?", (_EVENT_ID,)
@@ -1321,118 +1153,11 @@ def test_game_stream_id_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-8 (E-127-08): Dual-key summaries index -- event_id and game_stream_id
-# ---------------------------------------------------------------------------
-
-
-def test_boxscore_named_by_event_id_matches_summary(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-8: A boxscore file named by event_id is matched via the summaries index."""
-    boxscore = _make_boxscore()
-    # Write the boxscore file named by event_id (new crawler behaviour).
-    team_dir = _write_team_dir(tmp_path, boxscores={_EVENT_ID: boxscore})
-    loader = _make_loader(db)
-
-    result = loader.load_all(team_dir)
-
-    assert result.errors == 0
-    assert result.skipped == 0
-    row = db.execute("SELECT game_id FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()
-    assert row is not None, f"Expected game row for event_id={_EVENT_ID!r}"
-
-
-def test_boxscore_named_by_game_stream_id_matches_summary(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-8: A boxscore file named by game_stream_id is also matched (backwards compat)."""
-    boxscore = _make_boxscore()
-    # Write the boxscore file named by game_stream_id (old crawler behaviour).
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    loader = _make_loader(db)
-
-    result = loader.load_all(team_dir)
-
-    assert result.errors == 0
-    assert result.skipped == 0
-    row = db.execute("SELECT game_id FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()
-    assert row is not None, f"Expected game row for event_id={_EVENT_ID!r}"
-
-
-def test_dual_key_index_event_id_and_game_stream_id_both_resolve(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-8: When both event_id and game_stream_id are distinct, either key resolves the summary."""
-    # Confirm the test constants are distinct (test assumption).
-    assert _EVENT_ID != _GAME_STREAM_ID
-
-    boxscore = _make_boxscore()
-
-    # Load using event_id-named file.
-    team_dir_a = _write_team_dir(tmp_path, team_id="team-a", boxscores={_EVENT_ID: boxscore})
-    loader_a = _make_loader(db)
-    result_a = loader_a.load_all(team_dir_a)
-    assert result_a.errors == 0
-
-    # Same game loaded again using game_stream_id-named file -- should upsert, not error.
-    from src.gamechanger.types import TeamRef
-    pk_b = _insert_own_team(db, gc_uuid="team-b", public_id="slug-b")
-    loader_b = GameLoader(
-        db,
-        owned_team_ref=TeamRef(id=pk_b, gc_uuid="team-b", public_id="slug-b"),
-    )
-    summaries_b = [
-        {
-            "event_id": _EVENT_ID,
-            "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-            "home_away": "home",
-            "owning_team_score": 5,
-            "opponent_team_score": 2,
-            "last_scoring_update": "2025-05-10T19:39:58.788Z",
-        }
-    ]
-    team_dir_b = _write_team_dir(
-        tmp_path, team_id="team-b",
-        summaries=summaries_b,
-        boxscores={_GAME_STREAM_ID: boxscore},
-    )
-    result_b = loader_b.load_all(team_dir_b)
-    assert result_b.errors == 0
-
-    # Only one game row should exist (idempotent upsert).
-    count = db.execute("SELECT COUNT(*) FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()[0]
-    assert count == 1
-
-# ---------------------------------------------------------------------------
 # E-132-01: Opponent name resolution (AC-1, AC-3, AC-4, AC-6)
 # ---------------------------------------------------------------------------
 
 _OPP_NAME = "Blackhawks 14U"
 _OPP_PROGENITOR_UUID = _OPP_TEAM_ID  # progenitor_team_id matches opponent_id in game_stream
-
-
-def _write_opponents_json(team_dir: Path, opponents: list[dict] | None = None) -> None:
-    """Write an opponents.json file in team_dir."""
-    if opponents is None:
-        opponents = [
-            {
-                "root_team_id": "root-uuid-different-from-progenitor",
-                "owning_team_id": _OWN_TEAM_ID,
-                "name": _OPP_NAME,
-                "is_hidden": False,
-                "progenitor_team_id": _OPP_PROGENITOR_UUID,
-            }
-        ]
-    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
-
-
-def _write_schedule_json(team_dir: Path, events: list[dict] | None = None) -> None:
-    """Write a schedule.json file in team_dir."""
-    if events is None:
-        events = [
-            {
-                "id": _EVENT_ID,
-                "pregame_data": {
-                    "opponent_id": _OPP_PROGENITOR_UUID,
-                    "opponent_name": _OPP_NAME,
-                },
-            }
-        ]
-    (team_dir / "schedule.json").write_text(json.dumps(events), encoding="utf-8")
 
 
 def test_ensure_team_row_with_name_creates_named_row(db: sqlite3.Connection) -> None:
@@ -1503,171 +1228,14 @@ def test_ensure_team_row_does_not_match_by_gc_uuid(db: sqlite3.Connection) -> No
     )
 
 
-def test_build_opponent_name_lookup_reads_progenitor_team_id(
-    db: sqlite3.Connection, tmp_path: Path
+def test_load_payload_falls_back_to_uuid_when_no_opponent_name(
+    db: sqlite3.Connection,
 ) -> None:
-    """_build_opponent_name_lookup() keys by progenitor_team_id (not root_team_id)."""
-    loader = _make_loader(db)
-    team_dir = tmp_path / "team"
-    team_dir.mkdir()
-    opponents = [
-        {
-            "root_team_id": "root-uuid-000-should-not-be-used",
-            "name": "Nighthawks Navy",
-            "is_hidden": False,
-            "progenitor_team_id": "progenitor-uuid-aaa",
-        },
-        # Hidden entry: should be excluded.
-        {
-            "root_team_id": "root-uuid-hidden",
-            "name": "Hidden Team",
-            "is_hidden": True,
-            "progenitor_team_id": "progenitor-uuid-hidden",
-        },
-        # Null progenitor: should be excluded from primary lookup.
-        {
-            "root_team_id": "root-uuid-null",
-            "name": "No Progenitor Team",
-            "is_hidden": False,
-            "progenitor_team_id": None,
-        },
-    ]
-    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
-
-    lookup = loader._build_opponent_name_lookup(team_dir)
-
-    assert lookup.get("progenitor-uuid-aaa") == "Nighthawks Navy"
-    assert "root-uuid-000-should-not-be-used" not in lookup
-    assert "progenitor-uuid-hidden" not in lookup
-    assert None not in lookup  # null progenitor_team_id must not be stored as a key
-
-
-def test_build_opponent_name_lookup_supplements_from_schedule(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """_build_opponent_name_lookup() uses schedule.json to fill null-progenitor gaps."""
-    loader = _make_loader(db)
-    team_dir = tmp_path / "team"
-    team_dir.mkdir()
-    # opponents.json with one null progenitor (no name from that source).
-    opponents = [
-        {
-            "root_team_id": "root-uuid-001",
-            "name": "Primary Team",
-            "is_hidden": False,
-            "progenitor_team_id": "progenitor-001",
-        },
-    ]
-    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
-    # schedule.json with an opponent not covered by opponents.json (different UUID).
-    schedule = [
-        {
-            "id": "sched-event-001",
-            "pregame_data": {
-                "opponent_id": "progenitor-002",
-                "opponent_name": "Schedule Supplement Team",
-            },
-        }
-    ]
-    (team_dir / "schedule.json").write_text(json.dumps(schedule), encoding="utf-8")
-
-    lookup = loader._build_opponent_name_lookup(team_dir)
-
-    assert lookup.get("progenitor-001") == "Primary Team"
-    assert lookup.get("progenitor-002") == "Schedule Supplement Team"
-
-
-def test_build_opponent_name_lookup_schedule_does_not_override_opponents(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """schedule.json supplement does not overwrite entries from opponents.json."""
-    loader = _make_loader(db)
-    team_dir = tmp_path / "team"
-    team_dir.mkdir()
-    shared_uuid = "shared-uuid-001"
-    (team_dir / "opponents.json").write_text(
-        json.dumps([{"name": "Opponents Name", "is_hidden": False, "progenitor_team_id": shared_uuid}]),
-        encoding="utf-8",
-    )
-    (team_dir / "schedule.json").write_text(
-        json.dumps([{"id": "ev", "pregame_data": {"opponent_id": shared_uuid, "opponent_name": "Schedule Name"}}]),
-        encoding="utf-8",
-    )
-
-    lookup = loader._build_opponent_name_lookup(team_dir)
-
-    assert lookup[shared_uuid] == "Opponents Name"  # opponents.json wins
-
-
-def test_build_opponent_name_lookup_missing_files_returns_empty(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-3: _build_opponent_name_lookup() returns empty dict when files are absent."""
-    loader = _make_loader(db)
-    team_dir = tmp_path / "team"
-    team_dir.mkdir()
-
-    lookup = loader._build_opponent_name_lookup(team_dir)
-
-    assert lookup == {}
-
-
-def test_load_all_creates_opponent_row_with_name_from_opponents_json(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-1: load_all() creates opponent team row with name from opponents.json."""
+    """AC-3: with no opponent_name supplied, the opponent UUID is the name fallback."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    _write_opponents_json(team_dir)
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
-
-    # Opponent row has gc_uuid=NULL (E-211); find by name.
-    row = db.execute(
-        "SELECT name FROM teams WHERE name = ?", (_OPP_NAME,)
-    ).fetchone()
-    assert row is not None
-    assert row[0] == _OPP_NAME, f"Expected '{_OPP_NAME}', got {row[0]!r}"
-
-
-def test_load_all_creates_opponent_row_with_name_from_schedule_fallback(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-1: load_all() uses schedule.json when opponents.json has null progenitor_team_id."""
-    boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    # opponents.json with null progenitor for this opponent.
-    _write_opponents_json(team_dir, opponents=[
-        {
-            "root_team_id": "root-null-progenitor",
-            "name": "Null Progenitor Team",
-            "is_hidden": False,
-            "progenitor_team_id": None,
-        }
-    ])
-    _write_schedule_json(team_dir)
-    loader = _make_loader(db)
-
-    loader.load_all(team_dir)
-
-    # Opponent row has gc_uuid=NULL (E-211); find by name.
-    row = db.execute(
-        "SELECT name FROM teams WHERE name = ?", (_OPP_NAME,)
-    ).fetchone()
-    assert row is not None
-    assert row[0] == _OPP_NAME
-
-
-def test_load_all_falls_back_to_uuid_when_opponents_json_absent(
-    db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-3: load_all() falls back to UUID as name when opponents.json is missing."""
-    boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    loader = _make_loader(db)
-
-    result = loader.load_all(team_dir)
+    result = _load_game(loader, boxscore)
 
     assert result.errors == 0
     # Opponent row has gc_uuid=NULL (E-211); UUID string is used as name fallback.
@@ -1678,31 +1246,29 @@ def test_load_all_falls_back_to_uuid_when_opponents_json_absent(
     assert row[0] == _OPP_TEAM_ID  # UUID used as name (fallback)
 
 
-def test_load_all_with_opponents_json_creates_named_row(
-    db: sqlite3.Connection, tmp_path: Path
+def test_load_payload_with_opponent_name_creates_named_row(
+    db: sqlite3.Connection,
 ) -> None:
-    """Re-running load_all() with opponents.json creates a named opponent row.
+    """Re-running with an opponent_name creates a named opponent row.
 
     E-211: Since gc_uuid=None is passed for opponents, name-based dedup applies.
-    First load without opponents.json creates a row with UUID as name.
-    Second load with opponents.json creates a new row with the real name
+    The first load without an opponent_name creates a row with the UUID as name.
+    The second load with an opponent_name creates a new row with the real name
     (different name = different team row under name-based dedup).
     """
-    # First load: no opponents.json → UUID-stub created (gc_uuid=NULL, name=UUID).
+    # First load: no opponent_name → UUID-stub created (gc_uuid=NULL, name=UUID).
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     stub_row = db.execute(
         "SELECT id, name FROM teams WHERE name = ?", (_OPP_TEAM_ID,)
     ).fetchone()
     assert stub_row is not None
-    assert stub_row[1] == _OPP_TEAM_ID, "First load without opponents.json should create UUID-stub"
+    assert stub_row[1] == _OPP_TEAM_ID, "First load without a name should create a UUID-stub"
 
-    # Second load: with opponents.json → creates a new row with real name.
-    _write_opponents_json(team_dir)
-    loader.load_all(team_dir)
+    # Second load: with opponent_name → creates a new row with real name.
+    _load_game(loader, boxscore, opponent_name=_OPP_NAME)
 
     named_row = db.execute(
         "SELECT id, name FROM teams WHERE name = ?", (_OPP_NAME,)
@@ -1711,15 +1277,12 @@ def test_load_all_with_opponents_json_creates_named_row(
     assert named_row[0] != stub_row[0], "Named row should be distinct from UUID-stub row"
 
 
-def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """load_file() accepts opponent_name and uses it for the team row."""
-    _ensure_season(db)
+def test_load_payload_uses_opponent_name(db: sqlite3.Connection) -> None:
+    """load_payload() accepts opponent_name and uses it for the team row."""
     loader = _make_loader(db)
     boxscore = _make_boxscore()
-    bs_path = _write_boxscore(tmp_path, boxscore)
-    summary = _make_summary()
 
-    loader.load_file(bs_path, summary, opponent_name="Provided Opponent Name")
+    loader.load_payload(boxscore, _make_summary(), opponent_name="Provided Opponent Name")
 
     # Opponent row has gc_uuid=NULL (E-211); find by name.
     row = db.execute(
@@ -1734,18 +1297,8 @@ def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) ->
 # ---------------------------------------------------------------------------
 
 
-def _ensure_season(db: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
-    """Insert a season row for FK satisfaction in load_file tests."""
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
-        (season_id, season_id),
-    )
-    db.commit()
-
-
-def test_new_player_gets_real_name_from_boxscore(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_new_player_gets_real_name_from_boxscore(db: sqlite3.Connection) -> None:
     """AC-1: New player row is created with real name from boxscore players array."""
-    _ensure_season(db)
     boxscore = _make_boxscore(
         own_players=[
             {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
@@ -1756,10 +1309,9 @@ def test_new_player_gets_real_name_from_boxscore(db: sqlite3.Connection, tmp_pat
             {"id": _PLAYER_OPP_P1, "first_name": "Tyler", "last_name": "Brown", "number": "15"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -1768,9 +1320,8 @@ def test_new_player_gets_real_name_from_boxscore(db: sqlite3.Connection, tmp_pat
     assert row == ("Caleb", "Davis"), f"Expected real name, got {row}"
 
 
-def test_stub_player_upgraded_to_real_name(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_stub_player_upgraded_to_real_name(db: sqlite3.Connection) -> None:
     """AC-2: Existing stub player (Unknown Unknown) is upgraded to real name."""
-    _ensure_season(db)
     # Pre-insert a stub player row.
     db.execute(
         "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Unknown', 'Unknown')",
@@ -1784,10 +1335,9 @@ def test_stub_player_upgraded_to_real_name(db: sqlite3.Connection, tmp_path: Pat
             {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -1796,9 +1346,8 @@ def test_stub_player_upgraded_to_real_name(db: sqlite3.Connection, tmp_path: Pat
     assert row == ("Caleb", "Davis"), f"Expected stub to be upgraded, got {row}"
 
 
-def test_existing_real_name_not_overwritten(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_existing_real_name_not_overwritten(db: sqlite3.Connection) -> None:
     """AC-3: Existing player with real name is NOT overwritten by boxscore data."""
-    _ensure_season(db)
     # Pre-insert a player with a real name (e.g., from roster loader).
     db.execute(
         "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'RealFirst', 'RealLast')",
@@ -1812,10 +1361,9 @@ def test_existing_real_name_not_overwritten(db: sqlite3.Connection, tmp_path: Pa
             {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -1824,19 +1372,17 @@ def test_existing_real_name_not_overwritten(db: sqlite3.Connection, tmp_path: Pa
     assert row == ("RealFirst", "RealLast"), f"Expected real name preserved, got {row}"
 
 
-def test_jersey_number_creates_roster_row(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_jersey_number_creates_roster_row(db: sqlite3.Connection) -> None:
     """AC-4: Jersey number from boxscore creates a team_rosters row."""
-    _ensure_season(db)
     boxscore = _make_boxscore(
         own_players=[
             {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
             {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee", "number": "11"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     own_team_id = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
     row = db.execute(
@@ -1848,9 +1394,8 @@ def test_jersey_number_creates_roster_row(db: sqlite3.Connection, tmp_path: Path
     assert row[1] is None, "position should be NULL for boxscore-sourced rows"
 
 
-def test_jersey_number_backfills_null(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_jersey_number_backfills_null(db: sqlite3.Connection) -> None:
     """AC-4: Existing roster row with NULL jersey_number gets backfilled."""
-    _ensure_season(db)
     # Create the player and roster row first (as if roster loader ran without jersey number).
     db.execute(
         "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Caleb', 'Davis')",
@@ -1870,8 +1415,7 @@ def test_jersey_number_backfills_null(db: sqlite3.Connection, tmp_path: Path) ->
             {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT jersey_number, position FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
@@ -1881,9 +1425,8 @@ def test_jersey_number_backfills_null(db: sqlite3.Connection, tmp_path: Path) ->
     assert row[1] == "CF", "Existing position should NOT be overwritten"
 
 
-def test_jersey_number_not_overwritten_when_set(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_jersey_number_not_overwritten_when_set(db: sqlite3.Connection) -> None:
     """AC-4: Existing roster row with non-NULL jersey_number is NOT overwritten."""
-    _ensure_season(db)
     db.execute(
         "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Caleb', 'Davis')",
         (_PLAYER_OWN_1,),
@@ -1902,8 +1445,7 @@ def test_jersey_number_not_overwritten_when_set(db: sqlite3.Connection, tmp_path
             {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT jersey_number FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
@@ -1912,9 +1454,8 @@ def test_jersey_number_not_overwritten_when_set(db: sqlite3.Connection, tmp_path
     assert row[0] == "99", f"Expected jersey_number to stay '99', got {row[0]!r}"
 
 
-def test_opponent_player_names_extracted(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_opponent_player_names_extracted(db: sqlite3.Connection) -> None:
     """AC-5: Player names are extracted from both own and opponent teams."""
-    _ensure_season(db)
     boxscore = _make_boxscore(
         own_players=[
             {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis"},
@@ -1925,10 +1466,9 @@ def test_opponent_player_names_extracted(db: sqlite3.Connection, tmp_path: Path)
             {"id": _PLAYER_OPP_P1, "first_name": "Tyler", "last_name": "Brown"},
         ],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     opp_row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -1943,17 +1483,15 @@ def test_opponent_player_names_extracted(db: sqlite3.Connection, tmp_path: Path)
     assert opp_pitcher == ("Tyler", "Brown"), f"Expected opponent pitcher real name, got {opp_pitcher}"
 
 
-def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection) -> None:
     """When a player appears in stats but not in players array, they get a stub."""
-    _ensure_season(db)
     boxscore = _make_boxscore(
         own_players=[],  # No player info provided
         opp_players=[],
     )
-    bs_path = _write_boxscore(tmp_path, boxscore)
     loader = _make_loader(db)
 
-    loader.load_file(bs_path, _make_summary())
+    loader.load_payload(boxscore, _make_summary())
 
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -1967,7 +1505,7 @@ def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection, 
 # ---------------------------------------------------------------------------
 
 
-def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection) -> None:
     """A team with season_year=2025 produces the year-only season_id='2025' in the DB."""
     # Set up a USSSA program and team
     db.execute(
@@ -1988,10 +1526,10 @@ def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path:
     team_ref = TeamRef(id=team_pk, gc_uuid=gc_uuid, public_id=public_id)
 
     boxscore = _make_boxscore(own_key=public_id, opp_key=_OPP_TEAM_ID)
-    team_dir = _write_team_dir(tmp_path, team_id=gc_uuid, boxscores={_GAME_STREAM_ID: boxscore})
 
     loader = GameLoader(db, owned_team_ref=team_ref)
-    result = loader.load_all(team_dir)
+    ensure_season_row(db, loader._season_id)
+    result = _load_game(loader, boxscore)
 
     assert result.errors == 0
     assert result.loaded >= 1
@@ -2079,7 +1617,7 @@ _PLAYER_OWN_P3 = "player-own-pitcher-003"
 
 
 def test_appearance_order_populated_for_multiple_pitchers(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """AC-2: Three pitchers get appearance_order 1, 2, 3 matching stats array order."""
     pitching = [
@@ -2088,10 +1626,9 @@ def test_appearance_order_populated_for_multiple_pitchers(
         {"player_id": _PLAYER_OWN_P3, "player_text": "(SV)", "stats": {"IP": 2, "H": 0, "R": 0, "ER": 0, "BB": 1, "SO": 2}},
     ]
     boxscore = _make_boxscore(own_pitching=pitching)
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     rows = db.execute(
         "SELECT player_id, appearance_order FROM player_game_pitching "
@@ -2108,7 +1645,7 @@ def test_appearance_order_populated_for_multiple_pitchers(
 
 
 def test_appearance_order_updated_on_upsert(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """AC-3: Re-loading same boxscore updates appearance_order via ON CONFLICT."""
     pitching_v1 = [
@@ -2116,9 +1653,8 @@ def test_appearance_order_updated_on_upsert(
         {"player_id": _PLAYER_OWN_P2, "player_text": "", "stats": {"IP": 2, "H": 1, "R": 0, "ER": 0, "BB": 0, "SO": 3}},
     ]
     boxscore_v1 = _make_boxscore(own_pitching=pitching_v1)
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore_v1})
     loader = _make_loader(db)
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore_v1)
 
     # Verify initial load
     row = db.execute(
@@ -2128,7 +1664,7 @@ def test_appearance_order_updated_on_upsert(
     assert row[0] == 1
 
     # Re-load same data -- appearance_order should be preserved via upsert
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore_v1)
 
     row = db.execute(
         "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
@@ -2138,14 +1674,13 @@ def test_appearance_order_updated_on_upsert(
 
 
 def test_appearance_order_single_pitcher(
-    db: sqlite3.Connection, tmp_path: Path,
+    db: sqlite3.Connection,
 ) -> None:
     """Single pitcher gets appearance_order = 1."""
     boxscore = _make_boxscore()  # default has 1 pitcher per side
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
@@ -2178,14 +1713,13 @@ def test_appearance_order_in_dataclass() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_batting_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_batting_rows_have_perspective_team_id(db: sqlite3.Connection) -> None:
     """AC-1: Every batting row has perspective_team_id set to owned_team_ref.id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     rows = db.execute(
         "SELECT perspective_team_id FROM player_game_batting WHERE game_id = ?",
@@ -2196,14 +1730,13 @@ def test_batting_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path:
         assert row[0] == own_pk, f"Expected perspective_team_id={own_pk}, got {row[0]}"
 
 
-def test_pitching_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_pitching_rows_have_perspective_team_id(db: sqlite3.Connection) -> None:
     """AC-1: Every pitching row has perspective_team_id set to owned_team_ref.id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     rows = db.execute(
         "SELECT perspective_team_id FROM player_game_pitching WHERE game_id = ?",
@@ -2214,11 +1747,10 @@ def test_pitching_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path
         assert row[0] == own_pk, f"Expected perspective_team_id={own_pk}, got {row[0]}"
 
 
-def test_two_perspectives_create_separate_stat_rows(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_two_perspectives_create_separate_stat_rows(db: sqlite3.Connection) -> None:
     """AC-2: Same game from two perspectives creates separate batting/pitching rows."""
     from src.gamechanger.types import TeamRef
 
-    _ensure_season(db)
     boxscore = _make_boxscore()
 
     # Team A loads the game
@@ -2226,16 +1758,16 @@ def test_two_perspectives_create_separate_stat_rows(db: sqlite3.Connection, tmp_
     loader_a = GameLoader(
         db, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-perspective-a", public_id="slug-a"),
     )
-    bs_path = _write_boxscore(tmp_path, boxscore, game_stream_id="game-persp")
+    ensure_season_row(db, loader_a._season_id)
     summary = _make_summary(game_stream_id="game-persp")
-    loader_a.load_file(bs_path, summary)
+    loader_a.load_payload(boxscore, summary)
 
     # Team B loads the same game
     pk_b = _insert_own_team(db, gc_uuid="team-perspective-b", public_id="slug-b")
     loader_b = GameLoader(
         db, owned_team_ref=TeamRef(id=pk_b, gc_uuid="team-perspective-b", public_id="slug-b"),
     )
-    loader_b.load_file(bs_path, summary)
+    loader_b.load_payload(boxscore, summary)
 
     # Should have 4 batting rows (2 per perspective) and 4 pitching rows
     batting_count = db.execute(
@@ -2256,14 +1788,13 @@ def test_two_perspectives_create_separate_stat_rows(db: sqlite3.Connection, tmp_
     assert {r[0] for r in perspectives} == {pk_a, pk_b}
 
 
-def test_game_perspectives_row_inserted(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_game_perspectives_row_inserted(db: sqlite3.Connection) -> None:
     """AC-3: game_perspectives row exists after loading a game."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     row = db.execute(
         "SELECT game_id, perspective_team_id FROM game_perspectives WHERE game_id = ? AND perspective_team_id = ?",
@@ -2274,14 +1805,13 @@ def test_game_perspectives_row_inserted(db: sqlite3.Connection, tmp_path: Path) 
     assert row[1] == own_pk
 
 
-def test_opp_data_same_perspective_as_own_data(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_opp_data_same_perspective_as_own_data(db: sqlite3.Connection) -> None:
     """AC-5: Both own_data and opp_data rows carry the same perspective_team_id."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     own_persp = db.execute(
         "SELECT perspective_team_id FROM player_game_batting WHERE player_id = ?",
@@ -2296,14 +1826,13 @@ def test_opp_data_same_perspective_as_own_data(db: sqlite3.Connection, tmp_path:
     assert own_persp == opp_persp, "Both sides should have the same perspective_team_id"
 
 
-def test_load_all_perspective_uses_member_team_pk(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-6: load_all() sets perspective_team_id to the member team's integer PK."""
+def test_load_payload_perspective_uses_member_team_pk(db: sqlite3.Connection) -> None:
+    """AC-6: load_payload() sets perspective_team_id to the member team's integer PK."""
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
 
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
 
     rows = db.execute(
         "SELECT DISTINCT perspective_team_id FROM player_game_batting WHERE game_id = ?",
@@ -2313,7 +1842,7 @@ def test_load_all_perspective_uses_member_team_pk(db: sqlite3.Connection, tmp_pa
     assert rows[0][0] == own_pk
 
 
-def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection) -> None:
     """AC-7: When _find_duplicate_game redirects to canonical game_id,
     game_perspectives uses the canonical game_id.
 
@@ -2321,7 +1850,6 @@ def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_pa
     from the same team perspective (e.g., crawled via schedule and then
     via game-summaries with a different event_id).
     """
-    _ensure_season(db)
 
     loader = _make_loader(db)
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
@@ -2332,8 +1860,7 @@ def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_pa
         game_stream_id="stream-canon-a",
     )
     boxscore = _make_boxscore()
-    bs_path_a = _write_boxscore(tmp_path, boxscore, game_stream_id="stream-canon-a")
-    loader.load_file(bs_path_a, summary_a)
+    loader.load_payload(boxscore, summary_a)
 
     # Verify canonical game exists
     game_row = db.execute(
@@ -2346,8 +1873,7 @@ def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_pa
         event_id="event-duplicate",
         game_stream_id="stream-canon-b",
     )
-    bs_path_b = _write_boxscore(tmp_path, boxscore, game_stream_id="stream-canon-b")
-    loader.load_file(bs_path_b, summary_b)
+    loader.load_payload(boxscore, summary_b)
 
     # game_perspectives should reference the canonical game_id
     persp_rows = db.execute(
@@ -2366,17 +1892,16 @@ def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_pa
     assert dup_game is None, "Duplicate event_id should not create a separate game row"
 
 
-def test_on_conflict_uses_three_column_unique(db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_on_conflict_uses_three_column_unique(db: sqlite3.Connection) -> None:
     """AC-8: ON CONFLICT clauses use (game_id, player_id, perspective_team_id).
 
     Loading same data twice with same perspective is idempotent (no duplicates).
     """
     boxscore = _make_boxscore()
-    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    loader.load_all(team_dir)
-    loader.load_all(team_dir)
+    _load_game(loader, boxscore)
+    _load_game(loader, boxscore)
 
     batting_count = db.execute(
         "SELECT COUNT(*) FROM player_game_batting WHERE game_id = ?", (_EVENT_ID,)
@@ -2435,44 +1960,27 @@ def _dump_pitching(conn: sqlite3.Connection) -> list[tuple]:
     ).fetchall()
 
 
-def test_load_payload_matches_file_path(tmp_path: Path) -> None:
-    """AC-5: load_payload produces identical LoadResult + DB rows vs load_file.
+def test_load_payload_writes_games_and_stat_rows() -> None:
+    """AC-5: load_payload writes the game row plus both sides' stat rows.
 
-    Loads the same boxscore through both entry points into two independent
-    databases and asserts the LoadResult tallies and the written games /
-    player_game_batting / player_game_pitching rows are identical.
+    Row-content pin over the sole entry point: one game row, one batting and one
+    pitching row per side, each carrying the owned team's perspective PK.
     """
     boxscore = _make_boxscore()
     summary = _make_summary()
     opponent_name = "Rival High"
 
-    # File path via load_file.  Caller ensures the season row exactly as
-    # ScoutingLoader / load_all do (load_file/load_payload do not).
-    db_file = _fresh_db()
-    loader_file = _make_loader(db_file)
-    ensure_season_row(db_file, loader_file._season_id)
-    box_path = _write_boxscore(tmp_path, boxscore)
-    result_file = loader_file.load_file(box_path, summary, opponent_name=opponent_name)
-
-    # Payload path via load_payload (same in-memory dict).
     db_pl = _fresh_db()
     loader_pl = _make_loader(db_pl)
-    ensure_season_row(db_pl, loader_pl._season_id)
     result_pl = loader_pl.load_payload(boxscore, summary, opponent_name=opponent_name)
 
-    # Identical LoadResult tallies.
-    assert (result_pl.loaded, result_pl.skipped, result_pl.errors) == (
-        result_file.loaded,
-        result_file.skipped,
-        result_file.errors,
-    )
-    assert result_file.loaded > 0
-    assert result_file.errors == 0
+    assert result_pl.loaded > 0
+    assert result_pl.errors == 0
+    assert result_pl.skipped == 0
 
-    # Identical games + per-player stat rows.
-    assert _dump_games(db_pl) == _dump_games(db_file)
-    assert _dump_batting(db_pl) == _dump_batting(db_file)
-    assert _dump_pitching(db_pl) == _dump_pitching(db_file)
+    assert len(_dump_games(db_pl)) == 1
+    assert len(_dump_batting(db_pl)) == 2   # own + opponent batter
+    assert len(_dump_pitching(db_pl)) == 2  # own + opponent pitcher
 
     # AC-4: every stat row carries perspective_team_id = the owned team PK.
     own_pk = db_pl.execute(
@@ -2485,7 +1993,6 @@ def test_load_payload_matches_file_path(tmp_path: Path) -> None:
     ).fetchall()
     assert perspectives == [(own_pk,)]
 
-    db_file.close()
     db_pl.close()
 
 
@@ -2639,81 +2146,52 @@ class TestMissingScoreNoCoercion:
     """Missing game-summary scores must not flatten to 0-0 and collapse two
     distinct scoreless games into one row under the natural-key dedup."""
 
-    def test_missing_scores_stored_as_null(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+    def test_missing_scores_stored_as_null(self, db: sqlite3.Connection) -> None:
         """A summary omitting scores stores NULL home/away score, not 0."""
-        summaries = [
-            {
-                "event_id": _EVENT_ID,
-                "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-                "home_away": "home",
-                # owning_team_score / opponent_team_score deliberately omitted.
-                "last_scoring_update": "2025-05-10T19:39:58.788Z",
-            }
-        ]
-        team_dir = _write_team_dir(
-            tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: _make_boxscore()}
-        )
-        _make_loader(db).load_all(team_dir)
+        summary = _make_summary(owning_score=None, opponent_score=None)
+        _make_loader(db).load_payload(_make_boxscore(), summary)
 
         row = db.execute(
             "SELECT home_score, away_score FROM games WHERE game_id = ?", (_EVENT_ID,)
         ).fetchone()
         assert row == (None, None), "missing scores must be NULL, not coerced to 0"
 
-    def test_genuine_zero_score_preserved(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+    def test_genuine_zero_score_preserved(self, db: sqlite3.Connection) -> None:
         """A real 0 score (present, value 0) stays 0 -- only MISSING becomes NULL."""
-        summaries = [
-            {
-                "event_id": _EVENT_ID,
-                "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
-                "home_away": "home",
-                "owning_team_score": 0,
-                "opponent_team_score": 0,
-                "last_scoring_update": "2025-05-10T19:39:58.788Z",
-            }
-        ]
-        team_dir = _write_team_dir(
-            tmp_path, summaries=summaries, boxscores={_GAME_STREAM_ID: _make_boxscore()}
-        )
-        _make_loader(db).load_all(team_dir)
+        summary = _make_summary(owning_score=0, opponent_score=0)
+        _make_loader(db).load_payload(_make_boxscore(), summary)
 
         row = db.execute(
             "SELECT home_score, away_score FROM games WHERE game_id = ?", (_EVENT_ID,)
         ).fetchone()
         assert row == (0, 0), "a genuine 0-0 must be preserved, not nulled"
 
-    def test_scoreless_doubleheader_stays_two_rows(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+    def test_scoreless_doubleheader_stays_two_rows(self, db: sqlite3.Connection) -> None:
         """AC-3: two same-date, same-team games both missing scores (and no
         start_time) do NOT collapse -- they remain two games rows.
 
         Pre-fix, both coerced to 0-0 with equal score totals, so the natural-key
         dedup treated the second as a duplicate of the first and redirected it.
         """
-        summaries = [
-            {
-                "event_id": "dh-game-1",
-                "game_stream": {"id": "dh-stream-1", "opponent_id": _OPP_TEAM_ID},
-                "home_away": "home",
-                # No scores, no start_time -> the only pre-fix distinguishing
-                # signal (score total) was the false 0-0 collapse.
-                "last_scoring_update": "2025-05-10T13:00:00.000Z",
-            },
-            {
-                "event_id": "dh-game-2",
-                "game_stream": {"id": "dh-stream-2", "opponent_id": _OPP_TEAM_ID},
-                "home_away": "home",
-                "last_scoring_update": "2025-05-10T18:00:00.000Z",
-            },
-        ]
-        team_dir = _write_team_dir(
-            tmp_path,
-            summaries=summaries,
-            boxscores={
-                "dh-stream-1": _make_boxscore(),
-                "dh-stream-2": _make_boxscore(),
-            },
+        loader = _make_loader(db)
+        # No scores, no start_time -> the only pre-fix distinguishing signal
+        # (score total) was the false 0-0 collapse.
+        summary_1 = replace(
+            _make_summary(
+                event_id="dh-game-1", game_stream_id="dh-stream-1",
+                owning_score=None, opponent_score=None,
+            ),
+            last_scoring_update="2025-05-10T13:00:00.000Z",
         )
-        _make_loader(db).load_all(team_dir)
+        summary_2 = replace(
+            _make_summary(
+                event_id="dh-game-2", game_stream_id="dh-stream-2",
+                owning_score=None, opponent_score=None,
+            ),
+            last_scoring_update="2025-05-10T18:00:00.000Z",
+        )
+        loader.load_payload(_make_boxscore(), summary_1)
+        loader.load_payload(_make_boxscore(), summary_2)
 
         game_ids = {
             r[0] for r in db.execute("SELECT game_id FROM games").fetchall()

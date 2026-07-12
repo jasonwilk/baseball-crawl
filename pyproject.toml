@@ -4,14 +4,21 @@ version = "0.1.0"
 requires-python = ">=3.13"
 
 # Runtime dependencies -- keep in sync with requirements.in
+#
+# Security floors (E-256-07). These do NOT guard a fresh resolve -- an unbounded
+# ">=X" already picks the LATEST release, not X. They guard BACKTRACKING: a
+# resolve that pins an older fastapi (e.g. fastapi==0.115, whose metadata caps
+# starlette<0.42) would otherwise be free to drag starlette down onto the
+# vulnerable 0.41.x. The floor makes that resolution fail instead of silently
+# selecting a CVE-carrying version.
 dependencies = [
     "httpx>=0.28",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "starlette>=0.41",
-    "jinja2>=3.1",
+    "starlette>=0.49.1",       # CVE-2025-54121 / GHSA-7f5h-v6xp-fcq8 fix floor
+    "jinja2>=3.1.6",           # CVE-2025-27516 fix floor
     "aiofiles>=24.1",
-    "python-multipart>=0.0.20",
+    "python-multipart>=0.0.31",  # highest fix floor of its 6 advisories (CVE-2026-53540)
     "webauthn>=2.2",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
@@ -31,3 +38,32 @@ include = ["src*", "migrations*"]
 [tool.pytest.ini_options]
 timeout = 30
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+# SCOPED TO src/ + scripts/ ON PURPOSE, not by oversight.
+#
+# `tests/` is deliberately excluded. It currently carries 68 F-class violations
+# (48 F401, 16 F841, 2 F811, 2 F541), most of them harmless in test code -- unused
+# imports in fixtures, bindings kept for readability. Widening `include` to cover
+# `tests/` imports all 68 as a red build on the next run; that is a deliberate
+# future decision, not an accident waiting to be corrected.
+#
+# Derived with (a directory walk would be filtered by the `include` below, and
+# would vacuously report zero):
+#     git ls-files -z 'tests/*.py' | xargs -0 ruff check --select F --output-format json
+#
+# The count was 74 before this story. The 6 F821 in tests/test_cli_creds.py were
+# real false positives (string return annotations resolved by function-local
+# imports); this story RESOLVED them at the source with a TYPE_CHECKING block
+# rather than suppressing them, so they are no longer carried. They are checked by
+# an explicitly out-of-scope command, since this `include` does not cover them:
+#     ruff check tests/test_cli_creds.py --select F821
+#
+# Note: `include` filters DIRECTORY WALKS (`ruff check .`). Explicitly-named paths
+# are always checked, which is why the out-of-scope command above works at all.
+include = ["src/**/*.py", "scripts/**/*.py"]
+
+[tool.ruff.lint]
+# F (pyflakes) only. mypy and the other rule families are out of scope by epic
+# Non-Goals -- widening `select` is a separate decision with its own baseline.
+select = ["F"]

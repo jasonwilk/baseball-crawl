@@ -1,16 +1,18 @@
 """Import-isolation guard for the FastAPI app (E-239-01, AC-2).
 
-After E-239-01 extracted the surviving admin surface into
+E-239-01 extracted the surviving admin surface into
 ``src/api/routes/reports_admin.py`` and deleted ``src/api/routes/admin.py``,
-importing the app must no longer transitively import ``src.pipeline`` (the
-member-sync orchestration that admin.py pulled in via
-``from src.pipeline import trigger``).  This severs coupling chain 1 so the
-pipeline package becomes deletable in later E-239 stories without breaking app
-startup.
+which had pulled the member-sync orchestration package into the app's import
+graph.  Severing that coupling chain is what made the package deletable; it
+**was** deleted later in E-239 and no longer exists.
+
+This test is therefore a standing guard against the chain being re-formed, not
+a check on live code: it asserts that importing the app pulls in no module named
+``src.pipeline``.  The name survives here only as the thing being excluded.
 
 The check runs in a fresh subprocess so a clean ``sys.modules`` is guaranteed --
-an in-process assertion could pass or fail depending on whether an earlier test
-already imported ``src.pipeline``.
+an in-process assertion could pass or fail depending on what an earlier test had
+already imported.
 
 Run with:
     pytest tests/test_app_import_isolation.py -v
@@ -26,7 +28,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_app_import_does_not_pull_in_pipeline() -> None:
-    """A fresh ``import src.api.main`` must not load any ``src.pipeline`` module."""
+    """A fresh ``import src.api.main`` must not load a ``src.pipeline`` module.
+
+    The package was removed in E-239; this guards against its return.
+    """
     code = (
         "import sys\n"
         "import src.api.main  # noqa: F401\n"

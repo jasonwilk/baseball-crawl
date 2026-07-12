@@ -49,8 +49,8 @@ from src.gamechanger.opponent_ladder import (
 )
 from src.gamechanger.team_resolver import TeamProfile, resolve_team
 from src.gamechanger.url_parser import parse_team_url
-from src.reports.generator import GenerationResult, _utcnow_iso, generate_report
-from src.util.timezone import derive_local_date, operating_today
+from src.reports.generator import GenerationResult, generate_report
+from src.util.timezone import derive_local_date, operating_today, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -322,8 +322,9 @@ def _prior_success(
     if expires_at is None:
         return False
     # Non-expired => the prior report is still serveable; skip regeneration.
-    # Shared UTC-iso helper (E-247-05 AC-4) -- identical format to all callers.
-    return expires_at > _utcnow_iso()
+    # Lexical compare against the canonical UTC-iso helper: `expires_at` is
+    # written from the same UTC_ISO_FORMAT, so string order == time order.
+    return expires_at > utcnow_iso()
 
 
 def _existing_report_slug(

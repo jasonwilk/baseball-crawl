@@ -1,0 +1,92 @@
+# Docker build-context exclusions (E-256-06).
+#
+# The Dockerfile COPYs exactly four things: requirements.txt, src/, migrations/,
+# and pyproject.toml. Everything else in the repo root is sent to the daemon as
+# build context for no reason -- and some of it must never be able to enter a
+# layer at all. This file is an EXCLUDE list only (no `*` + negation), so what it
+# keeps out can be read off the patterns directly.
+#
+# ANCHORING. Docker anchors an unprefixed pattern at the context root: `data/`
+# matches ./data and nothing else, and `*.pyc` matches only root-level bytecode.
+# A pattern must say `**/` when it means "at any depth". Each group below states
+# which it is, because a reader cannot otherwise distinguish intended anchoring
+# from overlooked anchoring.
+#
+# CLAUDE.md Security Rules: credentials and tokens must never appear in code,
+# logs, commit history, or agent output. A build context is none of those, but it
+# is one careless `COPY . .` away from all of them.
+
+# --- Credentials and secrets. Never in the context, never in a layer. ---
+# RECURSIVE, and must stay that way: `COPY src/ ./src/` would carry a dotenv file
+# created anywhere under src/ straight into a layer. This is the one pattern that
+# must never be narrower than the COPY it guards. The root-anchored form is kept
+# alongside it as belt-and-braces.
+**/.env*
+.env*
+secrets/
+proxy/
+
+# --- Live data: the SQLite DB, backups, generated reports, raw API responses. ---
+# ROOT-ANCHORED ON PURPOSE. There is exactly one data/ and one ephemeral/, both at
+# the context root; a nested match would be a different directory, not this one.
+data/
+ephemeral/
+
+# --- VCS. The version in pyproject.toml is static, so the build never needs it. ---
+# ROOT-ANCHORED ON PURPOSE, same reason: there is exactly one repository root.
+.git/
+.gitignore
+.githooks/
+
+# --- Python build/run artifacts. RECURSIVE: these nest under src/, which is COPYd. ---
+# Regenerated inside the image, and stale by construction -- story 03 deleted source
+# whose .pyc would otherwise still ride along. A root-anchored `*.pyc` would miss
+# every one of them.
+#
+# Docker documents `**` as matching zero or more directories, so the recursive form
+# alone should also cover the root. The root-anchored forms are kept alongside it
+# rather than relying on that: same belt-and-braces as the credentials group.
+**/__pycache__/
+__pycache__/
+**/*.pyc
+*.pyc
+**/*.pyo
+*.pyo
+**/*.egg-info/
+*.egg-info/
+
+# --- Tool caches and virtualenvs. ROOT-ANCHORED ON PURPOSE. ---
+# Split out of the group above: these are single top-level directories, so anchoring
+# is correct for them -- but the RECURSIVE header would have over-claimed it.
+.venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Not needed at runtime: tests, docs, tooling, planning artifacts. ---
+# ROOT-ANCHORED ON PURPOSE: each names a single top-level directory.
+tests/
+docs/
+scripts/
+epics/
+reviews/
+.project/
+.claude/
+.agents/
+.codex/
+.codex-home/
+.devcontainer/
+.mcp.json
+
+# --- Compose/Docker files themselves are not build inputs. ---
+# ROOT-ANCHORED ON PURPOSE: each names a single top-level file. A `Dockerfile` nested
+# under src/ would be someone else's, and excluding it is not this file's business.
+Dockerfile
+.dockerignore
+docker-compose*.yml
+docker-compose*.yml.example
+
+# --- OS noise. RECURSIVE: Finder drops these at any depth. ---
+# Root twin kept, same belt-and-braces as the credentials and artifact groups.
+**/.DS_Store
+.DS_Store

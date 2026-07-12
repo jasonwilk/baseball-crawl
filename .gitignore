@@ -14,6 +14,10 @@ build/
 !.env.example
 secrets/
 
+# Closure runtime smoke fixture (Phase 5 Step 1d) -- holds LSB's own real
+# identifiers (generate=<public_id>, morning-run=<lsb-urls>); never committed.
+.smoke-fixture
+
 # IDE
 .vscode/
 .idea/
@@ -34,11 +38,8 @@ docker-compose.override.yml
 .DS_Store
 
 # Data (local dev outputs)
-# Ignore the runtime database and any other generated files under data/,
-# but commit seed SQL files (data/seeds/ is source-controlled).
+# Ignore the runtime database and any other generated files under data/.
 data/
-!data/seeds/
-!data/seeds/**
 
 # Database backups (created by scripts/backup_db.py)
 data/backups/

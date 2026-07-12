@@ -12,22 +12,23 @@ from fastapi.testclient import TestClient
 
 from migrations.apply_migrations import run_migrations
 from src.api.main import app
+from src.util.timezone import UTC_ISO_FORMAT, utcnow_iso
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+# These build the same `reports.generated_at` / `expires_at` strings the app
+# writes, so they MUST use the canonical UTC_ISO_FORMAT rather than a local
+# copy of it -- a divergent literal here would keep passing against a format
+# the code no longer emits (E-256-03).
 
 _CSRF = "test-csrf-token"
 
 
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _future_iso(days: int = 14) -> str:
     dt = datetime.now(timezone.utc) + timedelta(days=days)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.strftime(UTC_ISO_FORMAT)
 
 
 def _make_db(tmp_path: Path) -> Path:
@@ -63,7 +64,7 @@ def _insert_report(
     cursor = conn.execute(
         "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at, report_path, error_message) "
         "VALUES (?, ?, 'Test Report', ?, ?, ?, ?, ?)",
-        (slug, team_id, status, _utcnow_iso(), expires_at, report_path, error_message),
+        (slug, team_id, status, utcnow_iso(), expires_at, report_path, error_message),
     )
     report_id = cursor.lastrowid
     conn.commit()

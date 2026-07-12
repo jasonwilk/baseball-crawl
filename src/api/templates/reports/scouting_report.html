@@ -495,7 +495,7 @@
     </div>
   </div>
   <div>
-    <div class="report-date">{{ generated_at[:10] if generated_at else "" }}</div>
+    <div class="report-date">{{ generation_date if generation_date else "" }}</div>
   </div>
 </div>
 
@@ -862,7 +862,7 @@
 
 {# ===== FOOTER (AC-11, TN-10) ===== #}
 <div class="report-footer">
-  Generated {{ generated_at[:10] if generated_at else "" }}{% if expires_at %} &middot; Expires {{ expires_at[:10] }}{% endif %} &middot; bbstats.ai
+  Generated {{ generation_date if generation_date else "" }}{% if expires_at %} &middot; Expires {{ expires_at[:10] }}{% endif %} &middot; bbstats.ai
 </div>
 </div>{# /.stats-content (second block: roster + footer) #}
 

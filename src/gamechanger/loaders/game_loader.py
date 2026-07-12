@@ -1,25 +1,14 @@
 """Game loader for the baseball-crawl ingestion pipeline.
 
-Reads boxscore JSON files written by the game-stats crawler and upserts game
-records and per-player batting/pitching lines into the SQLite database.
-
-Expected file layout (written by GameStatsCrawler)::
-
-    data/raw/{season}/teams/{team_id}/games/{event_id}.json
-
-The loader also reads game-summaries files (one per team directory) to build a
-dual-key index (keyed by both ``event_id`` and ``game_stream_id``) used to
-resolve ``home_away`` assignments::
-
-    data/raw/{season}/teams/{team_id}/game_summaries.json
-
-``games.game_id`` uses the ``event_id`` from game-summaries.
+Upserts game records and per-player batting/pitching lines into the SQLite
+database from an already-fetched, in-memory boxscore payload.  The caller
+supplies the parsed boxscore dict and a matching :class:`GameSummaryEntry`
+(``event_id``, ``home_away``, scores, start_time); ``games.game_id`` uses the
+``event_id``.
 
 Key data decisions
 ------------------
-- **ID mapping**: file name is ``event_id``; DB primary key is also ``event_id``.
-  The game-summaries index is keyed by both ``event_id`` and ``game_stream_id``
-  so that files named by either key are matched correctly.
+- **ID mapping**: DB primary key is the ``event_id`` carried on the summary.
 - **Asymmetric boxscore keys**: own team key = public_id slug (alphanumeric, no
   dashes); opponent key = UUID (lowercase hex with dashes, 36 chars).
 - **IP to ip_outs**: boxscore stores IP as float decimal innings (e.g. 3.333...
@@ -33,27 +22,24 @@ Key data decisions
 Usage::
 
     import sqlite3
-    from pathlib import Path
     from src.gamechanger.loaders.game_loader import GameLoader
 
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = GameLoader(conn, owned_team_ref=team_ref)
-    result = loader.load_all(Path("data/raw/2025/teams/abc-team-uuid"))
+    result = loader.load_payload(boxscore_dict, summary)
     print(result)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from dataclasses import dataclass, field, replace
-from pathlib import Path
+from dataclasses import dataclass, replace
 
 from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row_with_provenance
-from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import is_gc_uuid
 from src.util.timezone import derive_local_date, get_operating_timezone
@@ -231,19 +217,19 @@ class _PlayerPitching:
 
 
 class GameLoader:
-    """Loads boxscore JSON files into the SQLite database.
+    """Loads in-memory boxscore payloads into the SQLite database.
 
-    Reads all ``games/{event_id}.json`` files in a team directory, resolves
-    each file to a ``GameSummaryEntry`` via the dual-key summaries index, and
-    upserts game records plus per-player batting and pitching lines.
+    Each call resolves the payload against its caller-supplied
+    ``GameSummaryEntry`` and upserts the game record plus per-player batting and
+    pitching lines.
 
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        owned_team_ref: ``TeamRef`` for the team that owns the data directory.
-            Used to identify which boxscore key belongs to the owned team vs.
-            the opponent.  ``gc_uuid`` is used for boxscore key detection;
-            ``id`` is used for FK inserts.
+        owned_team_ref: ``TeamRef`` for the team whose API call produced the
+            payload.  Used to identify which boxscore key belongs to the owned
+            team vs. the opponent.  ``gc_uuid`` is used for boxscore key
+            detection; ``id`` is used for FK inserts.
         created_team_ids: Optional in-memory set the loader records into when it
             INSERTs a brand-new opponent team row (E-235-04). Used by the report
             generator's per-run created-set so orphan cleanup deletes only teams
@@ -276,102 +262,25 @@ class GameLoader:
     # Public API
     # ------------------------------------------------------------------
 
-    def load_all(self, team_dir: Path) -> LoadResult:
-        """Load all boxscore files in a team directory.
-
-        Reads ``game_summaries.json`` from ``team_dir`` to build the
-        dual-key index (by ``event_id`` and ``game_stream_id``), then loads each
-        ``games/{event_id}.json`` file found in ``team_dir``.
-
-        Also reads ``opponents.json`` (and ``schedule.json`` as a supplement) to
-        build a UUID→name lookup so opponent team rows are created with real names
-        instead of UUID placeholders.
-
-        Args:
-            team_dir: Path to ``data/raw/{season}/teams/{team_id}/``.
-
-        Returns:
-            Aggregated ``LoadResult`` across all game files.
-        """
-        summaries_index = self._build_summaries_index(team_dir)
-        if summaries_index is None:
-            return LoadResult(errors=1)
-
-        games_dir = team_dir / "games"
-        if not games_dir.is_dir():
-            logger.info("No games directory at %s; nothing to load.", games_dir)
-            return LoadResult()
-
-        ensure_season_row(self._db, self._season_id)
-        opponent_name_lookup = self._build_opponent_name_lookup(team_dir)
-
-        total = LoadResult()
-        for boxscore_path in sorted(games_dir.glob("*.json")):
-            game_stream_id = boxscore_path.stem
-            summary = summaries_index.get(game_stream_id)
-            if summary is None:
-                logger.warning(
-                    "No game-summaries entry for game_stream_id=%s; skipping %s",
-                    game_stream_id,
-                    boxscore_path,
-                )
-                total.skipped += 1
-                continue
-
-            opponent_name = opponent_name_lookup.get(summary.opponent_id) if summary.opponent_id else None
-            result = self._load_boxscore_file(boxscore_path, summary, opponent_name=opponent_name)
-            total.loaded += result.loaded
-            total.skipped += result.skipped
-            total.errors += result.errors
-
-        self._db.commit()
-        logger.info(
-            "Game load complete for %s: loaded=%d skipped=%d errors=%d",
-            team_dir,
-            total.loaded,
-            total.skipped,
-            total.errors,
-        )
-        return total
-
-    def load_file(
-        self,
-        boxscore_path: Path,
-        summary: GameSummaryEntry,
-        opponent_name: str | None = None,
-    ) -> LoadResult:
-        """Load a single boxscore file.
-
-        Public for testing.  Callers must supply a matching ``GameSummaryEntry``
-        with the resolved ``event_id``, ``home_away``, and score data.
-
-        Args:
-            boxscore_path: Path to a ``{game_stream_id}.json`` boxscore file.
-            summary: Resolved game-summaries entry for this game.
-            opponent_name: Human-readable opponent team name.  When provided,
-                used as the ``teams.name`` value instead of the UUID placeholder.
-                Existing rows with ``name == gc_uuid`` (UUID-stubs) are updated.
-
-        Returns:
-            ``LoadResult`` for this single game.
-        """
-        result = self._load_boxscore_file(boxscore_path, summary, opponent_name=opponent_name)
-        self._db.commit()
-        return result
-
     def load_payload(
         self,
         raw: dict,
         summary: GameSummaryEntry,
         opponent_name: str | None = None,
     ) -> LoadResult:
-        """Load a single in-memory boxscore dict (payload-first entry point).
+        """Load a single in-memory boxscore dict.
 
-        Per-call counterpart to :meth:`load_file`: applies the identical
-        dict-processing logic (team-key detection, ID resolution,
-        ``_find_duplicate_game`` dedup, per-player stat upsert) to an
-        already-parsed boxscore dict without any disk round-trip, then commits
-        per call (TN-10 option (b)).
+        The sole entry point: applies team-key detection, ID resolution,
+        ``_find_duplicate_game`` dedup, and per-player stat upsert to an
+        already-parsed boxscore dict, then commits per call (TN-10 option (b)).
+
+        PRECONDITION: the caller MUST ensure the ``seasons`` row for
+        ``self._season_id`` exists (``ensure_season_row``) before calling.  This
+        method INSERTs ``games.season_id`` and ``team_rosters.season_id`` but
+        does not create the parent row, so a missing season raises a FOREIGN KEY
+        error that surfaces as ``LoadResult(errors=1)``.  ``ScoutingLoader``
+        (the only production caller) does this in ``_load_team_core``; the
+        deleted ``load_all`` used to do it inline (E-256-01).
 
         Args:
             raw: Parsed boxscore response dict.
@@ -387,220 +296,40 @@ class GameLoader:
         return result
 
     # ------------------------------------------------------------------
-    # Index building
-    # ------------------------------------------------------------------
-
-    def _build_opponent_name_lookup(self, team_dir: Path) -> dict[str, str]:
-        """Build a ``progenitor_team_id → name`` mapping from on-disk data.
-
-        Reads ``opponents.json`` first (keyed by ``progenitor_team_id`` -- NOT
-        ``root_team_id``; see API spec caveats).  Supplements with ``schedule.json``
-        for any opponent whose ``progenitor_team_id`` is null in opponents.json.
-
-        Args:
-            team_dir: Path to the team data directory.
-
-        Returns:
-            Dict mapping canonical GC team UUID to human-readable team name.
-            Returns an empty dict if both source files are missing or unreadable.
-        """
-        lookup: dict[str, str] = {}
-
-        # Primary source: opponents.json
-        opponents_path = team_dir / "opponents.json"
-        if opponents_path.exists():
-            try:
-                with opponents_path.open(encoding="utf-8") as fh:
-                    opponents = json.load(fh)
-                if isinstance(opponents, list):
-                    for opp in opponents:
-                        pid = opp.get("progenitor_team_id")  # canonical UUID
-                        name = opp.get("name")
-                        # Skip hidden records (duplicates / bad entries) and null progenitor_team_id.
-                        if pid and name and not opp.get("is_hidden"):
-                            lookup[pid] = name
-                    logger.info(
-                        "Built opponent name lookup from %s: %d entries",
-                        opponents_path,
-                        len(lookup),
-                    )
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.warning("Failed to read %s: %s", opponents_path, exc)
-
-        # Supplementary source: schedule.json (covers opponents with null progenitor_team_id)
-        schedule_path = team_dir / "schedule.json"
-        if schedule_path.exists():
-            try:
-                with schedule_path.open(encoding="utf-8") as fh:
-                    schedule = json.load(fh)
-                if isinstance(schedule, list):
-                    added = 0
-                    for event in schedule:
-                        pregame = event.get("pregame_data") or {}
-                        opp_id = pregame.get("opponent_id")
-                        opp_name = pregame.get("opponent_name")
-                        if opp_id and opp_name and opp_id not in lookup:
-                            lookup[opp_id] = opp_name
-                            added += 1
-                    if added:
-                        logger.info(
-                            "Supplemented opponent name lookup from %s: %d additional entries",
-                            schedule_path,
-                            added,
-                        )
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.warning("Failed to read %s: %s", schedule_path, exc)
-
-        return lookup
-
-    def _build_summaries_index(
-        self, team_dir: Path
-    ) -> dict[str, GameSummaryEntry] | None:
-        """Build a dual-key ``GameSummaryEntry`` index.
-
-        Reads ``game_summaries.json`` from ``team_dir`` and indexes each entry
-        by both ``event_id`` and ``game_stream_id`` so that boxscore files named
-        by either key are resolved to the correct summary.
-
-        Args:
-            team_dir: Path to the team data directory.
-
-        Returns:
-            Dict keyed by both ``event_id`` and ``game_stream_id``, or ``None``
-            on read error.
-        """
-        summaries_path = team_dir / "game_summaries.json"
-        if not summaries_path.exists():
-            logger.error(
-                "game_summaries.json not found at %s; cannot build ID index.",
-                summaries_path,
-            )
-            return None
-
-        try:
-            with summaries_path.open(encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except json.JSONDecodeError as exc:
-            logger.error("Failed to parse %s: %s", summaries_path, exc)
-            return None
-
-        if not isinstance(raw, list):
-            logger.error(
-                "Expected JSON array in %s, got %s",
-                summaries_path,
-                type(raw).__name__,
-            )
-            return None
-
-        index: dict[str, GameSummaryEntry] = {}
-        for record in raw:
-            entry = self._parse_summary_record(record)
-            if entry is not None:
-                index[entry.game_stream_id] = entry
-                index[entry.event_id] = entry
-
-        logger.info(
-            "Built game-summaries index: %d entries from %s",
-            len(index),
-            summaries_path,
-        )
-        return index
-
-    def _parse_summary_record(self, record: dict) -> GameSummaryEntry | None:
-        """Parse one game-summaries record into a ``GameSummaryEntry``.
-
-        Args:
-            record: Raw dict from game_summaries.json array.
-
-        Returns:
-            Parsed entry, or ``None`` if required fields are missing.
-        """
-        event_id = record.get("event_id")
-        game_stream = record.get("game_stream") or {}
-        game_stream_id = game_stream.get("id")
-
-        if not event_id or not game_stream_id:
-            logger.warning(
-                "Skipping summary record missing event_id or game_stream.id: %r", record
-            )
-            return None
-
-        return GameSummaryEntry(
-            event_id=str(event_id),
-            game_stream_id=str(game_stream_id),
-            home_away=record.get("home_away"),
-            owning_team_score=_opt_int(record.get("owning_team_score")),
-            opponent_team_score=_opt_int(record.get("opponent_team_score")),
-            opponent_id=str(game_stream.get("opponent_id") or ""),
-            last_scoring_update=str(record.get("last_scoring_update") or ""),
-        )
-
-    # ------------------------------------------------------------------
     # Core loading logic
     # ------------------------------------------------------------------
-
-    def _load_boxscore_file(
-        self,
-        path: Path,
-        summary: GameSummaryEntry,
-        opponent_name: str | None = None,
-    ) -> LoadResult:
-        """Parse and load a single boxscore JSON file.
-
-        This is a thin file-reading wrapper: it reads the JSON, guards the
-        ``None``/non-dict cases, and delegates to the shared
-        :meth:`_load_boxscore_data` payload logic.  It does NOT commit --
-        ``load_all`` commits once at the end and ``load_file`` commits per call.
-
-        Args:
-            path: Path to the boxscore JSON file.
-            summary: Resolved game-summaries entry for this game.
-            opponent_name: Human-readable opponent team name.  When provided,
-                used instead of the UUID placeholder for ``teams.name``.
-        """
-        raw = self._read_json(path)
-        if raw is None:
-            return LoadResult(errors=1)
-
-        return self._load_boxscore_data(
-            raw, summary, opponent_name=opponent_name, source=path,
-        )
 
     def _load_boxscore_data(
         self,
         raw: dict | list,
         summary: GameSummaryEntry,
         opponent_name: str | None = None,
-        source: Path | None = None,
     ) -> LoadResult:
         """Process a single parsed boxscore payload into games + stat rows.
 
-        Shared core for both :meth:`load_file` (file path -- ``source`` is the
-        path) and :meth:`load_payload` (in-memory -- ``source`` is ``None``).
         Performs the non-dict guard, team-key detection, ID resolution,
         ``_find_duplicate_game`` dedup, and per-player stat upsert.  Does NOT
-        commit -- the public entry points (and ``load_all``) own the commit
-        boundary.
+        commit -- :meth:`load_payload` owns the commit boundary.
 
         Args:
             raw: Parsed boxscore payload (expected to be a dict).
             summary: Resolved game-summaries entry for this game.
             opponent_name: Human-readable opponent team name.
-            source: Originating file path for log context, or ``None`` for
-                in-memory payloads.
         """
-        log_source = source if source is not None else "payload"
-
         if not isinstance(raw, dict):
             logger.error(
-                "Expected JSON object in %s, got %s", log_source, type(raw).__name__
+                "Expected boxscore payload to be a JSON object, got %s",
+                type(raw).__name__,
             )
             return LoadResult(errors=1)
 
         # Detect which key is own team and which is opponent.
         own_key, opp_key = self._detect_team_keys(raw)
         if own_key is None and opp_key is None:
-            logger.error("Could not identify team keys in boxscore %s", log_source)
+            logger.error(
+                "Could not identify team keys in boxscore for game %s",
+                summary.event_id,
+            )
             return LoadResult(errors=1)
 
         own_data = raw.get(own_key) if own_key else None
@@ -1170,25 +899,6 @@ class GameLoader:
                 if pid:
                     index.setdefault(pid, {})[stat_name] = int(value)
         return index
-
-    def _read_json(self, path: Path) -> dict | list | None:
-        """Read and parse a JSON file.
-
-        Args:
-            path: Path to the JSON file.
-
-        Returns:
-            Parsed JSON value, or ``None`` on error.
-        """
-        try:
-            with path.open(encoding="utf-8") as fh:
-                return json.load(fh)
-        except FileNotFoundError:
-            logger.error("File not found: %s", path)
-            return None
-        except json.JSONDecodeError as exc:
-            logger.error("JSON parse error in %s: %s", path, exc)
-            return None
 
     # ------------------------------------------------------------------
     # Dedup check

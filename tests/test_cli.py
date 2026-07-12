@@ -77,7 +77,6 @@ def test_status_command_runs() -> None:
             "src.cli.status.check_single_profile",
             return_value=(0, "valid -- logged in as Jason Smith"),
         ),
-        patch("src.cli.status._get_last_crawl", return_value=("2026-03-05T14:30:00Z", 47)),
         patch("src.cli.status._get_db_info", return_value=(True, "data/app.db (2.4 MB)")),
         patch("src.cli.status._get_proxy_sessions", return_value=None),
     ):

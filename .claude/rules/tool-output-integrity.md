@@ -15,6 +15,8 @@ Treat any of these as a tool-output FAILURE, not as truth:
 - **Truncated** -- output is cut off (tail missing, a partial edit that did not fully land).
 - **Garbled** -- output is nonempty but wrong. Examples: line numbers that disagree with an independent count (e.g., a Read reporting 17-19 lines while `cat -n` shows a clean 1-31 on the same file), stale or mismatched content, a different file's bytes, or a command echoed back instead of executed.
 
+**Silent-empty from a tool quirk, not from absence:** the environment's `grep` is ugrep, which returns EMPTY (no error) for `grep -rn "a\|b" <path…>` -- recursive BRE alternation over multiple path args. Use `grep -rnE "a|b"` (ERE), or a single pattern / single path. Treat an unexpected empty grep as an **Empty** FAILURE to cross-check (re-run with `-E` or per-file), never as proof of absence -- in E-256-15 this exact quirk returned "no matches" for symbols that were present, and driving a deletion-eviction sweep off it would have shipped a false-clean no-op.
+
 ## Response protocol (cross-check, retry, escalate)
 
 When a target known or expected to be non-empty returns empty, truncated, or garbled output:

@@ -222,14 +222,14 @@ def reconcile_game(
                     conn, game_id, team_id, chosen_perspective_id,
                 )
 
-                pitcher_order_from_json = _extract_pitcher_order(
+                pitcher_order = _extract_pitcher_order(
                     conn, game_id, game_stream_id, season_id, team_id, is_home,
                     perspective_team_id=chosen_perspective_id,
                 )
 
                 corrections = _correct_pitcher_attribution(
                     conn, game_id, team_id, pitching_half,
-                    pitching_rows, pitcher_order_from_json,
+                    pitching_rows, pitcher_order,
                     chosen_perspective_id,
                 )
                 total_reassigned += len(corrections)
@@ -459,8 +459,8 @@ def _detect_discrepancies(
             (game_id, team_id, chosen_perspective_id),
         ).fetchall()
 
-        # Get pitcher order from cached boxscore JSON
-        pitcher_order_from_json = _extract_pitcher_order(
+        # Get pitcher order from the stored appearance_order column
+        pitcher_order = _extract_pitcher_order(
             conn, game_id, game_stream_id, season_id, team_id, is_home,
             perspective_team_id=chosen_perspective_id,
         )
@@ -477,7 +477,7 @@ def _detect_discrepancies(
         # Run pitcher signal checks
         _check_pitcher_signals(
             pitching_rows, team_pitching_plays, events_by_play,
-            pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
+            pitcher_order, game_id, chosen_perspective_id, team_id,
             discrepancies,
         )
 
@@ -509,7 +509,7 @@ def _check_pitcher_signals(
     pitching_rows: list[tuple],
     pitching_plays: list[tuple],
     events_by_play: dict[int, list[tuple]],
-    pitcher_order_json: list[dict[str, Any]] | None,
+    pitcher_order: list[dict[str, Any]] | None,
     game_id: str,
     perspective_team_id: int,
     team_id: int,
@@ -611,8 +611,8 @@ def _check_pitcher_signals(
             seen_pitchers.add(pitcher_id)
 
     # Build boxscore pitcher order from JSON (or fallback to DB order)
-    if pitcher_order_json is not None:
-        box_pitcher_order = [p["player_id"] for p in pitcher_order_json]
+    if pitcher_order is not None:
+        box_pitcher_order = [p["player_id"] for p in pitcher_order]
     else:
         box_pitcher_order = [row[0] for row in pitching_rows]
 
@@ -981,7 +981,7 @@ def _check_game_level_signals(
 
 
 # ---------------------------------------------------------------------------
-# Pitcher order extraction from cached boxscore JSON
+# Pitcher order extraction from the stored appearance_order column
 # ---------------------------------------------------------------------------
 
 
@@ -1055,7 +1055,7 @@ def _correct_pitcher_attribution(
     team_id: int,
     pitching_half: str,
     pitching_rows: list[tuple],
-    pitcher_order_json: list[dict[str, Any]] | None,
+    pitcher_order: list[dict[str, Any]] | None,
     perspective_team_id: int,
 ) -> list[dict[str, Any]]:
     """Apply BF-boundary pitcher attribution correction for one team.
@@ -1067,8 +1067,8 @@ def _correct_pitcher_attribution(
     old_pitcher_id, and new_pitcher_id.
     """
     # Build pitcher order with BF counts
-    if pitcher_order_json is not None:
-        box_pitcher_order = [p["player_id"] for p in pitcher_order_json]
+    if pitcher_order is not None:
+        box_pitcher_order = [p["player_id"] for p in pitcher_order]
     else:
         box_pitcher_order = [row[0] for row in pitching_rows]
 

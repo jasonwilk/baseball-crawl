@@ -1122,10 +1122,6 @@ def compute_starter_prediction(
         pitcher_profiles, total_team_games
     )
 
-    # ── Latest game date for rest calculations ──────────────────────
-    all_dates = sorted(set(r["game_date"] for r in pitching_history))
-    latest_game_date = all_dates[-1] if all_dates else ""
-
     # ── Compute likelihoods ─────────────────────────────────────────
     likelihoods = _compute_rotation_likelihoods(
         pitcher_profiles, pitching_history, roles, reference_date

@@ -9,3 +9,4 @@ pytest-asyncio==0.25.0 # Async test support for pytest
 pytest-timeout==2.3.1  # Per-test timeout enforcement
 respx~=0.22            # HTTP mocking for httpx in tests
 pyyaml~=6.0            # YAML frontmatter parsing for API doc validation
+ruff==0.15.20          # Lint (F/pyflakes only -- see [tool.ruff] in pyproject.toml)

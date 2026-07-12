@@ -10,10 +10,10 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,7 +47,6 @@ def loader(db: sqlite3.Connection) -> ScoutingLoader:
 _PUBLIC_ID = "opp-slug-abc123"
 _GC_UUID = "aaaabbbb-cccc-dddd-eeee-ffff00000001"
 _SEASON_ID = "2025"
-_CRAWL_SEASON_ID = "2025-spring-hs"
 _PLAYER_1 = "player-uuid-001"
 _PLAYER_2 = "player-uuid-002"
 _PLAYER_3 = "player-uuid-003"
@@ -69,34 +68,24 @@ def _insert_team(db: sqlite3.Connection) -> int:
     return cursor.lastrowid
 
 
-def _make_scouting_dir(
-    tmp_path: Path,
+def _crawl_result(
+    team_id: int,
     roster: list[dict] | None = None,
     games: list[dict] | None = None,
     boxscores: dict[str, dict] | None = None,
-) -> Path:
-    """Set up a scouting directory with roster, games, and boxscores."""
-    scouting_dir = tmp_path / "raw" / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID
-    scouting_dir.mkdir(parents=True, exist_ok=True)
-
+) -> SimpleNamespace:
+    """Build a ``ScoutingCrawlResult``-shaped payload for ``load_team``."""
     if roster is None:
         roster = [
             {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"},
             {"id": _PLAYER_2, "first_name": "Jane", "last_name": "Smith", "number": "7"},
         ]
-    (scouting_dir / "roster.json").write_text(json.dumps(roster), encoding="utf-8")
-
-    if games is None:
-        games = []
-    (scouting_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
-
-    if boxscores:
-        bs_dir = scouting_dir / "boxscores"
-        bs_dir.mkdir(parents=True, exist_ok=True)
-        for game_id, data in boxscores.items():
-            (bs_dir / f"{game_id}.json").write_text(json.dumps(data), encoding="utf-8")
-
-    return scouting_dir
+    return SimpleNamespace(
+        team_id=team_id,
+        roster=roster,
+        games=games if games is not None else [],
+        boxscores=boxscores if boxscores is not None else {},
+    )
 
 
 def _make_game_entry(
@@ -143,20 +132,20 @@ def _make_minimal_boxscore(own_key: str = _PUBLIC_ID) -> dict:
 
 
 def test_no_duplicate_games_no_warning(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """When no duplicate games exist, no validation warning is logged."""
     team_pk = _insert_team(db)
     game_id = "game-stream-001"
-    scouting_dir = _make_scouting_dir(
-        tmp_path,
+    crawl_result = _crawl_result(
+        team_pk,
         games=[_make_game_entry(game_id)],
         boxscores={game_id: _make_minimal_boxscore()},
     )
 
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_loader"):
-        loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        loader.load_team(crawl_result)
 
     dedup_msgs = [r for r in caplog.records if "duplicate game" in r.message]
     assert len(dedup_msgs) == 0
@@ -168,7 +157,7 @@ def test_no_duplicate_games_no_warning(
 
 
 def test_duplicate_game_detected_produces_warning(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """When duplicate game rows exist for the same date and team pair,
@@ -207,12 +196,16 @@ def test_duplicate_game_detected_produces_warning(
     )
     db.commit()
 
-    # Provide an empty boxscores dir so load_team doesn't return early.
-    scouting_dir = _make_scouting_dir(tmp_path, games=[])
-    (scouting_dir / "boxscores").mkdir(parents=True, exist_ok=True)
+    # A non-empty boxscores payload is required to reach the post-boxscore
+    # validation tail (an empty one short-circuits it, E-247-01 F1).  This
+    # boxscore has no matching games entry, so it is skipped and adds no rows --
+    # only the pre-seeded duplicates remain for _check_duplicate_games to find.
+    crawl_result = _crawl_result(
+        team_pk, games=[], boxscores={"orphan-game": _make_minimal_boxscore()},
+    )
 
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_loader"):
-        loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        loader.load_team(crawl_result)
 
     dedup_msgs = [r for r in caplog.records if "duplicate game" in r.message]
     assert len(dedup_msgs) >= 1, "Expected WARNING about duplicate games"
@@ -225,10 +218,10 @@ def test_duplicate_game_detected_produces_warning(
 
 
 def test_roster_count_exceeding_expected_produces_warning(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """When DB roster count exceeds the roster.json count, a WARNING is logged."""
+    """When DB roster count exceeds the crawled roster count, a WARNING is logged."""
     team_pk = _insert_team(db)
 
     # Ensure season exists for FK.
@@ -237,7 +230,7 @@ def test_roster_count_exceeding_expected_produces_warning(
         "VALUES (?, ?, ?)",
         (_SEASON_ID, "2025", 2025),
     )
-    # Pre-insert an extra player in team_rosters that isn't in roster.json.
+    # Pre-insert an extra player in team_rosters that isn't in the crawl roster.
     db.execute(
         "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Extra', 'Player')",
         (_PLAYER_3,),
@@ -248,11 +241,10 @@ def test_roster_count_exceeding_expected_produces_warning(
     )
     db.commit()
 
-    # roster.json has 2 players, but DB will have 3 (2 from load + 1 pre-existing).
-    scouting_dir = _make_scouting_dir(tmp_path, games=[])
-
+    # The crawl roster has 2 players, but the DB will have 3 (2 from the load +
+    # 1 pre-existing).
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_loader"):
-        loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        loader.load_team(_crawl_result(team_pk))
 
     roster_msgs = [r for r in caplog.records if "roster entries" in r.message]
     assert len(roster_msgs) >= 1, "Expected WARNING about roster count"
@@ -266,7 +258,7 @@ def test_roster_count_exceeding_expected_produces_warning(
 
 
 def test_roster_count_lower_than_expected_no_warning(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """When DB roster count is lower than expected (post-dedup merges reduced
@@ -274,8 +266,7 @@ def test_roster_count_lower_than_expected_no_warning(
     team_pk = _insert_team(db)
 
     # Load roster with 2 players to set up DB state.
-    scouting_dir = _make_scouting_dir(tmp_path, games=[])
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    loader.load_team(_crawl_result(team_pk))
 
     # Derive the DB season_id the loader uses (same logic as load_team).
     from src.gamechanger.loaders import derive_season_id_for_team
@@ -303,7 +294,7 @@ def test_roster_count_lower_than_expected_no_warning(
 
 
 def test_validation_does_not_block_pipeline(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Even when validation logs warnings, the pipeline completes and
@@ -327,10 +318,8 @@ def test_validation_does_not_block_pipeline(
     )
     db.commit()
 
-    scouting_dir = _make_scouting_dir(tmp_path, games=[])
-
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_loader"):
-        result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        result = loader.load_team(_crawl_result(team_pk))
 
     # Pipeline completed (returned a result, didn't raise).
     assert result is not None
@@ -343,7 +332,7 @@ def test_validation_does_not_block_pipeline(
 
 
 def test_same_date_team_pair_different_seasons_no_warning(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path,
+    loader: ScoutingLoader, db: sqlite3.Connection,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Games on the same date between the same teams but in different seasons
@@ -389,11 +378,14 @@ def test_same_date_team_pair_different_seasons_no_warning(
     )
     db.commit()
 
-    scouting_dir = _make_scouting_dir(tmp_path, games=[])
-    (scouting_dir / "boxscores").mkdir(parents=True, exist_ok=True)
+    # Non-empty boxscores so the post-boxscore validation tail runs; the payload
+    # has no matching games entry and is skipped, adding no rows.
+    crawl_result = _crawl_result(
+        team_pk, games=[], boxscores={"orphan-game": _make_minimal_boxscore()},
+    )
 
     with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_loader"):
-        loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+        loader.load_team(crawl_result)
 
     dedup_msgs = [r for r in caplog.records if "duplicate game" in r.message]
     assert len(dedup_msgs) == 0, "Should NOT warn about games in different seasons"

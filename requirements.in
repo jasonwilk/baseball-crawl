@@ -6,10 +6,17 @@
 httpx~=0.28          # HTTP client for GameChanger crawlers
 fastapi~=0.115       # API framework (FastAPI)
 uvicorn[standard]~=0.34  # ASGI server for FastAPI
-starlette~=0.41      # Pinned explicitly -- FastAPI transitive; we import run_in_threadpool directly
-jinja2~=3.1          # HTML templating for server-rendered pages
+starlette>=0.49.1,<2 # Pinned explicitly -- FastAPI transitive; we import run_in_threadpool directly.
+                     # Floor: the CVE-2025-54121 / GHSA-7f5h-v6xp-fcq8 fix landed in 0.49.1.
+                     # Ceiling: FastAPI 0.139 dropped its own starlette upper bound, so nothing
+                     # else bounds it -- without <2 a --upgrade could cross a major on a package
+                     # src/api/ imports from at 13 sites. ~= cannot express this (E-256-07).
+jinja2>=3.1.6,<4     # HTML templating. Floor pins past CVE-2025-27516; ceiling preserves the
+                     # <4 that the previous ~=3.1 implied. ~=3.1 would still permit the
+                     # vulnerable 3.1.5, and ~=3.1.6 would wrongly block 3.2 (E-256-07).
 aiofiles~=24.1       # Async file I/O for static file serving
-python-multipart~=0.0.20  # Form parsing (required for FastAPI Form() parameters)
+python-multipart>=0.0.31,<0.1  # Form parsing (FastAPI Form() params). Floor = highest fix floor
+                     # of its 6 advisories (CVE-2026-53540); <0.1 preserves what ~=0.0.20 implied.
 webauthn~=2.2        # WebAuthn / passkey support
 python-dotenv~=1.0   # Environment variable loading from .env files
 pyyaml~=6.0          # YAML config parsing (teams.yaml)

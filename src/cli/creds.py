@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import httpx
 import typer
 from dotenv import dotenv_values
 from rich.console import Console
@@ -17,11 +16,9 @@ from rich.panel import Panel
 from rich.text import Text
 
 from src.gamechanger.credentials import (
-    ClientKeyCheckResult,
     ProfileCheckResult,
     ALL_PROFILES,
     run_api_check,
-    check_credentials,
     check_profile_detailed,
 )
 from src.gamechanger.credential_parser import (

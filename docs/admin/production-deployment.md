@@ -406,8 +406,10 @@ the container.
 
 ### Routine backup
 
-Create a timestamped backup at any time. `backup_db.py` is installed only inside the app
-container (no host-side install step), so invoke it via `docker compose exec`:
+**Required, scheduled -- not an optional cleanup step.** Schedule a daily backup via cron
+(below) on every production deployment. `backup_db.py` is installed only inside the app
+container (no host-side install step), so invoke it via `docker compose exec` (also
+available as `bb db backup` -- both run the same `backup_database()`):
 
 ```bash
 docker compose exec -T app python scripts/backup_db.py
@@ -422,13 +424,31 @@ or add a cron job to prune old backups:
 find data/backups -name "*.db" -mtime +30 -delete
 ```
 
-For a scheduled daily backup, add a cron entry that runs the command inside the container:
+**Copy every backup off the host disk.** `data/backups/` is inside the same host-mounted
+`./data` volume as `app.db` -- a backup left there is destroyed alongside the database on
+disk loss (dead disk, corrupted filesystem, host wipe). A backup that never leaves `./data`
+protects against nothing but an accidental `DELETE`. After each scheduled backup, copy the
+newest file to storage on a *different* disk -- another machine, network share, or object
+storage:
+
+```bash
+# Example: rsync the newest backup to a second machine
+rsync -av "$(ls -t data/backups/app-*.db | head -1)" backup-host:/srv/baseball-crawl-backups/
+```
+
+(`backup_database()` itself always writes under `./data/backups/` with no output-target
+option -- the off-host copy is a runbook step, not a script flag.)
+
+For the **required** daily schedule, add a cron entry that runs the backup and the
+off-host copy together, inside the container's host:
 
 ```bash
 crontab -e
-# Add:
-0 2 * * * cd /opt/baseball-crawl && docker compose exec -T app python scripts/backup_db.py >> data/backups/backup.log 2>&1
+# Add (2 AM daily -- backup, then copy the fresh file off-host):
+0 2 * * * cd /opt/baseball-crawl && docker compose exec -T app python scripts/backup_db.py >> data/backups/backup.log 2>&1 && rsync -av "$(ls -t data/backups/app-*.db | head -1)" backup-host:/srv/baseball-crawl-backups/ >> data/backups/backup.log 2>&1
 ```
+
+Replace `backup-host:/srv/baseball-crawl-backups/` with your actual off-host destination.
 
 ### Restore from backup
 
@@ -480,6 +500,61 @@ backups only. The active database file (`data/app.db`) is what matters.
 
 ---
 
+## Closure Runtime Smoke (Step 1d)
+
+Every epic closure that touches a runtime or build-input surface runs a live smoke test
+against the reports flow before the closure commit lands
+(`.claude/skills/implement/SKILL.md`, Step 1d). It runs in the main checkout, post-merge,
+against the **live dev database** -- not CI, and not the epic worktree (which has no `bb`,
+no Docker, no `.env`, no `data/`). This section documents the operator-owned setup that
+procedure depends on.
+
+### The `.smoke-fixture` file
+
+Step 1d reads a gitignored, two-field file at the repo root -- `.smoke-fixture` -- **never
+`.env`** (the credential-read guard blocks any Bash command naming `.env*`, so a fixture
+stored there would be unreadable to the reviewer that must read it). Create it once, using
+LSB's own real GameChanger identifiers:
+
+```
+generate=<public_id>
+morning-run=<lsb-team-url-1> <lsb-team-url-2> ...
+```
+
+- `generate` -- the `public_id` slug `bb report generate` runs against.
+- `morning-run` -- one or more LSB team URLs, space-separated, passed positionally to
+  `bb report morning-run --dry-run`.
+
+Both values are real LSB identifiers and must never be committed -- `.smoke-fixture` is
+already in `.gitignore`.
+
+### What the smoke checks (in order)
+
+1. **Preflight** (an environment problem, not an epic defect, if any of these fail):
+   `.smoke-fixture` present with both fields non-empty; the app stack up -- rebuilt, not
+   just started, when the closure touched a build input (`docker compose up -d --build app`);
+   credentials live (`bb creds check`); the reconciliation baseline present
+   (`.project/baselines/reconciliation-scoreboard.json`).
+2. **`bb report generate <generate public_id>`** -- runs first, so the reconciliation ratchet
+   below measures the state this run produced. The printed `reference_date` must equal today
+   in the operating timezone.
+3. **`curl -s http://localhost:8001/health`** -- the app answers.
+4. **`bb report reconcile-scoreboard`** -- `self_games` must be `0` (a hard zero); neither
+   `dropped_pitch_events` nor `no_plays_units` may have regressed against the committed
+   baseline.
+5. **`bb report morning-run --dry-run <morning-run urls>`** -- asserts exit `0` only,
+   order-independent after the health check. On an arbitrary closure date LSB usually has
+   no games, so this step gates the entry-point wiring and schedule-read path, not the
+   resolution ladder.
+
+`bb report verify-aggregates` is a hard sub-check only when the closure touched loaders or
+season aggregates -- it must report zero mismatches when it runs.
+
+This procedure is normally run by the code-reviewer as part of epic closure. An operator can
+run the same sequence manually at any time as a health check against the live database.
+
+---
+
 ## Verified on
 
 <!-- Operator: fill in after verifying on a real server -->
@@ -491,7 +566,8 @@ backups only. The active database file (`data/app.db`) is what matters.
 | Dashboard reachable at `https://bbstats.ai` from external browser | Verified on: | | |
 | Health check returns 200 from external curl | Verified on: | | |
 | Backup script creates backup file | Verified on: | | |
+| Scheduled backup cron entry runs and the off-host copy lands | Verified on: | | |
 
 ---
 
-*Last updated: 2026-07-08 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model)*
+*Last updated: 2026-07-12 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure)*

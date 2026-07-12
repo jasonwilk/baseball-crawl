@@ -10,15 +10,27 @@ if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   exit 0
 fi
 
-# Get staged files (Added, Copied, Modified only -- not Deleted)
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+# Get staged files (Added, Copied, Modified only -- not Deleted).
+# -z is the only safe enumeration: without it git C-quotes any path containing a
+# non-ASCII byte, a double-quote, or a backslash, and such a path matches no
+# prefix and names no readable file. core.quotePath=false covers only the
+# non-ASCII case.
+# The NUL read is a `while read -d ''` loop, not `mapfile -d ''`: mapfile's -d
+# needs bash 4.4+, and the documented Mac host ships bash 3.2, where mapfile -d
+# would error and leave STAGED_ARR empty -- passing the commit with both gates
+# inert (fail-open). This loop is bash 3.2+.
+STAGED_ARR=()
+while IFS= read -r -d '' _f; do STAGED_ARR+=("$_f"); done \
+  < <(git diff --cached --name-only -z --diff-filter=ACM)
 
-if [ -z "$STAGED_FILES" ]; then
+if [ ${#STAGED_ARR[@]} -eq 0 ]; then
   exit 0
 fi
 
-# Run scanner as a module (avoids sys.path manipulation in src/)
-cd "$REPO_ROOT" && echo "$STAGED_FILES" | python3 -m src.safety.pii_scanner --stdin
+# Run scanner as a module (avoids sys.path manipulation in src/).
+# `pii_scanner --stdin` is line-delimited, so a path containing a newline cannot
+# be represented to it. Such a path is unscannable by construction here.
+cd "$REPO_ROOT" && printf '%s\n' "${STAGED_ARR[@]}" | python3 -m src.safety.pii_scanner --stdin
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
@@ -26,6 +38,91 @@ if [ $EXIT_CODE -ne 0 ]; then
   echo "[pii-hook] Commit blocked. Fix the violations above, then try again."
   echo "[pii-hook] If this is a false positive, see docs/safe-data-handling.md"
   exit 1
+fi
+
+# --- doc-PII byte-gate over the planning trees -------------------------------
+# The pattern scanner skips epics/ and .project/ (shape heuristics are all noise
+# there). The byte-gate greps them for literal known identifiers instead.
+DOC_PII="$REPO_ROOT/scripts/check_doc_pii.sh"
+
+# Path prefixes are matched literally: `.project` as a regex would let a staged
+# `aproject/x.md` select the .project tree.
+GATE_TREES=()
+for tree in epics .project; do
+  for staged in "${STAGED_ARR[@]}"; do
+    case "$staged" in
+      "$tree"/*) GATE_TREES+=("$tree"); break ;;
+    esac
+  done
+done
+
+doc_pii_block() {
+  echo "[doc-pii: BLOCKED] $1" >&2
+  echo "" >&2
+  echo "[pii-hook] Commit blocked by the doc-PII byte-gate." >&2
+  echo "[pii-hook] See .claude/rules/pii-safety.md" >&2
+  exit 1
+}
+
+if [ ${#GATE_TREES[@]} -gt 0 ]; then
+  [ -x "$DOC_PII" ] || doc_pii_block "scripts/check_doc_pii.sh is missing or not executable"
+
+  SNAP="$(mktemp -d)" || doc_pii_block "cannot create a temp dir for the index snapshot"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$SNAP'" EXIT
+
+  # The gate greps a directory, but a commit hook must judge the INDEX, not the
+  # working tree -- they diverge under `git add -p` or staged-then-edited.
+  # --ignore-skip-worktree-bits: without it, checkout-index omits skip-worktree
+  # entries and the gate certifies a snapshot the index disagrees with.
+  git checkout-index --ignore-skip-worktree-bits --prefix="$SNAP/" -a \
+    || doc_pii_block "git checkout-index failed; refusing to certify"
+
+  BLOCKED=0
+  INCONCLUSIVE=0
+  GATED=0
+  for tree in "${GATE_TREES[@]}"; do
+    if [ ! -d "$SNAP/$tree" ]; then
+      BLOCKED=1
+      echo "[doc-pii: BLOCKED] $tree/ is staged but absent from the index snapshot" >&2
+      continue
+    fi
+    GATE_OUT="$("$DOC_PII" "$SNAP/$tree" 2>&1)"
+    GATE_RC=$?
+    GATED=$((GATED + 1))
+    case "$GATE_RC" in
+      0) ;;
+      3) INCONCLUSIVE=1 ;;
+      *)
+        BLOCKED=1
+        echo "$GATE_OUT" | sed "s#$SNAP/##" >&2
+        echo "[doc-pii: BLOCKED] $tree/ (exit $GATE_RC)" >&2
+        ;;
+    esac
+  done
+
+  # A gate that never ran is INVALID, not a pass: 0 findings and 0 executions are
+  # the same counter state otherwise.
+  if [ "$GATED" -ne ${#GATE_TREES[@]} ]; then
+    BLOCKED=1
+    echo "[doc-pii: BLOCKED] gated $GATED of ${#GATE_TREES[@]} staged trees" >&2
+  fi
+
+  if [ $BLOCKED -ne 0 ]; then
+    echo "" >&2
+    echo "[pii-hook] Commit blocked by the doc-PII byte-gate." >&2
+    echo "[pii-hook] See .claude/rules/pii-safety.md" >&2
+    exit 1
+  fi
+
+  if [ $INCONCLUSIVE -ne 0 ]; then
+    # Exit 3 is the default state on a fresh clone (the denylist is gitignored).
+    # Blocking here would make a fresh clone uncommittable and the hook would be
+    # uninstalled, taking the exit-1 detection with it.
+    echo "[doc-pii: INCONCLUSIVE — example mode]"
+  else
+    echo "[doc-pii: REAL, 0 matches]"
+  fi
 fi
 
 echo "[pii-hook] PII scan passed."

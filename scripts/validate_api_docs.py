@@ -250,11 +250,11 @@ def validate_index_consistency(
 
     orphans = disk_files - index_files
     for filename in sorted(orphans):
-        findings.append(Finding(filename, "ERROR", f"File exists on disk but is not listed in README index"))
+        findings.append(Finding(filename, "ERROR", "File exists on disk but is not listed in README index"))
 
     missing = index_files - disk_files
     for filename in sorted(missing):
-        findings.append(Finding(filename, "ERROR", f"File listed in README index but does not exist on disk"))
+        findings.append(Finding(filename, "ERROR", "File listed in README index but does not exist on disk"))
 
     return findings
 
@@ -341,7 +341,7 @@ def validate_inventory(
         if not filepath.exists():
             findings.append(Finding(
                 filename, "ERROR",
-                f"Inventory expects file to exist on disk but it is missing"
+                "Inventory expects file to exist on disk but it is missing"
             ))
             continue
 

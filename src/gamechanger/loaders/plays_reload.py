@@ -267,8 +267,8 @@ def reload_game_plays(
 def reload_all_games(conn: sqlite3.Connection) -> dict[str, int]:
     """Re-derive every loaded ``(game_id, perspective_team_id)`` game in place.
 
-    One-time operator-runnable batch driver (the ``bb data`` command wraps this)
-    following the ``bb data backfill-appearance-order`` precedent.  Iterates
+    One-time operator-runnable batch driver (the ``bb data`` command wraps this),
+    following the project's idempotent operator-maintenance convention.  Iterates
     every distinct ``(game_id, perspective_team_id)`` pair present in ``plays``
     and calls :func:`reload_game_plays` for each, committing per game so a
     mid-run failure isolates to one game.  Idempotent and re-runnable.

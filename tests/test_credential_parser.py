@@ -78,7 +78,7 @@ FULL_GC_CURL = textwrap.dedent(
       -H 'sec-ch-ua-mobile: ?0' \\
       -H 'gc-user-action: data_loading:events' \\
       -H 'gc-app-name: web' \\
-      -H 'gc-device-id: 7b615e8c124f5d44575d4e6736ae1a82' \\
+      -H 'gc-device-id: deadbeef' \\
       -H 'x-pagination: true' \\
       -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' \\
       -H 'Accept: application/vnd.gc.com.game_summary:list+json; version=0.1.0' \\
@@ -120,7 +120,7 @@ class TestParseCurlHappyPath:
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
         assert result["GAMECHANGER_APP_NAME_WEB"] == "web"
-        assert result["GAMECHANGER_DEVICE_ID_WEB"] == "7b615e8c124f5d44575d4e6736ae1a82"
+        assert result["GAMECHANGER_DEVICE_ID_WEB"] == "deadbeef"
         assert result["GAMECHANGER_BASE_URL"] == "https://api.team-manager.gc.com"
 
     def test_full_gc_curl_skips_per_request_headers(self) -> None:
@@ -359,7 +359,7 @@ class TestRoundTrip:
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
         assert merged["GAMECHANGER_APP_NAME_WEB"] == "web"
-        assert merged["GAMECHANGER_DEVICE_ID_WEB"] == "7b615e8c124f5d44575d4e6736ae1a82"
+        assert merged["GAMECHANGER_DEVICE_ID_WEB"] == "deadbeef"
         assert merged["GAMECHANGER_BASE_URL"] == "https://api.team-manager.gc.com"
         assert merged["MY_OTHER_VAR"] == "keep_me"
 

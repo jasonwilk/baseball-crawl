@@ -1,0 +1,107 @@
+# CI -- the STATIC gate (E-256-09).
+#
+# This workflow runs the half of the project's gates that need no credentials,
+# no live app, and no populated database: pytest, a whole-tree PII pattern
+# sweep, a lockfile-drift check, ruff, and `docker build`. Every step fails the
+# build on failure.
+#
+# WHAT CI DELIBERATELY CANNOT ABSORB -- the credentialed, populated-DB runtime
+# smoke. `bb report generate` / `bb report morning-run` need a live stack, real
+# GameChanger credentials, and the host-mounted `data/app.db` -- none of which
+# exist on a runner. That gate stays where it can actually run: the
+# code-reviewer at epic closure (implement/SKILL.md Step 1d, E-256-11) and the
+# operator post-deploy. Do not try to move it here; a fresh checkout has no
+# `.env` and an empty DB, so it would pass vacuously or fail on missing creds.
+#
+# smoke_test.py VERDICT (E-256-09, AGENTIC-FLOW-REVIEW.md false binary):
+# `scripts/smoke_test.py` is NEITHER wired into CI NOR deleted. It probes live
+# authenticated endpoints, so it needs a running app + real credentials and
+# cannot run on a runner; and it is covered by a test
+# (tests/test_script_entry_points.py) and prescribed as a credential-expiry
+# recovery step in docs/admin/operations.md, so it must not be deleted. It
+# STAYS as a MANUAL operator step. This comment records that verdict so the
+# "wire it into CI or delete it" false binary is not reopened.
+
+name: CI
+
+# Scope `push` to the default branch so a same-repo PR branch does not trigger
+# CI twice (once for the push, once for the PR). `pull_request` still catches
+# every PR, so pytest/PII/drift/docker run on both pushes-to-main and PRs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: this workflow only reads the checkout. Drop the repo-default
+# read-write GITHUB_TOKEN scope to read-only.
+permissions:
+  contents: read
+
+jobs:
+  static-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          # Register the `bb` entry point and make `src` importable without
+          # re-resolving pinned deps (mirrors the Dockerfile's editable install).
+          pip install -e . --no-deps
+
+      - name: Run tests
+        run: python -m pytest tests/
+
+      # PII sweep -- PATTERN scanner only, invoked with an EXPLICIT file
+      # enumeration. A bare `python -m src.safety.pii_scanner` with no args
+      # prints help and exits 0 (a silent no-op, pii_scanner.py main()), and
+      # `--staged` is the pre-commit mode with no staged set on a CI checkout,
+      # so neither would actually scan. `git ls-files -z | xargs -0` feeds the
+      # whole checked-out tree as explicit file args; the scanner's own
+      # SKIP_PATHS (epics/, .project/, lockfiles, ...) still apply. With bash
+      # `pipefail` (the GitHub Actions default), any violation exits the scanner
+      # non-zero and fails this step.
+      #
+      # This step does NOT invoke scripts/check_doc_pii.sh (the doc-PII
+      # byte-gate). That gate greps a denylist of literal real identifiers that
+      # lives in the gitignored secrets/pii-denylist.txt -- absent on every
+      # runner, so the byte-gate would always run in EXAMPLE MODE and exit 3
+      # (INCONCLUSIVE), never adding coverage here. It is a LOCAL pre-commit
+      # gate, not a CI gate. CI runs the pattern scanner only.
+      - name: PII pattern scan (whole tree)
+        run: git ls-files -z | xargs -0 python -m src.safety.pii_scanner
+
+      # Ruff, F-class (pyflakes) only -- config in pyproject.toml [tool.ruff],
+      # scoped to src/ + scripts/. Optional per the story; cheap and the repo is
+      # F-clean (E-256-08), so it is included as a fast static gate.
+      - name: Lint (ruff, F-class)
+        run: python -m ruff check .
+
+      # Lockfile-drift check -- recompile the pinned lockfiles in place from
+      # their .in sources and fail if the committed .txt files differ.
+      # pip-compile normalizes the recorded header, so flag ORDER does not
+      # matter; a real dependency change is what produces a diff. pip-tools is
+      # pinned so a tooling-version bump cannot manufacture false drift.
+      - name: Lockfile drift check
+        run: |
+          pip install pip-tools==7.5.3
+          pip-compile --quiet --generate-hashes --strip-extras \
+            --output-file=requirements.txt requirements.in
+          pip-compile --quiet --generate-hashes --strip-extras \
+            --output-file=requirements-dev.txt requirements-dev.in
+          git diff --exit-code -- requirements.txt requirements-dev.txt
+
+      # docker build against a fresh checkout. Relies on E-256-06's
+      # .dockerignore and the removed `COPY data/seeds/` line -- without those
+      # this fails on a missing build-context path. (Discharges E-256-06 AC-4,
+      # reassigned here.)
+      - name: Docker build
+        run: docker build -t baseball-crawl .

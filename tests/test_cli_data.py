@@ -2,10 +2,11 @@
 
 After E-239-03 the member/opponent-flow commands (sync, crawl, load, scout,
 resolve-opponents, dedup, repair-opponents) and their pipeline coupling were
-removed; only reconcile, dedup-players, and backfill-appearance-order remain.
-reconcile and backfill-appearance-order have their own dedicated test modules
-(test_reconciliation.py, test_backfill_appearance_order.py); this module covers
-the surviving CLI surface and the dedup-players error path.
+removed. E-256-02 additionally deleted the dead backfill-appearance-order
+command. The surviving set is reconcile, dedup-players, backfill-game-dates,
+reload-annotated-pitches, and fix-self-games; reconcile has its own dedicated
+test module (test_reconciliation.py). This module covers the surviving CLI
+surface and the dedup-players error path.
 """
 
 from __future__ import annotations
@@ -119,32 +120,38 @@ def _surviving_player_ids(db_file: Path) -> set[str]:
         conn.close()
 
 
-def _backfill_summary() -> dict[str, int]:
-    """Minimal summary dict the backfill command prints (values irrelevant here)."""
+def _game_dates_summary() -> dict[str, int]:
+    """Minimal summary dict the backfill-game-dates command prints (values irrelevant)."""
     return {
         "games_processed": 0,
         "rows_updated": 0,
-        "games_skipped": 0,
-        "games_with_errors": 0,
+        "rows_unchanged": 0,
+        "skipped_no_start_time": 0,
+        "skipped_unparseable": 0,
     }
 
 
-def _invoke_backfill_capturing_connect(
+def _invoke_db_path_capturing_connect(
     args: list[str],
 ) -> tuple[object, MagicMock]:
-    """Invoke `bb data backfill-appearance-order` with the DB layer stubbed.
+    """Invoke a `bb data` command with the DB layer stubbed, capturing the path.
 
     Patches ``sqlite3.connect`` (to capture the resolved DB path the command
-    opens) and the backfill pass (to a no-op summary), so the assertion is
+    opens) and the underlying pass (to a no-op summary), so the assertion is
     purely about which path the command resolved. Returns (result, connect_mock).
+
+    E-256-02 re-pointed this from the deleted ``backfill-appearance-order`` to
+    ``backfill-game-dates``: the command is only a VEHICLE here: any `bb data`
+    command with a ``--db`` option exercises the same
+    ``resolve_db_path`` seam, which is what these tests actually pin.
     """
     mock_conn = MagicMock()
     with patch("src.cli.data.sqlite3.connect", return_value=mock_conn) as connect_mock:
         with patch(
-            "src.gamechanger.loaders.backfill.backfill_appearance_order",
-            return_value=_backfill_summary(),
+            "src.db.backfill_game_dates.backfill_game_dates",
+            return_value=_game_dates_summary(),
         ):
-            result = runner.invoke(app, ["data", "backfill-appearance-order", *args])
+            result = runner.invoke(app, ["data", "backfill-game-dates", *args])
     return result, connect_mock
 
 
@@ -159,11 +166,11 @@ def test_data_help_lists_surviving_commands() -> None:
     assert result.exit_code == 0
     assert "reconcile" in result.output
     assert "dedup-players" in result.output
-    assert "backfill-appearance-order" in result.output
     assert "backfill-game-dates" in result.output
     assert "reload-annotated-pitches" in result.output
     assert "fix-self-games" in result.output
-    # The removed member/opponent-flow commands must not reappear. Match on a
+    # The removed member/opponent-flow commands (E-239-03) and the dead
+    # backfill-appearance-order command (E-256-02) must not reappear. Match on a
     # word boundary so legitimate commands that merely *contain* a removed name
     # as a substring (e.g. "reload-annotated-pitches" contains "load") do not
     # trip the guard.
@@ -174,6 +181,7 @@ def test_data_help_lists_surviving_commands() -> None:
         "scout",
         "resolve-opponents",
         "repair-opponents",
+        "backfill-appearance-order",
     ):
         assert re.search(rf"\b{re.escape(removed)}\b", result.output) is None, removed
 
@@ -759,7 +767,7 @@ def test_data_command_honors_database_path_env(tmp_path: Path) -> None:
     `bb data` command opens the DATABASE_PATH database."""
     target = tmp_path / "honored.db"
     with patch.dict(os.environ, {"DATABASE_PATH": str(target)}):
-        result, connect_mock = _invoke_backfill_capturing_connect([])
+        result, connect_mock = _invoke_db_path_capturing_connect([])
 
     assert result.exit_code == 0
     connect_mock.assert_called_once()
@@ -770,7 +778,7 @@ def test_data_command_explicit_db_overrides_database_path(tmp_path: Path) -> Non
     """AC-4: an explicit --db override wins over DATABASE_PATH."""
     override = tmp_path / "explicit.db"
     with patch.dict(os.environ, {"DATABASE_PATH": str(tmp_path / "env.db")}):
-        result, connect_mock = _invoke_backfill_capturing_connect(
+        result, connect_mock = _invoke_db_path_capturing_connect(
             ["--db", str(override)]
         )
 
@@ -784,7 +792,7 @@ def test_data_command_falls_back_to_default_db(tmp_path: Path) -> None:
     """AC-4: with neither --db nor DATABASE_PATH, the default DB path is used."""
     env_without = {k: v for k, v in os.environ.items() if k != "DATABASE_PATH"}
     with patch.dict(os.environ, env_without, clear=True):
-        result, connect_mock = _invoke_backfill_capturing_connect([])
+        result, connect_mock = _invoke_db_path_capturing_connect([])
 
     assert result.exit_code == 0
     connect_mock.assert_called_once()

@@ -1,17 +1,15 @@
 """Scouting spray chart crawler for the baseball-crawl ingestion pipeline.
 
-Fetches player-stats (spray chart) data for completed games on each scouted
-opponent's schedule, writing one file per game to::
-
-    data/raw/{season_id}/scouting/{public_id}/spray/{event_id}.json
-
-The crawler reads the already-cached ``games.json`` written by
-``ScoutingCrawler``, resolves each opponent's ``gc_uuid`` from the database,
-and calls::
+Fetches player-stats (spray chart) data for the completed games on a scouted
+opponent's schedule.  Games are supplied in memory by the caller (the parent
+``ScoutingCrawler`` run); the crawler resolves the opponent's ``gc_uuid`` from
+the database and calls::
 
     GET /teams/{gc_uuid}/schedule/events/{event_id}/player-stats
 
-for each completed game not already cached.
+for each completed game, returning the responses in a ``SprayCrawlResult``.
+Nothing is read from or written to disk (E-220 C2-B; E-256-03 removed the last
+vestigial raw-data-root handle).
 
 **Endpoint behavior is asymmetric** (verified 2026-03-29): the player-stats
 endpoint is team-scoped.  The *owning team* (whose schedule contains the
@@ -22,10 +20,6 @@ itself -- using an opponent's UUID would return only the opponent's data.
 
 When an opponent has no ``gc_uuid``, the crawler cannot call the endpoint and
 skips that team with an INFO log.
-
-Idempotency is existence-only: if the file already exists it is skipped
-regardless of age.  Files are written even when ``spray_chart_data`` is null
-(scorekeeper did not record) so the crawler does not re-fetch the same game.
 
 Rate limiting is handled automatically by the ``GameChangerClient`` session
 (minimum 1-second delay with jitter).
@@ -40,21 +34,18 @@ Usage::
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     crawler = ScoutingSprayChartCrawler(client, conn)
-    result = crawler.crawl_all()
+    result = crawler.crawl_team(public_id, games_data)
     print(result)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError, GameChangerClient
-from src.gamechanger.crawlers import CrawlResult
 
 logger = logging.getLogger(__name__)
 
@@ -79,35 +70,31 @@ class SprayCrawlResult:
     games_crawled: int = 0
     games_skipped: int = 0
     errors: int = 0
-_DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
+
+
 _COMPLETED_STATUS = "completed"
 
 
 class ScoutingSprayChartCrawler:
     """Crawls player-stats (spray chart) data for completed games of scouted opponents.
 
-    Reads cached ``games.json`` files (written by ``ScoutingCrawler``) from
-    disk, identifies completed games, looks up each opponent's ``gc_uuid``
-    from the database, and fetches player-stats via the GameChanger
-    authenticated API.
+    Takes an in-memory games list, identifies completed games, looks up the
+    scouted team's ``gc_uuid`` from the database, and fetches player-stats via
+    the GameChanger authenticated API.
 
     Args:
         client: Authenticated ``GameChangerClient`` used for all HTTP requests.
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        data_root: Root directory for raw data output.  Defaults to
-            ``data/raw/`` relative to the project root.
     """
 
     def __init__(
         self,
         client: GameChangerClient,
         db: sqlite3.Connection,
-        data_root: Path = _DATA_ROOT,
     ) -> None:
         self._client = client
         self._db = db
-        self._data_root = data_root
 
     def crawl_team(
         self,

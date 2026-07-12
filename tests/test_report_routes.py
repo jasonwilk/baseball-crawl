@@ -13,25 +13,27 @@ from fastapi.testclient import TestClient
 
 from src.api.auth import hash_token
 from src.api.main import app
+from src.util.timezone import UTC_ISO_FORMAT, utcnow_iso
 from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# These build the same `reports.generated_at` / `expires_at` strings the app
+# writes, so they MUST use the canonical UTC_ISO_FORMAT rather than a local
+# copy of it -- a divergent literal here would keep passing against a format
+# the code no longer emits (E-256-03).
 
 
 def _future_iso(days: int = 14) -> str:
     dt = datetime.now(timezone.utc) + timedelta(days=days)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.strftime(UTC_ISO_FORMAT)
 
 
 def _past_iso(days: int = 1) -> str:
     dt = datetime.now(timezone.utc) - timedelta(days=days)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.strftime(UTC_ISO_FORMAT)
 
 
 def _make_db(tmp_path: Path) -> Path:
@@ -60,7 +62,7 @@ def _insert_report(
     conn.execute(
         "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at, report_path) "
         "VALUES (?, 1, 'Test Report', ?, ?, ?, ?)",
-        (slug, status, _utcnow_iso(), expires_at, report_path),
+        (slug, status, utcnow_iso(), expires_at, report_path),
     )
     conn.commit()
     conn.close()

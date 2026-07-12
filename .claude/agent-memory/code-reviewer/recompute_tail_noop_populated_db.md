@@ -20,8 +20,11 @@ about the real risk.
 ## Why it's not idempotent in general
 `canonical_recompute` being the sole writer makes aggregates == recompute(per_game) ONLY WHEN nothing
 mutated per-game rows since the last recompute. Reachable out-of-sync states in this repo:
-- `bb data backfill-appearance-order` — CLAUDE.md explicitly says it leaves aggregates stale until a
-  manual recompute. After a backfill, a boxscoreless refresh's recompute CHANGES stored aggregates.
+- `bb data backfill-appearance-order` (DELETED in E-256-02) — while it existed, CLAUDE.md explicitly
+  noted it left aggregates stale until a manual recompute; after a backfill, a boxscoreless refresh's
+  recompute CHANGED stored aggregates. The command is gone, but the CLASS is not: any in-place
+  operator-maintenance pass that mutates per-game rows without recomputing season aggregates reaches the
+  same out-of-sync state, so the review rule below still binds.
 - Pre-existing un-merged duplicate players — the tail's dedup MERGES them (data mutation) during what
   was a no-op refresh before.
 Reachable trigger: re-scouting a previously-loaded opponent whose crawl returns 0 boxscores (transient

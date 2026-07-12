@@ -23,7 +23,6 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from src.api.db import (
@@ -31,7 +30,8 @@ from src.api.db import (
     get_connection,
     get_pitching_history,
     get_pitching_workload,
-    list_reports_with_runs,
+    get_season_batting,
+    get_season_pitching,
 )
 from src.api.helpers import get_app_url
 from src.db.teams import ensure_team_row_with_provenance
@@ -49,17 +49,33 @@ from src.gamechanger.search import resolve_gc_uuid_by_public_id
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.reconciliation.engine import reconcile_game
+# The lifecycle module is client-free and MUST NOT import this one (E-256-04,
+# TN-13). _REPO_ROOT / _REPORTS_DIR are canonical there; importing them binds
+# them as generator's own module attributes, so the existing
+# patch("src.reports.generator._REPORTS_DIR") test seam keeps working for the
+# generation path. Code inside lifecycle reads lifecycle's globals.
+from src.reports.lifecycle import (
+    _REPO_ROOT,
+    _REPORTS_DIR,
+    cleanup_expired_reports,
+    cleanup_orphan_teams,
+)
 from src.reports.renderer import render_no_games_page, render_report
 from src.reports.run_status import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     classify_stage_status,
 )
+from src.util.timezone import (
+    UTC_ISO_FORMAT,
+    derive_local_date,
+    get_operating_timezone,
+    operating_today,
+    utcnow_iso,
+)
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _PLAYS_ACCEPT = "application/vnd.gc.com.event_plays+json; version=0.0.0"
 
@@ -73,6 +89,11 @@ class GenerationResult:
     title: str | None = None
     url: str | None = None
     error_message: str | None = None
+    # The venue-local date the report's rest-day math and 7-day workload window
+    # were computed against (E-256-05). Surfaced so `bb report generate` can
+    # print it and the Step 1d smoke can assert it equals today in the operating
+    # timezone. Set on the "ready" path only; None otherwise.
+    reference_date: str | None = None
     # Additive finer-grained outcome (E-236 TN-5). ``success`` is UNCHANGED
     # (no_games stays success=False); ``outcome`` is purely additive. Defined
     # here with default "failed" so the all-blocked failed return (story 03)
@@ -85,19 +106,6 @@ class GenerationResult:
     # no box score data"). Set only on the no_games return; None elsewhere.
     completed_games: int | None = None
     completed_games_with_data: int | None = None
-
-
-@dataclass
-class CleanupResult:
-    """Result of an expired-report file-cleanup sweep (E-238-07).
-
-    ``files_removed`` counts HTML files actually unlinked from disk;
-    ``errors`` counts rows whose cleanup raised (per-file error isolation --
-    one unremovable file does not abort the sweep).
-    """
-
-    files_removed: int = 0
-    errors: int = 0
 
 
 @dataclass
@@ -220,10 +228,6 @@ def _accumulate_recon_counts(out: _ReconCounts, summary: object) -> None:
 def _get_base_url() -> str:
     """Return the base URL for public report links (shared APP_URL helper)."""
     return get_app_url()
-
-
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _create_report_row(
@@ -351,7 +355,7 @@ def _finalize_run_record(
     _update_run_record(
         report_id,
         overall_status=overall_status,
-        completed_at=_utcnow_iso(),
+        completed_at=utcnow_iso(),
         error_stage=error_stage,
         error_message=error_message,
     )
@@ -399,41 +403,14 @@ def _query_record(
 def _query_batting(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
-    """Query season batting stats."""
-    rows = conn.execute(
-        """
-        SELECT
-            p.player_id,
-            p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psb.gp, 0) AS games,
-            COALESCE(psb.ab, 0) AS ab,
-            COALESCE(psb.h, 0) AS h,
-            COALESCE(psb.doubles, 0) AS doubles,
-            COALESCE(psb.triples, 0) AS triples,
-            COALESCE(psb.hr, 0) AS hr,
-            COALESCE(psb.rbi, 0) AS rbi,
-            COALESCE(psb.bb, 0) AS bb,
-            COALESCE(psb.so, 0) AS so,
-            COALESCE(psb.sb, 0) AS sb,
-            COALESCE(psb.cs, 0) AS cs,
-            COALESCE(psb.hbp, 0) AS hbp,
-            COALESCE(psb.shf, 0) AS shf,
-            tr.jersey_number
-        FROM player_season_batting psb
-        JOIN players p ON p.player_id = psb.player_id
-        LEFT JOIN team_rosters tr
-            ON tr.player_id = psb.player_id
-            AND tr.team_id = psb.team_id
-            AND tr.season_id = psb.season_id
-        WHERE psb.team_id = ? AND psb.season_id = ?
-        ORDER BY
-            (COALESCE(psb.ab, 0) + COALESCE(psb.bb, 0)
-             + COALESCE(psb.hbp, 0) + COALESCE(psb.shf, 0)) DESC,
-            p.last_name ASC
-        """,
-        (team_id, season_id),
-    ).fetchall()
-    result = [dict(r) for r in rows]
+    """Query season batting stats.
+
+    Thin presentation wrapper (E-256-04 / TN-14): the SQL fetch lives in
+    ``src.api.db.get_season_batting``; the name cascade stays here in the report
+    layer.  E-259 substitutes the fetch's SQL body without touching this wrapper,
+    which is why ``tests/test_report_golden.py`` stays zero-diff across both.
+    """
+    result = get_season_batting(conn, team_id, season_id)
     _apply_name_cascade(result)
     return result
 
@@ -441,37 +418,14 @@ def _query_batting(
 def _query_pitching(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
-    """Query season pitching stats and compute rate fields."""
-    rows = conn.execute(
-        """
-        SELECT
-            p.player_id,
-            p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psp.gp_pitcher, 0) AS games,
-            COALESCE(psp.ip_outs, 0) AS ip_outs,
-            COALESCE(psp.h, 0) AS h,
-            COALESCE(psp.er, 0) AS er,
-            COALESCE(psp.bb, 0) AS bb,
-            COALESCE(psp.so, 0) AS so,
-            COALESCE(psp.pitches, 0) AS pitches,
-            COALESCE(psp.total_strikes, 0) AS total_strikes,
-            p.throws,
-            tr.jersey_number,
-            psp.gs
-        FROM player_season_pitching psp
-        JOIN players p ON p.player_id = psp.player_id
-        LEFT JOIN team_rosters tr
-            ON tr.player_id = psp.player_id
-            AND tr.team_id = psp.team_id
-            AND tr.season_id = psp.season_id
-        WHERE psp.team_id = ? AND psp.season_id = ?
-        ORDER BY
-            COALESCE(psp.ip_outs, 0) DESC,
-            p.last_name ASC
-        """,
-        (team_id, season_id),
-    ).fetchall()
-    result = [dict(r) for r in rows]
+    """Query season pitching stats and compute rate fields.
+
+    Thin presentation wrapper (E-256-04 / TN-14).  ``get_season_pitching``
+    returns the RAW SUM columns; the display strings ``era`` / ``k9`` / ``whip`` /
+    ``strike_pct`` are added here by ``_compute_pitching_rates``, which must stay
+    in the report layer to keep ``src.api.db`` free of a back-import.
+    """
+    result = get_season_pitching(conn, team_id, season_id)
     _apply_name_cascade(result)
     _compute_pitching_rates(result)
     return result
@@ -1482,176 +1436,6 @@ def _run_tier2_enrichment(
 # real single-report generation, so it never kills a LIVE (even cross-process)
 # generation, yet reaps a genuinely-dead one the same day. It bounds ONE report's
 # generation (generated_at is that report's START). Operator-tunable.
-STALE_GENERATING_SECONDS = 3600
-
-
-@dataclass
-class ReaperResult:
-    """Outcome of one stuck-'generating' reaper sweep (E-252-08).
-
-    ``reaped`` counts rows transitioned generating -> failed; ``files_removed``
-    counts orphan partial-HTML files unlinked; ``errors`` counts rows whose reap
-    raised (per-row error isolation -- one bad row does not abort the sweep).
-    """
-
-    reaped: int = 0
-    files_removed: int = 0
-    errors: int = 0
-
-
-def reap_stale_generating_reports() -> ReaperResult:
-    """Reap reports stuck at status='generating' past the staleness threshold.
-
-    Selects ``reports`` rows in ``status='generating'`` whose ``generated_at`` (the
-    generation START) is older than :data:`STALE_GENERATING_SECONDS`, and
-    transitions each to ``status='failed'`` with an operator-readable reaped
-    message -- so the admin page stops meta-refreshing on it and it becomes
-    deletable through the normal admin flow (the delete affordance is gated on
-    ``status != 'generating'``).
-
-    Orphan HTML: a report's HTML is written to ``reports/{slug}.html`` BEFORE the
-    'ready' transition that sets ``report_path``, so a death in that narrow window
-    leaves an orphan file while ``report_path`` is still NULL -- which
-    :func:`cleanup_expired_reports` (keyed on ``report_path IS NOT NULL``) can
-    NEVER reap. The reaper therefore unlinks ``reports/{slug}.html`` by slug
-    (canonical ``_REPO_ROOT`` resolution + an ``.is_file()`` guard, mirroring
-    :func:`cleanup_expired_reports` / ``_delete_report``) before flipping the row.
-
-    Idempotent: only ``generating`` rows older than the threshold are selected, so
-    a re-run finds none (they are now ``failed``); ``ready``/``failed``/``no_games``
-    rows and fresh in-progress ``generating`` rows are never touched.
-
-    Reachable without operator action via :func:`cleanup_expired_reports` (which
-    runs opportunistically at ``generate_report`` start and via ``bb report
-    cleanup``) and the FastAPI app lifespan startup.
-
-    Returns:
-        A :class:`ReaperResult` with ``reaped`` / ``files_removed`` / ``errors``.
-    """
-    result = ReaperResult()
-    threshold = (
-        datetime.now(timezone.utc) - timedelta(seconds=STALE_GENERATING_SECONDS)
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
-    reaped_message = (
-        f"Reaped: generation did not complete within {STALE_GENERATING_SECONDS}s "
-        "(the generation process likely died mid-run); marked failed so the report "
-        "can be deleted or regenerated."
-    )
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, slug FROM reports "
-            "WHERE status = 'generating' AND generated_at < ?",
-            (threshold,),
-        ).fetchall()
-
-        for row in rows:
-            report_id = row["id"]
-            slug = row["slug"]
-            try:
-                # Unlink any orphan partial HTML (written before the 'ready' update
-                # that would have set report_path -- so report_path is still NULL and
-                # cleanup_expired_reports can never reap it). Canonical resolution
-                # via the named _REPORTS_DIR constant + is_file guard, mirroring
-                # cleanup_expired_reports / _delete_report.
-                file_path = _REPORTS_DIR / f"{slug}.html"
-                if file_path.is_file():
-                    file_path.unlink()
-                    logger.info("Removed orphan HTML for reaped report: %s", file_path)
-                    result.files_removed += 1
-                conn.execute(
-                    "UPDATE reports SET status = 'failed', error_message = ? "
-                    "WHERE id = ? AND status = 'generating'",
-                    (reaped_message, report_id),
-                )
-                result.reaped += 1
-            except Exception as exc:  # noqa: BLE001 -- per-row error isolation
-                logger.warning(
-                    "Failed to reap stale 'generating' report id=%s: %s", report_id, exc
-                )
-                result.errors += 1
-                continue
-        conn.commit()
-
-    if result.reaped:
-        logger.info(
-            "Reaped %d stale 'generating' report(s) to failed (%d orphan file(s) removed)",
-            result.reaped, result.files_removed,
-        )
-    return result
-
-
-def cleanup_expired_reports() -> CleanupResult:
-    """Remove on-disk HTML files for expired reports; KEEP the DB rows.
-
-    Selects ``reports`` rows whose ``expires_at`` is strictly in the past
-    (``expires_at < now``) and that still have a non-NULL ``report_path``,
-    unlinks each HTML file, and NULLs ``report_path`` -- but KEEPS the row so
-    the report still appears as expired in ``bb report list`` / ``/admin/reports``
-    and serving it keeps the existing 404 behavior.
-
-    File removal mirrors the ``_delete_report`` admin path: canonical
-    ``_REPO_ROOT`` resolution plus an ``.is_file()`` guard. Each row's cleanup
-    is wrapped in per-row error isolation so one unremovable file (e.g. a
-    permission error) does not abort the whole sweep; a failing row keeps its
-    ``report_path`` so a later sweep can retry.
-
-    Reachable both opportunistically at the start of :func:`generate_report`
-    and via the ``bb report cleanup`` CLI command.
-
-    Returns:
-        A :class:`CleanupResult` with ``files_removed`` and ``errors`` counts.
-    """
-    # E-252-08: also reap stuck 'generating' reports here, so the reaper rides the
-    # SAME no-operator-action trigger as expired-file cleanup (opportunistic at
-    # generate_report start + `bb report cleanup`). Isolated so a reaper failure can
-    # never block or fail the expired-file sweep (this function's own contract).
-    try:
-        reap_stale_generating_reports()
-    except Exception:  # noqa: BLE001 -- the reaper is best-effort housekeeping
-        logger.warning(
-            "Stale-'generating' reaper failed during cleanup; continuing", exc_info=True
-        )
-
-    result = CleanupResult()
-    now_iso = _utcnow_iso()
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, report_path FROM reports "
-            "WHERE report_path IS NOT NULL AND expires_at < ?",
-            (now_iso,),
-        ).fetchall()
-
-        for row in rows:
-            report_id = row["id"]
-            report_path = row["report_path"]
-            try:
-                # Canonical resolution + is_file() guard (the _delete_report model).
-                file_path = _REPO_ROOT / "data" / report_path
-                if file_path.is_file():
-                    file_path.unlink()
-                    logger.info("Removed expired report file: %s", file_path)
-                    result.files_removed += 1
-                # NULL report_path but KEEP the row (so the list still shows the
-                # report as expired). Done whether or not the file was present,
-                # because either way the on-disk artifact is now gone.
-                conn.execute(
-                    "UPDATE reports SET report_path = NULL WHERE id = ?",
-                    (report_id,),
-                )
-            except Exception as exc:  # noqa: BLE001 -- per-file error isolation
-                logger.warning(
-                    "Failed to clean up expired report file for report_id=%s: %s",
-                    report_id, exc,
-                )
-                result.errors += 1
-                continue
-        conn.commit()
-
-    return result
-
-
 def generate_report(gc_url: str) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
@@ -1672,10 +1456,23 @@ def generate_report(gc_url: str) -> GenerationResult:
     """
     # Opportunistic expired-report file cleanup (E-238-07). A cleanup failure
     # must NEVER block or fail generation (AC-3), so swallow everything.
+    #
+    # The connection is opened HERE, through this module's `get_connection`, and
+    # injected (E-256-04, CR round 1). `cleanup_expired_reports` lives in the
+    # lifecycle module now, so calling it no-arg would make it resolve
+    # `lifecycle.get_connection` -- the real `data/app.db` -- while every caller's
+    # test sandbox patches `generator.get_connection`. The swallow below would
+    # then hide the fact that the sweep ran against production data. Passing the
+    # connection keeps the sandbox attached across the module boundary.
+    #
+    # Logged at ERROR, not WARNING: after the extraction this handler guards a
+    # cross-module call, and a swallow that has never fired is indistinguishable
+    # from one that fires every run.
     try:
-        cleanup_expired_reports()
+        with closing(get_connection()) as cleanup_conn:
+            cleanup_expired_reports(cleanup_conn)
     except Exception:  # noqa: BLE001
-        logger.warning(
+        logger.error(
             "Opportunistic expired-report cleanup failed; continuing generation",
             exc_info=True,
         )
@@ -1862,9 +1659,9 @@ class _ReportGeneration:
     def _create_report_and_run_record(self) -> None:
         """Step 3: create the reports row, then its run record (FK order)."""
         self.slug = secrets.token_urlsafe(12)
-        self.generated_at = _utcnow_iso()
+        self.generated_at = utcnow_iso()
         expires_dt = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
-        self.expires_at = expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.expires_at = expires_dt.strftime(UTC_ISO_FORMAT)
 
         with closing(get_connection()) as conn:
             initial_title = (
@@ -2351,6 +2148,27 @@ class _ReportGeneration:
         slug = self.slug
         generated_at = self.generated_at
 
+        # The venue-local reference date, derived ONCE (E-256-05 / AC-1).
+        #
+        # `generated_at` is a UTC instant. Slicing its first ten characters gives
+        # the UTC calendar date, which after ~19:00 venue time has already rolled
+        # to tomorrow -- so an evening generation computed pitcher rest days and
+        # the 7-day `pitches_7d` window against a date the coach has not reached.
+        # This is the third site of the finding E-252 and E-253 fixed elsewhere.
+        #
+        # `derive_local_date` is the canonical converter and takes an IANA NAME,
+        # so the operating-tz ZoneInfo is bridged via `.key`. It returns None only
+        # for an absent or unparseable instant; the fallback is venue-local
+        # "today", never a UTC slice -- reintroducing one here is the bug.
+        reference_date = (
+            derive_local_date(generated_at, get_operating_timezone().key)
+            or operating_today().isoformat()
+        )
+        # Adaptation, not a second derivation: two of the three consumers do date
+        # arithmetic and need a `date`; `get_pitching_workload` takes the string
+        # (its window is SQL `date(ref, '-6 days')`). One source, two shapes.
+        reference_date_local = date.fromisoformat(reference_date)
+
         # Run-record counts captured during this stage (TN-2).
         completed_games_with_data: int | None = None
         plays_games_covered: int | None = None
@@ -2374,10 +2192,10 @@ class _ReportGeneration:
                     conn, team_id, season_id
                 )
 
-                # Pitching workload (uses generation date as reference)
-                generation_date = generated_at[:10]
+                # Pitching workload (7-day rolling window anchored on the
+                # venue-local reference date, not the UTC generation date).
                 pitching_workload = get_pitching_workload(
-                    team_id, season_id, generation_date, db=conn,
+                    team_id, season_id, reference_date, db=conn,
                 )
 
                 # Predicted starter (Tier 1)
@@ -2408,7 +2226,7 @@ class _ReportGeneration:
                         )
                         starter_prediction = compute_starter_prediction(
                             pitcher_profiles, pitching_history_rows,
-                            reference_date=date.fromisoformat(generated_at[:10]),
+                            reference_date=reference_date_local,
                             workload=pitching_workload,
                             league=league,
                         )
@@ -2428,7 +2246,7 @@ class _ReportGeneration:
                             pitching_history_rows,
                             team_name=self.team_name_from_api,
                             team_record=team_record_str,
-                            reference_date=date.fromisoformat(generated_at[:10]),
+                            reference_date=reference_date_local,
                             public_id=self.public_id,
                         )
 
@@ -2511,7 +2329,11 @@ class _ReportGeneration:
                 "plays_game_count": plays_team["plays_game_count"],
                 "pitch_charted_game_count": plays_team["pitch_charted_game_count"],
                 "pitching_workload": pitching_workload,
-                "generation_date": generation_date,
+                # The coach-facing "Generated <date>" footer. Fed the venue-local
+                # reference date, so it agrees with the rest-day math above it
+                # rather than showing tomorrow's UTC date on an evening run.
+                # (A FOURTH consumer of this date; the story named three.)
+                "generation_date": reference_date,
                 "starter_prediction": starter_prediction,
                 "enriched_prediction": enriched_prediction,
                 "show_predicted_starter": show_predicted_starter,
@@ -2570,431 +2392,9 @@ class _ReportGeneration:
             slug=slug,
             title=self.title,
             url=url,
+            reference_date=reference_date,
             outcome="ready",
         )
-
-
-def _delete_game_scoped_data_for_perspectives(
-    conn: sqlite3.Connection,
-    game_ids: list[str],
-    perspective_team_ids: list[int],
-) -> None:
-    """Delete game-scoped rows owned by the given perspectives only.
-
-    E-220 round 6 cluster 2: scoped replacement for the prior
-    ``_delete_game_scoped_data()``.  Preserves rows belonging to OTHER
-    perspectives of the same games.  The ``games`` row itself is only
-    deleted when no other perspective remains in ``game_perspectives``;
-    otherwise the games row is preserved so the other perspective's data
-    still has a valid FK target.
-
-    FK-safe order: play_events -> plays -> reconciliation_discrepancies ->
-    player_game_batting -> player_game_pitching -> spray_charts ->
-    game_perspectives -> games.
-
-    Args:
-        conn: Open SQLite connection.
-        game_ids: The games whose dependent rows should be considered.
-        perspective_team_ids: Delete only rows tagged with these
-            perspectives.  Rows belonging to other perspectives are
-            preserved.
-
-    Note: ``reconciliation_discrepancies`` uses ``perspective_team_id``
-    directly for perspective-scoped deletion (E-220 round 7 P1-2).
-    """
-    if not game_ids or not perspective_team_ids:
-        return
-    gp = ",".join("?" for _ in game_ids)
-    pp = ",".join("?" for _ in perspective_team_ids)
-    params = list(game_ids) + list(perspective_team_ids)
-
-    # play_events inherits perspective via parent plays (FK to plays.id)
-    conn.execute(
-        f"DELETE FROM play_events WHERE play_id IN ("
-        f"  SELECT id FROM plays "
-        f"  WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})"
-        f")",
-        params,
-    )
-    conn.execute(
-        f"DELETE FROM plays "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    # reconciliation_discrepancies: scope by perspective_team_id so
-    # cross-perspective game-level rows for the opposite participant are
-    # not incorrectly preserved (E-220 round 7 P1-2 bonus bugfix).
-    conn.execute(
-        f"DELETE FROM reconciliation_discrepancies "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    conn.execute(
-        f"DELETE FROM player_game_batting "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    conn.execute(
-        f"DELETE FROM player_game_pitching "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    conn.execute(
-        f"DELETE FROM spray_charts "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    conn.execute(
-        f"DELETE FROM game_perspectives "
-        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
-        params,
-    )
-    # Only delete the games row if no other perspective remains for that game.
-    conn.execute(
-        f"DELETE FROM games "
-        f"WHERE game_id IN ({gp}) "
-        f"  AND NOT EXISTS ("
-        f"    SELECT 1 FROM game_perspectives gp2 "
-        f"    WHERE gp2.game_id = games.game_id"
-        f"  )",
-        list(game_ids),
-    )
-
-
-def _live_report_perspective_ids(
-    conn: sqlite3.Connection, exclude_team_id: int
-) -> set[int]:
-    """Return team_ids that still hold a ``reports`` row (F-H1 guard).
-
-    These are the perspectives whose game-level data must be preserved when a
-    DIFFERENT team is being deleted: a live report is regenerated from the DB,
-    and whole-game plays idempotency (``.claude/rules/data-model.md``) means any
-    destroyed shared-game plays are never re-fetched -- the hole is permanent
-    and silent.  ``exclude_team_id`` (the team being deleted) is dropped so the
-    guard never protects the deletion target against itself.
-
-    A row's mere existence counts as "live": ``bb report cleanup`` unlinks an
-    expired report's HTML but KEEPS the ``reports`` row (nulls ``report_path``),
-    and the row still underpins regeneration.  So any ``reports`` row is treated
-    as a data dependency, expired or not.
-    """
-    rows = conn.execute("SELECT DISTINCT team_id FROM reports").fetchall()
-    return {r[0] for r in rows if r[0] != exclude_team_id}
-
-
-def _delete_team_anchor_and_orphan_data(
-    conn: sqlite3.Connection, team_id: int
-) -> None:
-    """Delete game-level stat rows anchored to or perspectived by the given team.
-
-    Two passes, both unbounded by the participant-games set:
-
-      1. Perspective pass: rows where ``perspective_team_id = team_id`` in any
-         game.  Mirrors the Phase 1b cleanup from the pre-refactor admin cascade
-         (``src/api/routes/admin.py``).  Necessary because
-         ``_delete_game_scoped_data_for_perspectives`` scopes its DELETEs to a
-         participant-games set, so cross-perspective scouting rows the team
-         produced about games it did not play in are missed.
-
-      2. Anchor pass: rows where ``team_id = team_id`` (and ``batting_team_id``
-         for ``plays``) in any game, regardless of which perspective owns them.
-         Necessary because ``team_id INTEGER NOT NULL REFERENCES teams(id)``
-         has no ``ON DELETE`` clause anywhere in the schema.  SQLite's default
-         is NO ACTION (RESTRICT on immediate), so deleting a team without first
-         removing its anchor rows raises ``IntegrityError`` at the
-         ``DELETE FROM teams`` step.
-
-    F-H1 shared-game guard (E-253-01): the anchor pass is EXCLUDED from rows
-    owned by a perspective that still holds a live ``reports`` row.  When teams
-    X and Y played a shared game and Y holds a report, Y's pitcher FPS%/P-BF are
-    computed from the ``plays`` where X was batting (``batting_team_id = X``)
-    under Y's perspective (``perspective_team_id = Y``).  Deleting X must NOT
-    destroy those rows.  Because the spared rows still FK-reference X (and the
-    shared ``games`` row does too), the caller's teams-row survivor check keeps
-    X's ``teams`` row -- so sparing here does not cause an ``IntegrityError`` at
-    ``DELETE FROM teams`` (the FK-safety survivor path per TN-1).
-
-    Pass order (perspective first, anchor second) matches the historical
-    admin.py Phase 1b / Phase 3 ordering and keeps the two WHERE-clause
-    families grepable.  Correctness does not depend on the order -- both
-    passes are idempotent DELETEs on overlapping tables with different
-    filters.  Within the anchor pass, ``play_events`` MUST be deleted before
-    its parent ``plays`` rows to respect the ``play_events.play_id -> plays.id``
-    FK.
-    """
-    # --- Pass 1: perspective_team_id = T (any game) --------------------------
-    conn.execute(
-        "DELETE FROM play_events WHERE play_id IN ("
-        "  SELECT id FROM plays WHERE perspective_team_id = ?"
-        ")",
-        (team_id,),
-    )
-    conn.execute(
-        "DELETE FROM plays WHERE perspective_team_id = ?", (team_id,)
-    )
-    conn.execute(
-        "DELETE FROM player_game_batting WHERE perspective_team_id = ?",
-        (team_id,),
-    )
-    conn.execute(
-        "DELETE FROM player_game_pitching WHERE perspective_team_id = ?",
-        (team_id,),
-    )
-    conn.execute(
-        "DELETE FROM spray_charts WHERE perspective_team_id = ?",
-        (team_id,),
-    )
-    conn.execute(
-        "DELETE FROM reconciliation_discrepancies WHERE perspective_team_id = ?",
-        (team_id,),
-    )
-    conn.execute(
-        "DELETE FROM game_perspectives WHERE perspective_team_id = ?",
-        (team_id,),
-    )
-
-    # --- Pass 2: team_id / batting_team_id = T (any game, any perspective) ---
-    # plays.batting_team_id and plays.perspective_team_id are independent FKs;
-    # the perspective pass already handled perspective_team_id = T, so we
-    # target batting_team_id = T here.  play_events must precede plays.
-    #
-    # F-H1 guard: SPARE rows whose perspective still holds a live report.  The
-    # same NOT-IN filter is applied to the ``play_events`` subquery so a spared
-    # play keeps its child events.  When ``protected`` is empty the clause is
-    # omitted (SQLite has no empty-tuple ``IN``), preserving the pre-guard
-    # behaviour for true orphans.
-    protected = _live_report_perspective_ids(conn, team_id)
-    if protected:
-        pp = ",".join("?" for _ in protected)
-        excl = f" AND perspective_team_id NOT IN ({pp})"
-        excl_params: tuple[int, ...] = tuple(protected)
-    else:
-        excl = ""
-        excl_params = ()
-
-    conn.execute(
-        "DELETE FROM play_events WHERE play_id IN ("
-        "  SELECT id FROM plays WHERE batting_team_id = ?" + excl +
-        ")",
-        (team_id, *excl_params),
-    )
-    conn.execute(
-        "DELETE FROM plays WHERE batting_team_id = ?" + excl,
-        (team_id, *excl_params),
-    )
-    conn.execute(
-        "DELETE FROM player_game_batting WHERE team_id = ?" + excl,
-        (team_id, *excl_params),
-    )
-    conn.execute(
-        "DELETE FROM player_game_pitching WHERE team_id = ?" + excl,
-        (team_id, *excl_params),
-    )
-    conn.execute(
-        "DELETE FROM spray_charts WHERE team_id = ?" + excl,
-        (team_id, *excl_params),
-    )
-    conn.execute(
-        "DELETE FROM reconciliation_discrepancies WHERE team_id = ?" + excl,
-        (team_id, *excl_params),
-    )
-
-
-def _delete_team_scoped_data(
-    conn: sqlite3.Connection, team_ids: list[int], *, delete_team_rows: bool = True
-) -> None:
-    """Delete team-scoped dependent rows for the given team IDs.
-
-    FK-safe order per TN-6 Phase 2.  Optionally deletes the team rows
-    themselves (set ``delete_team_rows=False`` to skip when game FKs
-    still reference the team).
-    """
-    if not team_ids:
-        return
-    placeholders = ",".join("?" for _ in team_ids)
-    conn.execute(f"DELETE FROM team_rosters WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM player_season_batting WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM player_season_pitching WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM scouting_runs WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM crawl_jobs WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM coaching_assignments WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM user_team_access WHERE team_id IN ({placeholders})", team_ids)
-    # E-240-03: scheduled_report_runs slots belong to the team whose schedule
-    # produced them; remove them when the team is deleted (Cleanup-Detection
-    # Mirror Invariant). Distinct from report deletion, which only NULLs
-    # report_id (ON DELETE SET NULL) -- the audit row outlives the report.
-    conn.execute(
-        f"DELETE FROM scheduled_report_runs WHERE own_team_id IN ({placeholders})",
-        team_ids,
-    )
-    conn.execute(
-        f"DELETE FROM opponent_links WHERE our_team_id IN ({placeholders})",
-        team_ids,
-    )
-    conn.execute(
-        f"UPDATE opponent_links SET resolved_team_id = NULL, resolution_method = NULL, "
-        f"resolved_at = NULL WHERE resolved_team_id IN ({placeholders})",
-        team_ids,
-    )
-    if delete_team_rows:
-        conn.execute(f"DELETE FROM teams WHERE id IN ({placeholders})", team_ids)
-
-
-def cascade_delete_team(conn: sqlite3.Connection, team_id: int) -> None:
-    """Cascade-delete a single team and its dependent data.
-
-    Used by the report-deletion path where the team is confirmed eligible
-    for cleanup (all guard conditions passed).  Deletes only rows owned
-    by this team's perspective; cross-perspective rows belonging to other
-    teams are preserved, as are games rows when another perspective
-    remains.  The team-scoped tables (rosters, season aggregates,
-    scouting_runs, etc.) are deleted unconditionally since they are keyed
-    on team_id alone.
-
-    FK-safe team-row deletion (round 7 P1-1): after data cleanup, the
-    ``teams`` row itself is only deleted when no ``games`` row still
-    FK-references the team.  A survivor occurs when another stub
-    perspective loaded the same game and its ``game_perspectives`` row
-    kept the ``games`` row alive.  In that case, the team-scoped data
-    is still cleaned, but the ``teams`` row is retained to preserve the
-    cross-perspective ``games`` FK target.  This mirrors the pattern
-    ``cleanup_orphan_teams`` uses.
-    """
-    game_rows = conn.execute(
-        "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?",
-        (team_id, team_id),
-    ).fetchall()
-    # Unbounded cleanup MUST run before _delete_game_scoped_data_for_perspectives,
-    # because the latter attempts to delete the games row inside its last DELETE
-    # and will FK-violate if anchor rows (team_id = T, any perspective) still
-    # reference the game.  The anchor pass clears those; the perspective-scoped
-    # helper then cleans remaining perspective-scoped rows and deletes the game
-    # row under the NOT EXISTS guard.
-    _delete_team_anchor_and_orphan_data(conn, team_id)
-    _delete_game_scoped_data_for_perspectives(
-        conn, [r[0] for r in game_rows], [team_id],
-    )
-    _delete_team_scoped_data(conn, [team_id], delete_team_rows=False)
-
-    # Only delete the teams row if no games row still FK-references it.
-    game_still_references_team = conn.execute(
-        "SELECT 1 FROM games WHERE home_team_id = ? OR away_team_id = ? LIMIT 1",
-        (team_id, team_id),
-    ).fetchone() is not None
-
-    if game_still_references_team:
-        conn.commit()
-        logger.info(
-            "Cascade-deleted data for team_id=%d; teams row retained "
-            "(cross-perspective games still reference it).",
-            team_id,
-        )
-        return
-
-    conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
-    conn.commit()
-    logger.info("Cascade-deleted team_id=%d and all dependent data.", team_id)
-
-
-def cleanup_orphan_teams(
-    conn: sqlite3.Connection, orphan_ids: set[int]
-) -> int:
-    """Delete orphan teams and their dependent rows in FK-safe order.
-
-    Used during report generation to clean up auto-created opponent stubs.
-    Only deletes games where BOTH participants are orphans — shared games
-    between an orphan and a non-orphan (e.g., the report team) are
-    preserved.  Orphan teams that still have game FK references after
-    Phase 1 are retained (team-scoped data is still cleaned).
-    """
-    if not orphan_ids:
-        return 0
-
-    placeholders = ",".join("?" for _ in orphan_ids)
-    id_list = list(orphan_ids)
-
-    # Phase 1: delete games where BOTH participants are orphans.  Scope to
-    # orphan perspectives only -- non-orphan perspective rows for the same
-    # games (e.g., the report team's perspective) are preserved.
-    game_rows = conn.execute(
-        f"SELECT game_id FROM games WHERE home_team_id IN ({placeholders}) "
-        f"AND away_team_id IN ({placeholders})",
-        id_list + id_list,
-    ).fetchall()
-    _delete_game_scoped_data_for_perspectives(
-        conn, [r[0] for r in game_rows], id_list,
-    )
-
-    # Determine which orphans still have remaining game FK references
-    remaining_rows = conn.execute(
-        f"SELECT DISTINCT home_team_id FROM games WHERE home_team_id IN ({placeholders}) "
-        f"UNION "
-        f"SELECT DISTINCT away_team_id FROM games WHERE away_team_id IN ({placeholders})",
-        id_list + id_list,
-    ).fetchall()
-    undeletable_ids = {r[0] for r in remaining_rows}
-    deletable_ids = orphan_ids - undeletable_ids
-
-    # Phase 2: clean team-scoped data for all orphans
-    _delete_team_scoped_data(
-        conn, id_list, delete_team_rows=False,
-    )
-    # Only delete team rows that have no remaining game references
-    if deletable_ids:
-        dp = ",".join("?" for _ in deletable_ids)
-        conn.execute(f"DELETE FROM teams WHERE id IN ({dp})", list(deletable_ids))
-    conn.commit()
-
-    count = len(deletable_ids)
-    if undeletable_ids:
-        logger.info(
-            "Cleaned up %d orphan team(s); %d retained (shared games).",
-            count, len(undeletable_ids),
-        )
-    else:
-        logger.info("Cleaned up %d orphan team(s) from report generation.", count)
-    return count
-
-
-def is_team_eligible_for_cleanup(
-    conn: sqlite3.Connection, team_id: int, exclude_report_id: int
-) -> bool:
-    """Check whether a team is eligible for cascade-delete after report removal.
-
-    Guard conditions (all must pass):
-    1. ``is_active = 0``
-    2. No other ``reports`` rows reference this team_id
-
-    These are the correct guards for the removed opponent-tracking registry
-    mechanism (E-250 dropped that table). They are NOT asserted to be complete
-    deletion-safety semantics: the shared-game/live-report eligibility guard
-    (a cascade could destroy a still-referenced report's plays) is owned
-    separately by CE-3/E-253, not by this function.
-
-    Args:
-        conn: Open SQLite connection.
-        team_id: The team to check.
-        exclude_report_id: The report being deleted (excluded from the
-            multi-report check).
-    """
-    # Guard 1: is_active
-    row = conn.execute(
-        "SELECT is_active FROM teams WHERE id = ?", (team_id,)
-    ).fetchone()
-    if row is None:
-        return False
-    if row[0] != 0:
-        return False
-
-    # Guard 2: other reports
-    row = conn.execute(
-        "SELECT 1 FROM reports WHERE team_id = ? AND id != ? LIMIT 1",
-        (team_id, exclude_report_id),
-    ).fetchone()
-    if row is not None:
-        return False
-
-    return True
 
 
 def _fail_report(report_id: int, error_message: str) -> None:
@@ -3004,31 +2404,3 @@ def _fail_report(report_id: int, error_message: str) -> None:
             _update_report_failed(conn, report_id, error_message)
     except sqlite3.Error:
         logger.exception("Failed to update report status to 'failed'")
-
-
-def list_reports() -> list[dict]:
-    """Return all reports (joined to their run record) sorted by generated_at desc.
-
-    Uses the shared ``list_reports_with_runs`` join (src/api/db.py) so the CLI
-    (``bb report list``) and the admin list (``/admin/reports``) read the same
-    1:1 LEFT JOIN (E-235-06 / TN-6). Each dict now carries the reports columns
-    -- including the report-level ``error_message`` (newly returned here) -- the
-    joined ``report_generation_runs`` columns (NULL for legacy rows with no run),
-    and the derived ``url`` / ``is_expired``.
-
-    Returns:
-        List of report dicts. Empty list on a DB error (logged).
-    """
-    base_url = _get_base_url()
-    now = _utcnow_iso()
-    try:
-        with closing(get_connection()) as conn:
-            result = list_reports_with_runs(conn)
-    except sqlite3.Error:
-        logger.exception("Failed to list reports")
-        return []
-
-    for r in result:
-        r["url"] = f"{base_url}/reports/{r['slug']}"
-        r["is_expired"] = r["expires_at"] < now
-    return result

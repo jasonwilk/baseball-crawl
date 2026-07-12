@@ -55,6 +55,7 @@ from src.gamechanger.client import (
 )
 from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.loaders import ensure_season_row
+from src.util.timezone import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class ScoutingCrawler:
         scouting_runs) are preserved.
         """
         logger.info("Scouting team public_id=%s", public_id)
-        now_str = _utcnow_iso()
+        now_str = utcnow_iso()
 
         games_data = self._fetch_schedule(public_id)
         if games_data is None:
@@ -412,7 +413,7 @@ class ScoutingCrawler:
         error_message: str | None,
     ) -> None:
         """Update the scouting_run row with final status and counts."""
-        now = _utcnow_iso()
+        now = utcnow_iso()
         completed_at = None if status == "running" else now
         self._db.execute(
             """
@@ -461,8 +462,3 @@ def _derive_season_id(games: list[dict[str, Any]]) -> str:
     fallback_year = datetime.now(timezone.utc).year
     logger.warning("No valid start_ts found in games; falling back to year=%d.", fallback_year)
     return str(fallback_year)
-
-
-def _utcnow_iso() -> str:
-    """Return the current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")

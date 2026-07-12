@@ -3,24 +3,17 @@
 Resolves a GameChanger ``public_id`` slug to a ``TeamProfile`` dataclass by
 calling the public (unauthenticated) ``GET /public/teams/{public_id}`` endpoint.
 
-Also provides ``discover_opponents()`` which fetches a team's public game
-schedule and extracts unique opponent names from it.
-
 No auth headers (``gc-token``, ``gc-device-id``) are sent.  All public endpoints
 do not require authentication.
 
 Example::
 
-    from src.gamechanger.team_resolver import resolve_team, discover_opponents, TeamNotFoundError
+    from src.gamechanger.team_resolver import resolve_team, TeamNotFoundError
 
     try:
         profile = resolve_team("a1GFM9Ku0BbF")
     except TeamNotFoundError:
         print("Team not found")
-
-    opponents = discover_opponents("a1GFM9Ku0BbF")
-    for opp in opponents:
-        print(opp.name)
 """
 
 from __future__ import annotations
@@ -37,19 +30,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.team-manager.gc.com"
 _ACCEPT_HEADER = "application/vnd.gc.com.public_team_profile+json; version=0.1.0"
-_ACCEPT_GAMES_HEADER = "application/vnd.gc.com.public_team_schedule_event:list+json; version=0.0.0"
 _TIMEOUT_SECONDS = 10
-
-
-@dataclass
-class DiscoveredOpponent:
-    """A unique opponent discovered from a team's public game schedule.
-
-    Attributes:
-        name: Opponent team display name (e.g. ``"Jr Bluejays 15U"``).
-    """
-
-    name: str
 
 
 @dataclass
@@ -155,70 +136,3 @@ def resolve_team(public_id: str) -> TeamProfile:
         record_losses=record.get("loss"),
         staff=data.get("staff") or [],
     )
-
-
-def discover_opponents(public_id: str) -> list[DiscoveredOpponent]:
-    """Fetch unique opponent names from a team's public game schedule.
-
-    Calls ``GET /public/teams/{public_id}/games`` (no authentication required)
-    and extracts deduplicated opponent names.  Games with a missing or empty
-    ``opponent_team.name`` are skipped silently.
-
-    Args:
-        public_id: The team's short alphanumeric public identifier
-            (e.g. ``"a1GFM9Ku0BbF"``).
-
-    Returns:
-        List of ``DiscoveredOpponent`` instances with unique names (deduplicated
-        case-insensitively; order matches first occurrence).
-
-    Raises:
-        GameChangerAPIError: If the API returns a non-200 status code, or if the
-            HTTP request fails at the transport level (timeout, connection error,
-            DNS, TLS -- any ``httpx.RequestError``).
-    """
-    url = f"{_BASE_URL}/public/teams/{public_id}/games"
-    logger.debug("Discovering opponents for public_id=%s", public_id)
-
-    with create_session(min_delay_ms=0, jitter_ms=0, proxy_url=None) as session:
-        try:
-            response = session.get(
-                url,
-                headers={
-                    "Accept": _ACCEPT_GAMES_HEADER,
-                    "gc-app-name": "web",
-                },
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except httpx.RequestError as exc:
-            # E-252-09: catch the whole transport-error family (see resolve_team) so
-            # a connection-level failure surfaces as GameChangerAPIError, not a raw
-            # httpx exception that crashes the caller.
-            raise GameChangerAPIError(
-                f"HTTP request failed for public_id={public_id!r} "
-                f"({type(exc).__name__}): {exc}"
-            ) from exc
-
-    if response.status_code != 200:
-        raise GameChangerAPIError(
-            f"Unexpected HTTP {response.status_code} from GET /public/teams/{public_id}/games"
-        )
-
-    games = response.json()
-    seen: set[str] = set()
-    opponents: list[DiscoveredOpponent] = []
-
-    for game in games:
-        opp = game.get("opponent_team") or {}
-        name = opp.get("name")
-        if not name:
-            continue
-        key = name.lower()
-        if key not in seen:
-            seen.add(key)
-            opponents.append(DiscoveredOpponent(name=name))
-
-    logger.debug(
-        "Discovered %d unique opponents for public_id=%s", len(opponents), public_id
-    )
-    return opponents

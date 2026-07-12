@@ -7,12 +7,24 @@ Tests use CliRunner to exercise argument mapping only -- business logic
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from typer.testing import CliRunner
 
 from src.cli import app
 from src.gamechanger.key_extractor import KeyExtractionError
+
+if TYPE_CHECKING:
+    # The helper factories below annotate their return types as string literals
+    # ("ProfileCheckResult", "ApiCheckResult") and import the real classes inside
+    # the function body, to keep module import cheap. Those names are therefore
+    # undefined at module scope, which pyflakes reports as F821. Importing them
+    # under TYPE_CHECKING resolves the annotations for static tools at zero
+    # runtime cost. That is the correct fix: a blanket suppression comment would
+    # silence a genuinely unresolvable annotation just as effectively, and AC-3
+    # forbids one for exactly that reason.
+    from src.gamechanger.credentials import ApiCheckResult, ProfileCheckResult
 
 runner = CliRunner()
 

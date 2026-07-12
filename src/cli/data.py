@@ -1,4 +1,4 @@
-"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-appearance-order, backfill-game-dates, reload-annotated-pitches, fix-self-games)."""
+"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-game-dates, reload-annotated-pitches, fix-self-games)."""
 
 from __future__ import annotations
 
@@ -556,49 +556,11 @@ def _print_db_summary(db_summary: dict) -> None:
                 _echo_match_rate(sig, counts.get("MATCH", 0) + counts.get("CORRECTED", 0), total)
 
         if avail_sigs:
-            typer.echo(f"\n  Data Availability Checks (not cross-source reconciliation):")
+            typer.echo("\n  Data Availability Checks (not cross-source reconciliation):")
             for sig in sorted(avail_sigs):
                 counts = avail_sigs[sig]
                 total = sum(counts.values())
                 _echo_present(sig, counts.get("MATCH", 0), total)
-
-
-@app.command("backfill-appearance-order")
-def backfill_appearance_order(
-    db_path: Optional[Path] = typer.Option(
-        None,
-        "--db",
-        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
-    ),
-) -> None:
-    """Backfill appearance_order for existing player_game_pitching rows.
-
-    Walks cached boxscore JSON files on disk and updates rows where
-    appearance_order IS NULL. Idempotent and re-runnable.
-
-    Examples:
-        bb data backfill-appearance-order
-    """
-    from src.gamechanger.loaders.backfill import backfill_appearance_order as _backfill
-
-    db_path = resolve_db_path(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
-        summary = _backfill(conn)
-
-    typer.echo("\nBackfill Summary:")
-    typer.echo(f"  Games processed: {summary['games_processed']}")
-    typer.echo(f"  Rows updated: {summary['rows_updated']}")
-    typer.echo(f"  Games skipped (no cached file): {summary['games_skipped']}")
-    typer.echo(f"  Games with errors: {summary['games_with_errors']}")
-    typer.echo(
-        "\nReminder: regenerate reports for affected teams so canonical_recompute "
-        "rebuilds season aggregates from the backfilled appearance_order "
-        "(verify with 'bb report verify-aggregates')."
-    )
-
-    raise SystemExit(0)
 
 
 # ---------------------------------------------------------------------------

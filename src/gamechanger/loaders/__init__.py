@@ -1,8 +1,8 @@
 """GameChanger loaders package.
 
 Provides the shared ``LoadResult`` dataclass used as the return type for all
-loader ``load_file()`` methods, plus canonical season_id derivation and
-season-row helpers.
+loader entry points, plus canonical season_id derivation and season-row
+helpers.
 """
 
 from __future__ import annotations

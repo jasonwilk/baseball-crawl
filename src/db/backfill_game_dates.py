@@ -22,7 +22,8 @@ Three-tier recoverability (TN-5) keyed on what survives in the ``games`` row:
 
 Only rows whose re-derived date DIFFERS from the stored value are UPDATEd, so
 the backfill is idempotent and re-runnable (a second run is a no-op) -- mirroring
-``bb data backfill-appearance-order``. It corrects stored dates ONLY: it does
+``bb data reload-annotated-pitches`` (E-245), the surviving operator-maintenance
+precedent this command (E-253) followed.  It corrects stored dates ONLY: it does
 NOT re-run player/game dedup. A corrected date that shifts 7-day-rolling-window
 membership is the intended correction, not a regression (TN-5).
 """
@@ -44,7 +45,7 @@ def backfill_game_dates(
 
     Args:
         conn: Open SQLite connection. When ``dry_run`` is False this function
-            commits its own UPDATEs (mirroring ``backfill_appearance_order``).
+            commits its own UPDATEs (mirroring ``reload_all_games``).
         dry_run: When True (default), compute and count the changes but write
             nothing. When False, apply the UPDATEs and commit.
 

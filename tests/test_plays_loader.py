@@ -4,19 +4,19 @@ Covers:
 - AC-1: Successful load with DB verification (plays + play_events)
 - AC-2: Whole-game idempotent re-load (zero new rows)
 - AC-3: Stub player creation for unknown batter/pitcher IDs
-- AC-4: Parse error isolation (bad file logged, other games continue)
+- AC-4: Parse error isolation (bad payload logged, other games continue)
 - AC-5: Per-game DB transaction (commit/rollback)
 - AC-6: LoadResult counts (loaded/skipped/errors)
 - AC-7: Game FK guard (skip when game not in games table)
 - AC-8: Tests cover all the above scenarios
 
-All tests use an on-disk SQLite database with all migrations applied.
+All tests use an on-disk SQLite database with all migrations applied and drive
+the loader through its in-memory ``load_payload`` entry point.
 No real network calls.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -234,17 +234,9 @@ def _make_multi_play_json(
     }
 
 
-def _write_plays_file(
-    team_dir: Path,
-    game_id: str,
-    data: dict,
-) -> Path:
-    """Write a plays JSON file and return the team_dir."""
-    plays_dir = team_dir / "plays"
-    plays_dir.mkdir(parents=True, exist_ok=True)
-    file_path = plays_dir / f"{game_id}.json"
-    file_path.write_text(json.dumps(data), encoding="utf-8")
-    return file_path
+# A payload whose ``plays`` entries are not dicts: ``play.get(...)`` raises
+# inside PlaysParser, exercising the loader's per-game error isolation.
+_MALFORMED_PLAYS_PAYLOAD = {"sport": {}, "team_players": {}, "plays": ["not-a-dict"]}
 
 
 # ---------------------------------------------------------------------------
@@ -252,21 +244,17 @@ def _write_plays_file(
 # ---------------------------------------------------------------------------
 
 
-def test_load_all_inserts_plays_and_events(
+def test_load_payload_inserts_plays_and_events(
     db: sqlite3.Connection,
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
-    """AC-1: load_all reads cached JSON, parses, and inserts plays + events."""
+    """AC-1: load_payload parses the payload and inserts plays + events."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: _make_plays_json()})
 
     assert result.loaded == 1
     assert result.skipped == 0
@@ -307,21 +295,17 @@ def test_load_all_inserts_plays_and_events(
     assert events[2] == (2, "pitch", "in_play", 0, "In play")
 
 
-def test_load_all_inserts_multiple_plays(
+def test_load_payload_inserts_multiple_plays(
     db: sqlite3.Connection,
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-1: Multiple plays in one game are all inserted."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_multi_play_json())
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: _make_multi_play_json()})
 
     assert result.loaded == 2
     assert result.skipped == 0
@@ -340,21 +324,17 @@ def test_load_all_inserts_multiple_plays(
     assert events_count == 4
 
 
-def test_load_all_uses_game_table_season_id(
+def test_load_payload_uses_game_table_season_id(
     db: sqlite3.Connection,
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """The season_id written to plays comes from the games table, not the loader's season_id."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, season_id=_SEASON_ID)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-
-    loader.load_all(team_dir)
+    loader.load_payload({_GAME_ID_1: _make_plays_json()})
 
     row = db.execute(
         "SELECT season_id FROM plays WHERE game_id = ?", (_GAME_ID_1,),
@@ -373,24 +353,22 @@ def test_idempotent_reload_produces_zero_new_rows(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-2: Re-running the loader for an already-loaded game produces zero new rows."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+    payload = {_GAME_ID_1: _make_plays_json()}
 
     # First load.
-    result1 = loader.load_all(team_dir)
+    result1 = loader.load_payload(payload)
     assert result1.loaded == 1
 
     plays_count_after_first = db.execute("SELECT COUNT(*) FROM plays").fetchone()[0]
     events_count_after_first = db.execute("SELECT COUNT(*) FROM play_events").fetchone()[0]
 
     # Second load -- should be idempotent.
-    result2 = loader.load_all(team_dir)
+    result2 = loader.load_payload(payload)
     assert result2.loaded == 0
     assert result2.skipped == 1
     assert result2.errors == 0
@@ -412,17 +390,13 @@ def test_stub_player_created_for_unknown_batter(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-3: Unknown batter_id gets a stub player row inserted before the play row."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
     # Do NOT insert the batter player row -- it should be auto-created.
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json(batter_id=_BATTER_1))
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: _make_plays_json(batter_id=_BATTER_1)})
     assert result.loaded == 1
 
     # Verify the stub player was created.
@@ -439,16 +413,12 @@ def test_stub_player_created_for_unknown_pitcher(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-3: Unknown pitcher_id gets a stub player row inserted before the play row."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json(pitcher_id=_PITCHER_1))
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: _make_plays_json(pitcher_id=_PITCHER_1)})
     assert result.loaded == 1
 
     # Verify the stub pitcher was created.
@@ -465,17 +435,13 @@ def test_existing_player_not_overwritten_by_stub(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-3: If a player already exists with a real name, the stub does not overwrite."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
     _insert_player(db, _BATTER_1, "John", "Doe")
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json(batter_id=_BATTER_1))
-
-    loader.load_all(team_dir)
+    loader.load_payload({_GAME_ID_1: _make_plays_json(batter_id=_BATTER_1)})
 
     player = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
@@ -489,7 +455,6 @@ def test_null_pitcher_id_no_stub_created(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-3: When pitcher_id is None, no stub is created for None."""
     _insert_season(db)
@@ -518,10 +483,7 @@ def test_null_pitcher_id_no_stub_created(
         ],
     }
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, plays_json)
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: plays_json})
     assert result.loaded == 1
 
     # Only the batter stub should exist, not a NULL pitcher stub.
@@ -539,24 +501,18 @@ def test_parse_error_logged_and_skipped(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
-    """AC-4: A corrupt JSON file is logged and skipped; other games load fine."""
+    """AC-4: A malformed payload is logged and skipped; other games load fine."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
     _insert_game(db, _GAME_ID_2, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    plays_dir = team_dir / "plays"
-    plays_dir.mkdir(parents=True, exist_ok=True)
-
-    # Game 1: corrupt JSON.
-    (plays_dir / f"{_GAME_ID_1}.json").write_text("NOT VALID JSON", encoding="utf-8")
-
-    # Game 2: valid plays data.
-    _write_plays_file(team_dir, _GAME_ID_2, _make_plays_json())
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload(
+        {
+            _GAME_ID_1: _MALFORMED_PLAYS_PAYLOAD,
+            _GAME_ID_2: _make_plays_json(),
+        }
+    )
 
     assert result.errors == 1  # Game 1 errored
     assert result.loaded == 1  # Game 2 loaded
@@ -568,16 +524,12 @@ def test_parse_error_missing_plays_key(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
-    """AC-4: A file with valid JSON but no plays key produces zero plays (skipped)."""
+    """AC-4: A well-formed payload with no plays key produces zero plays (skipped)."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, {"sport": {}, "team_players": {}})
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: {"sport": {}, "team_players": {}}})
 
     # No plays parsed, so skipped.
     assert result.loaded == 0
@@ -594,7 +546,6 @@ def test_per_game_transaction_rollback_on_error(
     db: sqlite3.Connection,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-5: If insert fails partway through a game, the partial plays are rolled back."""
     _insert_season(db)
@@ -646,11 +597,8 @@ def test_per_game_transaction_rollback_on_error(
         ],
     }
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, plays_json)
-
     loader = PlaysLoader(db, owned_team_ref=team_ref)
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: plays_json})
 
     # The game should have errored due to the CHECK constraint violation.
     assert result.errors == 1
@@ -671,35 +619,26 @@ def test_load_result_counts(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-6: LoadResult loaded/skipped/errors counts are correct."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
     _insert_game(db, _GAME_ID_2, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-
-    # Game 1: valid.
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-    # Game 2: valid.
-    _write_plays_file(team_dir, _GAME_ID_2, _make_plays_json(batter_id=_BATTER_2))
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload(
+        {
+            _GAME_ID_1: _make_plays_json(),
+            _GAME_ID_2: _make_plays_json(batter_id=_BATTER_2),
+        }
+    )
     assert result.loaded == 2  # 1 play per game, 2 games
     assert result.skipped == 0
     assert result.errors == 0
 
 
-def test_load_result_no_plays_dir(
-    loader: PlaysLoader,
-    tmp_path: Path,
-) -> None:
-    """AC-6: Missing plays directory returns empty LoadResult."""
-    team_dir = tmp_path / "team"
-    team_dir.mkdir()
-
-    result = loader.load_all(team_dir)
+def test_load_result_empty_payload(loader: PlaysLoader) -> None:
+    """AC-6: An empty payload mapping returns an empty LoadResult."""
+    result = loader.load_payload({})
     assert result.loaded == 0
     assert result.skipped == 0
     assert result.errors == 0
@@ -713,16 +652,12 @@ def test_load_result_no_plays_dir(
 def test_game_fk_guard_skips_missing_game(
     db: sqlite3.Connection,
     loader: PlaysLoader,
-    tmp_path: Path,
 ) -> None:
     """AC-7: Games not in the games table are skipped with a warning."""
     _insert_season(db)
     # Do NOT insert a game row for GAME_ID_1.
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload({_GAME_ID_1: _make_plays_json()})
 
     assert result.loaded == 0
     assert result.skipped == 1
@@ -738,18 +673,18 @@ def test_game_fk_guard_loads_valid_skips_invalid(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-7: Valid games load while invalid games are skipped."""
     _insert_season(db)
     # Only insert game 1, not game 2.
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-    _write_plays_file(team_dir, _GAME_ID_2, _make_plays_json(batter_id=_BATTER_2))
-
-    result = loader.load_all(team_dir)
+    result = loader.load_payload(
+        {
+            _GAME_ID_1: _make_plays_json(),
+            _GAME_ID_2: _make_plays_json(batter_id=_BATTER_2),
+        }
+    )
 
     assert result.loaded == 1  # Game 1
     assert result.skipped == 1  # Game 2 (no FK)
@@ -765,7 +700,6 @@ def test_plays_scoped_to_correct_game_across_seasons(
     db: sqlite3.Connection,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """Multi-scope test: plays from different seasons are correctly scoped.
 
@@ -791,13 +725,14 @@ def test_plays_scoped_to_correct_game_across_seasons(
     _insert_game(db, _GAME_ID_2, team_ref.id, opponent_ref.id, season_id=season_2)
     db.commit()
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-    _write_plays_file(team_dir, _GAME_ID_2, _make_plays_json(batter_id=_BATTER_2))
-
     # Load both games using the same loader instance.
     loader = PlaysLoader(db, owned_team_ref=team_ref)
-    result = loader.load_all(team_dir)
+    result = loader.load_payload(
+        {
+            _GAME_ID_1: _make_plays_json(),
+            _GAME_ID_2: _make_plays_json(batter_id=_BATTER_2),
+        }
+    )
 
     assert result.loaded == 2
 
@@ -818,27 +753,11 @@ def test_plays_scoped_to_correct_game_across_seasons(
 # ---------------------------------------------------------------------------
 
 
-def test_empty_plays_dir(
-    db: sqlite3.Connection,
-    loader: PlaysLoader,
-    tmp_path: Path,
-) -> None:
-    """Empty plays directory returns empty LoadResult."""
-    team_dir = tmp_path / "team"
-    (team_dir / "plays").mkdir(parents=True)
-
-    result = loader.load_all(team_dir)
-    assert result.loaded == 0
-    assert result.skipped == 0
-    assert result.errors == 0
-
-
 def test_batting_team_id_correct_for_top_and_bottom(
     db: sqlite3.Connection,
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """Verify batting_team_id is away for top half, home for bottom half."""
     _insert_season(db)
@@ -884,10 +803,7 @@ def test_batting_team_id_correct_for_top_and_bottom(
         ],
     }
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, plays_json)
-
-    loader.load_all(team_dir)
+    loader.load_payload({_GAME_ID_1: plays_json})
 
     top_row = db.execute(
         "SELECT batting_team_id FROM plays WHERE game_id = ? AND half = 'top'",
@@ -914,16 +830,12 @@ def test_plays_rows_have_perspective_team_id(
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-1: Every plays row has perspective_team_id set to owned_team_ref.id."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_multi_play_json())
-
-    loader.load_all(team_dir)
+    loader.load_payload({_GAME_ID_1: _make_multi_play_json()})
 
     rows = db.execute(
         "SELECT perspective_team_id FROM plays WHERE game_id = ?",
@@ -938,23 +850,21 @@ def test_two_perspectives_coexist(
     db: sqlite3.Connection,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-2: Same game's plays from two perspectives coexist in the database."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+    payload = {_GAME_ID_1: _make_plays_json()}
 
     # Load from perspective A (team_ref).
     loader_a = PlaysLoader(db, owned_team_ref=team_ref)
-    result_a = loader_a.load_all(team_dir)
+    result_a = loader_a.load_payload(payload)
     assert result_a.loaded == 1
 
     # Load from perspective B (opponent_ref).
     loader_b = PlaysLoader(db, owned_team_ref=opponent_ref)
-    result_b = loader_b.load_all(team_dir)
+    result_b = loader_b.load_payload(payload)
     assert result_b.loaded == 1
 
     # Both sets should coexist.
@@ -975,29 +885,27 @@ def test_idempotency_check_includes_perspective(
     db: sqlite3.Connection,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
     """AC-3: Idempotency check is per-perspective -- loading from a new
     perspective proceeds even if plays exist from another perspective."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+    payload = {_GAME_ID_1: _make_plays_json()}
 
     # Load from perspective A.
     loader_a = PlaysLoader(db, owned_team_ref=team_ref)
-    result_a = loader_a.load_all(team_dir)
+    result_a = loader_a.load_payload(payload)
     assert result_a.loaded == 1
 
     # Same perspective A again -- should be skipped (idempotent).
-    result_a2 = loader_a.load_all(team_dir)
+    result_a2 = loader_a.load_payload(payload)
     assert result_a2.skipped == 1
     assert result_a2.loaded == 0
 
     # Different perspective B -- should load (not idempotent for B).
     loader_b = PlaysLoader(db, owned_team_ref=opponent_ref)
-    result_b = loader_b.load_all(team_dir)
+    result_b = loader_b.load_payload(payload)
     assert result_b.loaded == 1
     assert result_b.skipped == 0
 
@@ -1075,53 +983,49 @@ def _dump_events(conn: sqlite3.Connection) -> list[tuple]:
     ).fetchall()
 
 
-def test_load_payload_matches_file_path(tmp_path: Path) -> None:
-    """AC-5: load_payload produces identical LoadResult + DB rows vs load_all.
+def test_load_payload_writes_expected_plays_and_events(tmp_path: Path) -> None:
+    """AC-5: load_payload writes every play + event across a multi-game payload.
 
-    Loads the same plays data through both entry points into two independent
-    databases and asserts the LoadResult tallies and the written plays /
-    play_events rows are identical.  Also exercises the empty-entry skip.
+    Also exercises the empty-entry skip: a falsy payload value contributes
+    nothing and is not counted.
     """
     plays_a = _make_plays_json()
     plays_b = _make_multi_play_json()
 
-    # File path via load_all.
-    conn_file, ref_file, _ = _setup_independent_db(tmp_path, "file")
-    team_dir = tmp_path / "file_team"
-    _write_plays_file(team_dir, _GAME_ID_1, plays_a)
-    _write_plays_file(team_dir, _GAME_ID_2, plays_b)
-    result_file = PlaysLoader(conn_file, owned_team_ref=ref_file).load_all(team_dir)
-
-    # Payload path via load_payload (with an extra empty entry to skip).
-    conn_pl, ref_pl, _ = _setup_independent_db(tmp_path, "payload")
+    conn, ref, _ = _setup_independent_db(tmp_path, "payload")
     payload = {
         _GAME_ID_1: plays_a,
         _GAME_ID_2: plays_b,
-        "game-empty-entry-skip": {},  # falsy -> skipped, no file equivalent
+        "game-empty-entry-skip": {},  # falsy -> contributes nothing
     }
-    result_pl = PlaysLoader(conn_pl, owned_team_ref=ref_pl).load_payload(payload)
+    result = PlaysLoader(conn, owned_team_ref=ref).load_payload(payload)
 
-    # Identical LoadResult tallies.
-    assert (result_pl.loaded, result_pl.skipped, result_pl.errors) == (
-        result_file.loaded,
-        result_file.skipped,
-        result_file.errors,
-    )
-    assert result_file.loaded == 3  # 1 play (game 1) + 2 plays (game 2)
-    assert result_file.errors == 0
+    assert result.loaded == 3  # 1 play (game 1) + 2 plays (game 2)
+    assert result.skipped == 0
+    assert result.errors == 0
 
-    # Identical plays + play_events rows.
-    assert _dump_plays(conn_pl) == _dump_plays(conn_file)
-    assert _dump_events(conn_pl) == _dump_events(conn_file)
+    # Every parsed play and its events reached the DB, under the right games.
+    plays = _dump_plays(conn)
+    assert [(row[0], row[1]) for row in plays] == [
+        (_GAME_ID_1, 0),
+        (_GAME_ID_2, 0),
+        (_GAME_ID_2, 1),
+    ]
+    assert len(_dump_events(conn)) == 7  # 3 + 2 + 2
+
+    # The empty entry created no rows.
+    orphan = conn.execute(
+        "SELECT COUNT(*) FROM plays WHERE game_id = ?", ("game-empty-entry-skip",)
+    ).fetchone()[0]
+    assert orphan == 0
 
     # AC-4: every payload-written plays row carries perspective_team_id = ref.id.
-    perspectives = conn_pl.execute(
+    perspectives = conn.execute(
         "SELECT DISTINCT perspective_team_id FROM plays"
     ).fetchall()
-    assert perspectives == [(ref_pl.id,)]
+    assert perspectives == [(ref.id,)]
 
-    conn_file.close()
-    conn_pl.close()
+    conn.close()
 
 
 def test_load_payload_iteration_order_is_sorted(tmp_path: Path) -> None:
@@ -1139,21 +1043,17 @@ def test_load_payload_iteration_order_is_sorted(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_load_all_perspective_uses_member_team_pk(
+def test_load_payload_perspective_uses_member_team_pk(
     db: sqlite3.Connection,
     loader: PlaysLoader,
     team_ref: TeamRef,
     opponent_ref: TeamRef,
-    tmp_path: Path,
 ) -> None:
-    """AC-5: load_all() sets perspective_team_id to the member team's integer PK."""
+    """AC-5: load_payload() sets perspective_team_id to the member team's integer PK."""
     _insert_season(db)
     _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
 
-    team_dir = tmp_path / "team"
-    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
-
-    loader.load_all(team_dir)
+    loader.load_payload({_GAME_ID_1: _make_plays_json()})
 
     rows = db.execute(
         "SELECT DISTINCT perspective_team_id FROM plays WHERE game_id = ?",

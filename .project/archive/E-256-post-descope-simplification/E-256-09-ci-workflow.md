@@ -4,7 +4,7 @@
 [E-256: Post-Descope Simplification & Foundations](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a single `.github/workflows/ci.yml` runs the static half of the project's gates on push: pytest, a case-insensitive PII sweep, a lockfile-drift check, and `docker build`. The workflow explicitly documents what it **cannot** absorb — the credentialed populated-DB smoke — so that boundary is not silently reopened.

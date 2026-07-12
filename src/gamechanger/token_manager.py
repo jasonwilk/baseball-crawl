@@ -153,7 +153,7 @@ class TokenManager:
             if not self._access_token:
                 raise ConfigurationError(
                     "Mobile profile programmatic token refresh requires the client key "
-                    f"(GAMECHANGER_CLIENT_KEY_MOBILE), which has not been extracted from "
+                    "(GAMECHANGER_CLIENT_KEY_MOBILE), which has not been extracted from "
                     "the iOS binary. As a workaround, capture an access token manually "
                     "from mitmweb and set it as GAMECHANGER_ACCESS_TOKEN_MOBILE in .env."
                 )

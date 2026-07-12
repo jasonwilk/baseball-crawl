@@ -51,36 +51,6 @@ Feature flags are set as environment variables in `.env`. Values `1`, `true`, or
 
 ## Data Maintenance
 
-### Back-Filling Appearance Order (`bb data backfill-appearance-order`)
-
-`bb data backfill-appearance-order` populates the `appearance_order` column on existing `player_game_pitching` rows. It walks cached boxscore JSON files on disk to determine the order in which pitchers appeared in each game (1 = starter, 2+ = relievers in order of entry), then updates any row where `appearance_order IS NULL`.
-
-Run this command once on a database with historical pitching data written before `appearance_order` was populated at load time (the column has been part of the baseline schema in `migrations/001_initial_schema.sql` since the E-220 schema rewrite):
-
-```bash
-bb data backfill-appearance-order
-```
-
-**Output:**
-
-```
-Backfill Summary:
-  Games processed: 42
-  Rows updated: 87
-  Games skipped (no cached file): 3
-  Games with errors: 0
-```
-
-After the backfill completes, regenerate any standalone reports for affected opponents to reflect updated GS/GR counts.
-
-**Idempotent**: Safe to run multiple times -- only rows with `appearance_order IS NULL` are updated. Games with no cached boxscore file on disk are skipped and counted in "Games skipped".
-
-**Custom database path**:
-
-```bash
-bb data backfill-appearance-order --db /path/to/app.db
-```
-
 ### Reloading Annotated Pitches (`bb data reload-annotated-pitches`)
 
 `bb data reload-annotated-pitches` re-derives pitch-level data for already-loaded games from stored play text, without re-fetching anything from the GameChanger API. It reclassifies pitches that were previously dropped because they carried a trailing type or velocity annotation (e.g., `"Strike (Fastball, 72mph)"`), and recomputes the derived pitch flags (`pitch_count`, `is_first_pitch_strike`) in place.
@@ -152,7 +122,7 @@ game_date Backfill Summary (DRY-RUN):
 Dry-run only. Re-run with --execute to apply the corrections.
 ```
 
-**Idempotent**: Safe to run multiple times -- only rows whose re-derived date differs from the stored value are updated, so a second run is a no-op. Mirrors the `bb data backfill-appearance-order` operator-maintenance precedent.
+**Idempotent**: Safe to run multiple times -- only rows whose re-derived date differs from the stored value are updated, so a second run is a no-op. Mirrors the `bb data reload-annotated-pitches` (E-245) operator-maintenance precedent -- `bb data backfill-appearance-order`, the command this note originally cited, was removed in E-256.
 
 **Does not re-run dedup**: This command corrects stored `game_date` values only. It does not re-run player or game dedup. A corrected date that shifts a game's 7-day rolling-window membership is the intended correction, not a regression.
 
@@ -820,6 +790,8 @@ Also available as `bb db backup`.
 
 This copies `data/app.db` to `data/backups/app-<timestamp>.db`. The backups directory is created automatically and is git-ignored.
 
+**This must run on a schedule, and its output must be copied off the host disk.** `data/backups/` lives inside the same host-mounted `./data` volume as `app.db` -- a backup left there is destroyed alongside the database on disk loss. See [production-deployment.md: Routine backup](production-deployment.md#routine-backup) for the required daily cron cadence and the off-host copy step.
+
 ### Restore
 
 To restore from a backup:
@@ -944,4 +916,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-07-08 | Source: E-253 (E-253-11: bb data backfill-game-dates), E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, bb data scout/dedup/repair-opponents sections; reports-first reframe -- the plays and spray chart pipelines were NOT removed by E-239 and remain live), E-255-05 (Truth Sweep: replaced the phantom Migration 015/012/009/006 write-ups with a Schema Migrations table matching the real 001-010 files; corrected the false "plays pipeline removed in E-239" claim -- it is alive; fixed the `bb creds login` recovery reference -- no such subcommand, `bb creds refresh` first-line with `bb creds import`/`bb creds setup web` fallback; corrected "seed data" to "empty" for `bb db reset`; fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/)*
+*Last updated: 2026-07-12 | Source: E-256-10 (struck the deleted `bb data backfill-appearance-order` runbook section -- the command was removed in E-256-02 -- and re-pointed the `backfill-game-dates` precedent reference to `bb data reload-annotated-pitches`; added the required-cadence + off-host-copy cross-reference to the backup section), E-253 (E-253-11: bb data backfill-game-dates), E-252 (morning-run OPERATING_TIMEZONE default date, alerting-channel preflight, non-zero exit-code contract, always-attempted summary email), E-250-05 (delete-report cascade updated from four guards to the two that survive migration 008's `team_opponents` drop -- removed the `team_opponents`-links and shared-games conditions), E-245 (bb data reload-annotated-pitches and bb data fix-self-games commands), E-243 (feature flag description: Most Likely Arms; post-merge spot-check note), E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, bb data scout/dedup/repair-opponents sections; reports-first reframe -- the plays and spray chart pipelines were NOT removed by E-239 and remain live), E-255-05 (Truth Sweep: replaced the phantom Migration 015/012/009/006 write-ups with a Schema Migrations table matching the real 001-010 files; corrected the false "plays pipeline removed in E-239" claim -- it is alive; fixed the `bb creds login` recovery reference -- no such subcommand, `bb creds refresh` first-line with `bb creds import`/`bb creds setup web` fallback; corrected "seed data" to "empty" for `bb db reset`; fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/)*

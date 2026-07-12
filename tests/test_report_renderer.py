@@ -95,6 +95,11 @@ def _make_full_data(**overrides) -> dict:
             "record": {"wins": 15, "losses": 5},
         },
         "generated_at": "2026-03-28T12:00:00Z",
+        # The venue-local generation date. E-256-05 AC-6: the header and footer
+        # render THIS, not a UTC slice of `generated_at`, so a "complete" data
+        # dict must carry it -- the only production caller (generator.py) always
+        # does. Midday UTC, so the two happen to coincide here.
+        "generation_date": "2026-03-28",
         "expires_at": "2026-04-11T12:00:00Z",
         "freshness_date": "2026-03-25",
         "game_count": 20,

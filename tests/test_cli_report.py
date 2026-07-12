@@ -11,7 +11,8 @@ from typer.testing import CliRunner
 
 from src.cli.report import _apply_opponent_mapping, app
 from src.gamechanger.team_resolver import TeamProfile
-from src.reports.generator import CleanupResult, GenerationResult
+from src.reports.generator import GenerationResult
+from src.reports.lifecycle import CleanupResult
 from tests.conftest import load_real_schema
 
 runner = CliRunner()
@@ -35,6 +36,43 @@ class TestGenerateCommand:
         assert "abc123def456" in result.output
         assert "https://bbstats.ai/reports/abc123def456" in result.output
         assert "Test Tigers" in result.output
+
+    def test_success_prints_reference_date(self):
+        """E-256-05 AC-4: the printed reference date is Step 1d's headline
+        invariant (E-256-11 asserts it equals today in the operating timezone).
+
+        The machine-assertable shape is the literal prefix ``Reference date:``
+        followed by an ISO-8601 ``YYYY-MM-DD``.
+        """
+        mock_result = GenerationResult(
+            success=True,
+            slug="abc123def456",
+            title="Scouting Report — Test Tigers",
+            url="https://bbstats.ai/reports/abc123def456",
+            reference_date="2026-07-09",
+            outcome="ready",
+        )
+        with patch("src.cli.report.generate_report", return_value=mock_result):
+            result = runner.invoke(app, ["generate", "abc123"])
+
+        assert result.exit_code == 0
+        assert "Reference date: 2026-07-09" in result.output
+
+    def test_success_without_reference_date_omits_the_line(self):
+        """A legacy/failed-derivation result must not print an empty date line --
+        Step 1d would then assert against `Reference date: `."""
+        mock_result = GenerationResult(
+            success=True,
+            slug="abc",
+            title="T",
+            url="u",
+            outcome="ready",
+        )
+        with patch("src.cli.report.generate_report", return_value=mock_result):
+            result = runner.invoke(app, ["generate", "abc123"])
+
+        assert result.exit_code == 0
+        assert "Reference date:" not in result.output
 
     def test_failure_prints_error_and_exits_1(self):
         mock_result = GenerationResult(

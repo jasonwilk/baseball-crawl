@@ -110,6 +110,10 @@ The one genuine remaining gap is crash-atomicity: per-game writes commit individ
 `GameLoader.load_file` (`game_loader.py:321`), recompute commits separately at
 `scouting_loader.py:160` — a crash between leaves committed game rows with stale aggregates
 (self-heals on next run; payload-first single-transaction closes it).
+> **History (E-256-01):** `GameLoader.load_file` (the disk twin) was DELETED — `load_payload` is now
+> the sole loader entry path (`game_loader.py:321` no longer valid). The crash-atomicity note above is
+> retained as the historical rationale; payload-first single-transaction is the actual state now, not a
+> future fix.
 
 ## Canonical-column decision (E-237)
 **Canonical boxscore_only set = ScoutingLoader's set, full stop.** Verified NO live reader of

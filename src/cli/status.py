@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import typer
@@ -20,7 +19,6 @@ from src.http.proxy_check import (
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DATA_ROOT = _PROJECT_ROOT / "data"
 _DB_PATH = _DATA_ROOT / "app.db"
-_RAW_DATA_ROOT = _DATA_ROOT / "raw"
 _PROXY_SESSIONS_DIR = _PROJECT_ROOT / "proxy" / "data" / "sessions"
 
 
@@ -47,37 +45,8 @@ def _get_credential_status() -> dict[str, tuple[int, str]]:
     return results
 
 
-def _get_last_crawl() -> tuple[str | None, int]:
-    """Find the most recent manifest.json and return (crawled_at, total_files).
-
-    Returns:
-        (crawled_at_str, total_files) where crawled_at_str is None if no manifest exists.
-    """
-    manifests = list(_RAW_DATA_ROOT.glob("*/manifest.json"))
-    if not manifests:
-        return (None, 0)
-
-    best_ts: str | None = None
-    best_files = 0
-    for manifest_path in manifests:
-        try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            ts = data.get("crawled_at", "")
-            crawlers = data.get("crawlers", {})
-            total = sum(
-                c.get("files_written", 0) for c in crawlers.values()
-            )
-            if best_ts is None or ts > best_ts:
-                best_ts = ts
-                best_files = total
-        except (OSError, json.JSONDecodeError):
-            continue
-
-    return (best_ts, best_files)
-
-
 def _format_crawled_at(raw_ts: str) -> str:
-    """Convert ISO8601 UTC timestamp from manifest to a display string.
+    """Convert an ISO8601 UTC timestamp to a display string.
 
     Converts ``"2026-03-05T14:30:00Z"`` -> ``"2026-03-05 14:30:00"``.
     """
@@ -178,7 +147,7 @@ def _get_proxy_sessions() -> dict | None:
 
 
 def run() -> None:
-    """Print a system health summary (credentials, database, crawl, proxy session)."""
+    """Print a system health summary (credentials, proxy, database, proxy sessions)."""
     console = Console()
 
     # Determine if we're in a terminal for color support (rich auto-detects this,
@@ -211,15 +180,6 @@ def run() -> None:
         label = f"Proxy ({profile}):"
         style, text = _format_proxy_line(result)
         console.print(f"  {label:<{label_width}} [{style}]{text}[/{style}]")
-
-    # --- Last crawl ---
-    crawled_at, total_files = _get_last_crawl()
-    label = "Last crawl:"
-    if crawled_at is None:
-        console.print(f"  {label:<{label_width}} [yellow]never[/yellow]")
-    else:
-        display_ts = _format_crawled_at(crawled_at)
-        console.print(f"  {label:<{label_width}} {display_ts} ({total_files} files)")
 
     # --- Database ---
     db_exists, db_display = _get_db_info()

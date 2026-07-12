@@ -39,7 +39,8 @@ _ENV_PATH = "/app/.env"
 # from GAMECHANGER_CLIENT_KEY_* and do not need to be stored.
 _BASE_CREDENTIAL_HEADERS: dict[str, str] = {
     "gc-token": "GAMECHANGER_REFRESH_TOKEN",
-    "gc-device-id": "GAMECHANGER_DEVICE_ID",
+    # false positive: the value below is the env-var NAME, not a credential.
+    "gc-device-id": "GAMECHANGER_DEVICE_ID",  # pii-ok
     "gc-app-name": "GAMECHANGER_APP_NAME",
     "gc-client-id": "GAMECHANGER_CLIENT_ID",
 }

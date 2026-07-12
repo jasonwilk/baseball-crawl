@@ -1,16 +1,11 @@
 """Plays loader for the baseball-crawl ingestion pipeline.
 
-Reads cached plays JSON files written by ``PlaysCrawler`` and inserts
-parsed play and event records into the ``plays`` and ``play_events``
-database tables.
-
-Expected file layout (written by PlaysCrawler)::
-
-    data/raw/{season}/teams/{gc_uuid}/plays/{event_id}.json
+Inserts parsed play and event records into the ``plays`` and ``play_events``
+database tables from already-fetched, in-memory plays payloads.
 
 The loader:
 
-- Iterates over all ``*.json`` files in the plays directory
+- Iterates the payload mapping in sorted ``game_id`` order
 - Validates that each ``game_id`` exists in the ``games`` table (FK guard)
 - Checks whole-game idempotency: skips games with existing plays rows
 - Parses each game via ``PlaysParser.parse_game()``
@@ -21,7 +16,6 @@ The loader:
 Usage::
 
     import sqlite3
-    from pathlib import Path
     from src.gamechanger.loaders.plays_loader import PlaysLoader
     from src.gamechanger.types import TeamRef
 
@@ -29,16 +23,14 @@ Usage::
     conn.execute("PRAGMA foreign_keys=ON;")
     ref = TeamRef(id=1, gc_uuid="abc-team-uuid")
     loader = PlaysLoader(conn, owned_team_ref=ref)
-    result = loader.load_all(Path("data/raw/2025-spring-hs/teams/abc-team-uuid"))
+    result = loader.load_payload({"event-id": plays_response_dict})
     print(result)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from src.db.players import ensure_player_row
@@ -50,16 +42,16 @@ logger = logging.getLogger(__name__)
 
 
 class PlaysLoader:
-    """Loads plays JSON files into the SQLite database.
+    """Loads in-memory plays payloads into the SQLite database.
 
-    Reads all ``plays/{event_id}.json`` files in a team directory, parses
-    each via ``PlaysParser``, and inserts the resulting records into the
-    ``plays`` and ``play_events`` tables.
+    Parses each game's payload via ``PlaysParser`` and inserts the resulting
+    records into the ``plays`` and ``play_events`` tables.
 
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        owned_team_ref: ``TeamRef`` for the team that owns the data directory.
+        owned_team_ref: ``TeamRef`` for the team whose API call produced the
+            payloads (the perspective recorded on every inserted play).
     """
 
     def __init__(
@@ -74,53 +66,14 @@ class PlaysLoader:
     # Public API
     # ------------------------------------------------------------------
 
-    def load_all(self, team_dir: Path) -> LoadResult:
-        """Load all plays files in a team directory.
-
-        Reads each ``plays/{event_id}.json`` file, validates the game FK,
-        checks whole-game idempotency, parses via ``PlaysParser``, and
-        writes plays + events to the database.
-
-        Args:
-            team_dir: Path to ``data/raw/{season}/teams/{gc_uuid}/``.
-
-        Returns:
-            ``LoadResult`` with ``loaded`` = plays inserted,
-            ``skipped`` = games skipped (idempotent or missing FK),
-            ``errors`` = games with parse/insert errors.
-        """
-        plays_dir = team_dir / "plays"
-        if not plays_dir.is_dir():
-            logger.info("No plays directory at %s; nothing to load.", plays_dir)
-            return LoadResult()
-
-        total = LoadResult()
-        for plays_path in sorted(plays_dir.glob("*.json")):
-            game_id = plays_path.stem
-            result = self._load_game(game_id, plays_path=plays_path)
-            total.loaded += result.loaded
-            total.skipped += result.skipped
-            total.errors += result.errors
-
-        logger.info(
-            "Plays load complete for %s: loaded=%d skipped=%d errors=%d",
-            team_dir,
-            total.loaded,
-            total.skipped,
-            total.errors,
-        )
-        return total
-
     def load_payload(self, plays_by_game: dict[str, dict]) -> LoadResult:
         """Load a batch of in-memory plays payloads, keyed by game_id.
 
-        Payload-first counterpart to :meth:`load_all`: applies the identical
-        per-game logic (FK guard, whole-game idempotency, parse, per-game
-        transaction, error isolation) to each already-fetched plays dict
-        without any disk round-trip.
+        Applies the per-game logic (FK guard, whole-game idempotency, parse,
+        per-game transaction, error isolation) to each already-fetched plays
+        dict.
 
-        Entries are iterated in sorted ``game_id`` order to mirror the
-        deterministic ``sorted(glob)`` iteration of :meth:`load_all`.
+        Entries are iterated in sorted ``game_id`` order for determinism.
         Falsy/empty entries (e.g. ``{}`` markers for games skipped upstream)
         are skipped, mirroring the generator's existing ``if data:`` guard.
 
@@ -136,10 +89,10 @@ class PlaysLoader:
         for game_id in sorted(plays_by_game):
             raw_json = plays_by_game[game_id]
             if not raw_json:
-                # Empty/{} entry -- nothing to load (mirrors load_all having
-                # no file written for already-loaded/skipped games).
+                # Empty/{} entry -- nothing to load (an already-loaded or
+                # upstream-skipped game).
                 continue
-            result = self._load_game(game_id, raw_json=raw_json)
+            result = self._load_game(game_id, raw_json)
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
@@ -156,30 +109,16 @@ class PlaysLoader:
     # Per-game loading
     # ------------------------------------------------------------------
 
-    def _load_game(
-        self,
-        game_id: str,
-        *,
-        raw_json: dict[str, Any] | None = None,
-        plays_path: Path | None = None,
-    ) -> LoadResult:
-        """Load plays for a single game from an in-memory dict or a file.
+    def _load_game(self, game_id: str, raw_json: dict[str, Any]) -> LoadResult:
+        """Load plays for a single game from an in-memory payload.
 
-        Shared per-game core for both :meth:`load_all` (file path -- pass
-        ``plays_path``) and :meth:`load_payload` (in-memory -- pass
-        ``raw_json``).  Performs FK guard, idempotency check, parsing, and DB
-        insertion within a per-game transaction.  Parse or insert errors are
-        caught and logged (per-game error isolation).
-
-        Exactly one of ``raw_json`` or ``plays_path`` must be provided.  When
-        ``plays_path`` is given, the file is read lazily inside the parse
-        try-block (after the FK guard and idempotency checks) so that read
-        failures are isolated exactly as before.
+        Performs FK guard, idempotency check, parsing, and DB insertion within a
+        per-game transaction.  Parse or insert errors are caught and logged
+        (per-game error isolation).
 
         Args:
             game_id: The ``event_id`` (= ``games.game_id``).
-            raw_json: Pre-fetched raw plays response dict (payload path).
-            plays_path: Path to the plays JSON file (directory path).
+            raw_json: Pre-fetched raw plays response dict.
 
         Returns:
             ``LoadResult`` for this game.
@@ -211,10 +150,8 @@ class PlaysLoader:
             )
             return LoadResult(skipped=1)
 
-        # Read (file path only) and parse the plays payload.
+        # Parse the plays payload.
         try:
-            if raw_json is None:
-                raw_json = self._read_json(plays_path)
             parsed_plays = PlaysParser.parse_game(
                 raw_json=raw_json,
                 game_id=game_id,
@@ -223,12 +160,7 @@ class PlaysLoader:
                 away_team_id=away_team_id,
             )
         except Exception as exc:  # noqa: BLE001 -- per-game error isolation
-            logger.error(
-                "Parse error for game %s (%s): %s",
-                game_id,
-                plays_path if plays_path is not None else "payload",
-                exc,
-            )
+            logger.error("Parse error for game %s: %s", game_id, exc)
             return LoadResult(errors=1)
 
         if not parsed_plays:
@@ -336,23 +268,3 @@ class PlaysLoader:
             plays_inserted += 1
 
         return plays_inserted
-
-    # ------------------------------------------------------------------
-    # File I/O
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _read_json(path: Path) -> dict[str, Any]:
-        """Read and parse a JSON file.
-
-        Args:
-            path: Path to the JSON file.
-
-        Returns:
-            Parsed JSON dict.
-
-        Raises:
-            json.JSONDecodeError: If the file contains invalid JSON.
-            OSError: If the file cannot be read.
-        """
-        return json.loads(path.read_text(encoding="utf-8"))

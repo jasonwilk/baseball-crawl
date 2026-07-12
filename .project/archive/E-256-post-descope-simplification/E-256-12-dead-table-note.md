@@ -4,7 +4,7 @@
 [E-256: Post-Descope Simplification & Foundations](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/data-model.md` carries a brief dead-by-descope note recording that the write-orphaned tables `crawl_jobs` and `coaching_assignments`, and the ~100 season split/advanced columns rendered permanently unpopulatable by E-239, are retained deliberately rather than by accident.

@@ -1,20 +1,14 @@
 """Scouting spray chart loader for the baseball-crawl ingestion pipeline.
 
-Reads player-stats JSON files written by ``ScoutingSprayChartCrawler`` and
-inserts ball-in-play events into the ``spray_charts`` table for opponent
-teams.
-
-Expected file layout (written by ScoutingSprayChartCrawler)::
-
-    data/raw/{season_id}/scouting/{public_id}/spray/{event_id}.json
-
-The ``game_id`` (= ``event_id``) is inferred from the filename. The
-``season_id`` and opponent's ``public_id`` are inferred from the path.
+Inserts ball-in-play events into the ``spray_charts`` table for opponent teams
+from in-memory player-stats payloads fetched by ``ScoutingSprayChartCrawler``.
+The caller supplies an ``event_id`` -> payload mapping and the opponent's
+``public_id``.
 
 Key data decisions
 ------------------
 - **Team resolution**: ``public_id`` → ``teams.id`` lookup (not ``gc_uuid``),
-  because scouting paths use ``public_id`` as the directory name.
+  because scouting data is keyed by the opponent's ``public_id``.
 - **Idempotency**: a genuine re-run is short-circuited by the whole-game
   perspective gate in ``_load_game_data`` (returns a benign ``skipped=1``
   BEFORE any event is inserted), so re-running the same files produces zero
@@ -32,6 +26,7 @@ Key data decisions
   These events are stored with NULL x, y, fielder_position, and error.
 - **Missing x/y with defender present**: skip the event (log debug).
 - **Null spray_chart_data**: entire game skipped gracefully with INFO log (AC-5).
+- **season_id**: derived from team metadata, never from a path.
 - **Unresolvable players**: players not found in ``team_rosters`` for either the
   home or away team are skipped entirely -- all their events are counted in
   ``LoadResult.skipped`` and no rows are inserted (no stub player, no spray row).
@@ -72,22 +67,19 @@ affected report (the reports generator re-runs the scouting spray load).
 Usage::
 
     import sqlite3
-    from pathlib import Path
     from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
 
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = ScoutingSprayChartLoader(conn)
-    result = loader.load_all(Path("data/raw"))
+    result = loader.load_from_data({"event-id": player_stats_dict}, "opponentSlug")
     print(result)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from src.db.players import ensure_player_row
@@ -97,15 +89,14 @@ logger = logging.getLogger(__name__)
 
 
 class ScoutingSprayChartLoader:
-    """Loads scouting spray chart JSON files into the ``spray_charts`` table.
+    """Loads in-memory scouting spray chart payloads into ``spray_charts``.
 
-    Iterates all ``*.json`` files in an opponent's ``spray/`` directory,
-    parses the nested event structure, and inserts rows using
-    ``INSERT OR IGNORE`` on ``event_gc_id``.
+    Parses the nested event structure of each game's player-stats payload and
+    inserts rows using ``INSERT OR IGNORE`` on the migration-009 unique key.
 
     Unlike ``SprayChartLoader``, team resolution uses ``public_id`` (not
-    ``gc_uuid``) because scouting spray files are stored under the opponent's
-    ``public_id`` directory.
+    ``gc_uuid``) because scouting spray data is keyed by the opponent's
+    ``public_id``.
 
     Args:
         db: Open SQLite connection with foreign keys enabled.
@@ -113,60 +104,6 @@ class ScoutingSprayChartLoader:
 
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
-
-    def load_all(
-        self,
-        data_root: Path,
-        public_id: str | None = None,
-        season_id: str | None = None,
-    ) -> LoadResult:
-        """Load scouting spray chart files across all (or one) opponent/season.
-
-        Scans ``data_root/{season}/scouting/{public_id}/spray/`` directories.
-        When ``public_id`` is provided, only that opponent's directories are
-        processed.  When ``season_id`` is provided, only that season's
-        directories are processed.
-
-        Args:
-            data_root: Root of the raw data tree (e.g. ``data/raw/``).
-            public_id: If given, only load spray files for this opponent slug.
-                       If ``None``, load all opponents found on disk.
-            season_id: If given, only load spray files from this season
-                       directory.  If ``None``, load all seasons found on disk.
-
-        Returns:
-            Aggregated ``LoadResult`` across all spray directories processed.
-        """
-        season_glob = season_id if season_id is not None else "*"
-        opp_glob = public_id if public_id is not None else "*"
-        glob_pattern = f"{season_glob}/scouting/{opp_glob}/spray"
-        spray_dirs = sorted(
-            p for p in data_root.glob(glob_pattern) if p.is_dir()
-        )
-
-        if not spray_dirs:
-            logger.debug(
-                "No scouting spray directories found under %s (pattern=%s).",
-                data_root,
-                glob_pattern,
-            )
-            return LoadResult()
-
-        combined = LoadResult()
-        for spray_dir in spray_dirs:
-            result = self.load_dir(spray_dir)
-            combined.loaded += result.loaded
-            combined.skipped += result.skipped
-            combined.errors += result.errors
-
-        logger.info(
-            "ScoutingSprayChartLoader.load_all complete: "
-            "loaded=%d skipped=%d errors=%d",
-            combined.loaded,
-            combined.skipped,
-            combined.errors,
-        )
-        return combined
 
     def load_from_data(
         self,
@@ -226,13 +163,7 @@ class ScoutingSprayChartLoader:
         public_id: str,
         season_id: str,
     ) -> LoadResult:
-        """Load one game's spray chart data from an in-memory dict.
-
-        Shared payload core (E-247-01) for both the in-memory entry point
-        (``load_from_data`` -> here directly) and the disk entry point
-        (``load_dir`` -> ``_load_game_file`` reads the JSON, then delegates
-        here).  Mirrors the ``GameLoader.load_payload`` / ``load_file`` pattern.
-        """
+        """Load one game's spray chart data from an in-memory dict."""
         spray_data = data.get("spray_chart_data")
         if spray_data is None:
             logger.info(
@@ -289,14 +220,10 @@ class ScoutingSprayChartLoader:
                 continue
             for player_uuid, events in section.items():
                 if not isinstance(events, list):
-                    # Drift resolution (E-247-01): the in-memory and disk paths
-                    # previously disagreed here -- the disk path (_load_game_file)
-                    # logged a WARNING while the in-memory path skipped silently.
-                    # Unified to LOG-then-skip: a non-list ``events`` value is a
-                    # malformed API response worth surfacing for data-quality
-                    # follow-up, consistent with this loader's "log unexpected
-                    # shapes, don't crash" convention.  The data effect is
-                    # unchanged (skip the entry, count it once as skipped).
+                    # A non-list ``events`` value is a malformed API response
+                    # worth surfacing for data-quality follow-up, consistent with
+                    # this loader's "log unexpected shapes, don't crash"
+                    # convention: skip the entry, count it once as skipped.
                     logger.warning(
                         "Events for player %s in %s section is not a list; skipping.",
                         player_uuid, section_key,
@@ -328,95 +255,6 @@ class ScoutingSprayChartLoader:
 
         self._db.commit()
         return result
-
-    def load_dir(self, spray_dir: Path) -> LoadResult:
-        """Load all spray chart JSON files from one opponent's spray directory.
-
-        Infers ``public_id`` and ``season_id`` from the directory path::
-
-            data/raw/{season_id}/scouting/{public_id}/spray/
-
-        Args:
-            spray_dir: Path to the ``spray/`` directory for one opponent.
-
-        Returns:
-            Aggregated ``LoadResult`` across all game files in the directory.
-        """
-        public_id = spray_dir.parent.name
-
-        team_id = self._resolve_team_id_by_public_id(public_id)
-        if team_id is None:
-            logger.warning(
-                "Team public_id=%s not found in teams table; skipping directory %s.",
-                public_id,
-                spray_dir,
-            )
-            return LoadResult()
-
-        # Derive DB season_id from team metadata (not the filesystem path).
-        season_id, _ = derive_season_id_for_team(self._db, team_id)
-
-        combined = LoadResult()
-        json_files = sorted(spray_dir.glob("*.json"))
-        if not json_files:
-            logger.debug("No spray chart files found in %s.", spray_dir)
-            return combined
-
-        for json_file in json_files:
-            game_id = json_file.stem
-            try:
-                result = self._load_game_file(
-                    json_file, game_id, team_id, public_id, season_id
-                )
-            except Exception as exc:  # noqa: BLE001 -- log and continue
-                logger.error(
-                    "Unexpected error loading scouting spray file %s: %s",
-                    json_file,
-                    exc,
-                )
-                self._db.rollback()
-                result = LoadResult(errors=1)
-            combined.loaded += result.loaded
-            combined.skipped += result.skipped
-            combined.errors += result.errors
-
-        logger.info(
-            "ScoutingSprayChartLoader %s: loaded=%d skipped=%d errors=%d",
-            spray_dir,
-            combined.loaded,
-            combined.skipped,
-            combined.errors,
-        )
-        return combined
-
-    def _load_game_file(
-        self,
-        path: Path,
-        game_id: str,
-        team_id: int,
-        public_id: str,
-        season_id: str,
-    ) -> LoadResult:
-        """Parse and load one game's scouting spray chart JSON from disk.
-
-        Thin JSON-read wrapper (E-247-01): reads the file, then delegates to the
-        shared payload core :meth:`_load_game_data`.  Mirrors the established
-        ``GameLoader.load_file`` -> ``load_payload`` pattern, so the disk and
-        in-memory paths share one orchestration body (and one non-list-event
-        drift resolution -- see :meth:`_load_game_data`).
-
-        Args:
-            path: Path to the spray chart JSON file.
-            game_id: Event ID extracted from the filename (``games.game_id`` PK).
-            team_id: Integer ``teams.id`` for the scouted opponent team.
-            public_id: Opponent's ``public_id`` slug (for log messages).
-            season_id: Season slug from the file path.
-
-        Returns:
-            ``LoadResult`` for this game's events.
-        """
-        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-        return self._load_game_data(data, game_id, team_id, public_id, season_id)
 
     # -----------------------------------------------------------------------
     # Resolution helpers
@@ -482,7 +320,7 @@ class ScoutingSprayChartLoader:
             player_uuid: GC player UUID (spray chart key).
             team_id: Resolved integer ``teams.id``.
             chart_type: ``'offensive'`` or ``'defensive'``.
-            season_id: Season slug from the file path.
+            season_id: Season slug derived from the team's metadata.
             perspective_team_id: INTEGER PK of the team whose API call produced
                 this data.
 
