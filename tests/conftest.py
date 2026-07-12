@@ -3,28 +3,54 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
+import click.testing
 import pytest
+import typer.testing
 
-# Force plain (uncolored, unwrapped) CLI output for the whole test session.
+# --- Global ANSI strip on the CliRunner Result (env-independent) --------------
 #
-# CI environments (e.g. GitHub Actions) force color on, so typer/click/rich
-# inject ANSI escape codes -- and rich line-wraps to the terminal width -- into
-# ``--help`` and command output, breaking the plain-substring assertions the CLI
-# tests make against ``result.output``. ``NO_COLOR`` takes precedence over
-# ``FORCE_COLOR`` in both rich and click.
+# CI runners (e.g. GitHub Actions) enable color for typer's ``--help`` formatter
+# via a path that env vars like ``NO_COLOR`` override locally but NOT in CI, so
+# ANSI SGR codes (``\x1b[1m`` bold, ``\x1b[3Xm`` colors) leak into the captured
+# output and break the plain-substring assertions the CLI tests make against
+# ``result.output``. The only env-INDEPENDENT fix is to strip ANSI from the
+# captured output itself -- it cannot be defeated by however the runner forces
+# color, because it post-processes what CliRunner already captured.
 #
-# This MUST run at conftest import time (before any test module imports the CLI):
-# the command modules build module-global ``rich.Console()`` instances at import,
-# and rich freezes each Console's ``no_color`` decision in ``__init__`` from the
-# environment then. An autouse fixture alone runs too late to affect those cached
-# globals -- hence the import-time environment mutation here, with the fixture
-# below as per-test belt-and-suspenders. conftest is imported before test modules,
-# so setting these here guarantees the globals are constructed plain.
-os.environ["NO_COLOR"] = "1"
-os.environ.pop("FORCE_COLOR", None)
+# We patch the ``Result`` text getters at conftest import time so EVERY
+# ``runner.invoke(...)`` result is plain, for all present and future CLI tests.
+# ``typer.testing.CliRunner`` returns its OWN ``typer.testing.Result`` (a
+# standalone class, not a subclass of click's), so patching click's Result alone
+# does not reach it -- both classes are patched. In click >= 8.2 (installed:
+# 8.4.2) and typer 0.26.8, ``.output`` is its own getter over ``output_bytes``
+# -- NOT a proxy for ``.stdout`` -- so ``output`` / ``stdout`` / ``stderr`` are
+# each wrapped independently.
+_ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _ansi_stripping_property(result_cls: type, name: str) -> property:
+    """Return a property that strips ANSI SGR codes from ``result_cls.<name>``."""
+    original = getattr(result_cls, name).fget
+
+    def getter(self: object) -> str:
+        return _ANSI_SGR.sub("", original(self))
+
+    return property(getter)
+
+
+for _result_cls in (click.testing.Result, typer.testing.Result):
+    for _attr in ("output", "stdout", "stderr"):
+        setattr(_result_cls, _attr, _ansi_stripping_property(_result_cls, _attr))
+
+# A wide COLUMNS keeps click/rich from line-wrapping a multi-word substring
+# across lines (the strip removes color, not layout). Set at import time and
+# re-asserted per test below. NO_COLOR/FORCE_COLOR are intentionally NOT set:
+# the global strip is env-independent, and leaving color forcing untouched lets
+# the FORCE_COLOR=1 suite run genuinely exercise the strip rather than mask it.
 os.environ["COLUMNS"] = "200"
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
@@ -33,16 +59,13 @@ _SCHEMA_PATH = _MIGRATIONS_DIR / "001_initial_schema.sql"
 
 @pytest.fixture(autouse=True)
 def _force_plain_cli_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Re-assert plain CLI output before every test (see module-level note).
+    """Keep CLI help/command output unwrapped before every test.
 
-    The import-time env mutation above fixes the module-global Consoles; this
-    fixture re-asserts the same environment per test so a test that mutates these
-    vars cannot leak color into a later one. ``NO_COLOR`` wins over ``FORCE_COLOR``
-    in rich and click; the wide ``COLUMNS`` keeps rich from wrapping a multi-word
-    substring across lines. monkeypatch auto-reverts after each test.
+    The import-time ``Result`` patch above removes ANSI color regardless of the
+    runner environment; this fixture re-asserts the wide ``COLUMNS`` per test so a
+    test that mutates it cannot let click/rich wrap a multi-word substring across
+    lines in a later one. monkeypatch auto-reverts after each test.
     """
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.setenv("COLUMNS", "200")
 
 

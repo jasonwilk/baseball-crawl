@@ -5,8 +5,28 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from typer.testing import CliRunner
 
+from src.cli import app
 from tests.conftest import load_real_schema
+
+
+def test_cli_result_output_has_no_ansi_even_under_forced_color() -> None:
+    """Regression guard: the conftest global strip removes ANSI from output.
+
+    ``runner.invoke(..., color=True)`` tells click to PRESERVE the ANSI SGR codes
+    the ``--help`` formatter emits under forced color -- exactly the CI condition
+    that broke the plain-substring assertions. With the conftest ``Result`` patch
+    in place, ``result.output`` (and ``.stdout``/``.stderr``) must still contain no
+    ``\\x1b`` byte, proving the strip is active regardless of the runner env.
+    """
+    result = CliRunner().invoke(app, ["--help"], color=True)
+    assert result.exit_code == 0
+    assert "\x1b" not in result.output
+    assert "\x1b" not in result.stdout
+    assert "\x1b" not in result.stderr
+    # The strip must not eat the actual help text.
+    assert "baseball-crawl operator CLI" in result.output
 
 
 def test_load_real_schema_creates_production_tables():
