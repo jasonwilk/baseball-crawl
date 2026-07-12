@@ -7,6 +7,7 @@ entry point, which catches ModuleNotFoundError failures that CliRunner misses.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from unittest.mock import patch
@@ -18,38 +19,51 @@ from src.cli import app
 
 runner = CliRunner()
 
+# GitHub Actions forces color on the runner (FORCE_COLOR), so typer/click/rich
+# inject ANSI escape codes and may line-wrap help text.  Plain-substring
+# assertions against ``result.output`` break under those conditions.  ``_plain``
+# strips ANSI decoration and collapses all runs of whitespace to single spaces
+# so multi-word substrings survive both color and rich's line-wrapping.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """Return help output with ANSI codes stripped and whitespace normalized."""
+    return re.sub(r"\s+", " ", _ANSI_RE.sub("", output))
+
 
 def test_help_exits_zero() -> None:
     """bb --help exits with code 0 and contains the CLI help string."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "baseball-crawl operator CLI" in result.output
+    assert "baseball-crawl operator CLI" in _plain(result.output)
 
 
 def test_no_args_exits_zero() -> None:
     """bb with no arguments prints help and exits with code 0."""
     result = runner.invoke(app, [])
     assert result.exit_code == 0
-    assert "baseball-crawl operator CLI" in result.output
+    assert "baseball-crawl operator CLI" in _plain(result.output)
 
 
 def test_help_lists_all_command_groups() -> None:
     """bb --help lists all command groups and the status command."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "creds" in result.output
-    assert "data" in result.output
-    assert "proxy" in result.output
-    assert "db" in result.output
-    assert "report" in result.output
-    assert "status" in result.output
+    output = _plain(result.output)
+    assert "creds" in output
+    assert "data" in output
+    assert "proxy" in output
+    assert "db" in output
+    assert "report" in output
+    assert "status" in output
 
 
 def test_creds_subapp_has_help() -> None:
     """bb creds --help is accessible."""
     result = runner.invoke(app, ["creds", "--help"])
     assert result.exit_code == 0
-    assert "credential" in result.output.lower()
+    assert "credential" in _plain(result.output).lower()
 
 
 def test_data_subapp_has_help() -> None:
@@ -93,28 +107,28 @@ def test_creds_bare_exits_zero() -> None:
     """bb creds (no subcommand) prints help and exits 0 (AC-1)."""
     result = runner.invoke(app, ["creds"])
     assert result.exit_code == 0
-    assert "credential" in result.output.lower()
+    assert "credential" in _plain(result.output).lower()
 
 
 def test_data_bare_exits_zero() -> None:
     """bb data (no subcommand) prints help and exits 0 (AC-2)."""
     result = runner.invoke(app, ["data"])
     assert result.exit_code == 0
-    assert "pipeline" in result.output.lower()
+    assert "pipeline" in _plain(result.output).lower()
 
 
 def test_proxy_bare_exits_zero() -> None:
     """bb proxy (no subcommand) prints help and exits 0 (AC-3)."""
     result = runner.invoke(app, ["proxy"])
     assert result.exit_code == 0
-    assert "proxy" in result.output.lower()
+    assert "proxy" in _plain(result.output).lower()
 
 
 def test_db_bare_exits_zero() -> None:
     """bb db (no subcommand) prints help and exits 0 (AC-4)."""
     result = runner.invoke(app, ["db"])
     assert result.exit_code == 0
-    assert "database" in result.output.lower()
+    assert "database" in _plain(result.output).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -126,35 +140,43 @@ def test_root_help_includes_epilog() -> None:
     """bb --help includes the root epilog (AC-5)."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Run 'bb COMMAND --help' for more information on a command." in result.output
+    assert "Run 'bb COMMAND --help' for more information on a command." in _plain(result.output)
 
 
 def test_creds_help_includes_epilog() -> None:
     """bb creds --help includes the creds epilog (AC-6)."""
     result = runner.invoke(app, ["creds", "--help"])
     assert result.exit_code == 0
-    assert "Run 'bb creds COMMAND --help' for more information on a command." in result.output
+    assert "Run 'bb creds COMMAND --help' for more information on a command." in _plain(
+        result.output
+    )
 
 
 def test_data_help_includes_epilog() -> None:
     """bb data --help includes the data epilog (AC-6)."""
     result = runner.invoke(app, ["data", "--help"])
     assert result.exit_code == 0
-    assert "Run 'bb data COMMAND --help' for more information on a command." in result.output
+    assert "Run 'bb data COMMAND --help' for more information on a command." in _plain(
+        result.output
+    )
 
 
 def test_proxy_help_includes_epilog() -> None:
     """bb proxy --help includes the proxy epilog (AC-6)."""
     result = runner.invoke(app, ["proxy", "--help"])
     assert result.exit_code == 0
-    assert "Run 'bb proxy COMMAND --help' for more information on a command." in result.output
+    assert "Run 'bb proxy COMMAND --help' for more information on a command." in _plain(
+        result.output
+    )
 
 
 def test_db_help_includes_epilog() -> None:
     """bb db --help includes the db epilog (AC-6)."""
     result = runner.invoke(app, ["db", "--help"])
     assert result.exit_code == 0
-    assert "Run 'bb db COMMAND --help' for more information on a command." in result.output
+    assert "Run 'bb db COMMAND --help' for more information on a command." in _plain(
+        result.output
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,28 +188,28 @@ def test_creds_help_preserves_description() -> None:
     """bb creds --help includes 'Manage GameChanger credentials.' (AC-7)."""
     result = runner.invoke(app, ["creds", "--help"])
     assert result.exit_code == 0
-    assert "Manage GameChanger credentials." in result.output
+    assert "Manage GameChanger credentials." in _plain(result.output)
 
 
 def test_data_help_preserves_description() -> None:
     """bb data --help includes 'Data pipeline commands.' (AC-7)."""
     result = runner.invoke(app, ["data", "--help"])
     assert result.exit_code == 0
-    assert "Data pipeline commands." in result.output
+    assert "Data pipeline commands." in _plain(result.output)
 
 
 def test_proxy_help_preserves_description() -> None:
     """bb proxy --help includes 'Proxy analysis commands.' (AC-7)."""
     result = runner.invoke(app, ["proxy", "--help"])
     assert result.exit_code == 0
-    assert "Proxy analysis commands." in result.output
+    assert "Proxy analysis commands." in _plain(result.output)
 
 
 def test_db_help_preserves_description() -> None:
     """bb db --help includes 'Database operations.' (AC-7)."""
     result = runner.invoke(app, ["db", "--help"])
     assert result.exit_code == 0
-    assert "Database operations." in result.output
+    assert "Database operations." in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -199,25 +221,28 @@ def test_creds_check_help_includes_examples() -> None:
     """bb creds check --help includes an Examples block (AC-2)."""
     result = runner.invoke(app, ["creds", "check", "--help"])
     assert result.exit_code == 0
-    assert "Examples:" in result.output
-    assert "--profile web" in result.output
-    assert "--profile mobile" in result.output
+    output = _plain(result.output)
+    assert "Examples:" in output
+    assert "--profile web" in output
+    assert "--profile mobile" in output
 
 
 def test_creds_extract_key_help_includes_examples() -> None:
     """bb creds extract-key --help includes an Examples block (AC-2)."""
     result = runner.invoke(app, ["creds", "extract-key", "--help"])
     assert result.exit_code == 0
-    assert "Examples:" in result.output
-    assert "--apply" in result.output
+    output = _plain(result.output)
+    assert "Examples:" in output
+    assert "--apply" in output
 
 
 def test_proxy_refresh_headers_help_includes_examples() -> None:
     """bb proxy refresh-headers --help includes an Examples block (AC-2)."""
     result = runner.invoke(app, ["proxy", "refresh-headers", "--help"])
     assert result.exit_code == 0
-    assert "Examples:" in result.output
-    assert "--apply" in result.output
+    output = _plain(result.output)
+    assert "Examples:" in output
+    assert "--apply" in output
 
 
 # ---------------------------------------------------------------------------
@@ -229,14 +254,14 @@ def test_creds_extract_key_help_shows_apply_flag() -> None:
     """bb creds extract-key --help shows --apply option (AC-8)."""
     result = runner.invoke(app, ["creds", "extract-key", "--help"])
     assert result.exit_code == 0
-    assert "--apply" in result.output
+    assert "--apply" in _plain(result.output)
 
 
 def test_proxy_refresh_headers_help_shows_apply_flag() -> None:
     """bb proxy refresh-headers --help shows --apply option (AC-9)."""
     result = runner.invoke(app, ["proxy", "refresh-headers", "--help"])
     assert result.exit_code == 0
-    assert "--apply" in result.output
+    assert "--apply" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------
