@@ -98,7 +98,6 @@ def dedup_players(
         execute_collapse,
         plan_player_dedup,
         preview_player_merge,
-        recompute_affected_seasons,
     )
 
     # --dry-run is the default; --execute overrides it
@@ -237,7 +236,6 @@ def dedup_players(
 
         merged = 0
         failed = 0
-        all_affected: set[tuple[str, int, str]] = set()
 
         typer.echo("")
         for collapse in plan.collapses:
@@ -251,8 +249,7 @@ def dedup_players(
                 # component, all-or-nothing. Do NOT call merge_player_pair
                 # directly (its manage_transaction=True default self-commits per
                 # merge and cannot nest under the component transaction).
-                affected = execute_collapse(conn, collapse, manage_transaction=True)
-                all_affected.update(affected)
+                execute_collapse(conn, collapse, manage_transaction=True)
                 merged += len(collapse.duplicates)
                 for dup in collapse.duplicates:
                     duplicate_name = f"{dup.first_name} {dup.last_name}"
@@ -263,18 +260,9 @@ def dedup_players(
                     f"  ERROR collapsing component into {canonical_name}: {exc}"
                 )
 
-        # TN-5.4: the CLI owns its recompute. Recompute season aggregates for
-        # all affected scopes, then COMMIT -- the CLI owns its connection, and
-        # the recompute DML runs OUTSIDE the per-component transactions, so
-        # without an explicit commit it would be rolled back on close.
-        if all_affected:
-            typer.echo(
-                f"\nRecomputing season aggregates for {len(all_affected)} tuple(s)..."
-            )
-            recompute_affected_seasons(conn, all_affected)
-            conn.commit()
-            typer.echo("Season aggregates recomputed.")
-
+        # E-259: season aggregates are derived at query time; execute_collapse
+        # commits each component (manage_transaction=True), so there is no
+        # post-merge recompute or trailing commit to perform here.
         typer.echo(
             f"\nSummary: {total_merges} merge(s) detected, "
             f"{merged} merged, {failed} failed, "

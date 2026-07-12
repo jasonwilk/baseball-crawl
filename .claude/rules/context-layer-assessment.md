@@ -50,7 +50,11 @@ A lesson that must be recalled by an agent but lands only in a non-auto-loading 
 
 ### Deletion-Side Eviction
 
-Symmetry with promotion: for each file, flag, column, table, command, or agent this epic DELETED or RENAMED, grep `.claude/rules/`, `.claude/agents/`, `CLAUDE.md`, and the `MEMORY.md` indexes for references and strike or annotate each as history. Accretion without eviction is how stale identifiers accumulate (the cross-season saga -- the user asked ~5x while passes only leaf-patched -- is the standing proof this direction is missing).
+Symmetry with promotion: for each file, flag, column, table, command, or agent this epic DELETED or RENAMED, grep `.claude/rules/`, `.claude/agents/`, `CLAUDE.md`, and **every agent's own `.claude/agent-memory/<agent>/` directory -- the `MEMORY.md` index AND its topic files, not just the index** -- for references, and strike or annotate each as history. Reconcile-not-strike: a hit is a *candidate* for eviction, not an automatic strike; preserve still-valid guidance.
+
+**Ownership (who edits which dir).** Each agent's memory dir is reconciled by the OWNING agent. An agent ON the dispatch team reconciles its own dir at closure (its edits ride the closure patch); a hit in the dir of an agent NOT on the team is flagged by the main session as a follow-up sweep. Whoever runs the deletion-side sweep (typically claude-architect) MAY read ANY dir to IDENTIFY hits and report them as the closure seed, but only the owning agent edits its own content.
+
+Accretion without eviction is how stale identifiers accumulate (the cross-season saga -- the user asked ~5x while passes only leaf-patched -- is the standing proof this direction is missing). **Grepping only the `MEMORY.md` indexes and skipping the topic files is how stale references survive a sweep**: E-259's deletion-side sweep found the stale data-engineer references hiding in topic files (`season_aggregate_writers.md`, `season_tables_are_a_pure_cache.md`, `fixture_seed_not_rollup_consistent.md`), not in the index — an index-only grep would have shipped a false-clean.
 
 ### Memory Retirement
 

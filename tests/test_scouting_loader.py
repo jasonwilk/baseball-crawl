@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from migrations.apply_migrations import run_migrations
+from src.api.db import get_season_batting, get_season_pitching
 from src.gamechanger.loaders.game_loader import GameSummaryEntry
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.types import TeamRef
@@ -314,33 +315,41 @@ def test_season_aggregates_computed_from_game_rows(
     assert game_row[1] == 1  # h
     assert game_row[2] == 1  # doubles
 
-    # Verify season aggregate.
+    # Season line is derived at query time from the per-game rows (E-259), so
+    # verify the perspective-scoped per-game SUM the reader would return.
     season_row = db.execute(
-        "SELECT ab, h, doubles FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, team_pk, _SEASON_ID),
+        "SELECT SUM(pgb.ab), SUM(pgb.h), SUM(pgb.doubles) FROM player_game_batting pgb "
+        "JOIN games g ON g.game_id = pgb.game_id "
+        "WHERE pgb.player_id = ? AND pgb.team_id = ? AND g.season_id = ? "
+        "AND pgb.perspective_team_id = ?",
+        (_PLAYER_1, team_pk, _SEASON_ID, team_pk),
     ).fetchone()
-    assert season_row is not None, "Expected a player_season_batting row"
-    assert season_row[0] == 3  # ab
-    assert season_row[1] == 1  # h
-    assert season_row[2] == 1  # doubles
+    assert season_row == (3, 1, 1)
 
 
-def test_rate_stats_not_stored_in_season_batting(
+def test_rate_stats_not_in_season_batting_contract(
     loader: ScoutingLoader, db: sqlite3.Connection
 ) -> None:
-    """player_season_batting does not have an avg or obp column (rate stats computed at display time)."""
+    """Season batting exposes counting stats only; rate stats (avg/obp) are
+    computed at display time, never part of the query-time aggregate contract.
+
+    Post-E-259 the stored ``player_season_batting`` table is gone, so this
+    guards the surviving surface: the query-time reader ``get_season_batting``
+    must return real rows whose keys carry no precomputed avg/obp.
+    """
     team_pk = _insert_team(db)
     game_id = "game-stream-rate-001"
     opp_uuid = "22223333-4444-5555-6666-aaaabbbbcccc"
 
     loader.load_team(_one_game_crawl(team_pk, game_id, opp_key=opp_uuid))
 
-    cursor = db.execute("PRAGMA table_info(player_season_batting);")
-    columns = {row[1] for row in cursor.fetchall()}
-    # Rate stats should NOT be stored.
-    assert "avg" not in columns
-    assert "obp" not in columns
+    db.row_factory = sqlite3.Row  # get_season_batting returns dict(row)
+    rows = get_season_batting(db, team_pk, _SEASON_ID)
+    assert rows, "expected at least one season batting row"
+    keys = set(rows[0].keys())
+    # Rate stats are display-derived, not part of the aggregate contract.
+    assert "avg" not in keys
+    assert "obp" not in keys
 
 
 # ---------------------------------------------------------------------------
@@ -368,18 +377,14 @@ def test_double_load_no_duplicates(
     ).fetchone()[0]
     assert roster_count == 1
 
+    # E-259: idempotency now applies at the per-game grain (season aggregates are
+    # derived at query time, not stored), so the double-load produces exactly one
+    # per-game row.
     game_batting_count = db.execute(
         "SELECT COUNT(*) FROM player_game_batting WHERE player_id = ? AND game_id = ?",
         (_PLAYER_1, game_id),
     ).fetchone()[0]
     assert game_batting_count == 1
-
-    season_batting_count = db.execute(
-        "SELECT COUNT(*) FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, team_pk, _SEASON_ID),
-    ).fetchone()[0]
-    assert season_batting_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +501,7 @@ def test_loader_uuid_opportunism_does_not_create_duplicate(
 
 
 def test_aggregate_isolated_per_season(
-    loader: ScoutingLoader, db: sqlite3.Connection
+    db: sqlite3.Connection
 ) -> None:
     """Aggregates for one season do not include game rows from another season.
 
@@ -572,46 +577,29 @@ def test_aggregate_isolated_per_season(
     )
     db.commit()
 
-    # -- Run aggregation for 2026 only (INTEGER PK) --------------------
-    loader._compute_season_aggregates(own_pk, season_b)
-    db.commit()
+    # E-259: the season line is derived at query time; the reader filters by
+    # season_id, so the 2026 query must not absorb the 2025 game rows (and vice
+    # versa). This proves per-season isolation via the reader's scope.
+    db.row_factory = sqlite3.Row
 
-    # -- AC-1: batting aggregate for 2026 contains only 2026 game data --
-    # (season_b == "2026"; season_a == "2025" rows must be excluded)
-    bat_row = db.execute(
-        "SELECT ab, h, doubles FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_b),
-    ).fetchone()
-    assert bat_row is not None, "Expected player_season_batting row for 2026"
-    assert bat_row[0] == 4, f"Expected ab=4 (2026 only), got {bat_row[0]}"
-    assert bat_row[1] == 3, f"Expected h=3 (2026 only), got {bat_row[1]}"
-    assert bat_row[2] == 1, f"Expected doubles=1 (2026 only), got {bat_row[2]}"
+    bat_2026 = {r["player_id"]: r for r in get_season_batting(db, own_pk, season_b)}
+    assert bat_2026[_PLAYER_1]["ab"] == 4, "2026 batting must exclude 2025 rows"
+    assert bat_2026[_PLAYER_1]["h"] == 3
+    assert bat_2026[_PLAYER_1]["doubles"] == 1
+    pit_2026 = {r["player_id"]: r for r in get_season_pitching(db, own_pk, season_b)}
+    assert pit_2026[_PLAYER_1]["ip_outs"] == 6, "2026 pitching must exclude 2025 rows"
+    assert pit_2026[_PLAYER_1]["er"] == 1
 
-    # -- AC-2: pitching aggregate for 2026 contains only 2026 game data -
-    pitch_row = db.execute(
-        "SELECT ip_outs, er FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_b),
-    ).fetchone()
-    assert pitch_row is not None, "Expected player_season_pitching row for 2026"
-    assert pitch_row[0] == 6, f"Expected ip_outs=6 (2026 only), got {pitch_row[0]}"
-    assert pitch_row[1] == 1, f"Expected er=1 (2026 only), got {pitch_row[1]}"
-
-    # No 2025 rows should have been inserted.
-    bat_2025 = db.execute(
-        "SELECT COUNT(*) FROM player_season_batting WHERE season_id = ?", (season_a,)
-    ).fetchone()[0]
-    assert bat_2025 == 0, f"Expected 0 rows for 2025, got {bat_2025}"
-
-    pitch_2025 = db.execute(
-        "SELECT COUNT(*) FROM player_season_pitching WHERE season_id = ?", (season_a,)
-    ).fetchone()[0]
-    assert pitch_2025 == 0, f"Expected 0 rows for 2025, got {pitch_2025}"
+    # The 2025 reader returns its OWN season's data (5 AB / 9 ip_outs), confirming
+    # the two seasons are scoped independently.
+    bat_2025 = {r["player_id"]: r for r in get_season_batting(db, own_pk, season_a)}
+    assert bat_2025[_PLAYER_1]["ab"] == 5
+    pit_2025 = {r["player_id"]: r for r in get_season_pitching(db, own_pk, season_a)}
+    assert pit_2025[_PLAYER_1]["ip_outs"] == 9
 
 
 def test_aggregate_isolated_per_team(
-    loader: ScoutingLoader, db: sqlite3.Connection
+    db: sqlite3.Connection
 ) -> None:
     """Aggregates for one team do not include game rows from another team.
 
@@ -688,44 +676,20 @@ def test_aggregate_isolated_per_team(
     )
     db.commit()
 
-    # -- Run aggregation for own team only ------------------------------------
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
+    # E-259: the season line is derived at query time; the reader filters by
+    # team_id, so the own-team query must reflect _PLAYER_1 only and never absorb
+    # the opponent's (_PLAYER_2, team=opp_pk) rows.
+    db.row_factory = sqlite3.Row
 
-    # -- Own team batting: should reflect _PLAYER_1 only (ab=3, h=2) ----------
-    bat_row = db.execute(
-        "SELECT ab, h FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert bat_row is not None, "Expected player_season_batting row for own team"
-    assert bat_row[0] == 3, f"Expected ab=3 (own team only), got {bat_row[0]}"
-    assert bat_row[1] == 2, f"Expected h=2 (own team only), got {bat_row[1]}"
+    bat = {r["player_id"]: r for r in get_season_batting(db, own_pk, season_id)}
+    assert bat[_PLAYER_1]["ab"] == 3, "own-team batting must exclude opp rows"
+    assert bat[_PLAYER_1]["h"] == 2
+    assert _PLAYER_2 not in bat, "opp player leaked into own team's reader output"
 
-    # -- Own team pitching: should reflect _PLAYER_1 only (ip_outs=4, er=1) ---
-    pitch_row = db.execute(
-        "SELECT ip_outs, er FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert pitch_row is not None, "Expected player_season_pitching row for own team"
-    assert pitch_row[0] == 4, f"Expected ip_outs=4 (own team only), got {pitch_row[0]}"
-    assert pitch_row[1] == 1, f"Expected er=1 (own team only), got {pitch_row[1]}"
-
-    # -- Opp team's player should NOT appear in own team's aggregates ----------
-    opp_bat = db.execute(
-        "SELECT COUNT(*) FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ?",
-        (_PLAYER_2, own_pk),
-    ).fetchone()[0]
-    assert opp_bat == 0, f"Opp player's batting leaked into own team aggregate: {opp_bat} row(s)"
-
-    opp_pitch = db.execute(
-        "SELECT COUNT(*) FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ?",
-        (_PLAYER_2, own_pk),
-    ).fetchone()[0]
-    assert opp_pitch == 0, f"Opp player's pitching leaked into own team aggregate: {opp_pitch} row(s)"
+    pit = {r["player_id"]: r for r in get_season_pitching(db, own_pk, season_id)}
+    assert pit[_PLAYER_1]["ip_outs"] == 4, "own-team pitching must exclude opp rows"
+    assert pit[_PLAYER_1]["er"] == 1
+    assert _PLAYER_2 not in pit, "opp pitcher leaked into own team's reader output"
 
 
 # ---------------------------------------------------------------------------
@@ -766,323 +730,6 @@ def _seed_fk_rows(
     )
     db.commit()
     return team_pk, opp_pk
-
-
-def test_batting_aggregates_include_new_columns(
-    loader: ScoutingLoader, db: sqlite3.Connection
-) -> None:
-    """AC-4: Season batting aggregates include r, tb, hbp, shf, cs with correct sums.
-
-    Two game rows for _PLAYER_1: one with hbp=1 (non-NULL), one without (NULL in shf).
-    Verifies SUM ignores NULLs correctly (hbp sums to 1; shf stays NULL if all NULL).
-    """
-    season_id = "2025-bat-agg-new"
-    game_1 = "game-bat-agg-001"
-    game_2 = "game-bat-agg-002"
-
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("BatAggTeam", "gc-bat-agg-uuid"),
-    ).lastrowid
-    opp_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("BatAggOpp", "gc-bat-agg-opp-uuid"),
-    ).lastrowid
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'P')",
-        (_PLAYER_1,),
-    )
-    for gid, date in [(game_1, "2025-04-01"), (game_2, "2025-04-08")]:
-        db.execute(
-            "INSERT OR IGNORE INTO games "
-            "(game_id, season_id, game_date, home_team_id, away_team_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (gid, season_id, date, own_pk, opp_pk),
-        )
-
-    # Game 1: r=2, tb=4, hbp=1, shf=NULL (absent), cs=1
-    db.execute(
-        "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, own_pk, 4, 2, 2, 1, 0, 0, 4, 1, 1),
-    )
-    # Game 2: r=1, tb=2, hbp=0 (not HBP'd), shf=NULL, cs=0
-    db.execute(
-        "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_2, _PLAYER_1, own_pk, own_pk, 3, 1, 1, 0, 1, 1, 2, 0, 0),
-    )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    row = db.execute(
-        "SELECT r, tb, hbp, shf, cs FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert row is not None, "Expected player_season_batting row"
-    assert row[0] == 3,    f"Expected r=3 (2+1), got {row[0]}"
-    assert row[1] == 6,    f"Expected tb=6 (4+2), got {row[1]}"
-    assert row[2] == 1,    f"Expected hbp=1 (1+0), got {row[2]}"
-    assert row[3] is None, f"Expected shf=NULL (all game rows NULL), got {row[3]}"
-    assert row[4] == 1,    f"Expected cs=1 (1+0), got {row[4]}"
-
-
-def test_batting_aggregate_shf_sums_when_present(
-    loader: ScoutingLoader, db: sqlite3.Connection
-) -> None:
-    """AC-4: shf aggregates correctly when at least one game row has a non-NULL value."""
-    season_id = "2025-bat-shf"
-    game_1 = "game-bat-shf-001"
-    game_2 = "game-bat-shf-002"
-
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("SHFTeam", "gc-shf-uuid"),
-    ).lastrowid
-    opp_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("SHFOpp", "gc-shf-opp-uuid"),
-    ).lastrowid
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'P')",
-        (_PLAYER_1,),
-    )
-    for gid, date in [(game_1, "2025-04-01"), (game_2, "2025-04-08")]:
-        db.execute(
-            "INSERT OR IGNORE INTO games "
-            "(game_id, season_id, game_date, home_team_id, away_team_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (gid, season_id, date, own_pk, opp_pk),
-        )
-
-    # Game 1: shf=1
-    db.execute(
-        "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, perspective_team_id, ab, h, shf) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, own_pk, 3, 1, 1),
-    )
-    # Game 2: shf=NULL (SHF not recorded in this game's boxscore)
-    db.execute(
-        "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, perspective_team_id, ab, h) VALUES (?, ?, ?, ?, ?, ?)",
-        (game_2, _PLAYER_1, own_pk, own_pk, 4, 2),
-    )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    row = db.execute(
-        "SELECT shf FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert row is not None
-    # SUM(1, NULL) = 1 (SQL SUM ignores NULLs when at least one is non-NULL)
-    assert row[0] == 1, f"Expected shf=1 (SUM ignores NULL), got {row[0]}"
-
-
-def test_pitching_aggregates_include_new_columns(
-    loader: ScoutingLoader, db: sqlite3.Connection
-) -> None:
-    """AC-5: Season pitching aggregates include r, wp, hbp, pitches, total_strikes, bf.
-
-    Includes a case where wp is NULL across all games for _PLAYER_2 --
-    verifying the season aggregate is NULL (not 0).
-    """
-    season_id = "2025-pitch-agg-new"
-    game_1 = "game-pitch-agg-001"
-
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("PitchAggTeam", "gc-pitch-agg-uuid"),
-    ).lastrowid
-    opp_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("PitchAggOpp", "gc-pitch-agg-opp"),
-    ).lastrowid
-    for pid, fn, ln in [(_PLAYER_1, "P1", "Test"), (_PLAYER_2, "P2", "Test")]:
-        db.execute(
-            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
-            (pid, fn, ln),
-        )
-    db.execute(
-        "INSERT OR IGNORE INTO games "
-        "(game_id, season_id, game_date, home_team_id, away_team_id) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (game_1, season_id, "2025-04-20", own_pk, opp_pk),
-    )
-
-    # _PLAYER_1: all new extras populated (wp=1, hbp=1, pitches=87, total_strikes=57, bf=24)
-    db.execute(
-        "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, "
-        " wp, hbp, pitches, total_strikes, bf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, own_pk, 18, 4, 2, 2, 1, 8, 1, 1, 87, 57, 24),
-    )
-    # _PLAYER_2: wp is NOT set (NULL) -- all new pitching extras absent
-    db.execute(
-        "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_2, own_pk, own_pk, 3, 2, 1, 1, 0, 1),
-    )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    # _PLAYER_1 row: all new extras should be populated
-    p1 = db.execute(
-        "SELECT r, wp, hbp, pitches, total_strikes, bf "
-        "FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert p1 is not None, "Expected player_season_pitching row for _PLAYER_1"
-    assert p1[0] == 2,   f"Expected r=2, got {p1[0]}"
-    assert p1[1] == 1,   f"Expected wp=1, got {p1[1]}"
-    assert p1[2] == 1,   f"Expected hbp=1, got {p1[2]}"
-    assert p1[3] == 87,  f"Expected pitches=87, got {p1[3]}"
-    assert p1[4] == 57,  f"Expected total_strikes=57, got {p1[4]}"
-    assert p1[5] == 24,  f"Expected bf=24, got {p1[5]}"
-
-    # _PLAYER_2 row: wp NULL across all games → season wp should be NULL
-    p2 = db.execute(
-        "SELECT wp, hbp, pitches FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_2, own_pk, season_id),
-    ).fetchone()
-    assert p2 is not None, "Expected player_season_pitching row for _PLAYER_2"
-    assert p2[0] is None, f"Expected wp=NULL (all game rows NULL), got {p2[0]}"
-    assert p2[1] is None, f"Expected hbp=NULL (all game rows NULL), got {p2[1]}"
-    assert p2[2] is None, f"Expected pitches=NULL (all game rows NULL), got {p2[2]}"
-
-
-def test_aggregate_idempotent_with_updated_game_data(
-    loader: ScoutingLoader, db: sqlite3.Connection
-) -> None:
-    """AC-6: Rerun after updating game data overwrites stale season totals.
-
-    First run: game row has r=1, tb=3, hbp=0, wp=0, pitches=80, bf=20.
-    Second run: same game row updated to r=3, tb=5, hbp=1, wp=1, pitches=95, bf=25.
-    ON CONFLICT UPDATE must reflect the new values, not the old ones.
-    """
-    season_id = "2025-idem-new"
-    game_id = "game-idem-new-001"
-
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("IdemTeam", "gc-idem-uuid"),
-    ).lastrowid
-    opp_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        ("IdemOpp", "gc-idem-opp"),
-    ).lastrowid
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Idem', 'P')",
-        (_PLAYER_1,),
-    )
-    db.execute(
-        "INSERT OR IGNORE INTO games "
-        "(game_id, season_id, game_date, home_team_id, away_team_id) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (game_id, season_id, "2025-05-01", own_pk, opp_pk),
-    )
-
-    # -- First load: initial game stats --
-    db.execute(
-        "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, tb, hbp) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, own_pk, 4, 1, 2, 3, 0),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, wp, pitches, bf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, own_pk, 9, 3, 1, 1, 1, 5, 0, 80, 20),
-    )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    # Verify first-run values.
-    bat_v1 = db.execute(
-        "SELECT r, tb, hbp FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert bat_v1 == (1, 3, 0), f"Expected (r=1, tb=3, hbp=0) after first run, got {bat_v1}"
-
-    pitch_v1 = db.execute(
-        "SELECT r, wp, pitches, bf FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert pitch_v1 == (1, 0, 80, 20), f"Expected (r=1, wp=0, pitches=80, bf=20), got {pitch_v1}"
-
-    # -- Update game row to reflect new scouted data --
-    db.execute(
-        "UPDATE player_game_batting SET r=3, tb=5, hbp=1 "
-        "WHERE game_id=? AND player_id=?",
-        (game_id, _PLAYER_1),
-    )
-    db.execute(
-        "UPDATE player_game_pitching SET r=3, wp=1, pitches=95, bf=25 "
-        "WHERE game_id=? AND player_id=?",
-        (game_id, _PLAYER_1),
-    )
-    db.commit()
-
-    # -- Second run: aggregates should reflect updated values --
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    bat_v2 = db.execute(
-        "SELECT r, tb, hbp FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert bat_v2 == (3, 5, 1), f"Expected (r=3, tb=5, hbp=1) after second run, got {bat_v2}"
-
-    pitch_v2 = db.execute(
-        "SELECT r, wp, pitches, bf FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert pitch_v2 == (3, 1, 95, 25), f"Expected (r=3, wp=1, pitches=95, bf=25), got {pitch_v2}"
-
-    # No duplicate rows created.
-    bat_count = db.execute(
-        "SELECT COUNT(*) FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()[0]
-    assert bat_count == 1, f"Expected 1 row (idempotent), got {bat_count}"
 
 
 # ---------------------------------------------------------------------------
@@ -1355,262 +1002,15 @@ def test_usssa_team_gets_correct_db_season_id(
         f"Expected DB season_id='2025', got '{roster_row[0]}'"
     )
 
-    # Season aggregates should also use the team-derived season_id.
-    bat_row = db.execute(
-        "SELECT season_id FROM player_season_batting WHERE team_id = ?", (usssa_pk,)
+    # The loaded game (which the query-time season line derives from) is tagged
+    # with the same team-derived season_id.
+    game_row = db.execute(
+        "SELECT season_id FROM games WHERE game_id = ?", (game_id,)
     ).fetchone()
-    assert bat_row is not None, "Expected a player_season_batting row"
-    assert bat_row[0] == "2025", (
-        f"Expected DB season_id='2025', got '{bat_row[0]}'"
+    assert game_row is not None, "Expected a games row"
+    assert game_row[0] == "2025", (
+        f"Expected DB season_id='2025', got '{game_row[0]}'"
     )
-
-
-# ---------------------------------------------------------------------------
-# E-204-03: GS computation from appearance_order
-# ---------------------------------------------------------------------------
-
-
-def test_pitching_aggregates_compute_gs_from_appearance_order(
-    loader: ScoutingLoader, db: sqlite3.Connection,
-) -> None:
-    """AC-1: _compute_season_aggregates counts appearance_order=1 as GS."""
-    season_id = "2025-gs-test"
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
-        ("GS Test Team",),
-    ).lastrowid
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Ace', 'Pitcher')",
-        (_PLAYER_1,),
-    )
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Relief', 'Pitcher')",
-        (_PLAYER_2,),
-    )
-
-    # Game 1: PLAYER_1 starts (appearance_order=1), PLAYER_2 relieves (appearance_order=2)
-    db.execute(
-        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-01', 'completed', ?, ?)",
-        ("gs-game-1", season_id, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 15, 1)",
-        ("gs-game-1", _PLAYER_1, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 6, 2)",
-        ("gs-game-1", _PLAYER_2, own_pk, own_pk),
-    )
-
-    # Game 2: PLAYER_1 starts again, PLAYER_2 relieves
-    db.execute(
-        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-05', 'completed', ?, ?)",
-        ("gs-game-2", season_id, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 18, 1)",
-        ("gs-game-2", _PLAYER_1, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 3, 2)",
-        ("gs-game-2", _PLAYER_2, own_pk, own_pk),
-    )
-
-    # Game 3: PLAYER_2 starts, PLAYER_1 relieves
-    db.execute(
-        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-08', 'completed', ?, ?)",
-        ("gs-game-3", season_id, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 9, 2)",
-        ("gs-game-3", _PLAYER_1, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 12, 1)",
-        ("gs-game-3", _PLAYER_2, own_pk, own_pk),
-    )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    # PLAYER_1: started 2 games, relieved 1 → gs=2
-    p1 = db.execute(
-        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert p1 is not None, "Expected player_season_pitching row for PLAYER_1"
-    assert p1[0] == 2, f"Expected gs=2 for PLAYER_1 (started 2 of 3), got {p1[0]}"
-    assert p1[1] == 3, f"Expected gp_pitcher=3, got {p1[1]}"
-
-    # PLAYER_2: started 1 game, relieved 2 → gs=1
-    p2 = db.execute(
-        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_2, own_pk, season_id),
-    ).fetchone()
-    assert p2 is not None, "Expected player_season_pitching row for PLAYER_2"
-    assert p2[0] == 1, f"Expected gs=1 for PLAYER_2 (started 1 of 3), got {p2[0]}"
-    assert p2[1] == 3, f"Expected gp_pitcher=3, got {p2[1]}"
-
-
-def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
-    loader: ScoutingLoader, db: sqlite3.Connection,
-) -> None:
-    """GS should be NULL (not 0) when all appearance_order values are NULL (pre-backfill)."""
-    season_id = "2025-gs-null"
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, ?)",
-        (season_id, season_id, 2025),
-    )
-    own_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
-        ("GS Null Team",),
-    ).lastrowid
-    db.execute(
-        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Pitcher')",
-        (_PLAYER_1,),
-    )
-
-    # Two games, appearance_order is NULL for all rows (pre-backfill state)
-    for i, gid in enumerate(["gs-null-game-1", "gs-null-game-2"], start=1):
-        db.execute(
-            "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) "
-            "VALUES (?, ?, ?, 'completed', ?, ?)",
-            (gid, season_id, f"2025-04-0{i}", own_pk, own_pk),
-        )
-        db.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) "
-            "VALUES (?, ?, ?, ?, 15, NULL)",
-            (gid, _PLAYER_1, own_pk, own_pk),
-        )
-    db.commit()
-
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    row = db.execute(
-        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert row is not None, "Expected player_season_pitching row"
-    assert row[0] is None, f"Expected gs=NULL when all appearance_order NULL, got {row[0]}"
-    assert row[1] == 2, f"Expected gp_pitcher=2, got {row[1]}"
-
-
-# ---------------------------------------------------------------------------
-# E-220-07: Perspective filtering in season aggregates
-# ---------------------------------------------------------------------------
-
-
-def test_batting_aggregates_filter_by_perspective(
-    db: sqlite3.Connection,
-) -> None:
-    """AC-1/AC-2: Batting aggregates for team A sum only rows where perspective_team_id = A.
-
-    Player has 3 hits from perspective A and 3 from perspective B. Team A's
-    aggregate should show 3 hits (not 6).
-    """
-    season_id = "2025"
-    own_pk = _insert_team(db, public_id="team-a-slug", gc_uuid="team-a-uuid", name="Team A")
-    other_pk = _insert_team(db, public_id="team-b-slug", gc_uuid="team-b-uuid", name="Team B")
-
-    # Insert season and game prerequisites.
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
-        (season_id, season_id),
-    )
-    db.execute(
-        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
-        "VALUES ('game-persp-001', ?, '2025-04-10', ?, ?, 'completed')",
-        (season_id, own_pk, other_pk),
-    )
-    db.execute(
-        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Player')",
-        (_PLAYER_1,),
-    )
-
-    # Same player, same game, same team_id, but two different perspective_team_ids.
-    db.execute(
-        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
-        "VALUES ('game-persp-001', ?, ?, ?, 4, 3)",
-        (_PLAYER_1, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
-        "VALUES ('game-persp-001', ?, ?, ?, 4, 3)",
-        (_PLAYER_1, own_pk, other_pk),
-    )
-    db.commit()
-
-    loader = ScoutingLoader(db)
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    row = db.execute(
-        "SELECT ab, h, games_tracked FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_1, own_pk, season_id),
-    ).fetchone()
-    assert row is not None, "Expected player_season_batting row"
-    assert row[0] == 4, f"Expected ab=4 (single perspective), got {row[0]}"
-    assert row[1] == 3, f"Expected h=3 (single perspective), got {row[1]}"
-    assert row[2] == 1, f"Expected games_tracked=1 (single perspective), got {row[2]}"
-
-
-def test_pitching_aggregates_filter_by_perspective(
-    db: sqlite3.Connection,
-) -> None:
-    """AC-1/AC-2: Pitching aggregates for team A sum only rows where perspective_team_id = A."""
-    season_id = "2025"
-    own_pk = _insert_team(db, public_id="team-c-slug", gc_uuid="team-c-uuid", name="Team C")
-    other_pk = _insert_team(db, public_id="team-d-slug", gc_uuid="team-d-uuid", name="Team D")
-
-    db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES (?, ?, 2025)",
-        (season_id, season_id),
-    )
-    db.execute(
-        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
-        "VALUES ('game-persp-002', ?, '2025-04-10', ?, ?, 'completed')",
-        (season_id, own_pk, other_pk),
-    )
-    db.execute(
-        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Pitcher')",
-        (_PLAYER_2,),
-    )
-
-    # Same pitcher, same game, two perspective_team_ids.
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, "
-        "ip_outs, h, r, er, bb, so) "
-        "VALUES ('game-persp-002', ?, ?, ?, 15, 4, 2, 2, 1, 7)",
-        (_PLAYER_2, own_pk, own_pk),
-    )
-    db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, "
-        "ip_outs, h, r, er, bb, so) "
-        "VALUES ('game-persp-002', ?, ?, ?, 15, 4, 2, 2, 1, 7)",
-        (_PLAYER_2, own_pk, other_pk),
-    )
-    db.commit()
-
-    loader = ScoutingLoader(db)
-    loader._compute_season_aggregates(own_pk, season_id)
-    db.commit()
-
-    row = db.execute(
-        "SELECT ip_outs, so, games_tracked FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_2, own_pk, season_id),
-    ).fetchone()
-    assert row is not None, "Expected player_season_pitching row"
-    assert row[0] == 15, f"Expected ip_outs=15 (single perspective), got {row[0]}"
-    assert row[1] == 7, f"Expected so=7 (single perspective), got {row[1]}"
-    assert row[2] == 1, f"Expected games_tracked=1 (single perspective), got {row[2]}"
 
 
 # ---------------------------------------------------------------------------
@@ -1708,14 +1108,6 @@ def _e247_snapshot(db: sqlite3.Connection) -> dict[str, list[tuple]]:
             "appearance_order FROM player_game_pitching "
             "ORDER BY game_id, player_id, perspective_team_id"
         ).fetchall(),
-        "player_season_batting": db.execute(
-            "SELECT player_id, team_id, season_id, games_tracked, ab, h, doubles, rbi, bb, so "
-            "FROM player_season_batting ORDER BY player_id, team_id"
-        ).fetchall(),
-        "player_season_pitching": db.execute(
-            "SELECT player_id, team_id, season_id, games_tracked, ip_outs, h, r, er, bb, so, gs "
-            "FROM player_season_pitching ORDER BY player_id, team_id"
-        ).fetchall(),
     }
 
 
@@ -1745,15 +1137,10 @@ def test_e247_in_memory_matches_golden(
     team_pk = _e247_load_in_memory(db)
     snap = _e247_snapshot(db)
 
-    # Season batting: PLAYER_1 across 2 games -> 2 games, 8 AB, 4 H, 2 2B, 2 RBI, 2 BB, 2 SO.
-    assert snap["player_season_batting"] == [
-        (_PLAYER_1, team_pk, _SEASON_ID, 2, 8, 4, 2, 2, 2, 2),
-    ]
-    # Season pitching: PLAYER_2 across 2 games -> 2 games, 30 outs, 8 H, 4 R, 4 ER, 2 BB, 14 SO,
-    # gs=2 (appearance_order=1 in both games).
-    assert snap["player_season_pitching"] == [
-        (_PLAYER_2, team_pk, _SEASON_ID, 2, 30, 8, 4, 4, 2, 14, 2),
-    ]
+    # E-259: the season line is derived at query time from these per-game rows
+    # (no stored player_season_* rows), so the golden pins the per-game grain the
+    # loader writes; the query-time SUM of these is covered by
+    # tests/test_season_query_cutover.py + tests/test_season_projection.py.
     # Per-game batting: one row per game for PLAYER_1.
     assert snap["player_game_batting"] == [
         ("e247-game-1", _PLAYER_1, team_pk, team_pk, 4, 2, 1, 1, 1, 1),
@@ -1801,12 +1188,10 @@ def test_e247_in_memory_empty_boxscores_skips_tail_fresh_db(
         "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (team_pk,)
     ).fetchone()[0] == 1
 
-    # No per-game or per-season stat rows exist.
+    # No per-game stat rows exist (season aggregates are query-time since E-259).
     for table in (
         "player_game_batting",
         "player_game_pitching",
-        "player_season_batting",
-        "player_season_pitching",
         "games",
     ):
         count = db.execute(
@@ -1821,15 +1206,13 @@ def test_e247_in_memory_empty_boxscores_skips_tail_fresh_db(
 def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
     db: sqlite3.Connection,
 ) -> None:
-    """E-247-01 F1 (the proof CR flagged missing): a boxscoreless in-memory
-    refresh must NOT run the dedup/recompute/commit tail on a POPULATED db.
+    """E-247-01 F1: a boxscoreless in-memory refresh must NOT run the
+    post-boxscore tail (dedup + commit) on a POPULATED db, leaving existing rows
+    untouched.
 
-    Reproduces a reachable out-of-sync state: a STALE ``boxscore_only`` season
-    aggregate (ab=99) alongside a per-game row that sums to a DIFFERENT value
-    (ab=4).  If the tail ran, ``canonical_recompute`` would DELETE the stale
-    aggregate and re-INSERT ab=4 -- so this test FAILS against the
-    unconditional-tail code and PASSES only when the empty-boxscore guard skips
-    the tail (matching the pre-refactor in-memory early-return).
+    Seeds an existing per-game row and asserts the empty-boxscore guard skips the
+    tail so it is not perturbed. (Season aggregates are derived at query time
+    since E-259; there is no stored season row for the tail to touch.)
     """
     team_pk = _insert_team(db)  # season_year=2025 -> DB season_id "2025"
     season_id = _SEASON_ID
@@ -1843,8 +1226,6 @@ def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
         "VALUES (?, 'John', 'Doe')",
         (_PLAYER_1,),
     )
-    # A completed game + a per-game batting row that sums to ab=4 (what a
-    # recompute WOULD produce).
     db.execute(
         "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) "
         "VALUES ('pop-g1', ?, '2025-04-01', 'completed', ?, ?)",
@@ -1855,36 +1236,16 @@ def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
         "VALUES ('pop-g1', ?, ?, ?, 4, 2)",
         (_PLAYER_1, team_pk, team_pk),
     )
-    # A STALE boxscore_only season aggregate (ab=99) that disagrees with the
-    # per-game sum -- the row a recompute would overwrite.
-    db.execute(
-        """
-        INSERT INTO player_season_batting
-            (player_id, team_id, season_id, stat_completeness,
-             gp, games_tracked, pa, ab, h, singles, doubles, triples, hr,
-             rbi, r, bb, so, sb, tb, hbp, shf, cs, xbh)
-        VALUES (?, ?, ?, 'boxscore_only',
-                1, 1, 99, 99, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0)
-        """,
-        (_PLAYER_1, team_pk, season_id),
-    )
     db.commit()
 
     def _snapshot():
-        agg = db.execute(
-            "SELECT ab, h FROM player_season_batting "
-            "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-            (_PLAYER_1, team_pk, season_id),
-        ).fetchone()
-        pg = db.execute(
+        return db.execute(
             "SELECT game_id, player_id, ab, h FROM player_game_batting "
             "WHERE team_id = ? ORDER BY game_id, player_id",
             (team_pk,),
         ).fetchall()
-        return agg, pg
 
     before = _snapshot()
-    assert before[0] == (99, 50), "precondition: aggregate seeded stale"
 
     # Boxscoreless in-memory refresh (re-scout returning 0 boxscores).
     crawl_result = SimpleNamespace(
@@ -1892,13 +1253,8 @@ def test_e247_in_memory_empty_boxscores_does_not_touch_populated_db(
     )
     ScoutingLoader(db).load_team(crawl_result)
 
-    after = _snapshot()
-    # Tail was skipped: the stale aggregate is untouched (NOT recomputed to ab=4)
-    # and the per-game rows are unchanged.
-    assert after[0] == (99, 50), (
-        f"Expected stale aggregate untouched (tail skipped), got {after[0]}"
-    )
-    assert after[1] == before[1], "per-game rows must be unchanged"
+    # Tail was skipped: the existing per-game row is unchanged.
+    assert _snapshot() == before, "per-game rows must be unchanged"
 
 
 # ---------------------------------------------------------------------------

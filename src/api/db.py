@@ -20,6 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from src.db.paths import resolve_db_path
+from src.db.season_aggregates import (
+    batting_recompute_select,
+    pitching_recompute_select,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -442,48 +446,73 @@ def check_connection() -> bool:
 # strings ``era`` / ``k9`` / ``whip`` / ``strike_pct``, which ``_compute_pitching_rates``
 # writes in the wrapper.
 #
-# E-259 rewrites ONLY the SQL bodies below (against ``player_game_*``, adding the
-# ``perspective_team_id`` filter and reproducing the ORDER BY over the new
-# projection). The move being *pure* is what makes that diff a legible
-# old-SQL-vs-new-SQL comparison, so do not "clean up" this SQL.
+# E-259-01 rewrote the SQL bodies below to derive the season line at query time
+# from ``player_game_*`` (perspective-filtered SUM via the shared
+# ``batting_recompute_select`` / ``pitching_recompute_select`` projection),
+# reproducing the prior ORDER BY over the new projection. They no longer read the
+# stored ``player_season_*`` tables.
 
 
 def get_season_batting(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
-    """Fetch raw season batting rows for a team-season (no presentation)."""
+    """Fetch raw season batting rows for a team-season (no presentation).
+
+    Derived at query time by SUMming ``player_game_batting`` per player
+    (E-259-01 cutover). The per-game SUM projection is the shared
+    :func:`src.db.season_aggregates.batting_recompute_select` (the single
+    source, so the reader and the retired write path can never drift); it is
+    wrapped as a subquery and the ``players`` name / ``team_rosters`` jersey
+    joins are layered on the OUTSIDE (the shared projection deliberately carries
+    neither, so it stays the exact write-path column list).
+
+    The ``perspective_team_id = team_id`` filter reproduces the perspective
+    scoping the stored rows carried IMPLICITLY pre-E-259 (``canonical_recompute``
+    applied it at write time, before the query-time cutover dropped those
+    tables): without it a game loaded from two perspectives would silently
+    DOUBLE the season line. The ORDER BY reproduces the prior PA-proxy
+    ordering ``(ab+bb+hbp+shf) DESC, last_name ASC`` as an expression over the
+    per-game SUMs.
+    """
     rows = conn.execute(
         """
         SELECT
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psb.gp, 0) AS games,
-            COALESCE(psb.ab, 0) AS ab,
-            COALESCE(psb.h, 0) AS h,
-            COALESCE(psb.doubles, 0) AS doubles,
-            COALESCE(psb.triples, 0) AS triples,
-            COALESCE(psb.hr, 0) AS hr,
-            COALESCE(psb.rbi, 0) AS rbi,
-            COALESCE(psb.bb, 0) AS bb,
-            COALESCE(psb.so, 0) AS so,
-            COALESCE(psb.sb, 0) AS sb,
-            COALESCE(psb.cs, 0) AS cs,
-            COALESCE(psb.hbp, 0) AS hbp,
-            COALESCE(psb.shf, 0) AS shf,
+            COALESCE(sub.games_tracked, 0) AS games,
+            COALESCE(sub.ab, 0) AS ab,
+            COALESCE(sub.h, 0) AS h,
+            COALESCE(sub.doubles, 0) AS doubles,
+            COALESCE(sub.triples, 0) AS triples,
+            COALESCE(sub.hr, 0) AS hr,
+            COALESCE(sub.rbi, 0) AS rbi,
+            COALESCE(sub.bb, 0) AS bb,
+            COALESCE(sub.so, 0) AS so,
+            COALESCE(sub.sb, 0) AS sb,
+            COALESCE(sub.cs, 0) AS cs,
+            COALESCE(sub.hbp, 0) AS hbp,
+            COALESCE(sub.shf, 0) AS shf,
             tr.jersey_number
-        FROM player_season_batting psb
-        JOIN players p ON p.player_id = psb.player_id
+        FROM (
+            """
+        + batting_recompute_select()
+        + """
+            WHERE pgb.team_id = ?
+              AND g.season_id = ?
+              AND pgb.perspective_team_id = ?
+            GROUP BY pgb.player_id
+        ) sub
+        JOIN players p ON p.player_id = sub.player_id
         LEFT JOIN team_rosters tr
-            ON tr.player_id = psb.player_id
-            AND tr.team_id = psb.team_id
-            AND tr.season_id = psb.season_id
-        WHERE psb.team_id = ? AND psb.season_id = ?
+            ON tr.player_id = sub.player_id
+            AND tr.team_id = ?
+            AND tr.season_id = ?
         ORDER BY
-            (COALESCE(psb.ab, 0) + COALESCE(psb.bb, 0)
-             + COALESCE(psb.hbp, 0) + COALESCE(psb.shf, 0)) DESC,
+            (COALESCE(sub.ab, 0) + COALESCE(sub.bb, 0)
+             + COALESCE(sub.hbp, 0) + COALESCE(sub.shf, 0)) DESC,
             p.last_name ASC
         """,
-        (team_id, season_id),
+        (team_id, season_id, team_id, team_id, season_id),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -491,34 +520,55 @@ def get_season_batting(
 def get_season_pitching(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
-    """Fetch raw season pitching rows for a team-season (no computed rates)."""
+    """Fetch raw season pitching rows for a team-season (no computed rates).
+
+    Derived at query time by SUMming ``player_game_pitching`` per player
+    (E-259-01 cutover), mirroring :func:`get_season_batting`. The per-game SUM
+    projection is the shared
+    :func:`src.db.season_aggregates.pitching_recompute_select` (the single
+    source). It is wrapped as a subquery with the ``players`` /
+    ``team_rosters`` joins on the OUTSIDE. ``gs`` comes from the shared
+    projection's NULL-safe CASE over ``appearance_order``.
+
+    Carries the ``perspective_team_id = team_id`` filter (else two-perspective
+    games double the line) and reproduces the prior ``ip_outs DESC, last_name
+    ASC`` ordering over the per-game SUM. ``games`` maps to the projection's
+    ``games_tracked`` (``COUNT(*)``), reproducing the stored ``gp_pitcher``.
+    """
     rows = conn.execute(
         """
         SELECT
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psp.gp_pitcher, 0) AS games,
-            COALESCE(psp.ip_outs, 0) AS ip_outs,
-            COALESCE(psp.h, 0) AS h,
-            COALESCE(psp.er, 0) AS er,
-            COALESCE(psp.bb, 0) AS bb,
-            COALESCE(psp.so, 0) AS so,
-            COALESCE(psp.pitches, 0) AS pitches,
-            COALESCE(psp.total_strikes, 0) AS total_strikes,
+            COALESCE(sub.games_tracked, 0) AS games,
+            COALESCE(sub.ip_outs, 0) AS ip_outs,
+            COALESCE(sub.h, 0) AS h,
+            COALESCE(sub.er, 0) AS er,
+            COALESCE(sub.bb, 0) AS bb,
+            COALESCE(sub.so, 0) AS so,
+            COALESCE(sub.pitches, 0) AS pitches,
+            COALESCE(sub.total_strikes, 0) AS total_strikes,
             p.throws,
             tr.jersey_number,
-            psp.gs
-        FROM player_season_pitching psp
-        JOIN players p ON p.player_id = psp.player_id
+            sub.gs
+        FROM (
+            """
+        + pitching_recompute_select()
+        + """
+            WHERE pgp.team_id = ?
+              AND g.season_id = ?
+              AND pgp.perspective_team_id = ?
+            GROUP BY pgp.player_id
+        ) sub
+        JOIN players p ON p.player_id = sub.player_id
         LEFT JOIN team_rosters tr
-            ON tr.player_id = psp.player_id
-            AND tr.team_id = psp.team_id
-            AND tr.season_id = psp.season_id
-        WHERE psp.team_id = ? AND psp.season_id = ?
+            ON tr.player_id = sub.player_id
+            AND tr.team_id = ?
+            AND tr.season_id = ?
         ORDER BY
-            COALESCE(psp.ip_outs, 0) DESC,
+            COALESCE(sub.ip_outs, 0) DESC,
             p.last_name ASC
         """,
-        (team_id, season_id),
+        (team_id, season_id, team_id, team_id, season_id),
     ).fetchall()
     return [dict(r) for r in rows]

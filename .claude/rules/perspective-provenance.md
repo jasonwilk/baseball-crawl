@@ -16,7 +16,7 @@ paths:
 
 Every per-player stat INSERT (`player_game_batting`, `player_game_pitching`, `spray_charts`, `plays`) MUST include `perspective_team_id` -- the `teams.id` of the team whose API call produced the data. This is a NOT NULL column with no default; omitting it causes a hard insertion error.
 
-Season aggregate tables (`player_season_batting`, `player_season_pitching`) do NOT carry `perspective_team_id`. Perspective filtering happens at aggregation time via `WHERE perspective_team_id = ?` in the query.
+There are no stored season-aggregate tables (E-259 retired `player_season_batting`/`player_season_pitching`); season totals are derived at query time by SUMming the per-game tables, which DO carry `perspective_team_id`. Perspective filtering therefore happens in the aggregating query via `WHERE perspective_team_id = ?` -- omitting it double-counts.
 
 ## Why This Exists
 
@@ -28,7 +28,7 @@ GameChanger returns different player UUIDs, player names (initials vs. full), an
 
 2. **UNIQUE constraints include `perspective_team_id`**. The same `(game_id, player_id)` pair can legitimately appear twice with different perspectives. ON CONFLICT clauses must reference the full constraint including `perspective_team_id`.
 
-3. **Season aggregates filter by perspective**. `_compute_season_aggregates()` and any future aggregation queries MUST include `WHERE perspective_team_id = ?` to prevent double-counting when the same game has been loaded from multiple perspectives.
+3. **Season aggregates filter by perspective**. The query-time season readers `get_season_batting` / `get_season_pitching` (`src/api/db.py`) and any future aggregation query over the per-game tables MUST include `WHERE perspective_team_id = ?` to prevent double-counting when the same game has been loaded from multiple perspectives. This was the #1 hazard of the E-259 query-time cutover -- a season sum that omits the filter silently doubles a player's line with nothing crashing (guarded by a dedicated two-perspective test).
 
 4. **New loaders follow this pattern**. Any new loader that INSERTs into the four stat tables must accept `perspective_team_id` and pass it through to every INSERT. There is no opt-out.
 

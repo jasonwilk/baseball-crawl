@@ -9,8 +9,8 @@ Sub-command groups:
                 reload-annotated-pitches, fix-self-games
   bb proxy   -- proxy report, endpoints, refresh-headers, review
   bb db      -- database backup, reset
-  bb report  -- generate, list, cleanup, verify-aggregates,
-                reconcile-scoreboard, morning-run, map-opponent
+  bb report  -- generate, list, cleanup, reconcile-scoreboard,
+                morning-run, map-opponent
   bb status  -- system health check (top-level command)
 """
 

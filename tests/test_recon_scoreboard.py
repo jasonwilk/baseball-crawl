@@ -44,7 +44,6 @@ from src.reports.recon_scoreboard import (  # noqa: E402
     SO_OUTCOMES,
     ScoreboardResult,
     compute_scoreboard,
-    default_baseline_path,
     evaluate_gate,
     is_dropped_pitch_event,
     load_baseline,
@@ -141,7 +140,7 @@ class TestReadOnly:
         before = scoreboard_db.total_changes
         compute_scoreboard(scoreboard_db)
         assert scoreboard_db.total_changes == before, (
-            "compute_scoreboard must be read-only (mirrors verify_aggregates); "
+            "compute_scoreboard must be read-only; "
             "it modified rows on the connection."
         )
 

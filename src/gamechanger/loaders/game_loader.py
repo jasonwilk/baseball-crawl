@@ -852,8 +852,8 @@ class GameLoader:
         Fires at GROUP grain (never per-row) when a core key is absent from the
         per-row ``stats`` dict of ALL rows in a NON-EMPTY group -- the signature
         of a GameChanger field rename that would silently zero the stat for
-        every player on the team. ``verify-aggregates`` cannot catch this because
-        both perspectives share the same corrupted source. The returned ``1`` is
+        every player on the team. A cross-perspective reconciliation cannot catch
+        this because both perspectives share the same corrupted source. The returned ``1`` is
         the ``LoadResult.errors`` increment the caller adds -- a hard-fail signal
         the future E-245 reconciliation scoreboard can consume (AC-4).
 

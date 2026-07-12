@@ -94,9 +94,13 @@ more reliable, or easier to deliver?*
   2026-06-14, Option A): the coach-visible `season_fallback` degraded line is dropped**;
   the column stays as operator-only telemetry. The genuine risk here is the
   transient-failure path scoping to the wrong year, and the name-match identity fallback.)
-- **Stored season aggregates** (`player_season_batting/_pitching`) are computed at load
+- ~~**Stored season aggregates** (`player_season_batting/_pitching`) are computed at load
   time and can go stale within a generation run (player merges happen after aggregation
-  in some paths) — and silently diverge after any post-load mutation.
+  in some paths) — and silently diverge after any post-load mutation.~~ **RESOLVED (E-259,
+  2026-07-12):** the stored season-aggregate tables were dropped (migration 011) and the
+  season line is now derived at query time from the per-game tables
+  (`get_season_batting`/`get_season_pitching` in `src/api/db.py`), so there is no stored
+  copy left to go stale or diverge.
 - ~~**Loaders are Path-only, bridged by temp files** — in TWO places: the generator writes
   plays to a tempdir for `PlaysLoader.load_all(Path)` (`generator.py:598-609`), and
   `ScoutingLoader` internally writes boxscore JSON to temp files because
@@ -173,7 +177,8 @@ the reports admin surface. D2's decoupling story (below) exists for exactly this
   reports admin page's own nav) — see D1.
 
 **Tables written/read**: teams, players, games, game_perspectives, player_game_batting,
-player_game_pitching, player_season_batting, player_season_pitching, team_rosters,
+player_game_pitching, ~~player_season_batting, player_season_pitching~~ (dropped in
+migration 011, E-259 — season line derived at query time), team_rosters,
 spray_charts, plays, play_events, reconciliation_discrepancies, reports, seasons,
 programs (+ auth tables for the admin UI session).
 

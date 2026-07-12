@@ -289,22 +289,24 @@ def test_generate_report_e2e_matches_committed_oracle(
         )
 
     # ---- Load-layer cross-check (independent of the captured render data) -
-    # Confirms the real loader persisted season aggregates AND that the
+    # Confirms the real loader persisted the per-game rows the query-time season
+    # line derives from (E-259: no stored season aggregates) AND that the
     # (trimmed) spray fixtures are still valid enough to load >=1 row without
     # crashing the non-fatal spray stage. Spray values are NOT oracle-guarded.
     conn = e2e_db()
     try:
         p4_outs = conn.execute(
-            "SELECT psp.ip_outs FROM player_season_pitching psp "
-            "JOIN team_rosters tr ON tr.player_id = psp.player_id "
-            "AND tr.team_id = psp.team_id AND tr.season_id = psp.season_id "
-            "WHERE tr.jersey_number = '4'"
+            "SELECT SUM(pgp.ip_outs) FROM player_game_pitching pgp "
+            "JOIN games g ON g.game_id = pgp.game_id "
+            "JOIN team_rosters tr ON tr.player_id = pgp.player_id "
+            "AND tr.team_id = pgp.team_id AND tr.season_id = g.season_id "
+            "WHERE tr.jersey_number = '4' AND pgp.perspective_team_id = pgp.team_id"
         ).fetchone()
         spray_rows = conn.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0]
     finally:
         conn.close()
     assert p4_outs is not None and p4_outs[0] == 18, (
-        "loader did not persist pitcher #4's season ip_outs=18"
+        "loader did not persist pitcher #4's per-game ip_outs summing to 18"
     )
     assert spray_rows > 0, (
         "trimmed spray fixtures should still load >=1 spray row (valid/no-crash)"

@@ -444,15 +444,13 @@ def test_dedup_players_execute_warns_per_refused_fork(
     assert "Oliver" in msg and "Owen" in msg
 
 
-def test_dedup_players_execute_recomputes_and_persists_aggregate(
+def test_dedup_players_execute_merges_and_combines_per_game_line(
     tmp_path: Path,
 ) -> None:
-    """AC-4: after a CLI collapse the season aggregate is recomputed (and the
-    recompute is COMMITTED -- it survives the connection close) to the combined
-    per-game line, matching what `verify-aggregates` would assert.
-
-    The stored boxscore_only aggregate is deliberately seeded WRONG, so the test
-    has teeth: a missing/rolled-back recompute would leave the stale value.
+    """AC-4: after a CLI collapse the duplicate's per-game rows are attributed to
+    the canonical, so the query-time season line (the SUM of the canonical's
+    per-game rows) is the combined line. E-259 retired the stored recompute, so
+    the combined line is now derived at read time from the merged per-game rows.
     """
     db_file = _make_db_file(tmp_path)
     conn = sqlite3.connect(str(db_file))
@@ -466,12 +464,6 @@ def test_dedup_players_execute_recomputes_and_persists_aggregate(
     _seed_game(conn, "g2", "2026", 1)
     _seed_game_batting(conn, "g1", "p-o", 1, ab=3, h=1)
     _seed_game_batting(conn, "g2", "p-oliver", 1, ab=4, h=2)
-    # Deliberately STALE stored aggregate on the canonical (ab=1, h=0).
-    conn.execute(
-        "INSERT INTO player_season_batting "
-        "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
-        "VALUES ('p-oliver', 1, '2026', 'boxscore_only', 1, 1, 1, 0)"
-    )
     conn.commit()
     conn.close()
 
@@ -480,18 +472,24 @@ def test_dedup_players_execute_recomputes_and_persists_aggregate(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Season aggregates recomputed." in result.output
+    assert "MERGED O Diaz -> Oliver Diaz" in result.output
 
     verify = sqlite3.connect(str(db_file))
     try:
-        rows = verify.execute(
-            "SELECT player_id, ab, h FROM player_season_batting "
-            "WHERE team_id = 1 AND season_id = '2026'"
-        ).fetchall()
+        # The duplicate is gone; both games' per-game rows are now under the
+        # canonical, so their SUM (what the query-time reader returns) is 7/3.
+        survivors = {
+            r[0] for r in verify.execute("SELECT player_id FROM players").fetchall()
+        }
+        combined = verify.execute(
+            "SELECT SUM(ab), SUM(h) FROM player_game_batting "
+            "WHERE player_id = 'p-oliver' AND team_id = 1 AND perspective_team_id = 1"
+        ).fetchone()
     finally:
         verify.close()
-    assert rows == [("p-oliver", 7, 3)], (
-        f"recompute should persist the combined per-game line, got {rows}"
+    assert "p-o" not in survivors and "p-oliver" in survivors
+    assert combined == (7, 3), (
+        f"merged per-game line should combine to (7, 3), got {combined}"
     )
 
 

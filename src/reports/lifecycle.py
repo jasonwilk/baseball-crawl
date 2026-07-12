@@ -512,8 +512,9 @@ def _delete_team_scoped_data(
         return
     placeholders = ",".join("?" for _ in team_ids)
     conn.execute(f"DELETE FROM team_rosters WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM player_season_batting WHERE team_id IN ({placeholders})", team_ids)
-    conn.execute(f"DELETE FROM player_season_pitching WHERE team_id IN ({placeholders})", team_ids)
+    # player_season_batting / player_season_pitching are gone (E-259-03 dropped
+    # the stored season-aggregate tables; the season line is derived at query
+    # time), so there are no team-scoped season rows to cascade-delete here.
     conn.execute(f"DELETE FROM scouting_runs WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM crawl_jobs WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM coaching_assignments WHERE team_id IN ({placeholders})", team_ids)

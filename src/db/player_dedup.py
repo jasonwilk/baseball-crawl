@@ -386,11 +386,11 @@ def _count_stat_rows(
 
     counts: dict[str, int] = {pid: 0 for pid in player_ids}
 
+    # Season-aggregate tables were dropped (E-259-03); the per-game tables are
+    # the source of truth for the stat-row count.
     for table in (
         "player_game_batting",
         "player_game_pitching",
-        "player_season_batting",
-        "player_season_pitching",
     ):
         rows = db.execute(
             f"SELECT player_id, COUNT(*) FROM {table} "  # noqa: S608
@@ -505,14 +505,13 @@ def preview_player_merge(
         duplicate_player_id=duplicate_id,
     )
 
+    # player_season_* are gone (E-259-03); the merge no longer touches them.
     for table, columns in [
         ("plays", ["batter_id", "pitcher_id"]),
         ("spray_charts", ["player_id", "pitcher_id"]),
         ("reconciliation_discrepancies", ["player_id"]),
         ("player_game_batting", ["player_id"]),
         ("player_game_pitching", ["player_id"]),
-        ("player_season_batting", ["player_id"]),
-        ("player_season_pitching", ["player_id"]),
         ("team_rosters", ["player_id"]),
     ]:
         total = 0
@@ -546,12 +545,16 @@ def merge_player_pair(
     duplicate_id: str,
     *,
     manage_transaction: bool = True,
-    recompute_scopes: set[tuple[int, str]] | None = None,
-) -> set[tuple[str, int, str]]:
+) -> None:
     """Atomically merge duplicate_id into canonical_id.
 
     Follows TN-6 execution order. All FK references are reassigned or
     conflict-deleted, then the duplicate player row is removed.
+
+    Since the E-259 query-time cutover the season-aggregate tables were dropped
+    (E-259-03) and season stats are derived at query time from ``player_game_*``,
+    so the merge no longer computes affected scopes, recomputes aggregates, or
+    touches any ``player_season_*`` rows.
 
     Args:
         db: An open sqlite3.Connection with PRAGMA foreign_keys = ON.
@@ -559,16 +562,6 @@ def merge_player_pair(
         duplicate_id: The player_id to merge away.
         manage_transaction: If True (CLI use), wraps in BEGIN IMMEDIATE.
             If False (caller manages transaction), uses SAVEPOINT.
-        recompute_scopes: The ``(team_id, season_id)`` scopes the caller will
-            recompute after the merge (E-253-08 AC-3). Passed through to the
-            season-row handling so ``boxscore_only`` rows are only deleted where
-            they will be rebuilt; rows in un-rebuilt scopes are preserved. When
-            None (default), the caller is expected to recompute ALL affected
-            scopes, so every boxscore_only row is deleted (rebuilt).
-
-    Returns:
-        Set of (player_id, team_id, season_id) tuples that need season
-        aggregate recomputation.
 
     Raises:
         PlayerMergeError: If validation fails.
@@ -591,31 +584,6 @@ def merge_player_pair(
     ).fetchone()
     if duplicate_row is None:
         raise PlayerMergeError(f"Duplicate player {duplicate_id!r} not found")
-
-    # Collect affected season tuples BEFORE merge for recomputation
-    affected_seasons: set[tuple[str, int, str]] = set()
-
-    # From game-level stats, find all (player_id, team_id, season) combos
-    # that will need recomputation. We need to join to games to get season_id.
-    for table in ("player_game_batting", "player_game_pitching"):
-        rows = db.execute(
-            f"SELECT DISTINCT g.season_id, t.team_id "  # noqa: S608
-            f"FROM {table} t JOIN games g ON g.game_id = t.game_id "
-            f"WHERE t.player_id IN (?, ?)",
-            (canonical_id, duplicate_id),
-        ).fetchall()
-        for season_id, team_id in rows:
-            affected_seasons.add((canonical_id, team_id, season_id))
-
-    # Also from season tables directly
-    for table in ("player_season_batting", "player_season_pitching"):
-        rows = db.execute(
-            f"SELECT DISTINCT team_id, season_id FROM {table} "  # noqa: S608
-            f"WHERE player_id IN (?, ?)",
-            (canonical_id, duplicate_id),
-        ).fetchall()
-        for team_id, season_id in rows:
-            affected_seasons.add((canonical_id, team_id, season_id))
 
     savepoint_name = "merge_" + canonical_id[:8].replace("-", "_") + "_" + duplicate_id[:8].replace("-", "_")
 
@@ -675,25 +643,10 @@ def merge_player_pair(
         )
 
         # ---------------------------------------------------------------
-        # TN-6 Step 6: player_season_batting -- delete boxscore_only (rederived
-        # by the recompute) but PRESERVE + re-point member full/supplemented
-        # rows (E-237-03 AC-8: member rows are API-authoritative, not
-        # rederivable from game rows -- they must survive the merge).
-        # ---------------------------------------------------------------
-        _delete_or_repoint_season_rows(
-            db, "player_season_batting", canonical_id, duplicate_id,
-            recompute_scopes,
-        )
-
-        # ---------------------------------------------------------------
-        # TN-6 Step 7: player_season_pitching -- same provenance-aware handling.
-        # ---------------------------------------------------------------
-        _delete_or_repoint_season_rows(
-            db, "player_season_pitching", canonical_id, duplicate_id,
-            recompute_scopes,
-        )
-
-        # ---------------------------------------------------------------
+        # (E-259-03 dropped player_season_batting / player_season_pitching, so
+        # the old TN-6 Steps 6-7 season-row handling is gone -- there is no
+        # stored season table left for the merge to touch.)
+        #
         # TN-6 Step 8: team_rosters -- delete-or-update
         # ---------------------------------------------------------------
         _delete_or_update_rosters(db, canonical_id, duplicate_id)
@@ -726,8 +679,6 @@ def merge_player_pair(
         duplicate_id,
         canonical_id,
     )
-
-    return affected_seasons
 
 
 def _delete_or_update_game_stats(
@@ -857,96 +808,6 @@ def _delete_or_update_rosters(
     # Update remaining
     db.execute(
         "UPDATE team_rosters SET player_id = ? WHERE player_id = ?",
-        (canonical_id, duplicate_id),
-    )
-
-
-def _delete_or_repoint_season_rows(
-    db: sqlite3.Connection,
-    table: str,
-    canonical_id: str,
-    duplicate_id: str,
-    recompute_scopes: set[tuple[int, str]] | None = None,
-) -> None:
-    """Merge season-aggregate rows from a duplicate into the canonical player.
-
-    Provenance-aware (E-237-03 AC-8 -- closes the merge-path re-opening of the
-    member data-loss bug that the canonical recompute's NOT EXISTS guard closes
-    for non-merged players):
-
-    * ``boxscore_only`` rows are derivable from the per-game rows by the
-      canonical recompute that runs after the merge, so they are DELETED (in the
-      rebuilt scopes) and rebuilt under the canonical id later.
-    * ``full`` / ``supplemented`` rows are member-authoritative -- they come
-      straight from the season-stats API and are NOT rederivable from game
-      rows.  They must MOVE to the canonical id, never be deleted or downgraded
-      to a boxscore sum.
-
-    Unrebuilt-scope guard (E-253-08 AC-3): the boxscore_only DELETE is only safe
-    for ``(team_id, season_id)`` scopes the post-merge recompute will actually
-    rebuild. The load path (``dedup_team_players(recompute_aggregates=False)``)
-    recomputes ONLY the loaded scope, so deleting a boxscore_only row in ANY
-    OTHER scope (e.g. a different season for the same merged human) would drop a
-    canonical aggregate that nothing rebuilds -- silent data loss. When
-    ``recompute_scopes`` is given, the boxscore_only DELETE is restricted to
-    those scopes; boxscore_only rows in un-rebuilt scopes are instead PRESERVED
-    -- they fall through to the same collision/re-point handling as member rows
-    (the canonical's survive untouched; the duplicate's re-point to the
-    canonical, or drop when the canonical already owns that scope). When
-    ``recompute_scopes`` is None (the standalone CLI path, which recomputes ALL
-    affected scopes), every boxscore_only row is deleted as before -- all get
-    rebuilt.
-
-    Collision (PK ``UNIQUE(player_id, team_id, season_id)``): if the canonical
-    player ALSO owns a member row for the SAME ``(team_id, season_id)`` as a
-    duplicate member row, re-pointing the duplicate's would violate the unique
-    constraint.  Resolution is deterministic -- the canonical's row WINS (the
-    duplicate's member row is dropped) -- matching the canonical-preference
-    convention used elsewhere in the merge (``_delete_or_update_*``).  Both
-    rows are member-authoritative for the same scope, so keeping one is correct
-    and keeping the canonical's is the consistent choice.
-    """
-    # boxscore_only rows: drop for both players in the scopes the post-merge
-    # canonical recompute rebuilds; those get rebuilt under the canonical id
-    # from the per-game rows. Rows in un-rebuilt scopes are left in place (they
-    # fall through to the collision/re-point logic below) so a canonical
-    # aggregate that nothing would rebuild is never silently lost (AC-3).
-    if recompute_scopes is None:
-        db.execute(
-            f"DELETE FROM {table} "  # noqa: S608
-            f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only'",
-            (canonical_id, duplicate_id),
-        )
-    else:
-        for team_id, season_id in recompute_scopes:
-            db.execute(
-                f"DELETE FROM {table} "  # noqa: S608
-                f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only' "
-                f"AND team_id = ? AND season_id = ?",
-                (canonical_id, duplicate_id, team_id, season_id),
-            )
-
-    # Collision resolution: drop the duplicate's member rows whose
-    # (team_id, season_id) the canonical already owns a (member) row for.
-    conflicts = db.execute(
-        f"SELECT d.team_id, d.season_id FROM {table} d "  # noqa: S608
-        f"JOIN {table} c "
-        f"  ON  c.team_id = d.team_id "
-        f"  AND c.season_id = d.season_id "
-        f"  AND c.player_id = ? "
-        f"WHERE d.player_id = ?",
-        (canonical_id, duplicate_id),
-    ).fetchall()
-    for team_id, season_id in conflicts:
-        db.execute(
-            f"DELETE FROM {table} "  # noqa: S608
-            f"WHERE player_id = ? AND team_id = ? AND season_id = ?",
-            (duplicate_id, team_id, season_id),
-        )
-
-    # Re-point the remaining (non-colliding) duplicate member rows to canonical.
-    db.execute(
-        f"UPDATE {table} SET player_id = ? WHERE player_id = ?",  # noqa: S608
         (canonical_id, duplicate_id),
     )
 
@@ -1148,8 +1009,7 @@ def execute_collapse(
     collapse: CollapsePlan,
     *,
     manage_transaction: bool,
-    recompute_scopes: set[tuple[int, str]] | None = None,
-) -> set[tuple[str, int, str]]:
+) -> None:
     """Merge every duplicate of one component into its canonical, atomically.
 
     TN-5.3: per-component atomicity requires the EXECUTOR to own the
@@ -1160,7 +1020,6 @@ def execute_collapse(
     open transaction) we wrap it in a single component-level SAVEPOINT.  A
     failure rolls back the WHOLE component (all-or-nothing) and re-raises.
     """
-    affected: set[tuple[str, int, str]] = set()
     # Collision-safe savepoint name: derive from the FULL canonical_player_id
     # (not just an 8-char prefix, which two UUIDs could share), sanitizing every
     # non-alphanumeric char to '_' so the result is a valid SQLite identifier.
@@ -1177,12 +1036,11 @@ def execute_collapse(
 
     try:
         for dup in collapse.duplicates:
-            affected |= merge_player_pair(
+            merge_player_pair(
                 db,
                 collapse.canonical_player_id,
                 dup.player_id,
                 manage_transaction=False,
-                recompute_scopes=recompute_scopes,
             )
         if manage_transaction:
             db.execute("COMMIT")
@@ -1196,13 +1054,6 @@ def execute_collapse(
             db.execute(f"RELEASE {savepoint}")
         raise
 
-    return affected
-
-
-# ---------------------------------------------------------------------------
-# Season aggregate recomputation (TN-5)
-# ---------------------------------------------------------------------------
-
 
 def dedup_team_players(
     db: sqlite3.Connection,
@@ -1210,7 +1061,6 @@ def dedup_team_players(
     season_id: str,
     *,
     manage_transaction: bool = True,
-    recompute_aggregates: bool = True,
 ) -> int:
     """Detect and merge same-team duplicate players for one (team, season).
 
@@ -1218,8 +1068,10 @@ def dedup_team_players(
     TN-4 planning unit), collapses every single-terminal-name component to one
     canonical player (each component merged atomically -- TN-5.3), and REFUSES
     every fork (>=2 distinct terminal names), leaving it unmerged with one WARN
-    log per refused component (TN-1, TN-3).  Recomputes season aggregates for
-    any affected (player, team, season) tuples unless suppressed.
+    log per refused component (TN-1, TN-3).
+
+    Season aggregates are derived at query time since the E-259 cutover, so this
+    no longer recomputes anything after merging.
 
     Because the plan groups whole components and merges each duplicate directly
     into the component canonical, the stale-worklist ``PlayerMergeError`` cascade
@@ -1239,14 +1091,6 @@ def dedup_team_players(
             inside ScoutingLoader), each component is wrapped in a SAVEPOINT.
             Either way the per-merge primitive runs with
             ``manage_transaction=False`` so the executor owns atomicity (TN-5.3).
-        recompute_aggregates: When ``True`` (default -- the standalone
-            ``bb data dedup-players`` CLI caller), recompute season aggregates for the
-            affected scopes after merging.  The two embedded load-path dedup
-            calls (ScoutingLoader Hook 1) pass ``False`` because the canonical
-            recompute runs once at end-of-load -- suppressing the redundant
-            in-dedup recompute (E-237-03, TN-11).  This is deliberately a
-            separate flag from ``manage_transaction``: transaction-ownership is
-            not the same concern as recompute-ownership.
 
     Returns:
         Number of duplicate players successfully merged away.
@@ -1274,26 +1118,12 @@ def dedup_team_players(
         )
 
     merged = 0
-    all_affected: set[tuple[str, int, str]] = set()
-
-    # E-253-08 AC-3: when the caller recomputes only THIS scope after us
-    # (recompute_aggregates=False -- the ScoutingLoader load path, which then
-    # runs a single canonical_recompute(team_id, season_id)), restrict the merge's
-    # boxscore_only deletion to this scope so a merged human's boxscore_only rows
-    # in OTHER scopes (e.g. another season) are not dropped unrebuilt. When we own
-    # the recompute (recompute_aggregates=True), recompute_affected_seasons below
-    # rebuilds EVERY affected scope, so None (delete-all) is safe.
-    recompute_scopes: set[tuple[int, str]] | None = (
-        None if recompute_aggregates else {(team_id, season_id)}
-    )
 
     for collapse in plan.collapses:
         try:
-            affected = execute_collapse(
+            execute_collapse(
                 db, collapse, manage_transaction=manage_transaction,
-                recompute_scopes=recompute_scopes,
             )
-            all_affected.update(affected)
             merged += len(collapse.duplicates)
             logger.info(
                 "dedup_team_players: collapsed component into %s (%d member(s)) "
@@ -1312,11 +1142,6 @@ def dedup_team_players(
                 exc_info=True,
             )
 
-    # Recompute season aggregates for all affected tuples (unless suppressed
-    # because a canonical end-of-load recompute will run -- TN-11).
-    if all_affected and recompute_aggregates:
-        recompute_affected_seasons(db, all_affected)
-
     logger.info(
         "dedup_team_players: %d duplicate(s) merged, %d fork(s) refused for "
         "team_id=%d season=%s",
@@ -1326,28 +1151,3 @@ def dedup_team_players(
         season_id,
     )
     return merged
-
-
-def recompute_affected_seasons(
-    db: sqlite3.Connection,
-    affected: set[tuple[str, int, str]],
-) -> None:
-    """Recompute season aggregates for the scopes touched by a set of merges.
-
-    E-237-03 (TN-11): the per-player ``recompute_season_batting`` /
-    ``recompute_season_pitching`` writers have been consolidated away into the
-    single canonical recompute in ``src.db.season_aggregates``.  This function
-    keeps its signature for the standalone ``bb data dedup-players``
-    CLI caller but now reduces the
-    affected ``(player_id, team_id, season_id)`` tuples to their distinct
-    ``(team_id, season_id)`` scopes and runs the scope-level canonical
-    recompute once per scope.  Slightly broader than the prior per-player
-    recompute (it rebuilds every boxscore_only player in the scope), but
-    idempotent and beneficial -- the merged and non-merged players in a scope
-    now get the identical deterministic superset column set.
-    """
-    from src.db.season_aggregates import canonical_recompute
-
-    scopes = {(team_id, season_id) for _player_id, team_id, season_id in affected}
-    for team_id, season_id in scopes:
-        canonical_recompute(db, team_id, season_id)

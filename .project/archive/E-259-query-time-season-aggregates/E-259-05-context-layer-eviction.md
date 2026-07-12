@@ -4,7 +4,7 @@
 [E-259: Query-Time Season Aggregates](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the context layer no longer references the retired stored tables, `canonical_recompute`, `_compute_season_aggregates`, the parity apparatus, or the `bb report verify-aggregates` command. The Step 1d `verify-aggregates` HARD sub-check E-256 added is **struck** (a plain deletion, not a substitution), and the epic's net context-layer shrinkage is recorded as the trigger-7 counterweight.

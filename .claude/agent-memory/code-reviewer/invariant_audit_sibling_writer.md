@@ -22,6 +22,13 @@ but only for *merged* players. Pre-existing bug, but exactly the class the invar
 audit targets. Fix: provenance-scope the DELETE to `boxscore_only` + re-point
 surviving member rows to the canonical id (with canonical-wins collision resolution).
 
+> **[E-259 reconciliation]** The E-237 worked example above is now HISTORICAL: E-259 dropped the
+> `player_season_*` tables (migration 011) and deleted `canonical_recompute`, `recompute_affected_seasons`,
+> and `merge_player_pair`'s season-row DELETE, so this specific guard/writer/table triad no longer exists.
+> The GENERAL lesson — a provenance/row-ownership guard on ONE writer is silently defeated by a sibling
+> delete-then-rederive path, so sweep ALL writers of a guarded table, not just the epic diff — is
+> table-agnostic and fully LIVE; the audit heuristic below is unchanged.
+
 **Audit heuristic (invariant-audit mode):**
 - Grep ALL writers of the guarded table, not just the epic diff.
 - For each writer that does `DELETE ... WHERE <key>` (no provenance filter) followed

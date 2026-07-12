@@ -4,7 +4,7 @@
 [E-259: Query-Time Season Aggregates](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator-facing docs in `docs/admin/` no longer prescribe `bb report verify-aggregates` or describe the stored season-aggregate tables as live, and any maintenance recipe that chained through `verify-aggregates` is corrected to reflect the query-time reality.

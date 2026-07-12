@@ -8,9 +8,11 @@ parsing, player stubs, game records, and batting/pitching stat upserts).
 Additional responsibilities beyond ``GameLoader``:
 - Roster loading into ``players`` and ``team_rosters``.
 - ``scouting_runs`` metadata tracking (status transitions, timestamps).
-- Season aggregate computation: sums per-game stats from
-  ``player_game_batting`` and ``player_game_pitching``, then upserts into
-  ``player_season_batting`` and ``player_season_pitching``.
+- A post-boxscore dedup sweep over same-team duplicate player entries.
+
+Season lines are NOT computed here: since the E-259 cutover they are derived at
+query time from the per-game tables (``src.api.db.get_season_*``), and the
+stored ``player_season_*`` tables are dropped in E-259-03.
 
 Usage::
 
@@ -140,12 +142,10 @@ class ScoutingLoader:
             self._validate_roster_count(team_id, db_season_id, expected_count)
 
         # Empty-boxscore-source guard (E-247-01 F1): skip the whole post-boxscore
-        # tail (dedup / season-aggregate recompute / commit) when there is no
-        # boxscore source to process THIS invocation.  This is NOT an
-        # optimization -- ``canonical_recompute`` DELETEs+rebuilds the season
-        # aggregates and the dedup sweep can MERGE players, so on a populated DB
-        # a boxscoreless invocation would rewrite rows the pre-refactor early-
-        # returns left untouched.
+        # tail (dedup / commit) when there is no boxscore source to process THIS
+        # invocation.  This is NOT an optimization -- the dedup sweep can MERGE
+        # players, so on a populated DB a boxscoreless invocation would mutate
+        # rows the pre-refactor early-returns left untouched.
         if not boxscores:
             logger.info(
                 "No boxscores in crawl result for team_id=%d; nothing to load.",
@@ -178,27 +178,25 @@ class ScoutingLoader:
         # Post-boxscore validation: check for duplicate game rows.
         self._check_duplicate_games(team_id, db_season_id)
 
-        # Hook 1: dedup sweep after boxscore loading, before aggregation.
+        # Hook 1: dedup sweep after boxscore loading. Collapses same-team
+        # duplicate player entries; season aggregates are derived at query time
+        # (E-259) so there is no post-dedup recompute.
         try:
             from src.db.player_dedup import dedup_team_players
 
             dedup_team_players(
                 self._db, team_id, db_season_id,
-                manage_transaction=False, recompute_aggregates=False,
+                manage_transaction=False,
             )
         except Exception:  # noqa: BLE001
             logger.error(
                 "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
-                "continuing with aggregation",
+                "continuing",
                 team_id,
                 db_season_id,
                 exc_info=True,
             )
 
-        # Canonical recompute runs exactly once per load (the embedded dedup
-        # above suppresses its own recompute via recompute_aggregates=False),
-        # committed atomically with the dedup sweep below.
-        self._compute_season_aggregates(team_id, db_season_id)
         self._db.commit()
         logger.info(
             "Scouting load complete for team_id=%d season=%s: loaded=%d skipped=%d errors=%d",
@@ -426,25 +424,6 @@ class ScoutingLoader:
                 "team_id=%d, found %d in DB",
                 expected_count, team_id, actual,
             )
-
-    # ------------------------------------------------------------------
-    # Season aggregate computation
-    # ------------------------------------------------------------------
-
-    def _compute_season_aggregates(self, team_id: int, season_id: str) -> None:
-        """Recompute season aggregate stats from per-game rows.
-
-        Thin signature-preserving delegate (E-237-03, TN-11) to the module-level
-        canonical recompute in ``src.db.season_aggregates``.  Rate stats (AVG,
-        OBP, ERA, WHIP) are NOT stored -- they are computed at display time.
-
-        Args:
-            team_id: INTEGER PK of the scouted team.
-            season_id: Season slug.
-        """
-        from src.db.season_aggregates import canonical_recompute
-
-        canonical_recompute(self._db, team_id, season_id)
 
     # ------------------------------------------------------------------
     # FK prerequisite helpers

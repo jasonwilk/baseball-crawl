@@ -1,8 +1,17 @@
 # Removing an early-return before a recompute/dedup tail: prove the no-op on a POPULATED DB, not just fresh
 
 When a refactor removes an early-return that previously guarded a "rebuild-from-source" tail
-(canonical_recompute DELETE+re-INSERT, dedup_team_players, or any aggregate recompute), a
+(a `dedup_team_players` merge, a plays re-derivation, or any aggregate rebuild), a
 fresh-DB characterization test is NECESSARY BUT NOT SUFFICIENT to prove the tail is a no-op.
+
+> **[E-259 reconciliation]** The concrete `canonical_recompute` DELETE+re-INSERT and the stored
+> `player_season_*` tables in the worked example below are RETIRED — E-259 dropped the tables
+> (migration 011) and deleted every season-aggregate writer, so the *recompute* half of the E-247
+> tail no longer exists (the *dedup* half survives and can still merge/mutate per-game rows). The
+> general lesson is unchanged and LIVE for any rebuild-from-source/dedup tail, and E-259 itself
+> RE-VALIDATED it: E-259-01/02 removed an early-return before that same tail, and the review demanded
+> exactly the populated-DB characterization test this file prescribes. Read the `canonical_recompute`
+> specifics below as the historical origin case.
 
 ## The trap (E-247-01, caught by Codex in Phase 4b after I missed it)
 E-247-01 collapsed the loader twin methods and DROPPED the in-memory `if not crawl_result.boxscores:

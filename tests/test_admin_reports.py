@@ -392,14 +392,7 @@ def _seed_full_team_data(db_path: Path, team_id: int) -> dict:
         "INSERT INTO team_rosters (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
         (team_id, season_id),
     )
-    conn.execute(
-        "INSERT INTO player_season_batting (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
-        (team_id, season_id),
-    )
-    conn.execute(
-        "INSERT INTO player_season_pitching (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
-        (team_id, season_id),
-    )
+    # player_season_* dropped in E-259-03 -- no stored season rows to cascade.
 
     game_id = "game-cascade-001"
     conn.execute(
@@ -487,8 +480,6 @@ class TestCascadeDeleteOnReportDeletion:
         assert _count_rows(db_path, "player_game_pitching", "game_id = ?", (data["game_id"],)) == 0
         assert _count_rows(db_path, "spray_charts", "team_id = ?", (team_id,)) == 0
         assert _count_rows(db_path, "team_rosters", "team_id = ?", (team_id,)) == 0
-        assert _count_rows(db_path, "player_season_batting", "team_id = ?", (team_id,)) == 0
-        assert _count_rows(db_path, "player_season_pitching", "team_id = ?", (team_id,)) == 0
         assert _count_rows(db_path, "scouting_runs", "team_id = ?", (team_id,)) == 0
         assert _count_rows(db_path, "play_events") == 0
 

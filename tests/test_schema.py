@@ -109,8 +109,8 @@ _EXPECTED_TABLES = {
     "games",
     "player_game_batting",
     "player_game_pitching",
-    "player_season_batting",
-    "player_season_pitching",
+    # player_season_batting / player_season_pitching dropped by migration 011
+    # (E-259-03); the season line is derived at query time.
     "spray_charts",
     "opponent_links",
     "scouting_runs",
@@ -390,29 +390,8 @@ class TestForeignKeyEnforcement:
         count = schema_db.execute("SELECT COUNT(*) FROM games;").fetchone()[0]
         assert count == 1
 
-    def test_player_season_batting_rejects_nonexistent_season_id(
-        self, schema_db: sqlite3.Connection
-    ) -> None:
-        """player_season_batting rejects a season_id not in seasons."""
-        team_id = self._insert_team(schema_db)
-        self._insert_player(schema_db)
-        with pytest.raises(sqlite3.IntegrityError):
-            schema_db.execute(
-                "INSERT INTO player_season_batting (player_id, team_id, season_id) VALUES ('p-001', ?, 'nonexistent-season');",
-                (team_id,),
-            )
-
-    def test_player_season_pitching_rejects_nonexistent_season_id(
-        self, schema_db: sqlite3.Connection
-    ) -> None:
-        """player_season_pitching rejects a season_id not in seasons."""
-        team_id = self._insert_team(schema_db)
-        self._insert_player(schema_db)
-        with pytest.raises(sqlite3.IntegrityError):
-            schema_db.execute(
-                "INSERT INTO player_season_pitching (player_id, team_id, season_id) VALUES ('p-001', ?, 'nonexistent-season');",
-                (team_id,),
-            )
+    # (player_season_batting / player_season_pitching FK-constraint tests removed:
+    # E-259-03 dropped both tables -- the season line is derived at query time.)
 
 
 # ---------------------------------------------------------------------------

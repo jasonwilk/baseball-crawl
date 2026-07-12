@@ -134,8 +134,7 @@ def test_all_expected_tables_exist(db: sqlite3.Connection) -> None:
     assert "games" in tables
     assert "player_game_batting" in tables
     assert "player_game_pitching" in tables
-    assert "player_season_batting" in tables
-    assert "player_season_pitching" in tables
+    # player_season_* dropped by migration 011 (E-259-03).
 
     # Auth tables
     assert "users" in tables

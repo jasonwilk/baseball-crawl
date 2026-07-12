@@ -35,7 +35,7 @@ bare `COUNT(*) FROM games WHERE ... score IS NOT NULL` — NO join/EXISTS on sta
 tables — so it counts SCORED games, not DATA-BEARING games.
 
 **How to apply:** Any "how many games do we actually have data for" count (trust
-signals, freshness N-of-M, no-data gates, aggregate-parity denominators) MUST
+signals, freshness N-of-M, no-data gates, query-time season-aggregate coverage denominators) MUST
 `EXISTS`-filter on a perspective-scoped stat row, e.g.:
 `... AND EXISTS (SELECT 1 FROM player_game_batting b WHERE b.game_id = g.game_id AND b.perspective_team_id = ?)`
 (and/or the pitching equivalent). Counting bare completed games over-counts.

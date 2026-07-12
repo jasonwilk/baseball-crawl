@@ -547,9 +547,6 @@ already in `.gitignore`.
    no games, so this step gates the entry-point wiring and schedule-read path, not the
    resolution ladder.
 
-`bb report verify-aggregates` is a hard sub-check only when the closure touched loaders or
-season aggregates -- it must report zero mismatches when it runs.
-
 This procedure is normally run by the code-reviewer as part of epic closure. An operator can
 run the same sequence manually at any time as a health check against the live database.
 
@@ -570,4 +567,4 @@ run the same sequence manually at any time as a health check against the live da
 
 ---
 
-*Last updated: 2026-07-12 | Story: E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure)*
+*Last updated: 2026-07-12 | Source: E-259 (E-259-06: removed the `bb report verify-aggregates` closure sub-check from the Closure Runtime Smoke procedure -- the command and the stored `player_season_*` tables it checked were retired in E-259-03/04), E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure)*

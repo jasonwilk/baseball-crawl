@@ -43,8 +43,7 @@ _CORE_TABLES = {
     "games",
     "player_game_batting",
     "player_game_pitching",
-    "player_season_batting",
-    "player_season_pitching",
+    # player_season_* dropped by migration 011 (E-259-03).
 }
 
 

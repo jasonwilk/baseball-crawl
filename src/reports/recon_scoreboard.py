@@ -6,8 +6,8 @@ measures how faithfully the plays-derived stats reconstruct GameChanger's
 official box scores -- the concrete metric behind CLAUDE.md's north-star
 Operating Principle ("Always Get Closer to Byte-Identical Play Ingestion").
 
-Following the ``src/reports/aggregate_parity.py`` precedent, the core is a pure,
-read-only, connection-in / result-dataclass-out function:
+Following the project's established pure-core pattern for read-only analytics,
+the core is a connection-in / result-dataclass-out function:
 :func:`compute_scoreboard` takes an open SQLite connection and returns a
 :class:`ScoreboardResult`.  The human Rich table, the ``--json`` block, and any
 regression gate (E-257-02) all fall out of that one dataclass.  This module
@@ -206,7 +206,7 @@ def is_dropped_pitch_event(raw_template: str | None) -> bool:
 
 # ---------------------------------------------------------------------------
 # Plays-side aggregate SQL (net-new; reads only plays / play_events / the
-# per-game boxscore tables -- no SQL shared with aggregate_parity)
+# per-game boxscore tables)
 # ---------------------------------------------------------------------------
 
 
@@ -351,7 +351,7 @@ def compute_scoreboard(conn: sqlite3.Connection) -> ScoreboardResult:
     """Compute the plays-vs-boxscore reconciliation scoreboard.
 
     Read-only: issues only ``SELECT`` statements and never writes to the
-    database (mirroring ``verify_aggregates``).
+    database.
 
     Args:
         conn: Open SQLite connection to the database to measure.

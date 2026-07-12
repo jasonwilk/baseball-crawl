@@ -147,7 +147,7 @@ class TestMigrationsApply:
             "programs", "teams", "seasons", "players",
             "team_rosters", "games",
             "player_game_batting", "player_game_pitching",
-            "player_season_batting", "player_season_pitching",
+            # player_season_* dropped by migration 011 (E-259-03).
             "spray_charts", "opponent_links", "scouting_runs",
             "users", "user_team_access", "magic_link_tokens",
             "passkey_credentials", "sessions", "coaching_assignments",
@@ -327,77 +327,9 @@ class TestPlayerGamePitchingColumns:
         assert "hr" not in cols, "player_game_pitching.hr should be excluded per AC-14"
 
 
-class TestPlayerSeasonBattingColumns:
-    """AC-20(e): player_season_batting has all required columns."""
-
-    REQUIRED_STANDARD = {
-        "id", "player_id", "team_id", "season_id", "stat_completeness", "games_tracked",
-        "gp", "pa", "ab", "h", "singles", "doubles", "triples", "hr", "rbi", "r",
-        "bb", "so", "sol", "hbp", "shb", "shf", "gidp", "roe", "fc", "ci", "pik",
-        "sb", "cs", "tb", "xbh", "lob", "three_out_lob", "ob", "gshr",
-        "two_out_rbi", "hrisp", "abrisp",
-    }
-    REQUIRED_ADVANCED = {
-        "qab", "hard", "weak", "lnd", "flb", "gb", "ps", "sw", "sm",
-        "inp", "full", "two_strikes", "two_s_plus_3", "six_plus", "lobb",
-    }
-    REQUIRED_SPLITS = {
-        "home_ab", "home_h", "home_hr", "home_bb", "home_so",
-        "away_ab", "away_h", "away_hr", "away_bb", "away_so",
-        "vs_lhp_ab", "vs_lhp_h", "vs_lhp_hr", "vs_lhp_bb", "vs_lhp_so",
-        "vs_rhp_ab", "vs_rhp_h", "vs_rhp_hr", "vs_rhp_bb", "vs_rhp_so",
-    }
-
-    def test_standard_columns_present(self, migrated_db: sqlite3.Connection) -> None:
-        """All standard batting stat columns exist."""
-        cols = _columns(migrated_db, "player_season_batting")
-        missing = self.REQUIRED_STANDARD - cols
-        assert not missing, f"Missing standard batting columns: {missing}"
-
-    def test_advanced_columns_present(self, migrated_db: sqlite3.Connection) -> None:
-        """All advanced batting stat columns exist."""
-        cols = _columns(migrated_db, "player_season_batting")
-        missing = self.REQUIRED_ADVANCED - cols
-        assert not missing, f"Missing advanced batting columns: {missing}"
-
-    def test_split_columns_present(self, migrated_db: sqlite3.Connection) -> None:
-        """All home/away and vs_lhp/vs_rhp split columns exist."""
-        cols = _columns(migrated_db, "player_season_batting")
-        missing = self.REQUIRED_SPLITS - cols
-        assert not missing, f"Missing batting split columns: {missing}"
-
-
-class TestPlayerSeasonPitchingColumns:
-    """AC-20(e): player_season_pitching has all required columns."""
-
-    REQUIRED_STANDARD = {
-        "id", "player_id", "team_id", "season_id", "stat_completeness", "games_tracked",
-        "gp_pitcher", "gs", "ip_outs", "bf", "pitches", "h", "er", "bb", "so",
-        "hr", "bk", "wp", "hbp", "svo", "sb", "cs", "go", "ao", "loo",
-        "zero_bb_inn", "inn_123", "fps", "lbfpn",
-        "gp", "w", "l", "sv", "bs", "r", "sol", "lob", "pik",
-        "total_strikes", "total_balls",
-        "lt_3", "first_2_out", "lt_13", "bbs", "lobb", "lobbs",
-        "sm", "sw", "weak", "hard", "lnd", "fb", "gb",
-    }
-    REQUIRED_SPLITS = {
-        "home_ip_outs", "home_h", "home_er", "home_bb", "home_so",
-        "away_ip_outs", "away_h", "away_er", "away_bb", "away_so",
-        "vs_lhb_ab", "vs_lhb_h", "vs_lhb_hr", "vs_lhb_bb", "vs_lhb_so",
-        "vs_rhb_ab", "vs_rhb_h", "vs_rhb_hr", "vs_rhb_bb", "vs_rhb_so",
-    }
-
-    def test_standard_columns_present(self, migrated_db: sqlite3.Connection) -> None:
-        """All standard pitching stat columns exist."""
-        cols = _columns(migrated_db, "player_season_pitching")
-        missing = self.REQUIRED_STANDARD - cols
-        assert not missing, f"Missing standard pitching columns: {missing}"
-
-    def test_split_columns_present(self, migrated_db: sqlite3.Connection) -> None:
-        """All home/away and vs_lhb/vs_rhb split columns exist."""
-        cols = _columns(migrated_db, "player_season_pitching")
-        missing = self.REQUIRED_SPLITS - cols
-        assert not missing, f"Missing pitching split columns: {missing}"
+# (TestPlayerSeasonBattingColumns + TestPlayerSeasonPitchingColumns removed:
+# migration 011 (E-259-03) dropped player_season_batting / player_season_pitching
+# -- their column inventory no longer exists.)
 
 
 # ---------------------------------------------------------------------------
@@ -408,11 +340,11 @@ class TestPlayerSeasonPitchingColumns:
 class TestStatCompletenessColumn:
     """AC-20(f): stat_completeness column exists on all four stat tables with CHECK constraint."""
 
+    # player_season_* dropped by migration 011 (E-259-03); the surviving stat
+    # tables carrying stat_completeness are the per-game tables.
     STAT_TABLES = [
         "player_game_batting",
         "player_game_pitching",
-        "player_season_batting",
-        "player_season_pitching",
     ]
     VALID_VALUES = ("full", "supplemented", "boxscore_only")
 
@@ -465,23 +397,7 @@ class TestStatCompletenessColumn:
             migrated_db.commit()
 
 
-# ---------------------------------------------------------------------------
-# (g) AC-20: games_tracked column on season stat tables
-# ---------------------------------------------------------------------------
-
-
-class TestGamesTrackedColumn:
-    """AC-20(g): games_tracked column on both season stat tables."""
-
-    def test_season_batting_games_tracked(self, migrated_db: sqlite3.Connection) -> None:
-        """player_season_batting.games_tracked column exists."""
-        cols = _columns(migrated_db, "player_season_batting")
-        assert "games_tracked" in cols
-
-    def test_season_pitching_games_tracked(self, migrated_db: sqlite3.Connection) -> None:
-        """player_season_pitching.games_tracked column exists."""
-        cols = _columns(migrated_db, "player_season_pitching")
-        assert "games_tracked" in cols
+# (TestGamesTrackedColumn removed: player_season_* dropped by migration 011.)
 
 
 # ---------------------------------------------------------------------------
@@ -702,47 +618,8 @@ class TestStatTableUniqueConstraints:
             )
             migrated_db.commit()
 
-    def test_season_batting_unique_player_team_season(self, migrated_db: sqlite3.Connection) -> None:
-        """UNIQUE(player_id, team_id, season_id) on player_season_batting."""
-        team_id = _insert_team(migrated_db, "Unique Season Bat Team")
-        _insert_player(migrated_db, "P-UNIQ-03")
-        _insert_season(migrated_db)
-
-        migrated_db.execute(
-            "INSERT INTO player_season_batting (player_id, team_id, season_id, gp) "
-            "VALUES (?, ?, ?, ?)",
-            ("P-UNIQ-03", team_id, "2026", 7),
-        )
-        migrated_db.commit()
-
-        with pytest.raises(sqlite3.IntegrityError):
-            migrated_db.execute(
-                "INSERT INTO player_season_batting (player_id, team_id, season_id, gp) "
-                "VALUES (?, ?, ?, ?)",
-                ("P-UNIQ-03", team_id, "2026", 8),
-            )
-            migrated_db.commit()
-
-    def test_season_pitching_unique_player_team_season(self, migrated_db: sqlite3.Connection) -> None:
-        """UNIQUE(player_id, team_id, season_id) on player_season_pitching."""
-        team_id = _insert_team(migrated_db, "Unique Season Pitch Team")
-        _insert_player(migrated_db, "P-UNIQ-04")
-        _insert_season(migrated_db)
-
-        migrated_db.execute(
-            "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher) "
-            "VALUES (?, ?, ?, ?)",
-            ("P-UNIQ-04", team_id, "2026", 3),
-        )
-        migrated_db.commit()
-
-        with pytest.raises(sqlite3.IntegrityError):
-            migrated_db.execute(
-                "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher) "
-                "VALUES (?, ?, ?, ?)",
-                ("P-UNIQ-04", team_id, "2026", 4),
-            )
-            migrated_db.commit()
+    # (season-table UNIQUE-constraint tests removed: migration 011 (E-259-03)
+    # dropped player_season_batting / player_season_pitching.)
 
 
 # ---------------------------------------------------------------------------

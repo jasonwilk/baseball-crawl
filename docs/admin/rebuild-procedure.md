@@ -136,35 +136,7 @@ find data/raw/*/scouting -type f 2>/dev/null | wc -l
 
 Expected: `0`.
 
-### (d) No double-counted aggregates
-
-Verify that season aggregates match single-perspective game counts:
-
-```sql
--- For each team, games_tracked in season batting should equal
--- the number of distinct games with that perspective.
-SELECT psb.player_id, psb.team_id, psb.season_id,
-       psb.games_tracked AS agg_games,
-       (SELECT COUNT(DISTINCT pgb.game_id)
-        FROM player_game_batting pgb
-        JOIN games g ON pgb.game_id = g.game_id
-        WHERE pgb.player_id = psb.player_id
-          AND pgb.team_id = psb.team_id
-          AND g.season_id = psb.season_id
-          AND pgb.perspective_team_id = psb.team_id) AS actual_games
-FROM player_season_batting psb
-WHERE psb.games_tracked != (
-    SELECT COUNT(DISTINCT pgb2.game_id)
-    FROM player_game_batting pgb2
-    JOIN games g2 ON pgb2.game_id = g2.game_id
-    WHERE pgb2.player_id = psb.player_id
-      AND pgb2.team_id = psb.team_id
-      AND g2.season_id = psb.season_id
-      AND pgb2.perspective_team_id = psb.team_id
-);
-```
-
-Expected: no rows returned (aggregates match per-perspective game counts).
+> **Note (E-259):** this section previously included a "No double-counted aggregates" query that diffed the stored `player_season_batting.games_tracked` column against a per-perspective game count. The stored `player_season_*` tables were dropped in migration 011 -- the season line is now derived at query time from `player_game_batting` / `player_game_pitching` (`src.api.db.get_season_batting` / `get_season_pitching`), so there is no separate stored copy left to double-count or drift. The check is removed as meaningless rather than replaced.
 
 ---
 
@@ -175,4 +147,4 @@ Expected: no rows returned (aggregates match per-perspective game counts).
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-220 (original), E-239 (removed Steps 5/6 member-sync and scout, updated to reports-first)*
+*Last updated: 2026-07-12 | Source: E-259 (E-259-06: removed the "(d) No double-counted aggregates" verification query -- the stored `player_season_*` tables it checked were dropped in migration 011), E-220 (original), E-239 (removed Steps 5/6 member-sync and scout, updated to reports-first)*

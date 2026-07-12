@@ -86,13 +86,13 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 
 ---
 
-### Step 4: Compute season aggregates (local, no API calls)
+### Step 4: Compute season aggregates (local, no API calls, no storage)
 
 **Auth:** N/A
 
 **Input:** Per-game stat rows loaded from step 3 boxscores
 
-**Operation:** Sum counting stats across all games per player, upsert into `player_season_batting` and `player_season_pitching`.
+**Operation:** Sum counting stats across all games per player at query time -- no separate season-aggregate table is written. (Post-E-259: the `player_season_batting`/`player_season_pitching` tables were dropped in migration 011; the season line is derived on read from the per-game rows via `src.api.db.get_season_batting` / `get_season_pitching`.)
 
 - **Batting:** Sum `AB`, `R`, `H`, `RBI`, `BB`, `SO`, `2B`, `3B`, `HR`, `TB`, `HBP`, `SB`, `CS`, `E` (treat absent extras as 0).
 - **Pitching:** Sum `ip_outs` (convert IP → outs first via `round(float(IP) * 3)`), `H`, `R`, `ER`, `BB`, `SO`, `WP`, `HBP`, `#P`, `TS`, `BF` (treat absent extras as 0).

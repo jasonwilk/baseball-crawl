@@ -158,6 +158,19 @@ def _seed_completed_game(db, season_id="2026", team_id=1, game_id="seed-g1"):
     db.commit()
 
 
+def _seed_game(db, team_id, game_id="g1", season_id="2026", game_date="2026-04-01"):
+    """Insert a minimal completed game (home=away=team) to hang per-game stat
+    rows on. Since the E-259-01 cutover the season readers derive from
+    ``player_game_*``, so a per-game stat row needs a parent ``games`` row whose
+    ``season_id`` matches the query scope."""
+    db.execute(
+        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+        "home_score, away_score, game_date) VALUES (?, ?, ?, ?, 5, 3, ?)",
+        (game_id, season_id, team_id, team_id, game_date),
+    )
+    db.commit()
+
+
 # ---------------------------------------------------------------------------
 # AC-1, AC-2: Removed inline spray functions and constants
 # ---------------------------------------------------------------------------
@@ -1344,9 +1357,17 @@ class TestQueryHelpers:
         _seed_season(db)
         _seed_player(db, "p1", "Jane", "Doe")
         _seed_roster(db, team_id, "p1", "2026", "7")
+        # Per-game rows summing to the season line (E-259-01: reader SUMs
+        # player_game_batting). Split across two games so games=2 is a real SUM.
+        _seed_game(db, team_id, "g1")
+        _seed_game(db, team_id, "g2")
         db.execute(
-            "INSERT INTO player_season_batting (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026", 10, 30, 10, 2, 1, 1, 5, 3, 8, 2, 1, 0),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "p1", team_id, team_id, 15, 5, 1, 1, 1, 3, 2, 4, 1, 1, 0),
+        )
+        db.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g2", "p1", team_id, team_id, 15, 5, 1, 0, 0, 2, 1, 4, 1, 0, 0),
         )
         db.commit()
 
@@ -1362,9 +1383,17 @@ class TestQueryHelpers:
         _seed_season(db)
         _seed_player(db, "p2", "John", "Smith")
         _seed_roster(db, team_id, "p2", "2026", "12")
+        # Per-game rows summing to the season line (E-259-01: reader SUMs
+        # player_game_pitching).
+        _seed_game(db, team_id, "g1")
+        _seed_game(db, team_id, "g2")
         db.execute(
-            "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs, h, er, bb, so, pitches, total_strikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026", 5, 45, 20, 8, 10, 30, 300, 180),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, appearance_order, ip_outs, h, er, bb, so, pitches, total_strikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "p2", team_id, team_id, 1, 24, 11, 4, 5, 16, 160, 96),
+        )
+        db.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, appearance_order, ip_outs, h, er, bb, so, pitches, total_strikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g2", "p2", team_id, team_id, 1, 21, 9, 4, 5, 14, 140, 84),
         )
         db.commit()
 
@@ -2153,17 +2182,20 @@ class TestBattingSortOrder:
         # Player with higher PA should come first
         _seed_player(db, "p1", "High", "PA")
         _seed_player(db, "p2", "Low", "PA")
+        # E-259-01: reader SUMs player_game_batting; the PA-proxy ORDER BY is now
+        # an expression over the per-game SUM.
+        _seed_game(db, team_id, "g1")
         db.execute(
-            "INSERT INTO player_season_batting "
-            "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026", 10, 50, 15, 10, 2, 1),  # PA=63
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h, bb, hbp, shf) "
+            "VALUES ('g1', ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, team_id, 50, 15, 10, 2, 1),  # PA=63
         )
         db.execute(
-            "INSERT INTO player_season_batting "
-            "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026", 10, 20, 8, 3, 0, 0),  # PA=23
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h, bb, hbp, shf) "
+            "VALUES ('g1', ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", team_id, team_id, 20, 8, 3, 0, 0),  # PA=23
         )
         db.commit()
         db.row_factory = sqlite3.Row
@@ -2181,17 +2213,20 @@ class TestPitchingSortOrder:
         _seed_season(db)
         _seed_player(db, "p1", "Ace", "Pitcher")
         _seed_player(db, "p2", "Relief", "Pitcher")
+        # E-259-01: reader SUMs player_game_pitching; the ip_outs ORDER BY is now
+        # an expression over the per-game SUM.
+        _seed_game(db, team_id, "g1")
         db.execute(
-            "INSERT INTO player_season_pitching "
-            "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026", 8, 60, 5, 40, 10, 20, 400, 250),
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, appearance_order, ip_outs, er, so, bb, h, pitches, total_strikes) "
+            "VALUES ('g1', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, team_id, 60, 5, 40, 10, 20, 400, 250),
         )
         db.execute(
-            "INSERT INTO player_season_pitching "
-            "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p2", team_id, "2026", 5, 30, 3, 15, 8, 12, 200, 120),
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, appearance_order, ip_outs, er, so, bb, h, pitches, total_strikes) "
+            "VALUES ('g1', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", team_id, team_id, 30, 3, 15, 8, 12, 200, 120),
         )
         db.commit()
         db.row_factory = sqlite3.Row
@@ -2208,11 +2243,13 @@ class TestBattingCSColumn:
         team_id = _seed_team(db)
         _seed_season(db)
         _seed_player(db, "p1", "Jane", "Doe")
+        # E-259-01: reader SUMs player_game_batting (cs included in the SUM).
+        _seed_game(db, team_id, "g1")
         db.execute(
-            "INSERT INTO player_season_batting "
-            "(player_id, team_id, season_id, gp, ab, h, sb, cs) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("p1", team_id, "2026", 10, 30, 10, 5, 3),
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h, sb, cs) "
+            "VALUES ('g1', ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, team_id, 30, 10, 5, 3),
         )
         db.commit()
         db.row_factory = sqlite3.Row
@@ -2765,16 +2802,7 @@ class TestCleanupOrphanTeams:
             "VALUES (?, 'p2', '2026', '99')",
             (orphan_id,),
         )
-        db.execute(
-            "INSERT INTO player_season_batting (player_id, team_id, season_id, gp, ab, h) "
-            "VALUES ('p2', ?, '2026', 5, 20, 8)",
-            (orphan_id,),
-        )
-        db.execute(
-            "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs) "
-            "VALUES ('p2', ?, '2026', 2, 12)",
-            (orphan_id,),
-        )
+        # player_season_* dropped in E-259-03 -- no stored season rows to seed.
         # E-220 remediation: seed a game_perspectives row for the shared game.
         # When cleanup processes game-scoped data, game_perspectives must be
         # deleted before games, otherwise FK check on games deletion fails.
@@ -2802,13 +2830,6 @@ class TestCleanupOrphanTeams:
         # Orphan roster deleted (team-scoped data always cleaned)
         assert db.execute(
             "SELECT team_id FROM team_rosters WHERE team_id = ?", (orphan_id,)
-        ).fetchone() is None
-        # Orphan season stats deleted (team-scoped data always cleaned)
-        assert db.execute(
-            "SELECT team_id FROM player_season_batting WHERE team_id = ?", (orphan_id,)
-        ).fetchone() is None
-        assert db.execute(
-            "SELECT team_id FROM player_season_pitching WHERE team_id = ?", (orphan_id,)
         ).fetchone() is None
         # Players NOT deleted (shared across teams)
         assert db.execute("SELECT player_id FROM players WHERE player_id = 'p2'").fetchone() is not None

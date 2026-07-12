@@ -1,9 +1,40 @@
 ---
 name: season-aggregate-writers
-description: ONE canonical boxscore_only recompute since E-237-03 (src/db/season_aggregates.py); history of the prior THREE divergent writers, the gs-vs-w/l/sv hybrid-row footgun it fixed, and the renderer-derived PA/XBH trap
+description: HISTORY — the entire season-aggregate WRITER architecture (canonical_recompute / _compute_season_aggregates / aggregate_parity / player_season_* tables) was RETIRED by E-259 (query-time derivation). One carried-forward residual: canonical boxscore column set = ScoutingLoader's, now the surviving SUM projection; PA/XBH are renderer-derived, never stored.
 metadata:
   type: project
 ---
+
+# RETIRED BY E-259 (2026-07-12): the writer architecture below is HISTORY
+
+E-259 (Query-Time Season Aggregates) DROPPED the `player_season_batting`/`player_season_pitching`
+tables and retired every season-aggregate WRITE path. Everything below this banner documents
+machinery that NO LONGER EXISTS:
+- `canonical_recompute` / `_recompute_batting` / `_recompute_pitching` — DELETED (E-259-02).
+- `ScoutingLoader._compute_season_aggregates` + the dedup recompute plumbing
+  (`recompute_affected_seasons`, the `recompute_aggregates` kwarg) — DELETED (E-259-02).
+- `aggregate_parity.py` / `verify_aggregates` / `bb report verify-aggregates` — DELETED (E-259-04).
+- `player_season_batting` / `player_season_pitching` tables — DROPPED via migration 011 (E-259-03).
+
+Season batting/pitching aggregates are now DERIVED AT QUERY TIME by `src.api.db.get_season_batting`
+/ `get_season_pitching` (E-259-01): they SUM the per-game `player_game_*` tables, perspective-filtered
+(`perspective_team_id = team_id`), with the ORDER BY reproduced over the per-game SUM.
+
+## The ONE carried-forward residual (STILL LIVE)
+The canonical-column decision below OUTLIVES the cutover. The shared SUM projection survived into
+`src/db/season_aggregates.py` — `batting_recompute_select` / `pitching_recompute_select` +
+`BATTING_RECOMPUTE_KEYS` / `PITCHING_RECOMPUTE_KEYS` — and is exactly ScoutingLoader's old canonical
+`boxscore_only` column set; the query-time readers consume it. Two facts remain load-bearing:
+- **Canonical column set = ScoutingLoader's set** (batting 16; pitching incl `gs`). The dedup-only
+  extras (batting pa/singles/xbh; pitching w/l/sv) were never live-read and are NOT in the projection.
+- **PA and XBH are renderer-DERIVED, never stored/read**: `_compute_pa` = ab+bb+hbp+shf; `_xbh` =
+  doubles+triples+hr (renderer). There is no stored `pa`/`xbh` cell to read.
+
+See [[season_tables_are_a_pure_cache.md]] for the E-259 design basis and [[etl-patterns.md]].
+
+---
+
+# PRE-E-259 HISTORY (kept for the WHY — describes now-deleted machinery)
 
 # UPDATE (E-237-03 DONE, 2026-06-16): boxscore_only recompute is now CONSOLIDATED
 

@@ -26,9 +26,7 @@ games ingested BEFORE that fix:
 
 Perspective scoping + Cleanup-Detection Mirror Invariant (AC-4): every step here
 is non-destructive.  ``reload_game_plays`` is perspective-scoped and only UPDATEs
-``plays`` / ``play_events`` rows; the boxscore re-ingest's season-aggregate
-recompute (``canonical_recompute``) preserves member ``full``/``supplemented``
-rows via its provenance guard.  Nothing in this module DELETEs a row, so the
+``plays`` / ``play_events`` rows.  Nothing in this module DELETEs a row, so the
 Cleanup-Detection Mirror Invariant (``.claude/rules/data-model.md``) is not
 engaged -- there is no cleanup surface to mirror.
 """

@@ -169,8 +169,8 @@ class TestRunMigrations:
             "games",
             "player_game_batting",
             "player_game_pitching",
-            "player_season_batting",
-            "player_season_pitching",
+            # player_season_batting / player_season_pitching dropped by migration
+            # 011 (E-259-03) -- the season line is derived at query time.
             "spray_charts",
             "opponent_links",
             "scouting_runs",
@@ -1123,6 +1123,12 @@ class TestE220UpgradeGuard:
             CREATE TABLE players (player_id TEXT PRIMARY KEY, gc_athlete_profile_id TEXT);
             CREATE TABLE seasons (season_id TEXT PRIMARY KEY, season_type TEXT NOT NULL);
             CREATE TABLE team_opponents (id INTEGER PRIMARY KEY);
+            -- player_season_batting/pitching must exist so pending migration 011
+            -- (drop the season-aggregate tables) applies cleanly before the
+            -- E-220 guard runs; not perspective-checked tables. stat_completeness
+            -- is present because 011's refuse-on-member-row preflight reads it.
+            CREATE TABLE player_season_batting (id INTEGER PRIMARY KEY, stat_completeness TEXT);
+            CREATE TABLE player_season_pitching (id INTEGER PRIMARY KEY, stat_completeness TEXT);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
@@ -1188,6 +1194,10 @@ class TestE220UpgradeGuard:
             CREATE TABLE players (player_id TEXT PRIMARY KEY, gc_athlete_profile_id TEXT);
             CREATE TABLE seasons (season_id TEXT PRIMARY KEY, season_type TEXT NOT NULL);
             CREATE TABLE team_opponents (id INTEGER PRIMARY KEY);
+            -- Season-aggregate tables for pending migration 011's DROP (see the
+            -- sibling test above for the rationale).
+            CREATE TABLE player_season_batting (id INTEGER PRIMARY KEY, stat_completeness TEXT);
+            CREATE TABLE player_season_pitching (id INTEGER PRIMARY KEY, stat_completeness TEXT);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
@@ -1884,4 +1894,119 @@ class TestGameDedupBackstopMigration:
         finally:
             conn.close()
         assert names.count(self._INDEX) == 1
+
+
+class TestMigration011DropSeasonAggregates:
+    """E-259-03 migration 011: drop the season-aggregate tables with a
+    refuse-on-member-row preflight.
+
+    Clean input (zero ``full``/``supplemented`` rows) -> both tables dropped and
+    the migration recorded. Member-row input -> REFUSED: the migration raises,
+    BOTH tables stay intact, and it is NOT recorded (so a corrected DB can re-run
+    it later). Uses ``apply_migration`` directly to run 011 in isolation after
+    building the pre-011 schema, since ``run_migrations`` would apply 011 too.
+    """
+
+    _FILENAME = "011_drop_season_aggregate_tables.sql"
+    _SEASON_TABLES = {"player_season_batting", "player_season_pitching"}
+    _MIGRATIONS_DDL = (
+        "CREATE TABLE IF NOT EXISTS _migrations ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "filename TEXT NOT NULL UNIQUE, "
+        "applied_at TEXT NOT NULL DEFAULT (datetime('now')));"
+    )
+
+    def _apply_through_010(self, db_path: Path) -> sqlite3.Connection:
+        """Apply every migration BEFORE 011 to a fresh DB; return an open conn."""
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + self._MIGRATIONS_DDL)
+        conn.commit()
+        for f in collect_migration_files():
+            if f.name < self._FILENAME:
+                apply_migration(conn, f)
+        return conn
+
+    def _mig_011(self) -> Path:
+        return next(
+            f for f in collect_migration_files() if f.name == self._FILENAME
+        )
+
+    def _present_season_tables(self, conn: sqlite3.Connection) -> set[str]:
+        return {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('player_season_batting', 'player_season_pitching')"
+            ).fetchall()
+        }
+
+    def test_clean_input_drops_tables_and_records(self, fresh_db: Path) -> None:
+        """AC-1: zero member rows -> both tables dropped, migration recorded."""
+        conn = self._apply_through_010(fresh_db)
+        try:
+            assert self._present_season_tables(conn) == self._SEASON_TABLES
+            apply_migration(conn, self._mig_011())
+            assert self._present_season_tables(conn) == set(), "tables not dropped"
+            assert self._FILENAME in get_applied_migrations(conn)
+        finally:
+            conn.close()
+
+    def test_member_row_refuses_and_preserves(self, fresh_db: Path) -> None:
+        """AC-2/AC-3: a member row -> REFUSED (raises), both tables intact, and
+        the migration is NOT recorded so a corrected run can proceed later."""
+        conn = self._apply_through_010(fresh_db)
+        try:
+            conn.execute(
+                "INSERT INTO seasons (season_id, name, year) VALUES ('2026', '2026', 2026)"
+            )
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type) VALUES (1, 'T', 'member')"
+            )
+            conn.execute(
+                "INSERT INTO players (player_id, first_name, last_name) VALUES ('p1', 'A', 'B')"
+            )
+            # A member (full) row -- non-re-derivable; the preflight must refuse.
+            conn.execute(
+                "INSERT INTO player_season_pitching "
+                "(player_id, team_id, season_id, stat_completeness) "
+                "VALUES ('p1', 1, '2026', 'full')"
+            )
+            conn.commit()
+
+            with pytest.raises(sqlite3.Error, match="REFUSED"):
+                apply_migration(conn, self._mig_011())
+
+            # Both tables intact and the migration was NOT recorded.
+            assert self._present_season_tables(conn) == self._SEASON_TABLES
+            assert self._FILENAME not in get_applied_migrations(conn)
+        finally:
+            conn.close()
+
+    def test_member_row_in_batting_also_refuses(self, fresh_db: Path) -> None:
+        """AC-2: a member row in player_season_batting (the other table) also
+        refuses and names that table in the message."""
+        conn = self._apply_through_010(fresh_db)
+        try:
+            conn.execute(
+                "INSERT INTO seasons (season_id, name, year) VALUES ('2026', '2026', 2026)"
+            )
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type) VALUES (1, 'T', 'member')"
+            )
+            conn.execute(
+                "INSERT INTO players (player_id, first_name, last_name) VALUES ('p1', 'A', 'B')"
+            )
+            conn.execute(
+                "INSERT INTO player_season_batting "
+                "(player_id, team_id, season_id, stat_completeness) "
+                "VALUES ('p1', 1, '2026', 'supplemented')"
+            )
+            conn.commit()
+
+            with pytest.raises(sqlite3.Error, match="player_season_batting"):
+                apply_migration(conn, self._mig_011())
+            assert self._present_season_tables(conn) == self._SEASON_TABLES
+            assert self._FILENAME not in get_applied_migrations(conn)
+        finally:
+            conn.close()
 

@@ -21,7 +21,7 @@
 - **Last updated line format**: `*Last updated: YYYY-MM-DD | Source: E-NNN (description), E-NNN-SS (description)*`
 - Pipeline commands documented in operations.md under `## Data Maintenance` (Admin Team Management section removed in E-239)
 - Schema changes go in architecture.md under `## Schema Changes`, newest first
-- Standalone report run-record / trust-flag operator docs live in operations.md under `### Report Generation Run Records` (inside Standalone Reports section, after verify-aggregates)
+- Standalone report run-record / trust-flag operator docs live in operations.md under `### Report Generation Run Records` (inside Standalone Reports section, after `bb report cleanup` -- the `verify-aggregates` subsection it used to sit after was removed in E-259, the stored `player_season_*` tables it checked having been dropped)
 - Coaching explanations should not mention technical details (routes, SQL, Python modules)
 - Coaching docs use plain prose and "what it means in practice" examples, not formulas
 - Audience: coaching docs assume zero technical knowledge; admin docs assume Python/Docker/SQL competence
