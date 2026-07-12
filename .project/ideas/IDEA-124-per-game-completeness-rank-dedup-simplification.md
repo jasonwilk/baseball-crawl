@@ -26,6 +26,8 @@ A dedicated per-game dedup-simplification pass. No urgency — it is dead code, 
 ## Notes
 Surfaced by DE + verified by PM (schema + zero-writer trace) during E-259-02 dispatch, 2026-07-12 — the Q3 deferral. **Domain: data-engineer** (`src/db/player_dedup.py`). Related: E-259-02 story file's DISPATCH CORRECTION block records the full trace.
 
+**Rider (E-259 closure review): a second weakened test in the same area.** `tests/test_scouting_loader.py::test_e247_in_memory_empty_boxscores_does_not_touch_populated_db` is now toothless — its pre-cutover stale-aggregate observable was deleted along with `canonical_recompute`, and the current single-player fixture passes whether or not the empty-boxscore guard fires. When IDEA-124's dedup pass touches this area, RE-ARM the test via the surviving dedup half: seed a mergeable duplicate pair, invoke with zero boxscores, and assert NO merge occurred (this detects removal of the E-247 early-return guard, which still protects populated DBs from mutation-on-empty-re-scout). Weakened-not-wrong; accepted at E-259 closure rather than reopening it. (DISTINCT from the E-259 closure Codex F1, which fixed the OTHER toothless test in this file — the rate-stat `test_rate_stats_not_in_season_batting_contract` at ~:330; this rider's `test_e247_...` test was deliberately deferred, not fixed in E-259.)
+
 ---
 Created: 2026-07-12
 Last reviewed: 2026-07-12
