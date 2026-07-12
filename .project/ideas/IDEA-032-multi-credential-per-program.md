@@ -1,7 +1,7 @@
 # IDEA-032: Multi-Credential per Program
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — multi-program operation is de-scoped (ROADMAP §7); a single credential suffices for the single-program reports-first product.
 
 ## Summary
 Support different GameChanger credentials for different programs (e.g., one GC account for HS teams, another for USSSA teams). Currently the system uses a single set of credentials for all API access.

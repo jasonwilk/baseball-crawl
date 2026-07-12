@@ -1,7 +1,7 @@
 # IDEA-013: cmux Evaluation for Agent Teams
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — operator ruled discard: the idea's own discard condition ("no concrete problem surfaces") has fired. The current agent-teams tooling is sufficient; no cmux evaluation is warranted.
 
 ## Summary
 Evaluate whether cmux adds meaningful value beyond iTerm2 + tmux for heavy Agent Teams sessions. cmux positions itself as a terminal app built for coding agents with workspace organization, hooks, and notifications. The consensus plan (DISCUSSION-terminal-setup.md) explicitly deferred this as Phase 5.

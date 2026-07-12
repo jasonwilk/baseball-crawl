@@ -1,7 +1,7 @@
 # IDEA-040: Optimistic Pitching Column API Audit
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the loader whose optimistic column mapping this would audit was deleted (E-239). Nothing left to audit.
 
 ## Summary
 Investigate which of the 23 "optimistic" pitching columns (mapped by E-117-03 via `defense.get()`) the GameChanger season-stats API actually returns. These columns are in the DDL and mapped in the loader, but have never been confirmed in a live API response.

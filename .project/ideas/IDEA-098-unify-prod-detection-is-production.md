@@ -1,7 +1,7 @@
 # IDEA-098: Unify production-detection through the is_production() seam
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-254-01 (`csrf.py` now routes through `is_production()`; verified at `csrf.py:136`).
 
 ## Summary
 E-252-03 introduced `src/api/helpers.py::is_production()` as the single-source production-detection seam (`APP_ENV == "production"`, development default) and repointed `routes/auth.py::_is_dev_mode` to `not is_production()`. But `csrf.py:135` still uses the inline `os.environ.get("APP_ENV", "development") == "production"` idiom. This idea narrows that remaining inline idiom to route through the seam, so prod-detection is read one way everywhere.

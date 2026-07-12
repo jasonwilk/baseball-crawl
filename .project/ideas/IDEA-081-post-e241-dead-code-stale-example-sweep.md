@@ -1,7 +1,7 @@
 # IDEA-081: Post-E-241 dead-code + stale-example sweep
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-246-02 (that story's text states "IDEA-081 is effectively promoted into this work"; the flagged removals are verified gone from code).
 
 ## Summary
 A small, focused cleanup sweep of dead code and stale compound-slug example text

@@ -1,7 +1,7 @@
 # IDEA-070: Admin-UI delete-team path does not clean reports.team_id
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the admin delete-team path this patches was deleted by E-239. The gap no longer exists.
 
 ## Summary
 The admin-UI delete-team HTTP handler (`src/api/routes/admin.py::delete_team` → `_delete_team_cascade` → `src/reports/generator.py::cascade_delete_team`) does not gate on `is_team_eligible_for_cleanup` and the canonical `cascade_delete_team` helper does not clean `reports.team_id`. Since `reports.team_id NOT NULL REFERENCES teams(id)` (`migrations/001_initial_schema.sql:611`) has no `ON DELETE` clause, deleting a team that owns any `reports` rows via the admin UI would FK-violate on the final `DELETE FROM teams` step. The report-deletion code path at `admin.py:3261` already excludes such teams via `is_team_eligible_for_cleanup` Guard 3 (`src/reports/generator.py:1672`); the admin-UI delete path has no equivalent gate.

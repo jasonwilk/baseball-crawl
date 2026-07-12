@@ -1,7 +1,7 @@
 # IDEA-092: data-engineer.md Core Entities table is stale vs the live schema
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the cited DEFECT (hallucination anchors: `PlayerTeamSeason` etc.) was already stripped by E-250-04. CA verified `.claude/agents/data-engineer.md:105-118` now names ONLY real tables and carries a self-aware note at `:118`. Briefly folded into E-262 (story E-262-05) then dropped in review: the residual "fuller schema-aligned entity refresh" is an ENHANCEMENT, not a live defect, and is barred by the E-260 meta-layer freeze. Re-file against a concrete CURRENT inaccuracy (name the mis-described row) if one surfaces.
 
 ## Summary
 The `.claude/agents/data-engineer.md` "Core Entities" table is broadly out of date with the live database schema — beyond the cross-season/`PlayerTeamSeason` cells that E-250 removes, other rows (e.g. `Lineup`, `PlateAppearance`, and the entity set generally) do not match the tables that actually exist. Refresh the table to reflect the live schema.

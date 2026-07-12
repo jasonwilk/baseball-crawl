@@ -23,7 +23,7 @@
 - `src/api/routes/auth.py` -- /auth/* routes (login/verify/logout)
 - `src/api/email.py` -- Mailgun helper (stdout when MAILGUN_API_KEY not set)
 - `src/api/templates/auth/` -- login.html, check_email.html, verify_error.html
-- DEV_USER_EMAIL bypasses login; auto-creates is_admin=1 user if missing
+- DEV_USER_EMAIL bypasses login; auto-creates a plain user (email only) if missing; admin ONLY if the email matches ADMIN_EMAIL (there is no is_admin column -- admin = users.role='admin' OR email==ADMIN_EMAIL, per _user_is_admin in src/api/auth.py)
 - Session cookie: name=session, HttpOnly, SameSite=Lax, Max-Age=604800
 - Tokens: token_urlsafe(32) for magic links (43 chars), token_hex(32) for sessions (64 chars)
 - DB only stores SHA-256 hashes of tokens, never the raw value

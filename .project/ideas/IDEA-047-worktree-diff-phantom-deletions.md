@@ -1,7 +1,7 @@
 # IDEA-047: Epic Worktree `git diff main` Shows Phantom File Deletions
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the prime suspected cause (rtk rewriting git output) was removed by E-229, and the closure sequence already uses `--cached`. Likely unreproducible now; re-file with a fresh repro if the phantom-deletion symptom recurs.
 
 ## Summary
 During E-161 dispatch, `git diff main` from the epic worktree showed deletions for E-162/E-163 directories and modifications to PM memory/IDEA-046/README that don't exist in the worktree's staging area. `git status` correctly showed only 8 staged files, but `git diff main` reported 19 files changed including phantom deletions. Root cause unclear -- possibly related to rtk proxy rewriting git output, or a subtle git worktree state issue.

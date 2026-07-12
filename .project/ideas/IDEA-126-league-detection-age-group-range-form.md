@@ -1,7 +1,7 @@
 # IDEA-126: `detect_league_level` Misses GC's Free-Text `age_group` Range Form
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262: code fix in story E-262-03 (SE, `starter_prediction.py`); companion `age_group` doc note in story E-262-09 (api-scout, `docs/api/`).
 
 ## Summary
 `src/reports/starter_prediction.py::detect_league_level` only recognizes the `\d+U` bracket form (e.g. `"14U"`) in its Priority-2 `age_group` branch. GameChanger also returns a free-text range form -- `age_group="Between 13 - 18"` -- which slips through to `"unknown"`, suppressing the "Most Likely Arms" projection and the Tier-2 AI "Scouting Analysis" for summer HS-age travel opponents that have no NGB. The API is giving us a valid HS-age level signal; the detector just doesn't read that format. This is a `starter_prediction.py` detection fix, not an API gap.

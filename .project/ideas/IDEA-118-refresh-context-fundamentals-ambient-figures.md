@@ -1,7 +1,7 @@
 # IDEA-118: Refresh the stale ambient per-session figures in context-fundamentals
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-05, context-layer truth & staleness).
 
 ## Summary
 `.claude/skills/context-fundamentals/SKILL.md` still carries stale ambient per-session context figures outside the `:74-85` table that E-260-04 re-derived: `:28` ("approximately 614-886 lines of always-loaded text"), and the `:185`/`:193` example load-budget illustration. Refresh these to the current ambient subset (~638-910) and drop the "measured post-E-213 (2026-04-05)" provenance so the skill is internally consistent with the re-derived whole-layer table.

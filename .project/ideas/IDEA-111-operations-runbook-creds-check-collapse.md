@@ -1,7 +1,7 @@
 # IDEA-111: Collapse the operations.md:884 credential-recovery step now that bb creds check is an end-to-end probe
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-07, admin docs hygiene). Note IDEA-109 (smoke_test retarget) remains OUT of scope; the recipe collapse is done standalone.
 
 ## Summary
 The credential-expiry recovery recipe at `docs/admin/operations.md:884` predates the current `bb creds check`, which is itself a real end-to-end authenticated probe (`/me/user`). The recipe may now carry redundant or superseded steps (e.g. a separate `smoke_test.py` run whose liveness signal `bb creds check` already provides). Review the recipe and collapse it to the minimal, current set of steps.

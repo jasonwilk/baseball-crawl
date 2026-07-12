@@ -1,7 +1,7 @@
 # IDEA-117: Scope multi-agent-patterns:24's bare "Never summarize" to the dispatch context block
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-05, context-layer truth & staleness).
 
 ## Summary
 `.claude/skills/multi-agent-patterns/SKILL.md:24` reads "Pass original content at every relay point. Never summarize." Its next line (`:26`) correctly scopes it to the dispatch context block (Main Session → Implementing Agent: full story file text + full epic Technical Notes), but the bare `:24` sentence, read alone, looks like a blanket verbatim-relay mandate — the exact over-broad reading E-260 removed elsewhere. Scope `:24` to the dispatch context block in place, mirroring how E-260-04 scoped `context-fundamentals/SKILL.md:203`.

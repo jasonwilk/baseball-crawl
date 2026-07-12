@@ -1,7 +1,7 @@
 # IDEA-037: Scouting Report Redesign
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-185 (scouting report redesign), with E-159 (print) and E-192 (PDF page breaks).
 
 ## Summary
 Redesign scouting reports with rate stats (OBP, K/9, BB/9), proactive flags (hot/cold streaks, recent form), and PDF export for game-day use. E-100's UX consultation surfaced these needs but scoped them out.

@@ -1,7 +1,7 @@
 # IDEA-127: Report generator stamps `name_only` identity-match before it back-fills the team's anchors (false-positive wrong-team badge)
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-03, live source bugs).
 
 ## Summary
 The report generator records `identity_match_method='name_only'` on the `report_generation_runs` row BEFORE it back-fills the team's `public_id` and `gc_uuid` anchors within the SAME run. So the FIRST direct report for any team that already exists as a pre-scouted opponent stub always shows the operator "name-only match" wrong-team-risk badge on `/admin/reports`, even though the team is fully resolvable and self-heals during that same run. It is a sequencing bug, not a data-integrity problem -- no stats are misattributed.

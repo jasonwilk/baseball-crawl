@@ -1,7 +1,7 @@
 # IDEA-078: Coaching Docs Still Sell a Dashboard-First / Longitudinal Product
 
 ## Status
-`CANDIDATE` — surfaced by the reports-first drift scour (2026-06-15, Codex pass). Doc-only; bounded cleanup, not an epic.
+`DISCARDED` (2026-07-12) — ALREADY RESOLVED by E-239 (2026-06-17), two days after this idea was captured. Briefly folded into E-262 (story E-262-08) then dropped in planning review: docs-writer verified `docs/coaching/README.md` is already reports-first (no dashboard/longitudinal framing) and `docs/coaching/scouting-reports.md` no longer exists (renamed to `standalone-reports.md` by E-239); a grep of all `docs/coaching/*.md` for dashboard/longitudinal/cross-season hits only past-tense "removed" provenance lines. Nothing left to rewrite. Story E-262-08 ABANDONED.
 
 ## Summary
 `docs/coaching/` still describes the pre-reframe product. `docs/coaching/README.md` promises "Player development tracking" across seasons/levels and directs coaches to the live dashboard; `docs/coaching/scouting-reports.md` is framed as a "Coaching Dashboard" guide and states "The dashboard is the main tool." Under the reports-first reframe (`docs/ROADMAP.md`), the dashboard surface and longitudinal/cross-season tracking are explicit NON-GOALS (§7), and the actual product is generate-and-share a standalone scouting report. The coaching docs should be rewritten to match — reports-first, no dashboard, no longitudinal framing.

@@ -1,7 +1,7 @@
 # IDEA-128: perspective-provenance.md public-scorebook caveats
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-05, context-layer truth & staleness).
 
 ## Summary
 api-scout flagged two corrections to the `.claude/rules/perspective-provenance.md` "Perspective-Specific vs. Stable Fields" table during E-261 review: (1) the "Stable" row asserts scores are stable across perspectives, but two independently-kept public scorebooks of the same game CAN disagree by a run (E-261 observed 12-4 vs 12-5) — the row needs a public-scorebook caveat; (2) the "Uncertain: public games `id`" row should be promoted to definitively perspective-specific (post-E-239 the public path is the sole populator, where `event_id`/`id` is per-perspective, byte-identical to `game_stream_id`). Both are context-layer (rule) edits owned by claude-architect.

@@ -1,7 +1,7 @@
 # IDEA-060: Comprehensive Flow Testing and Validation
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — 9 of its 14 flows target surfaces deleted by E-239; the surviving report flows are covered by E-234 regression guards. No net-new flow-testing work remains.
 
 ## Summary
 Systematic end-to-end testing of every user flow in the system. Partially completed during E-187 evaluation (6 of 14 flows tested). Remaining flows need live testing with real data to verify correctness and discover gaps before coaching staff begins using the system.

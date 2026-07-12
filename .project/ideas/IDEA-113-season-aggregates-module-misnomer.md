@@ -1,7 +1,7 @@
 # IDEA-113: Rename or fold src/db/season_aggregates.py post-cutover (it no longer computes aggregates)
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-04, rename/fold season_aggregates.py).
 
 ## Summary
 After E-259's query-time cutover, `src/db/season_aggregates.py` no longer computes or writes season aggregates — the DELETE+INSERT recompute driver (`canonical_recompute`) is deleted, leaving only the projection SQL builders (`batting_recompute_select()`/`pitching_recompute_select()`) and the `*_RECOMPUTE_KEYS` tuples that a *reader* (`get_season_batting`/`get_season_pitching` in `src/api/db.py`) consumes. The module name and the `*_recompute_*` symbol names become a mild misnomer. Rename the module (and/or the symbols) or fold the surviving projection helpers into `src/api/db.py` next to their sole consumer.

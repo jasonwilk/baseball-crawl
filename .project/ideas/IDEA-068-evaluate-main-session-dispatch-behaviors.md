@@ -1,7 +1,7 @@
 # IDEA-068: Evaluate main-session dispatch behaviors for codification
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — operator ruled discard: the meta-layer is FROZEN post-E-260, so codifying additional main-session dispatch behaviors is overtaken by that freeze discipline.
 
 ## Summary
 Main session (team-lead / Claude Opus 4.6) developed operational behaviors during the E-220 → E-221 → E-222 recovery arc that the user believes influenced dispatch quality. This idea catalogs 15 observed behaviors grouped into 6 themes and asks "should any of these be codified into CLAUDE.md, plan skill, implement skill, dispatch-pattern rule, or elsewhere?" — NOT to decide codification now, but to preserve the behaviors for deliberate later evaluation.

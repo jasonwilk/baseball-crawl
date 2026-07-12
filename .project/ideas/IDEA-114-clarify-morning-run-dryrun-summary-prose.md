@@ -1,7 +1,7 @@
 # IDEA-114: Clarify CLAUDE.md's morning-run --dry-run summary-email prose
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-05, context-layer truth & staleness).
 
 ## Summary
 CLAUDE.md's `bb report morning-run` description couples "`--dry-run` … generates nothing" with "an always-sent end-of-run operator summary email is the missed-run signal" in a way that reads as if dry-run ALSO sends the summary email. The code is unambiguous the other way: `src/cli/report.py:571` `_emit_summary_if_needed` returns early on `if dry_run:` (line 581), and line 666 states "Dry-run sends no summary, so it is exempt." Add a short clarifying clause so the prose matches the code — dry-run sends no summary.

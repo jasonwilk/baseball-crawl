@@ -1,7 +1,7 @@
 # IDEA-041: Play-by-Play Stat Compilation Pipeline
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-195 + E-245 + E-198 (play-by-play stat compilation + reconciliation).
 
 ## Summary
 Parse play-by-play data from the plays endpoint to derive advanced per-game stats (QAB, pitches seen per batter, contact quality, swing metrics, etc.), validate derived counting stats against boxscore data, and compile game-level results into season aggregates. This achieves full stat parity between owned teams (season-stats API) and opponent teams (our own compilation).

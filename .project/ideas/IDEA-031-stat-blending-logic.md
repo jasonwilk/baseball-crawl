@@ -1,7 +1,7 @@
 # IDEA-031: Stat Blending Logic
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the `season_stats_loader` and the member season-stats write path this blended were deleted by E-239. Reports derive stats from boxscore/plays only, so there are no two provenance streams to blend.
 
 ## Summary
 Implement loaders that merge API season stats with boxscore-derived stats. E-100 created the provenance columns (`stat_completeness` with three states: full/supplemented/boxscore_only, plus `games_tracked` on season tables) but deferred the blending strategy.

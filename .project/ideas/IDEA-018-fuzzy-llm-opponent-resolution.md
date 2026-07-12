@@ -1,7 +1,7 @@
 # IDEA-018: Fuzzy LLM Opponent Resolution
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the `opponent_resolver` this would have enhanced was deleted by E-239. The reports product takes a `public_id` directly, so there is no fuzzy opponent-matching step left to improve.
 
 ## Summary
 Use a lightweight LLM (Haiku) to fuzzy-match unlinked opponents to real GC teams by comparing rosters (player names, jersey numbers), cross-referencing shared game scores, and confirming "these are the same team" when the automated progenitor_team_id chain is unavailable.

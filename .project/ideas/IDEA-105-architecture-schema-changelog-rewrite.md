@@ -1,7 +1,7 @@
 # IDEA-105: Full Rewrite of `architecture.md` "Schema Changes" Historical Changelog
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-07, admin docs hygiene).
 
 ## Summary
 `docs/admin/architecture.md` carries a "Schema Changes" changelog section that still cites pre-E-220 migration numbers which no longer map to real `migrations/*.sql` files (the E-220 rewrite squashed all prior migrations into `001_initial_schema.sql` and later real migrations 002–010 reused some numbers). E-255-05 added a clarifying note atop the section and fixed the one false "plays removed" claim in it, but did NOT rewrite the full historical changelog.

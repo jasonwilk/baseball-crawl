@@ -1,7 +1,7 @@
 # IDEA-011: Investigate HTTP 500 Endpoint Failures
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the three endpoints target org-level / bulk-opponent surfaces (org discovery, org team lists, bulk opponent rosters) that the E-239 reports-first descope removed. The reports product takes a `public_id` directly and needs no org-scoped bulk data. Re-file as a fresh idea if an org-level need re-emerges against the then-current surfaces.
 
 ## Summary
 Three GameChanger API endpoints return HTTP 500 with web browser headers but succeeded during iOS proxy capture. The root cause is unknown. This idea covers systematically investigating why they fail and how to make them work.

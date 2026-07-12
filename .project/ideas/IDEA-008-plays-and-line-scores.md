@@ -1,7 +1,7 @@
 # IDEA-008: Pitch-by-Pitch Plays and Inning Line Scores Crawling
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-195 + E-245 (plays pipeline / high-fidelity play ingestion). Both endpoints in scope here (plays + public line-score details) are now crawled and ingested.
 
 ## Summary
 Crawl per-game pitch-by-pitch play data (`GET /game-stream-processing/{game_stream_id}/plays`) and inning-by-inning line scores (`GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores`) for all completed games. These endpoints were discovered 2026-03-04 and are not covered by E-002.

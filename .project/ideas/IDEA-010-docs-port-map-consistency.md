@@ -1,7 +1,7 @@
 # IDEA-010: Docs Port Map Consistency for Devcontainer + Compose
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-07, admin docs hygiene).
 
 ## Summary
 Create a focused docs cleanup pass to align all local URL/port references with the current devcontainer + Docker Compose networking model, especially Traefik dashboard on `8180` and mitmproxy/mitmweb on `8080/8081`.

@@ -1,7 +1,7 @@
 # IDEA-056: Fix _search_fallback_team Return Type Bug
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — `crawlers/opponent_resolver.py` was deleted by E-239-05; a grep confirms `_search_fallback_team` is gone from `src/`. The buggy function no longer exists.
 
 ## Summary
 `_search_fallback_team` in the opponent resolver returns bare `0` instead of tuple `(0, 0)` when no unlinked rows remain, causing an unpacking error in `resolve()` that silently inflates error counts by 1 on every resolution cycle.

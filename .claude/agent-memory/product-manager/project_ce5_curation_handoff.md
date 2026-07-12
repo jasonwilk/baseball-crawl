@@ -6,6 +6,8 @@ Three SOUND_BUT_UNDERDOCUMENTED items from `PLATFORM-AUDIT.md` §3 (lines 199-20
 **How to apply:** when CE-5 is refined/dispatched, hand these three rationales to claude-architect as the source text for its charter/rule edits. Do not re-litigate the decisions; they are Jason-approved (2026-07-05).
 
 ## 1. Nine-agent roster review (audit §3 item #1)
+> **DISCHARGED — CODIFIED by E-255-03 (ux-designer charter refocus) + E-255-09 (docs-writer REPURPOSED branch), archived 2026-07-08.** Both agents refocused, neither retired; this rationale is now historical.
+
 **Decision (D4, Jason-approved 2026-07-05; RE-CONFIRMED by Jason 2026-07-07 during E-255 planning): refocus both ux-designer and docs-writer; retire neither.** (A ux-designer docket recon briefly framed the refocus as "not final"; Jason re-confirmed REPURPOSE directly, so that framing is superseded — E-255-03 refocuses the ux charter, E-255-09 takes the REPURPOSED branch.)
 Recorded rationale: *"The 2026-06-12 reports-first reframe (E-239) deleted the coaching dashboard but not the design/documentation need. ux-designer refocuses from dashboard UI to report layout, trust surfaces, and the tools-hub IA pass (2026-06-20 signal — a live forward docket). docs-writer refocuses from dashboard docs to admin runbooks + coaching how-tos for reports and morning-run (it has a live CE-5 docket). Neither is retired; both have forward work."*
 Physical home: `.claude/agents/ux-designer.md`, `.claude/agents/docs-writer.md` — CA edits in CE-5. Also referenced in audit §7 CA docket line 284 ("ux-designer repurpose-or-retire (user decision)" — now DECIDED: refocus) and line 300-301 (ux-designer own-memory rewrite around surviving surfaces).
@@ -17,6 +19,8 @@ Physical home: `.claude/rules/context-layer-assessment.md` — CA writes in CE-5
 > **SUPERSEDED by E-260-07 (2026-07-12).** This "soft review prompt, NOT a hard cap" shape was codified by E-255-03 and then ran through the whole 1,652→4,061 growth without ever producing a shrink — the ungameable version never fired. E-260-07 replaced trigger 7 with a **hard ratchet**: the manual operator diagnostic `.claude/hooks/context-ratchet.sh` counts `*.md`+`*.sh` lines across the four subtrees vs a committed operator-owned baseline (`.project/baselines/context-layer-ratchet.json`) and exits non-zero on growth past baseline; net growth now requires an operator-signed exception, not any answer. The "density-gameable" objection was answered by the evidence (the soft version lost to whoever was doing the growing). Do NOT cite this section as the current trigger-7 design.
 
 ## 3. Persistent agent-memory lifecycle policy (audit §3 item #3)
+> **DISCHARGED — CODIFIED by E-255-03 as the Learning-Loop Lifecycle (context-layer-assessment trigger 8), archived 2026-07-08.** This rationale is now historical.
+
 **Decision: record a lightweight lifecycle policy.**
 Recommended policy (simple-first): (a) **promote** a memory to a rule when its lesson is cited across 2+ epics or generalizes beyond one agent; (b) **strike** a memory when the code/flag/decision it names is deleted (staleness eviction at the next epic that touches that area); (c) **per-agent review cadence** rather than a hard KB cap (the ~516KB total is a symptom, not a threshold). Jason may want to set the specific ceiling/cadence when CE-5 is refined.
 Physical home: a short new rule or a section in `.claude/rules/context-layer-assessment.md` — CA writes in CE-5.

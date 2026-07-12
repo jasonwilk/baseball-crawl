@@ -1,7 +1,7 @@
 # IDEA-021: Database Migration Process Definition
 
 ## Status
-`CANDIDATE`
+`DISCARDED` (2026-07-12) — the forcing function (the E-088 opponent data model) was de-scoped, and a migration process has since been solved in practice across E-100 / E-220 / E-239 (numbered SQL migrations applied by a transactional startup runner). No standalone process-definition work remains.
 
 ## Priority
 HIGH -- the opponent data model epic (E-088) will be the first real migration, and we need a solid process before executing it.

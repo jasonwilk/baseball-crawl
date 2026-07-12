@@ -1,7 +1,7 @@
 # IDEA-009: Per-Player Per-Game Stats and Spray Charts
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — delivered by E-158 + E-166 (per-player per-game stats + spray charts).
 
 ## Summary
 Crawl per-player per-game statistics and spray chart data via `GET /teams/{team_id}/players/{player_id}/stats`. This endpoint was discovered 2026-03-04 and returns comprehensive per-game batting/fielding stats, rolling cumulative season stats, and ball-in-play location coordinates (spray charts) for a single player across all their games. Not covered by E-002.

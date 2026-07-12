@@ -1,7 +1,7 @@
 # IDEA-107: Normalize `/game-stream-processing/` Endpoint-Doc Path-Variable Naming
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-09, docs/api cleanup).
 
 ## Summary
 Sibling `docs/api/` endpoint files name the `/game-stream-processing/{id}/` path variable inconsistently — `get-game-stream-processing-game_stream_id-boxscore.md` uses `{game_stream_id}` while `get-game-stream-processing-event_id-plays.md` uses `{event_id}` — even though BOTH endpoints take `event_id` as the path parameter (verified: `game_stream.id` returns HTTP 500 on both). The filenames and their frontmatter `path:` placeholders + `see_also` link entries carry the legacy `game_stream_id` name, which can mislead a reader into thinking boxscore takes a different id than plays.

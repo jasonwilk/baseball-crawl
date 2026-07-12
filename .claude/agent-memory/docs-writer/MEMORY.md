@@ -28,4 +28,4 @@
 - **N vs M (report coverage)**: N = `completed_games_with_data` (games with stat rows loaded); M = `completed_games` (games with final score). N ≤ M. Always document as "N of M games with data", never conflate with score-only coverage.
 
 ## Topic File Index
-- [Conventions file](conventions.md) -- (this MEMORY.md serves as the index; no separate topic files yet)
+- No separate topic files yet -- Conventions above (this file) is the sole reference.

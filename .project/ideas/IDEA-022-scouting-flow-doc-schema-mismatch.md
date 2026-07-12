@@ -1,7 +1,7 @@
 # IDEA-022: Scouting Flow Doc / Schema Stat Mismatch
 
 ## Status
-`CANDIDATE`
+`PROMOTED` (2026-07-12) — folded into E-262 (story E-262-09, docs/api cleanup; DE-ratified direction = fix the doc, not the schema).
 
 ## Summary
 The opponent scouting flow doc (`docs/api/flows/opponent-scouting.md`) lists stats that are not present in the actual database schema. The doc describes what the API returns; the schema stores a subset. Either the doc should be corrected to reflect what we actually store, or the schema should be expanded to capture the additional stats.
