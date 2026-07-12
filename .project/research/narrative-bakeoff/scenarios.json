@@ -3,7 +3,7 @@
     "key": "committee",
     "team_id": 147,
     "season_id": "2026",
-    "label": "Standing Bear Freshman",
+    "label": "<OWN-PROGRAM-REDACTED> Freshman",
     "game_date": "2026-03-26",
     "league": "nsaa_varsity",
     "is_estimate": false,
@@ -13,7 +13,7 @@
     "team_record": "2-2",
     "ranked_arms": [
       {
-        "name": "Liam Beiermann",
+        "name": "<PLAYER-NAME-REDACTED>",
         "jersey_number": "3",
         "games_started": 1,
         "start_share": 0.25,
@@ -25,7 +25,7 @@
         "reasoning": "Committee candidate, 7 days rest, 27 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
       },
       {
-        "name": "Jace Stanczyk",
+        "name": "<PLAYER-NAME-REDACTED>",
         "jersey_number": "0",
         "games_started": 1,
         "start_share": 0.25,
@@ -37,7 +37,7 @@
         "reasoning": "Committee candidate, 5 days rest, 42 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
       },
       {
-        "name": "Thomas Saddler",
+        "name": "<PLAYER-NAME-REDACTED>",
         "jersey_number": "7",
         "games_started": 2,
         "start_share": 0.5,
@@ -182,7 +182,7 @@
     "key": "clear_rotation",
     "team_id": 160,
     "season_id": "2026",
-    "label": "Standing Bear Varsity",
+    "label": "<OWN-PROGRAM-REDACTED> Varsity",
     "game_date": "2026-03-31",
     "league": "nsaa_varsity",
     "is_estimate": false,

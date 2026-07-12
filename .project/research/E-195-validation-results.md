@@ -16,37 +16,37 @@ against GC season-stats API values.
 
 | Player | Team | Derived | GC | Diff | % Diff | Status |
 |--------|------|---------|----|------|--------|--------|
-| Austin Rodocker | Lincoln Rebels 14U | 106 | 101 | 5 | 5.0% | OK |
-| Beckett Meens | Lincoln Rebels 14U | 134 | 151 | 17 | 11.3% | MISMATCH |
-| Brody Henninger | Standing Bear Freshman Grizzlies | 21 | 26 | 5 | 19.2% | MISMATCH |
-| Caiden Strauss | Standing Bear Freshman Grizzlies | 6 | 7 | 1 | 14.3% | MISMATCH |
-| Chase Lightner | Lincoln Rebels 14U | 206 | 212 | 6 | 2.8% | OK |
-| Cole Silvertrust | Standing Bear Freshman Grizzlies | 4 | 4 | 0 | 0.0% | OK |
-| Easton Larkins | Standing Bear Freshman Grizzlies | 1 | 1 | 0 | 0.0% | OK |
-| Evan Mittan-DeBuhr | Lincoln Rebels 14U | 58 | 58 | 0 | 0.0% | OK |
-| Grant Oliver | Standing Bear Freshman Grizzlies | 7 | 6 | 1 | 16.7% | MISMATCH |
-| Hudson Reimers | Lincoln Rebels 14U | 99 | 119 | 20 | 16.8% | MISMATCH |
-| Jace Stanczyk | Standing Bear Freshman Grizzlies | 20 | 21 | 1 | 4.8% | OK |
-| James Powell | Standing Bear Freshman Grizzlies | 2 | 2 | 0 | 0.0% | OK |
-| Kadyn Lichtenberg | Lincoln Rebels 14U | 113 | 124 | 11 | 8.9% | MISMATCH |
-| Kadyn Lichtenberg | Standing Bear Freshman Grizzlies | 3 | 3 | 0 | 0.0% | OK |
-| Keenan Treat | Lincoln Rebels 14U | 45 | 48 | 3 | 6.2% | MISMATCH |
-| Kyler Hoffman | Standing Bear Freshman Grizzlies | 1 | 1 | 0 | 0.0% | OK |
-| Levin Nguyen | Standing Bear Freshman Grizzlies | 6 | 6 | 0 | 0.0% | OK |
-| Liam Beiermann | Standing Bear Freshman Grizzlies | 18 | 18 | 0 | 0.0% | OK |
-| Oliver Hitz | Lincoln Rebels 14U | 59 | 48 | 11 | 22.9% | MISMATCH |
-| Owen Hemmingsen | Lincoln Rebels 14U | 117 | 117 | 0 | 0.0% | OK |
-| Owen Robison | Standing Bear Freshman Grizzlies | 4 | 4 | 0 | 0.0% | OK |
-| Owen Rodocker | Lincoln Rebels 14U | 199 | 189 | 10 | 5.3% | MISMATCH |
-| Reid Wilkinson | Lincoln Rebels 14U | 84 | 90 | 6 | 6.7% | MISMATCH |
-| Reid Wilkinson | Standing Bear Freshman Grizzlies | 0 | 0 | 0 | 0.0% | OK |
-| Tanner Rahmatulla | Standing Bear Freshman Grizzlies | 10 | 12 | 2 | 16.7% | MISMATCH |
-| Thomas Saddler | Standing Bear Freshman Grizzlies | 22 | 20 | 2 | 10.0% | MISMATCH |
-| Truman Jackson | Lincoln Rebels 14U | 104 | 103 | 1 | 1.0% | OK |
+| Austin Rodocker | <CITY-REDACTED> Rebels 14U | 106 | 101 | 5 | 5.0% | OK |
+| Beckett Meens | <CITY-REDACTED> Rebels 14U | 134 | 151 | 17 | 11.3% | MISMATCH |
+| Brody Henninger | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 21 | 26 | 5 | 19.2% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 6 | 7 | 1 | 14.3% | MISMATCH |
+| Chase Lightner | <CITY-REDACTED> Rebels 14U | 206 | 212 | 6 | 2.8% | OK |
+| Cole Silvertrust | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 4 | 4 | 0 | 0.0% | OK |
+| Easton Larkins | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 1 | 1 | 0 | 0.0% | OK |
+| Evan Mittan-DeBuhr | <CITY-REDACTED> Rebels 14U | 58 | 58 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 7 | 6 | 1 | 16.7% | MISMATCH |
+| Hudson Reimers | <CITY-REDACTED> Rebels 14U | 99 | 119 | 20 | 16.8% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 20 | 21 | 1 | 4.8% | OK |
+| James Powell | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 2 | 2 | 0 | 0.0% | OK |
+| Kadyn Lichtenberg | <CITY-REDACTED> Rebels 14U | 113 | 124 | 11 | 8.9% | MISMATCH |
+| Kadyn Lichtenberg | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 3 | 3 | 0 | 0.0% | OK |
+| Keenan Treat | <CITY-REDACTED> Rebels 14U | 45 | 48 | 3 | 6.2% | MISMATCH |
+| Kyler Hoffman | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 1 | 1 | 0 | 0.0% | OK |
+| Levin Nguyen | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 6 | 6 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 18 | 18 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 59 | 48 | 11 | 22.9% | MISMATCH |
+| Owen Hemmingsen | <CITY-REDACTED> Rebels 14U | 117 | 117 | 0 | 0.0% | OK |
+| Owen Robison | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 4 | 4 | 0 | 0.0% | OK |
+| Owen Rodocker | <CITY-REDACTED> Rebels 14U | 199 | 189 | 10 | 5.3% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 84 | 90 | 6 | 6.7% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 0 | 0 | 0 | 0.0% | OK |
+| Tanner Rahmatulla | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 10 | 12 | 2 | 16.7% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 22 | 20 | 2 | 10.0% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 104 | 103 | 1 | 1.0% | OK |
 
 ### FPS Discrepancy Diagnostics
 
-#### Beckett Meens (Lincoln Rebels 14U)
+#### Beckett Meens (<CITY-REDACTED> Rebels 14U)
 Derived=134, GC=151, Diff=17 (11.3%)
 
 **Per-game breakdown:**
@@ -85,7 +85,7 @@ Derived=134, GC=151, Diff=17 (11.3%)
 | `24fccda9-110e-4614-be8b-3cc821ba8527` | 3 | 1 | top | Fly Out | 2 | 0 |
 | `24fccda9-110e-4614-be8b-3cc821ba8527` | 15 | 2 | top | Error | 5 | 0 |
 
-#### Brody Henninger (Standing Bear Freshman Grizzlies)
+#### Brody Henninger (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=21, GC=26, Diff=5 (19.2%)
 
 **Per-game breakdown:**
@@ -107,7 +107,7 @@ Derived=21, GC=26, Diff=5 (19.2%)
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 64 | 7 | top | Strikeout | 5 | 1 |
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 65 | 7 | top | Strikeout | 3 | 1 |
 
-#### Caiden Strauss (Standing Bear Freshman Grizzlies)
+#### <PLAYER-NAME-REDACTED> (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=6, GC=7, Diff=1 (14.3%)
 
 **Per-game breakdown:**
@@ -127,7 +127,7 @@ Derived=6, GC=7, Diff=1 (14.3%)
 | `757c024c-de8d-4b44-b159-7704a6ff0640` | 44 | 4 | top | Single | 2 | 0 |
 | `757c024c-de8d-4b44-b159-7704a6ff0640` | 45 | 4 | top | Strikeout | 3 | 1 |
 
-#### Grant Oliver (Standing Bear Freshman Grizzlies)
+#### <PLAYER-NAME-REDACTED> (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=7, GC=6, Diff=1 (16.7%)
 
 **Per-game breakdown:**
@@ -148,7 +148,7 @@ Derived=7, GC=6, Diff=1 (16.7%)
 | `155bc5ef-3347-4b23-b4ed-4ea8f1e3e9c7` | 16 | 2 | top | Walk | 4 | 0 |
 | `155bc5ef-3347-4b23-b4ed-4ea8f1e3e9c7` | 17 | 2 | top | Single | 4 | 1 |
 
-#### Hudson Reimers (Lincoln Rebels 14U)
+#### Hudson Reimers (<CITY-REDACTED> Rebels 14U)
 Derived=99, GC=119, Diff=20 (16.8%)
 
 **Per-game breakdown:**
@@ -186,7 +186,7 @@ Derived=99, GC=119, Diff=20 (16.8%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 65 | 7 | bottom | Ground Out | 1 | 1 |
 | `077a027a-f296-4784-9f94-a325f8b646dd` | 22 | 3 | top | Strikeout | 6 | 0 |
 
-#### Kadyn Lichtenberg (Lincoln Rebels 14U)
+#### Kadyn Lichtenberg (<CITY-REDACTED> Rebels 14U)
 Derived=113, GC=124, Diff=11 (8.9%)
 
 **Per-game breakdown:**
@@ -226,7 +226,7 @@ Derived=113, GC=124, Diff=11 (8.9%)
 | `0d8acfd0-5a41-474b-bf51-2ff2a2dc75b9` | 42 | 4 | top | Pop Out | 2 | 0 |
 | `0d8acfd0-5a41-474b-bf51-2ff2a2dc75b9` | 47 | 5 | top | Fly Out | 3 | 1 |
 
-#### Keenan Treat (Lincoln Rebels 14U)
+#### Keenan Treat (<CITY-REDACTED> Rebels 14U)
 Derived=45, GC=48, Diff=3 (6.2%)
 
 **Per-game breakdown:**
@@ -254,7 +254,7 @@ Derived=45, GC=48, Diff=3 (6.2%)
 | `1c9e15d7-6405-4aae-b387-99bdad642cb6` | 8 | 1 | bottom | Strikeout | 4 | 1 |
 | `1c9e15d7-6405-4aae-b387-99bdad642cb6` | 16 | 2 | bottom | Walk | 4 | 0 |
 
-#### Oliver Hitz (Lincoln Rebels 14U)
+#### <PLAYER-NAME-REDACTED> (<CITY-REDACTED> Rebels 14U)
 Derived=59, GC=48, Diff=11 (22.9%)
 
 **Per-game breakdown:**
@@ -285,7 +285,7 @@ Derived=59, GC=48, Diff=11 (22.9%)
 | `0373a710-7214-47cf-920c-ca73949ee929` | 7 | 1 | bottom | Line Out | 5 | 0 |
 | `0373a710-7214-47cf-920c-ca73949ee929` | 8 | 1 | bottom | Fly Out | 1 | 1 |
 
-#### Owen Rodocker (Lincoln Rebels 14U)
+#### Owen Rodocker (<CITY-REDACTED> Rebels 14U)
 Derived=199, GC=189, Diff=10 (5.3%)
 
 **Per-game breakdown:**
@@ -329,7 +329,7 @@ Derived=199, GC=189, Diff=10 (5.3%)
 | `077a027a-f296-4784-9f94-a325f8b646dd` | 4 | 1 | top | Ground Out | 2 | 0 |
 | `077a027a-f296-4784-9f94-a325f8b646dd` | 5 | 1 | top | Strikeout | 4 | 1 |
 
-#### Reid Wilkinson (Lincoln Rebels 14U)
+#### <PLAYER-NAME-REDACTED> (<CITY-REDACTED> Rebels 14U)
 Derived=84, GC=90, Diff=6 (6.7%)
 
 **Per-game breakdown:**
@@ -359,7 +359,7 @@ Derived=84, GC=90, Diff=6 (6.7%)
 | `0bf3b9e3-3414-4961-b19b-d58dd82f84d4` | 7 | 1 | bottom | Walk | 6 | 0 |
 | `0bf3b9e3-3414-4961-b19b-d58dd82f84d4` | 8 | 1 | bottom | Strikeout | 5 | 0 |
 
-#### Tanner Rahmatulla (Standing Bear Freshman Grizzlies)
+#### Tanner Rahmatulla (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=10, GC=12, Diff=2 (16.7%)
 
 **Per-game breakdown:**
@@ -379,7 +379,7 @@ Derived=10, GC=12, Diff=2 (16.7%)
 | `155bc5ef-3347-4b23-b4ed-4ea8f1e3e9c7` | 33 | 3 | top | Walk | 7 | 0 |
 | `155bc5ef-3347-4b23-b4ed-4ea8f1e3e9c7` | 34 | 3 | top | Single | 4 | 1 |
 
-#### Thomas Saddler (Standing Bear Freshman Grizzlies)
+#### <PLAYER-NAME-REDACTED> (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=22, GC=20, Diff=2 (10.0%)
 
 **Per-game breakdown:**
@@ -409,36 +409,36 @@ Derived=22, GC=20, Diff=2 (10.0%)
 
 | Player | Team | Derived | GC | Diff | % Diff | Status |
 |--------|------|---------|----|------|--------|--------|
-| Austin Rodocker | Lincoln Rebels 14U | 64 | 73 | 9 | 12.3% | MISMATCH |
-| Beckett Meens | Lincoln Rebels 14U | 52 | 57 | 5 | 8.8% | MISMATCH |
-| Brody Henninger | Standing Bear Freshman Grizzlies | 16 | 16 | 0 | 0.0% | OK |
-| Brooks Good | Standing Bear Freshman Grizzlies | 4 | 4 | 0 | 0.0% | OK |
-| Caiden Strauss | Standing Bear Freshman Grizzlies | 2 | 2 | 0 | 0.0% | OK |
-| Chase Lightner | Lincoln Rebels 14U | 128 | 135 | 7 | 5.2% | MISMATCH |
-| Cole Silvertrust | Standing Bear Freshman Grizzlies | 12 | 12 | 0 | 0.0% | OK |
-| Easton Larkins | Standing Bear Freshman Grizzlies | 10 | 11 | 1 | 9.1% | MISMATCH |
-| Evan Mittan-DeBuhr | Lincoln Rebels 14U | 62 | 67 | 5 | 7.5% | MISMATCH |
-| Grant Oliver | Standing Bear Freshman Grizzlies | 12 | 12 | 0 | 0.0% | OK |
-| Hudson Reimers | Lincoln Rebels 14U | 104 | 107 | 3 | 2.8% | OK |
-| Jace Stanczyk | Standing Bear Freshman Grizzlies | 4 | 4 | 0 | 0.0% | OK |
-| Kadyn Lichtenberg | Lincoln Rebels 14U | 126 | 131 | 5 | 3.8% | OK |
-| Keenan Treat | Lincoln Rebels 14U | 98 | 108 | 10 | 9.3% | MISMATCH |
-| Kyler Hoffman | Standing Bear Freshman Grizzlies | 10 | 10 | 0 | 0.0% | OK |
-| Levin Nguyen | Standing Bear Freshman Grizzlies | 4 | 4 | 0 | 0.0% | OK |
-| Liam Beiermann | Standing Bear Freshman Grizzlies | 5 | 5 | 0 | 0.0% | OK |
-| Oliver Hitz | Lincoln Rebels 14U | 121 | 132 | 11 | 8.3% | MISMATCH |
-| Owen Hemmingsen | Lincoln Rebels 14U | 93 | 99 | 6 | 6.1% | MISMATCH |
-| Owen Robison | Standing Bear Freshman Grizzlies | 13 | 13 | 0 | 0.0% | OK |
-| Owen Rodocker | Lincoln Rebels 14U | 118 | 130 | 12 | 9.2% | MISMATCH |
-| Reid Wilkinson | Lincoln Rebels 14U | 80 | 85 | 5 | 5.9% | MISMATCH |
-| Reid Wilkinson | Standing Bear Freshman Grizzlies | 8 | 8 | 0 | 0.0% | OK |
-| Tanner Rahmatulla | Standing Bear Freshman Grizzlies | 16 | 17 | 1 | 5.9% | MISMATCH |
-| Thomas Saddler | Standing Bear Freshman Grizzlies | 15 | 15 | 0 | 0.0% | OK |
-| Truman Jackson | Lincoln Rebels 14U | 122 | 132 | 10 | 7.6% | MISMATCH |
+| Austin Rodocker | <CITY-REDACTED> Rebels 14U | 64 | 73 | 9 | 12.3% | MISMATCH |
+| Beckett Meens | <CITY-REDACTED> Rebels 14U | 52 | 57 | 5 | 8.8% | MISMATCH |
+| Brody Henninger | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 16 | 16 | 0 | 0.0% | OK |
+| Brooks Good | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 4 | 4 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 2 | 2 | 0 | 0.0% | OK |
+| Chase Lightner | <CITY-REDACTED> Rebels 14U | 128 | 135 | 7 | 5.2% | MISMATCH |
+| Cole Silvertrust | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 12 | 12 | 0 | 0.0% | OK |
+| Easton Larkins | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 10 | 11 | 1 | 9.1% | MISMATCH |
+| Evan Mittan-DeBuhr | <CITY-REDACTED> Rebels 14U | 62 | 67 | 5 | 7.5% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 12 | 12 | 0 | 0.0% | OK |
+| Hudson Reimers | <CITY-REDACTED> Rebels 14U | 104 | 107 | 3 | 2.8% | OK |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 4 | 4 | 0 | 0.0% | OK |
+| Kadyn Lichtenberg | <CITY-REDACTED> Rebels 14U | 126 | 131 | 5 | 3.8% | OK |
+| Keenan Treat | <CITY-REDACTED> Rebels 14U | 98 | 108 | 10 | 9.3% | MISMATCH |
+| Kyler Hoffman | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 10 | 10 | 0 | 0.0% | OK |
+| Levin Nguyen | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 4 | 4 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 5 | 5 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 121 | 132 | 11 | 8.3% | MISMATCH |
+| Owen Hemmingsen | <CITY-REDACTED> Rebels 14U | 93 | 99 | 6 | 6.1% | MISMATCH |
+| Owen Robison | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 13 | 13 | 0 | 0.0% | OK |
+| Owen Rodocker | <CITY-REDACTED> Rebels 14U | 118 | 130 | 12 | 9.2% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 80 | 85 | 5 | 5.9% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 8 | 8 | 0 | 0.0% | OK |
+| Tanner Rahmatulla | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 16 | 17 | 1 | 5.9% | MISMATCH |
+| <PLAYER-NAME-REDACTED> | <OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> | 15 | 15 | 0 | 0.0% | OK |
+| <PLAYER-NAME-REDACTED> | <CITY-REDACTED> Rebels 14U | 122 | 132 | 10 | 7.6% | MISMATCH |
 
 ### QAB Discrepancy Diagnostics
 
-#### Austin Rodocker (Lincoln Rebels 14U)
+#### Austin Rodocker (<CITY-REDACTED> Rebels 14U)
 Derived=64, GC=73, Diff=9 (12.3%)
 
 **Per-game breakdown:**
@@ -521,7 +521,7 @@ Derived=64, GC=73, Diff=9 (12.3%)
 | `077a027a-f296-4784-9f94-a325f8b646dd` | 58 | 6 | bottom | Hit By Pitch | 3 | 0 |
 | `0b8d88cc-01fd-4077-b76d-f13022c271d2` | 4 | 1 | top | Walk | 4 | 1 |
 
-#### Beckett Meens (Lincoln Rebels 14U)
+#### Beckett Meens (<CITY-REDACTED> Rebels 14U)
 Derived=52, GC=57, Diff=5 (8.8%)
 
 **Per-game breakdown:**
@@ -601,7 +601,7 @@ Derived=52, GC=57, Diff=5 (8.8%)
 | `0b8d88cc-01fd-4077-b76d-f13022c271d2` | 0 | 1 | top | Walk | 6 | 1 |
 | `0b8d88cc-01fd-4077-b76d-f13022c271d2` | 9 | 1 | top | Walk | 5 | 1 |
 
-#### Chase Lightner (Lincoln Rebels 14U)
+#### Chase Lightner (<CITY-REDACTED> Rebels 14U)
 Derived=128, GC=135, Diff=7 (5.2%)
 
 **Per-game breakdown:**
@@ -706,7 +706,7 @@ Derived=128, GC=135, Diff=7 (5.2%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 17 | 3 | top | Single | 5 | 0 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 32 | 4 | top | Single | 2 | 0 |
 
-#### Easton Larkins (Standing Bear Freshman Grizzlies)
+#### Easton Larkins (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=10, GC=11, Diff=1 (9.1%)
 
 **Per-game breakdown:**
@@ -733,7 +733,7 @@ Derived=10, GC=11, Diff=1 (9.1%)
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 51 | 5 | bottom | Single | 4 | 0 |
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 70 | 7 | bottom | Single | 6 | 1 |
 
-#### Evan Mittan-DeBuhr (Lincoln Rebels 14U)
+#### Evan Mittan-DeBuhr (<CITY-REDACTED> Rebels 14U)
 Derived=62, GC=67, Diff=5 (7.5%)
 
 **Per-game breakdown:**
@@ -820,7 +820,7 @@ Derived=62, GC=67, Diff=5 (7.5%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 31 | 4 | top | Fly Out | 6 | 1 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 62 | 7 | top | Strikeout | 4 | 0 |
 
-#### Keenan Treat (Lincoln Rebels 14U)
+#### Keenan Treat (<CITY-REDACTED> Rebels 14U)
 Derived=98, GC=108, Diff=10 (9.3%)
 
 **Per-game breakdown:**
@@ -915,7 +915,7 @@ Derived=98, GC=108, Diff=10 (9.3%)
 | `06852f3e-6626-40a2-bd17-7f18a92cb936` | 18 | 2 | bottom | Error | 3 | 0 |
 | `06852f3e-6626-40a2-bd17-7f18a92cb936` | 34 | 3 | bottom | Ground Out | 3 | 0 |
 
-#### Oliver Hitz (Lincoln Rebels 14U)
+#### <PLAYER-NAME-REDACTED> (<CITY-REDACTED> Rebels 14U)
 Derived=121, GC=132, Diff=11 (8.3%)
 
 **Per-game breakdown:**
@@ -1023,7 +1023,7 @@ Derived=121, GC=132, Diff=11 (8.3%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 29 | 4 | top | Walk | 5 | 1 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 46 | 6 | top | Double | 1 | 1 |
 
-#### Owen Hemmingsen (Lincoln Rebels 14U)
+#### Owen Hemmingsen (<CITY-REDACTED> Rebels 14U)
 Derived=93, GC=99, Diff=6 (6.1%)
 
 **Per-game breakdown:**
@@ -1127,7 +1127,7 @@ Derived=93, GC=99, Diff=6 (6.1%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 22 | 3 | top | Fly Out | 1 | 0 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 41 | 5 | top | Ground Out | 4 | 0 |
 
-#### Owen Rodocker (Lincoln Rebels 14U)
+#### Owen Rodocker (<CITY-REDACTED> Rebels 14U)
 Derived=118, GC=130, Diff=12 (9.2%)
 
 **Per-game breakdown:**
@@ -1233,7 +1233,7 @@ Derived=118, GC=130, Diff=12 (9.2%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 20 | 3 | top | Walk | 5 | 1 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 39 | 5 | top | Ground Out | 4 | 0 |
 
-#### Reid Wilkinson (Lincoln Rebels 14U)
+#### <PLAYER-NAME-REDACTED> (<CITY-REDACTED> Rebels 14U)
 Derived=80, GC=85, Diff=5 (5.9%)
 
 **Per-game breakdown:**
@@ -1327,7 +1327,7 @@ Derived=80, GC=85, Diff=5 (5.9%)
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 30 | 4 | top | Strikeout | 4 | 0 |
 | `06715ac5-4d35-4c96-a945-d9593f63c68f` | 47 | 6 | top | Walk | 4 | 1 |
 
-#### Tanner Rahmatulla (Standing Bear Freshman Grizzlies)
+#### Tanner Rahmatulla (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>)
 Derived=16, GC=17, Diff=1 (5.9%)
 
 **Per-game breakdown:**
@@ -1354,7 +1354,7 @@ Derived=16, GC=17, Diff=1 (5.9%)
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 4 | 1 | bottom | Strikeout | 3 | 0 |
 | `2975658b-9608-4176-a3df-69aa45d00af3` | 26 | 3 | bottom | Single | 3 | 0 |
 
-#### Truman Jackson (Lincoln Rebels 14U)
+#### <PLAYER-NAME-REDACTED> (<CITY-REDACTED> Rebels 14U)
 Derived=122, GC=132, Diff=10 (7.6%)
 
 **Per-game breakdown:**

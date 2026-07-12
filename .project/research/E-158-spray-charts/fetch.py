@@ -1,4 +1,4 @@
-"""Fetch spray chart data from GameChanger API for the Freshman Grizzlies.
+"""Fetch spray chart data from GameChanger API for the Freshman <TEAM-REDACTED>.
 
 Usage:
     python3 .project/research/spray-chart-spike/fetch.py
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from src.gamechanger.client import GameChangerClient
 
-# Freshman Grizzlies - our only member team with played games
+# Freshman <TEAM-REDACTED> - our only member team with played games
 TEAM_GC_UUID = "ec2827f3-9eb5-4473-b39a-be4a9e4d656e"
 
 # Played games: (event_id, opponent_team_id, date)

@@ -7,7 +7,7 @@
 `DONE`
 
 ## Description
-After this story is complete, all existing database rows for the Lincoln Rebels 14U team (team_id 126) and any opponents scouted through it will have their season_id corrected from `2026-spring-hs` to `2025-summer-usssa`. A new season row for `2025-summer-usssa` will exist in the `seasons` table. This migration runs at app startup via `apply_migrations.py`.
+After this story is complete, all existing database rows for the <CITY-REDACTED> Rebels 14U team (team_id 126) and any opponents scouted through it will have their season_id corrected from `2026-spring-hs` to `2025-summer-usssa`. A new season row for `2025-summer-usssa` will exist in the `seasons` table. This migration runs at app startup via `apply_migrations.py`.
 
 ## Context
 The Rebels 14U (a 2025 summer USSSA team) was crawled under the `2026-spring-hs` directory and all 92 games plus associated data were tagged with the wrong season_id. Opponents scouted through the Rebels 14U scouting pipeline may also carry the wrong season_id. This migration corrects all existing data. Going forward, the loader changes in E-197-02 and E-197-03 prevent future mis-tagging.
@@ -17,7 +17,7 @@ This migration can be developed and applied independently of the loader changes 
 ## Acceptance Criteria
 - [ ] **AC-1**: Migration file `migrations/011_fix_season_id_rebels_14u.sql` exists and is idempotent (safe to run multiple times).
 - [ ] **AC-2**: The migration begins with `PRAGMA foreign_keys=ON;` to ensure FK enforcement during UPDATEs.
-- [ ] **AC-3**: A USSSA program row is created (INSERT OR IGNORE): `program_id='rebels-usssa'`, `program_type='usssa'`, `name='Lincoln Rebels'`. Team 126 is assigned to it: `UPDATE teams SET program_id = 'rebels-usssa' WHERE id = 126 AND program_id IS NULL`. This ensures the derivation utility produces `2025-summer-usssa` for this team.
+- [ ] **AC-3**: A USSSA program row is created (INSERT OR IGNORE): `program_id='rebels-usssa'`, `program_type='usssa'`, `name='<CITY-REDACTED> Rebels'`. Team 126 is assigned to it: `UPDATE teams SET program_id = 'rebels-usssa' WHERE id = 126 AND program_id IS NULL`. This ensures the derivation utility produces `2025-summer-usssa` for this team.
 - [ ] **AC-4**: A `seasons` row for `2025-summer-usssa` is created (INSERT OR IGNORE) BEFORE any UPDATE statements (FK prerequisite).
 - [ ] **AC-5**: The migration discovers all affected team_ids using a SQL CTE: `{126} UNION SELECT opponent_team_id FROM team_opponents WHERE our_team_id = 126`. This set is used in all subsequent UPDATE WHERE clauses.
 - [ ] **AC-6**: All `games` rows where (home_team_id OR away_team_id is in the affected set) AND `season_id = '2026-spring-hs'` are updated to `season_id = '2025-summer-usssa'`.

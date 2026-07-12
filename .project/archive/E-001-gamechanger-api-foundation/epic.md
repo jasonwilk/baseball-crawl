@@ -8,7 +8,7 @@
 Establish the foundational layer for all GameChanger API access: credential extraction from user-provided curl commands, a rotating-credential management system, an authenticated HTTP client utility, and a living API specification document. Every other epic in this project depends on this foundation being solid.
 
 ## Background & Context
-GameChanger is a commercial platform used by Lincoln Standing Bear High School coaches to track stats for their Freshman, JV, Reserve, and Varsity teams. The platform does not offer a self-service developer API -- instead, the user extracts credentials by capturing network traffic (via curl commands) from the GameChanger web or mobile interface.
+GameChanger is a commercial platform used by <CITY-REDACTED> <OWN-PROGRAM-REDACTED> High School coaches to track stats for their Freshman, JV, Reserve, and Varsity teams. The platform does not offer a self-service developer API -- instead, the user extracts credentials by capturing network traffic (via curl commands) from the GameChanger web or mobile interface.
 
 These credentials are short-lived and rotate frequently. The system must handle credential expiry gracefully, and the user must be able to refresh credentials without touching application code.
 

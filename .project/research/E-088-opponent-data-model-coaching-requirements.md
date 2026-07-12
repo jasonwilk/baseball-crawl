@@ -59,7 +59,7 @@ A coach looking at an unlinked opponent should see:
 1. The badge: "Partial scouting data -- our games only"
 2. A brief explanation: "This team isn't in GameChanger's database. The stats below are from games we played against them -- our scorekeeper's records only."
 3. Our game results against them (if any): Score, date, our pitchers, our hitters' lines
-4. A prompt to the operator (Jason): "Want to link this team? Search by name or paste their GameChanger URL."
+4. A prompt to the operator (<OPERATOR-REDACTED>): "Want to link this team? Search by name or paste their GameChanger URL."
 
 This is not embarrassing -- it is honest. A coach would rather see "we don't have full data on this team" than see stale or misleading partial stats presented as if they were complete.
 
@@ -95,26 +95,26 @@ Specifically: the batters with the highest OBP, their typical lineup slot, and t
 
 ## 4. Manual Association Workflow -- The Coach's Mental Model
 
-This addresses how Jason (the operator) should be able to manually link an unlinked opponent to a real GC team.
+This addresses how <OPERATOR-REDACTED> (the operator) should be able to manually link an unlinked opponent to a real GC team.
 
 ### How an Operator Thinks About This
-Jason is not thinking about `progenitor_team_id` values. He is thinking: "We're playing Lincoln Eagles next week and I need scouting data. How do I connect them to their real GameChanger page?"
+<OPERATOR-REDACTED> is not thinking about `progenitor_team_id` values. He is thinking: "We're playing <CITY-REDACTED> Eagles next week and I need scouting data. How do I connect them to their real GameChanger page?"
 
-He will try the most natural thing first: **search by name**. "Lincoln Eagles." If there are 4 teams with similar names in the database, he needs enough context to pick the right one (city/state, competition level, a couple of their recent opponents he recognizes).
+He will try the most natural thing first: **search by name**. "<CITY-REDACTED> Eagles." If there are 4 teams with similar names in the database, he needs enough context to pick the right one (city/state, competition level, a couple of their recent opponents he recognizes).
 
 ### Recommended Workflow Priority -- MUST HAVE: Search by Name First
 The primary manual association flow should be:
 1. Operator sees an unlinked opponent with the "Partial data" badge
 2. An action button: "Link to GameChanger team"
 3. A search field: "Search by team name"
-4. Results show: team name, city/state, competition level, win/loss record, and 2-3 opponent names from their recent schedule (so Jason can confirm it's the right team -- "yeah, I recognize Lincoln Academy and Burlington Heights as teams they'd play")
+4. Results show: team name, city/state, competition level, win/loss record, and 2-3 opponent names from their recent schedule (so <OPERATOR-REDACTED> can confirm it's the right team -- "yeah, I recognize <CITY-REDACTED> Academy and Burlington Heights as teams they'd play")
 5. Operator selects the match, confirming the link
 
 ### SHOULD HAVE: URL Paste as a Power-User Path
-Some operators (Jason is technically savvy) will know they can get the team's GameChanger URL directly. Support paste: "Or paste a GameChanger team URL." This is faster for someone who already has the URL open in a browser tab.
+Some operators (<OPERATOR-REDACTED> is technically savvy) will know they can get the team's GameChanger URL directly. Support paste: "Or paste a GameChanger team URL." This is faster for someone who already has the URL open in a browser tab.
 
 ### NICE TO HAVE: Browse Recent Shared Opponents
-"Teams that played both you and this opponent" -- if both teams played the same third team, that's a strong signal they are in the same competition tier and likely the same region. This is a helpful disambiguation when there are multiple "Lincoln Eagles" in the search results.
+"Teams that played both you and this opponent" -- if both teams played the same third team, that's a strong signal they are in the same competition tier and likely the same region. This is a helpful disambiguation when there are multiple "<CITY-REDACTED> Eagles" in the search results.
 
 ### What the Operator Should NOT Have to Do
 - Manually enter `progenitor_team_id` UUIDs. Never expose raw API IDs in the UI.
@@ -128,27 +128,27 @@ Some operators (Jason is technically savvy) will know they can get the team's Ga
 This is a genuine data modeling tension that needs to be resolved at the schema level.
 
 ### The Core Problem
-"Lincoln Eagles 14U" in 2025 has completely different players than "Lincoln Eagles 14U" in 2026. But:
+"<CITY-REDACTED> Eagles 14U" in 2025 has completely different players than "<CITY-REDACTED> Eagles 14U" in 2026. But:
 - The coaching staff may be the same (or mostly the same)
 - The coaching tendencies and game strategies persist even when the roster turns over
-- For scouting purposes, a coach facing Lincoln Eagles wants to know about both "what this PROGRAM does" and "what this SPECIFIC TEAM does right now"
+- For scouting purposes, a coach facing <CITY-REDACTED> Eagles wants to know about both "what this PROGRAM does" and "what this SPECIFIC TEAM does right now"
 
 ### Recommendation: Same Team Entity, Separate Season Stats -- MUST HAVE
-The team entity (the program -- "Lincoln Eagles 14U") should persist across seasons. What changes per season is the roster, the stats, and the record. The data model should distinguish:
+The team entity (the program -- "<CITY-REDACTED> Eagles 14U") should persist across seasons. What changes per season is the roster, the stats, and the record. The data model should distinguish:
 
 - **Team entity**: Name, city/state, competition level, GC team UUID. This persists.
 - **Team season**: Linked to the team entity + a season year. Contains the win/loss record, season stats, roster for that year.
-- **Head-to-head history**: Stored as games between teams, linked via team entity + season. This lets a coach see "we've played Lincoln Eagles 4 times across 2 seasons."
+- **Head-to-head history**: Stored as games between teams, linked via team entity + season. This lets a coach see "we've played <CITY-REDACTED> Eagles 4 times across 2 seasons."
 
 ### What Coaches Actually Want
-- "What is Lincoln Eagles doing THIS season?" -- current season stats, current roster, recent games
-- "What have we seen from Lincoln Eagles historically?" -- head-to-head games, our performance vs. them over time
+- "What is <CITY-REDACTED> Eagles doing THIS season?" -- current season stats, current roster, recent games
+- "What have we seen from <CITY-REDACTED> Eagles historically?" -- head-to-head games, our performance vs. them over time
 - "Who is their ace this year vs. last year?" -- same program, roster comparison across seasons
 
 The data model must support both "current season view" (default) and "multi-season historical view" (available for programs we've faced repeatedly). The scouting report defaults to current season but surfaces historical context if available.
 
 ### SHOULD HAVE: Competition Level Context When Comparing Seasons
-A team that was "club_travel" in 2024 and "high_school_varsity" in 2025 is not directly comparable. The data model should store `competition_level` per season (not just per team entity) so coaches see: "Lincoln Eagles, 2024 Club Travel, 2025 HS Varsity -- these seasons are at different competition levels."
+A team that was "club_travel" in 2024 and "high_school_varsity" in 2025 is not directly comparable. The data model should store `competition_level` per season (not just per team entity) so coaches see: "<CITY-REDACTED> Eagles, 2024 Club Travel, 2025 HS Varsity -- these seasons are at different competition levels."
 
 ### NICE TO HAVE: Cross-Season Coaching Staff Continuity Signal
 If the same coaching staff persists across seasons, their tendencies carry over even with a new roster. The public endpoint returns coach names. If the same names appear for a team across multiple seasons, that's a useful signal: "This program runs the same system year over year." Worth tracking but not blocking for the initial data model.
@@ -175,7 +175,7 @@ Crawl recently played opponents immediately after games complete. This builds th
 All opponents with `progenitor_team_id` that have not been crawled yet. This is the background fill pass -- no urgency, just completeness. Should run on a slow crawler (generous rate limiting, not time-sensitive).
 
 ### Priority 4 -- NICE TO HAVE: Unresolved (Unlinked) Opponents
-Once Jason manually links them (via the search/URL workflow in item 4 above), move them into the resolution queue. No point crawling before the link exists.
+Once <OPERATOR-REDACTED> manually links them (via the search/URL workflow in item 4 above), move them into the resolution queue. No point crawling before the link exists.
 
 ### Practical Crawl Frequency
 - **Pre-game (T-48 hours)**: Re-crawl the upcoming opponent's data. Player-stats and season stats can change day-to-day during the season. Stale data is worse than no data if a key pitcher just had a 120-pitch outing and is unavailable.

@@ -10,7 +10,7 @@
 Fix the bug where `OpponentResolver._ensure_opponent_team_row` creates a duplicate team row when a stub team already owns the target `public_id`. Instead of creating a new row with the `gc_uuid` and hitting a UNIQUE collision on `public_id`, the resolver should find the existing `public_id` stub and merge the `gc_uuid` onto it. This is the auto-resolve code path complement to E-160 (which fixed the manual connect code path).
 
 ## Background & Context
-Observed in production on 2026-03-26: during sync for Standing Bear Varsity, the resolver created team id=454 for Bennington with `gc_uuid` but no `public_id` (UNIQUE collision prevented writing it). Team 280 already had Bennington's `public_id` from earlier seeding. Team 454 was deleted during cleanup, losing the `gc_uuid` until it was recovered from logs and manually written to team 280.
+Observed in production on 2026-03-26: during sync for <OWN-PROGRAM-REDACTED> Varsity, the resolver created team id=454 for Bennington with `gc_uuid` but no `public_id` (UNIQUE collision prevented writing it). Team 280 already had Bennington's `public_id` from earlier seeding. Team 454 was deleted during cleanup, losing the `gc_uuid` until it was recovered from logs and manually written to team 280.
 
 The root cause: `_ensure_opponent_team_row` does `INSERT OR IGNORE INTO teams ... gc_uuid=?` without first checking whether any existing team already has the target `public_id`. When the INSERT succeeds (new gc_uuid), the subsequent `_write_public_id` detects the collision and logs a warning, but the damage is done — a duplicate team row with gc_uuid and no public_id now exists.
 

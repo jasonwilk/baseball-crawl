@@ -50,12 +50,12 @@ Admins get two access paths:
 - Coaches can log in via magic link email without installing anything or managing passwords
 - Coaches can optionally register a passkey for faster future logins
 - Each coach sees only the teams they are assigned to on the dashboard
-- Jason can manage coach accounts and team assignments via an admin page (network-protected by Cloudflare Access/WARP; app-level auth via session + is_admin flag)
+- <OPERATOR-REDACTED> can manage coach accounts and team assignments via an admin page (network-protected by Cloudflare Access/WARP; app-level auth via session + is_admin flag)
 - Local development works without Mailgun or Cloudflare (dev user bypass)
 
 ## Non-Goals
 - Password-based authentication (no passwords anywhere in this system)
-- Self-service registration (Jason adds coaches manually via admin page)
+- Self-service registration (<OPERATOR-REDACTED> adds coaches manually via admin page)
 - Role-based access beyond admin/non-admin (the dashboard is read-only)
 - Per-game or per-player permissions (access is at the team level only)
 - Audit logging of who viewed what (can be added later)
@@ -68,7 +68,7 @@ Admins get two access paths:
 - A coach with a registered passkey can log in with a tap instead of waiting for an email
 - A coach assigned to Varsity sees Varsity data and cannot navigate to JV data
 - A coach assigned to both JV and Freshman sees a team selector and can switch between them
-- An admin (Jason) sees all teams on the dashboard and can access the admin page (admin page requires WARP at the network layer + session + is_admin in the app)
+- An admin (<OPERATOR-REDACTED>) sees all teams on the dashboard and can access the admin page (admin page requires WARP at the network layer + session + is_admin in the app)
 - An unauthenticated request to the dashboard redirects to the login page
 - An unrecognized email (not in the users table) sees the same "If this email is registered, you will receive a login link" message as a recognized email (no enumeration)
 - Local dev works with `DEV_USER_EMAIL` and no Mailgun/Cloudflare
@@ -292,7 +292,7 @@ None. The user provided a complete architecture specification.
 
 ## History
 - 2026-03-02: Created as READY with Cloudflare Access JWT-based auth design.
-- 2026-03-03: Full rewrite. Replaced Cloudflare Access JWT auth with magic link + passkey for coaches. Cloudflare WARP retained only for Jason's admin access. Added Mailgun for email, py_webauthn for passkeys, SQLite sessions table. Stories restructured from 4 to 5.
+- 2026-03-03: Full rewrite. Replaced Cloudflare Access JWT auth with magic link + passkey for coaches. Cloudflare WARP retained only for <OPERATOR-REDACTED>'s admin access. Added Mailgun for email, py_webauthn for passkeys, SQLite sessions table. Stories restructured from 4 to 5.
 - 2026-03-03: Architecture clarification pass. Removed app-level CF JWT header inspection for admin routes. Admin route protection is now two layers: (1) Cloudflare Access policy at the network level (WARP required), (2) app-level session + is_admin guard. The app has one unified auth system (magic link + passkey + session) for all users. Admins can also access the dashboard via the same magic link/passkey flow without WARP.
 - 2026-03-03: **Codex spec review refinement.** Reviewed 11 findings (4 P1, 6 P2, 1 P3). Accepted 9, rejected 2.
   - **Finding 1 (P1, ACCEPTED)**: Fixed login UX contract. AC-3 wins: both known and unknown emails render the same "If this email is registered..." response. Updated epic Success Criteria and magic link flow description. Updated E-023-02 AC-2 to explicitly render the same page as AC-3.

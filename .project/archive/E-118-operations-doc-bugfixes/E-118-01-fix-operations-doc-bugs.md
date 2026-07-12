@@ -14,7 +14,7 @@ Codex review of E-115 output identified three factual errors in the operations g
 
 ## Acceptance Criteria
 - [x] **AC-1**: The bridge endpoint reference is corrected from `GET /teams/{team_uuid}/public-team-profile-id` to `GET /teams/public/{public_id}/id`, per Technical Notes Bug 1
-- [x] **AC-2**: The bare UUID line (`A bare UUID: 72bb77d8-...` or equivalent) is removed from the "What the URL parser accepts" list, per Technical Notes Bug 2
+- [x] **AC-2**: The bare UUID line (`A bare UUID: 00000000-REDACTED-...` or equivalent) is removed from the "What the URL parser accepts" list, per Technical Notes Bug 2
 - [x] **AC-3**: The `/admin/opponents` reference for connecting discovered placeholders is replaced with the correct upgrade path (paste the GameChanger URL via the Add Team form at `/admin/teams`), per Technical Notes Bug 3
 - [x] **AC-4**: The "Last updated" footer in `docs/admin/operations.md` reflects the current date
 

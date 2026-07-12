@@ -7,10 +7,10 @@
 Fix same-team duplicate player entries caused by GameChanger's cross-perspective UUID mismatch. The scouting pipeline creates duplicate players when the same human appears with different `player_id` UUIDs and name formats across boxscores viewed from different team perspectives. This splits stats across two entries in reports and dashboards, understating player performance.
 
 ## Background & Context
-GameChanger assigns different `player_id` UUIDs to the same physical player depending on which team's boxscore is being viewed. When the scouting pipeline crawls boxscores for a scouted team (e.g., Lincoln High), it encounters:
+GameChanger assigns different `player_id` UUIDs to the same physical player depending on which team's boxscore is being viewed. When the scouting pipeline crawls boxscores for a scouted team (e.g., <CITY-REDACTED> High), it encounters:
 
-1. **The team's own roster/boxscore**: Returns player_id `X` with first name as initial only (e.g., "O Holbein")
-2. **Another team's boxscore** (where the scouted team is the opponent): Returns player_id `Y` with full first name (e.g., "Oliver Holbein")
+1. **The team's own roster/boxscore**: Returns player_id `X` with first name as initial only (e.g., "O <NAME-REDACTED>")
+2. **Another team's boxscore** (where the scouted team is the opponent): Returns player_id `Y` with full first name (e.g., "<PLAYER-NAME-REDACTED>")
 
 Both get inserted as separate `players` rows because they have different `player_id` values. This creates duplicate entries in `team_rosters`, game-level stats, season aggregates, plays, spray charts, and reconciliation data.
 
@@ -18,7 +18,7 @@ Both get inserted as separate `players` rows because they have different `player
 
 **Member teams are NOT affected**: Zero duplicate pairs exist for member teams. Member teams use authenticated endpoints with consistent UUIDs. This bug is scouting/tracked-team only.
 
-**User-reported trigger**: Jason opened a standalone report for Lincoln High and saw "O Holbein 29 PA" and "Oliver Holbein 3 PA" as separate entries -- same person, same team, split stats.
+**User-reported trigger**: <OPERATOR-REDACTED> opened a standalone report for <CITY-REDACTED> High and saw "O <NAME-REDACTED> 29 PA" and "<PLAYER-NAME-REDACTED> 3 PA" as separate entries -- same person, same team, split stats.
 
 **Measured impact** (production DB):
 - 120 duplicate pairs where both IDs are rostered to the same team
@@ -27,7 +27,7 @@ Both get inserted as separate `players` rows because they have different `player
 - 5,191 plays (batter_id) + 4,972 plays (pitcher_id) referencing initial-only IDs
 - 4,513 spray_chart rows + 24,285 reconciliation_discrepancy rows affected
 
-**Compounding bug**: The scouting loader's `_upsert_roster_player()` and roster loader's `_upsert_player()` use UNCONDITIONAL name overwrites -- they can downgrade "Oliver" back to "O" on re-runs. The game loader's `_ensure_player()` is better (only upgrades from "Unknown") but won't upgrade "O" to "Oliver".
+**Compounding bug**: The scouting loader's `_upsert_roster_player()` and roster loader's `_upsert_player()` use UNCONDITIONAL name overwrites -- they can downgrade "<NAME-REDACTED>" back to "O" on re-runs. The game loader's `_ensure_player()` is better (only upgrades from "Unknown") but won't upgrade "O" to "<NAME-REDACTED>".
 
 **Expert consultation** (2026-04-06):
 - **DE**: Runtime CLI merge (not migration), delete-then-update for UNIQUE conflicts, one transaction per pair, season stats recomputed after merge
@@ -75,10 +75,10 @@ Both get inserted as separate `players` rows because they have different `player
 ### TN-1: Name-Preference Rule
 Update a name component only if the incoming value is strictly longer than the stored value, with "Unknown" treated as length 0. This handles all transitions correctly:
 - "Unknown" -> "O" (upgrade)
-- "O" -> "Oliver" (upgrade)
-- "Oliver" -> "O" (no-op, preserved)
-- "Oliver" -> "Oliver" (no-op)
-- "Oliver" -> "Unknown" (no-op)
+- "O" -> "<NAME-REDACTED>" (upgrade)
+- "<NAME-REDACTED>" -> "O" (no-op, preserved)
+- "<NAME-REDACTED>" -> "<NAME-REDACTED>" (no-op)
+- "<NAME-REDACTED>" -> "Unknown" (no-op)
 
 **`bats`/`throws` columns**: The `players` table has `bats` and `throws` columns but NO loader currently writes to them. The shared `ensure_player_row()` function does NOT need `bats`/`throws` parameters. These columns remain NULL until a future epic populates them (likely via E-104 athlete profile data).
 
@@ -86,7 +86,7 @@ Update a name component only if the incoming value is strictly longer than the s
 Same-team duplicates are identified by:
 - Both `player_id` values appear in `team_rosters` for the same `(team_id, season_id)`
 - `last_name` matches (case-insensitive)
-- One `first_name` is a prefix of the other (e.g., "O" is prefix of "Oliver")
+- One `first_name` is a prefix of the other (e.g., "O" is prefix of "<NAME-REDACTED>")
 - The player_id with the longer `first_name` is the canonical (keep) ID
 
 The shorter first_name must have `LENGTH > 0` to guard against empty/blank strings matching everything as a prefix. This is safe at the HS roster scale (12-15 players per team) -- false positives from two different players with the same last name and one's first name being a prefix of the other's on the same team are vanishingly unlikely.
@@ -164,7 +164,7 @@ The plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader pla
 - None -- expert consultation resolved all open questions.
 
 ## History
-- 2026-04-06: Created. Triggered by user-reported duplicate player entries on Lincoln High standalone report. Expert consultation with DE, SE, and Coach completed same day.
+- 2026-04-06: Created. Triggered by user-reported duplicate player entries on <CITY-REDACTED> High standalone report. Expert consultation with DE, SE, and Coach completed same day.
 - 2026-04-06: Set to READY after spec review and refinement.
 - 2026-04-07: Dispatch started. E-215-05 (context-layer) added after initial DRAFT based on user requirement. Plays/spray pipeline re-contamination gap discovered during post-internal-review investigation and addressed in E-215-04 revision (two-hook architecture).
 - 2026-04-07: All 5 stories implemented and reviewed. CR integration review clean. Codex code review skipped (epic branch not accessible to Codex sandbox). Epic COMPLETED.

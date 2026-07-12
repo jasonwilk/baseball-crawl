@@ -113,7 +113,7 @@ The constant `_SEASON_STATS_USER_ACTION = "data_loading:team_stats"` is defined 
 
 **File**: `src/gamechanger/crawlers/scouting.py:387,399`
 
-When inserting a stub team row, the `name` column is set to the `public_id` or `gc_uuid` value. While the opponent resolver later updates UUID-as-name stubs, the `public_id`-as-name stubs in the scouting crawler are never updated to real team names by any downstream process. The team list in the admin UI would show slugs like `"8O8bTolVfb9A"` instead of team names.
+When inserting a stub team row, the `name` column is set to the `public_id` or `gc_uuid` value. While the opponent resolver later updates UUID-as-name stubs, the `public_id`-as-name stubs in the scouting crawler are never updated to real team names by any downstream process. The team list in the admin UI would show slugs like `"<PUBLIC-ID-REDACTED>"` instead of team names.
 
 ### M-4: `scouting.py` `_record_uuid_from_boxscore` doesn't commit
 

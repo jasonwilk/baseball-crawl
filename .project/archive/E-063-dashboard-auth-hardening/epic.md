@@ -7,7 +7,7 @@
 Close authentication and UX gaps in the dashboard so that unauthenticated visitors cannot access protected pages, the dev bypass cannot leak into production, and auth-adjacent pages (login, errors) present a clean, nav-free experience. This is a security and polish epic -- no new features, just making existing auth work correctly.
 
 ## Background & Context
-The operator (Jason) reported that he could access the dashboard without authentication. An assessment found four primary gaps plus three additional security concerns surfaced by SE consultation:
+The operator (<OPERATOR-REDACTED>) reported that he could access the dashboard without authentication. An assessment found four primary gaps plus three additional security concerns surfaced by SE consultation:
 
 1. **DEV_USER_EMAIL production risk** -- The dev bypass grants full admin access (`is_admin=1`) with no guard preventing it from running in production. An accidental `.env` misconfiguration silently disables all authentication.
 2. **No root route `/`** -- Visitors get a 404 instead of a redirect to the dashboard or login.

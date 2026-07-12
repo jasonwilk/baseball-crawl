@@ -7,7 +7,7 @@
 The scouting spray chart loader guesses team assignment when a player cannot be resolved via roster lookup, resulting in 46.4% of scouting spray chart rows (1,275 of 2,745) assigned to the wrong team. This epic eliminates the guessing -- unresolvable players are skipped instead of misattributed -- and cleans up existing bad data.
 
 ## Background & Context
-When scouting an opponent, we fetch their entire season's spray chart data. That includes games against teams we don't track. Players from those non-tracked teams aren't in `team_rosters`, so `_resolve_player_team_id` falls back to `fallback_team_id` (the opponent team ID). This silently assigns spray events to the wrong team -- some rows are even misattributed to Standing Bear.
+When scouting an opponent, we fetch their entire season's spray chart data. That includes games against teams we don't track. Players from those non-tracked teams aren't in `team_rosters`, so `_resolve_player_team_id` falls back to `fallback_team_id` (the opponent team ID). This silently assigns spray events to the wrong team -- some rows are even misattributed to <OWN-PROGRAM-REDACTED>.
 
 The user's position: "We should not guess and assign things to teams that we aren't sure about. That's just irresponsible."
 
@@ -68,7 +68,7 @@ WHERE id IN (
 
 This query is loader-agnostic (catches bad rows from both member and scouting loaders), idempotent, and precisely matches only guessed rows. No re-load is required after this DELETE -- it removes only bad rows, preserving correctly-attributed data. Document as an operator step.
 
-A `membership_type`-based DELETE (`WHERE team_id IN (SELECT id FROM teams WHERE membership_type = 'tracked')`) is insufficient: if the opponent played Standing Bear, misattributed rows have `team_id` = Standing Bear's id (membership_type = 'member') and would be missed.
+A `membership_type`-based DELETE (`WHERE team_id IN (SELECT id FROM teams WHERE membership_type = 'tracked')`) is insufficient: if the opponent played <OWN-PROGRAM-REDACTED>, misattributed rows have `team_id` = <OWN-PROGRAM-REDACTED>'s id (membership_type = 'member') and would be missed.
 
 ### TN-4: Log level (from SE consultation)
 "Player not in opponent roster" is expected and normal for scouting data. Log at DEBUG, not INFO or WARNING. Aggregate per game: collect skipped player count during game processing, emit one DEBUG line after all sections are processed (e.g., "Game {game_id}: skipped {N} events for {M} unresolvable players"). Emit only when at least one player was unresolvable -- no log line for clean games. This replaces the current per-player WARNING.

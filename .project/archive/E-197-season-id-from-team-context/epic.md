@@ -4,12 +4,12 @@
 `COMPLETED`
 
 ## Overview
-Fix season_id derivation so it comes from team metadata (season_year + program type) instead of the crawl directory path. Currently, all loaders derive season_id from the filesystem path or a single global config value, which produces wrong season tags when a team's real season differs from the crawl directory -- e.g., Lincoln Rebels 14U (2025 summer USSSA) had all 92 games tagged as `2026-spring-hs`. This epic decouples DB season_id from filesystem paths and corrects existing mis-tagged data.
+Fix season_id derivation so it comes from team metadata (season_year + program type) instead of the crawl directory path. Currently, all loaders derive season_id from the filesystem path or a single global config value, which produces wrong season tags when a team's real season differs from the crawl directory -- e.g., <CITY-REDACTED> Rebels 14U (2025 summer USSSA) had all 92 games tagged as `2026-spring-hs`. This epic decouples DB season_id from filesystem paths and corrects existing mis-tagged data.
 
 ## Background & Context
 Promoted from [IDEA-061](/.project/ideas/IDEA-061-season-id-from-team-context.md).
 
-The problem was discovered during plays data validation (E-195): players on multiple teams (like Kadyn Lichtenberg on both Rebels 14U and Freshman Grizzlies) had plays from different real seasons merged under the same season_id, making per-season validation and display impossible.
+The problem was discovered during plays data validation (E-195): players on multiple teams (like Kadyn Lichtenberg on both Rebels 14U and Freshman <TEAM-REDACTED>) had plays from different real seasons merged under the same season_id, making per-season validation and display impossible.
 
 **Root cause**: Two season_id derivation patterns exist in the codebase, both wrong for multi-program setups:
 1. **Constructor-injected** (GameLoader, ScheduleLoader, PlaysLoader, ScoutingLoader): season_id comes from `CrawlConfig.season` -- a single global value per pipeline run, not team-specific.
@@ -120,7 +120,7 @@ Both formats must produce valid `seasons` rows (the `season_type NOT NULL` const
 
 **Migration steps**:
 1. Prepend `PRAGMA foreign_keys=ON;` (required because `executescript()` resets connection state).
-2. Create a USSSA program row (INSERT OR IGNORE): `program_id='rebels-usssa'`, `program_type='usssa'`, `name='Lincoln Rebels'`.
+2. Create a USSSA program row (INSERT OR IGNORE): `program_id='rebels-usssa'`, `program_type='usssa'`, `name='<CITY-REDACTED> Rebels'`.
 3. Assign team 126 to the program: `UPDATE teams SET program_id = 'rebels-usssa' WHERE id = 126 AND program_id IS NULL`.
 4. Create the `2025-summer-usssa` season row (INSERT OR IGNORE) -- FK prerequisite for all UPDATEs.
 3. UPDATE each table, scoped by team_id AND `season_id = '2026-spring-hs'` (the old value in WHERE clause ensures idempotency and precision):

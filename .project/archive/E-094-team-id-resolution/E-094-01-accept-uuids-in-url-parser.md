@@ -7,15 +7,15 @@
 `DONE`
 
 ## Description
-After this story is complete, `parse_team_url()` will accept GameChanger UUIDs (e.g., `72bb77d8-54ca-42d2-8547-9da4880d0cb4`) as valid input in addition to public_id slugs and full URLs. The function will return a result that indicates what type of identifier was provided, enabling callers to handle each type appropriately.
+After this story is complete, `parse_team_url()` will accept GameChanger UUIDs (e.g., `00000000-REDACTED`) as valid input in addition to public_id slugs and full URLs. The function will return a result that indicates what type of identifier was provided, enabling callers to handle each type appropriately.
 
 ## Context
 Currently `parse_team_url()` only returns a `public_id` string. It validates that the extracted value is alphanumeric 6-20 chars, which rejects UUIDs (they contain dashes and are 36 chars). The admin import route needs to accept UUIDs as input so operators can paste either format. The return value must distinguish the ID type so the import route (E-094-02) can decide whether to resolve the counterpart.
 
 ## Acceptance Criteria
-- [ ] **AC-1**: Given a bare UUID string (e.g., `"72bb77d8-54ca-42d2-8547-9da4880d0cb4"`), `parse_team_url()` returns a result indicating the value is a UUID and provides the UUID string.
-- [ ] **AC-2**: Given a bare public_id slug (e.g., `"a1GFM9Ku0BbF"`), `parse_team_url()` returns a result indicating the value is a public_id and provides the slug string.
-- [ ] **AC-3**: Given a full GameChanger URL containing a public_id (e.g., `"https://web.gc.com/teams/a1GFM9Ku0BbF/2025-rebels-14u"`), the function returns a public_id result with the extracted slug. Given a URL with a UUID in the `/teams/` segment (e.g., `"https://web.gc.com/teams/72bb77d8-54ca-42d2-8547-9da4880d0cb4/..."`), the function returns a UUID result with the extracted UUID.
+- [ ] **AC-1**: Given a bare UUID string (e.g., `"00000000-REDACTED"`), `parse_team_url()` returns a result indicating the value is a UUID and provides the UUID string.
+- [ ] **AC-2**: Given a bare public_id slug (e.g., `"<PUBLIC-ID-REDACTED>"`), `parse_team_url()` returns a result indicating the value is a public_id and provides the slug string.
+- [ ] **AC-3**: Given a full GameChanger URL containing a public_id (e.g., `"https://web.gc.com/teams/<PUBLIC-ID-REDACTED>/2025-rebels-14u"`), the function returns a public_id result with the extracted slug. Given a URL with a UUID in the `/teams/` segment (e.g., `"https://web.gc.com/teams/00000000-REDACTED/..."`), the function returns a UUID result with the extracted UUID.
 - [ ] **AC-4**: Given an invalid input (empty string, random text, URL with no `/teams/` segment), `ValueError` is raised as before.
 - [ ] **AC-5**: The return type is a structured result (dataclass or similar) with fields for the identifier value and its type, not a plain string. Existing callers that expect a plain string must be updated or the API change must be backward-compatible.
 - [ ] **AC-6**: All existing `test_url_parser.py` tests pass (updated as needed for the new return type).

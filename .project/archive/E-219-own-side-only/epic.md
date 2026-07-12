@@ -94,7 +94,7 @@ The following was built to compensate for cross-perspective duplication:
 - `find_duplicate_players()` roster-based detection in `src/db/player_dedup.py`
 - `bb data dedup-players` CLI command in `src/cli/data.py`
 
-Assessment must distinguish cross-perspective cleanup (no longer needed after root cause fix) from genuine name-variant dedup (e.g., "O" vs "Oliver" -- still needed). The dedup hooks and CLI may still serve the name-variant use case.
+Assessment must distinguish cross-perspective cleanup (no longer needed after root cause fix) from genuine name-variant dedup (e.g., "O" vs "<NAME-REDACTED>" -- still needed). The dedup hooks and CLI may still serve the name-variant use case.
 
 ### TN-8: Test Impact
 Tests that construct boxscore fixtures with opponent data and assert opponent player rows are inserted will need updating:

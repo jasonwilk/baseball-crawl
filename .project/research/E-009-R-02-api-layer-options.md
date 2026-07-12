@@ -15,11 +15,11 @@ This research evaluated API layer technologies for baseball-crawl across two dep
 
 **Option B (FastAPI + Docker)** is the simpler path for a Python-first team. FastAPI's async model adds minimal complexity when paired with SQLite and thread pool execution; the risk of event loop blocking is manageable and well-documented. Flask is viable but offers no meaningful advantage over FastAPI for this use case. A single monolithic FastAPI app (JSON API + HTML dashboard in one process) is the right choice—no need for separate microservices.
 
-**For Jason (Python-first developer)**: TypeScript learning curve is real but manageable for a small serving layer. The context switch cost is lower if the TypeScript surface area is small (routing + bindings, not complex business logic). Option B (FastAPI) eliminates this cost entirely, keeping the entire stack in Python.
+**For <OPERATOR-REDACTED> (Python-first developer)**: TypeScript learning curve is real but manageable for a small serving layer. The context switch cost is lower if the TypeScript surface area is small (routing + bindings, not complex business logic). Option B (FastAPI) eliminates this cost entirely, keeping the entire stack in Python.
 
 **Language-agnostic routing**: Neither option requires language-specific router abstractions. Both TypeScript Workers and FastAPI support straightforward route definition in the language they're written in.
 
-**Recommendation**: If zero operational overhead is the priority and Jason is willing to invest in TypeScript learning, **Option A (TypeScript Workers) is viable**. If Python homogeneity and developer velocity matter more, **Option B (FastAPI) is the stronger choice**. Both are production-ready; the decision is team preference and skill investment tolerance.
+**Recommendation**: If zero operational overhead is the priority and <OPERATOR-REDACTED> is willing to invest in TypeScript learning, **Option A (TypeScript Workers) is viable**. If Python homogeneity and developer velocity matter more, **Option B (FastAPI) is the stronger choice**. Both are production-ready; the decision is team preference and skill investment tolerance.
 
 ---
 
@@ -88,7 +88,7 @@ Returning server-rendered HTML from TypeScript Workers is straightforward:
 
 **Use TypeScript Workers for Option A.** Production-ready, mature local dev story, excellent type safety, zero operational overhead. The trade-off is learning TypeScript, which is addressed in the "Learning Curve" section below.
 
-**Do not use Python Workers yet**—wait for the beta flag requirement to be removed unless Jason specifically wants to pilot the beta. TypeScript is the current production-ready path.
+**Do not use Python Workers yet**—wait for the beta flag requirement to be removed unless <OPERATOR-REDACTED> specifically wants to pilot the beta. TypeScript is the current production-ready path.
 
 ---
 
@@ -240,7 +240,7 @@ FastAPI's `TestClient` works without a running server, making tests fast and det
 
 ## Language Learning Curve: TypeScript for a Python Developer
 
-Jason is a Python-first developer (crawlers, data processing). If Option A is chosen, he must learn TypeScript for the serving layer. How difficult is this, and what is the context switching cost?
+<OPERATOR-REDACTED> is a Python-first developer (crawlers, data processing). If Option A is chosen, he must learn TypeScript for the serving layer. How difficult is this, and what is the context switching cost?
 
 ### TypeScript Learning Fundamentals
 
@@ -282,10 +282,10 @@ TypeScript is a superset of JavaScript with static typing. The core syntax is C-
 | **Framework learning** | Workers API, D1 bindings, Hono (routing) | FastAPI, Jinja2, SQLite patterns |
 | **Total ramp time** | ~6 weeks (language + framework) | ~2 weeks (framework + patterns) |
 | **Ongoing context switching** | Every serving-layer change requires TypeScript mindset | Minimal; same language as crawlers |
-| **Team capability** | Jason must learn TypeScript; future hires may lack it | Easier to hire Python developers |
+| **Team capability** | <OPERATOR-REDACTED> must learn TypeScript; future hires may lack it | Easier to hire Python developers |
 | **Long-term maintainability** | Smaller codebase, type safety; fewer runtime errors | Larger codebase but all Python |
 
-**Conclusion**: Option A has a real learning cost. Option B eliminates this cost entirely. For Jason, the time investment in TypeScript learning is real (~4-6 weeks) but not insurmountable. The question is whether zero operational overhead (Option A) is worth the learning investment. If Jason's time is the constraint, Option B is faster to productivity.
+**Conclusion**: Option A has a real learning cost. Option B eliminates this cost entirely. For <OPERATOR-REDACTED>, the time investment in TypeScript learning is real (~4-6 weeks) but not insurmountable. The question is whether zero operational overhead (Option A) is worth the learning investment. If <OPERATOR-REDACTED>'s time is the constraint, Option B is faster to productivity.
 
 ---
 
@@ -453,7 +453,7 @@ Why this works:
 - No server to manage or monitor.
 
 Trade-offs to accept:
-- Jason must learn TypeScript (2-4 weeks ramp time).
+- <OPERATOR-REDACTED> must learn TypeScript (2-4 weeks ramp time).
 - Serving layer code is TypeScript, not Python (language context switching).
 - Miniflare/`wrangler dev` is excellent but adds one toolchain to mental model.
 
@@ -470,7 +470,7 @@ Why this works:
 - Python end-to-end: crawlers, API, dashboard all in one language. Minimal context switching.
 - Simple, standard Docker Compose setup runs identically locally and in production.
 - FastAPI is fast, modern, and has excellent async + SQLite patterns.
-- Familiar to Jason; no new language learning required.
+- Familiar to <OPERATOR-REDACTED>; no new language learning required.
 - Low operational overhead: a single-instance VPS ($4-10/month) with standard Docker tools.
 
 Trade-offs to accept:
@@ -550,6 +550,6 @@ This research confirms that both Option A (TypeScript Workers) and Option B (Fas
 
 The Product Manager's prior for Option B (FastAPI + Docker) holds up under scrutiny. The async complexity is manageable, the patterns are standard, and the Docker setup mirrors the proven n8n-wilk-io pattern the user already operates.
 
-For Jason specifically: if minimizing learning overhead is the goal, choose Option B. If the zero-ops simplicity of Cloudflare is compelling and he's willing to invest in TypeScript, choose Option A. Both will work.
+For <OPERATOR-REDACTED> specifically: if minimizing learning overhead is the goal, choose Option B. If the zero-ops simplicity of Cloudflare is compelling and he's willing to invest in TypeScript, choose Option A. Both will work.
 
 The next decision point is E-009-01 (Technology Decision Record), which should synthesize this research, E-009-R-01 (database options), E-009-R-03 (dashboard framework), and E-009-R-04 (infrastructure comparison) into a final recommendation.

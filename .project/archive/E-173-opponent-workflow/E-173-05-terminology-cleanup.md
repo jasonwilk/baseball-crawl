@@ -64,4 +64,4 @@ software-engineer
 
 ## Notes
 - The "Tracked" -> "Opponent" badge change should apply everywhere the membership type badge is rendered, not just the team list. Check `admin/edit_team.html` and any other templates that display membership type.
-- The filter pill URL parameters can remain as-is (e.g., `?filter=full`, `?filter=scoresheet`) with only the display label changing, to avoid breaking bookmarks or existing links. Alternatively, update both -- the user base is one person (Jason), so backward compatibility is not a concern.
+- The filter pill URL parameters can remain as-is (e.g., `?filter=full`, `?filter=scoresheet`) with only the display label changing, to avoid breaking bookmarks or existing links. Alternatively, update both -- the user base is one person (<OPERATOR-REDACTED>), so backward compatibility is not a concern.

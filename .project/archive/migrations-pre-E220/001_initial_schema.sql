@@ -30,10 +30,10 @@
 -- programs
 -- ---------------------------------------------------------------------------
 -- Umbrella entity grouping teams under an organizational program.
--- One seed row for Lincoln Standing Bear HS.
+-- One seed row for <CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS.
 CREATE TABLE IF NOT EXISTS programs (
     program_id   TEXT PRIMARY KEY,               -- e.g., 'lsb-hs'
-    name         TEXT NOT NULL,                   -- 'Lincoln Standing Bear HS'
+    name         TEXT NOT NULL,                   -- '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS'
     program_type TEXT NOT NULL CHECK(program_type IN ('hs', 'usssa', 'legion')),
     org_name     TEXT,                            -- org display name
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS programs (
 -- ---------------------------------------------------------------------------
 -- teams
 -- ---------------------------------------------------------------------------
--- Every team: Lincoln member teams and tracked opponent teams.
+-- Every team: <CITY-REDACTED> member teams and tracked opponent teams.
 -- membership_type replaces the old is_owned boolean.
 -- classification replaces the old level column.
 -- source/is_active/last_synced preserve crawl configuration.
@@ -506,4 +506,4 @@ CREATE INDEX IF NOT EXISTS idx_coaching_assignments_team ON coaching_assignments
 -- Seed data
 -- ---------------------------------------------------------------------------
 INSERT OR IGNORE INTO programs (program_id, name, program_type, org_name) VALUES
-    ('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear');
+    ('lsb-hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS', 'hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED>');

@@ -12,7 +12,7 @@ After this story is complete, the implement skill includes a NEW Phase 4b: a cod
 ## Context
 Per-story CR during dispatch (Phase 3) reviews each story's changes in isolation. It is effective for story-level bugs and AC verification but cannot catch issues that emerge when multiple stories' changes interact. The integration review fills this gap by reviewing the combined epic diff.
 
-Jason confirmed this is valuable: "review with the entire change with @code-reviewer and start a team to remediate anything that comes up." Per TN-3, the integration review has a different scope and purpose than per-story review.
+<OPERATOR-REDACTED> confirmed this is valuable: "review with the entire change with @code-reviewer and start a team to remediate anything that comes up." Per TN-3, the integration review has a different scope and purpose than per-story review.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: A new Phase 4b is added to the implement skill, positioned after Phase 4a (codex review) and before Phase 5 (closure).

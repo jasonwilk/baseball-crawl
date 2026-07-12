@@ -10,7 +10,7 @@ Spray charts do not appear in standalone scouting reports for any tracked team t
 Two prior epics built on a false premise about the spray endpoint:
 
 - **E-158** (Spray Charts): Original implementation. Documented the endpoint as "returns both teams regardless of which UUID" -- an incorrect claim that was never verified with controlled testing.
-- **E-176** (Fix Spray Scouting): Added a boxscore-UUID fallback for teams without gc_uuid. Because of the asymmetry, this fetches spray data for the *opponents*, not the scouted team. Evidence: Lincoln Sox 12U (team 51) report crawled 56 games, loaded 2,021 events -- ALL attributed to opponents, ZERO to team 51. Also created ~30 orphan team rows.
+- **E-176** (Fix Spray Scouting): Added a boxscore-UUID fallback for teams without gc_uuid. Because of the asymmetry, this fetches spray data for the *opponents*, not the scouted team. Evidence: <CITY-REDACTED> Sox 12U (team 51) report crawled 56 games, loaded 2,021 events -- ALL attributed to opponents, ZERO to team 51. Also created ~30 orphan team rows.
 
 **Live API Verification (2026-03-29)** confirmed:
 
@@ -20,7 +20,7 @@ Two prior epics built on a false premise about the spray endpoint:
 | Call with OPPONENT's gc_uuid | Only opponent's data (own team absent) |
 | Call with UNRELATED gc_uuid | 404 Not Found |
 
-**Verified fix**: `POST /search` by team name, filter hits by `public_id` exact match, extract `id` = gc_uuid. Confirmed for Lincoln Sox 12U (`public_id=0kfqCjpbDcSH` -> `gc_uuid=03b1e8ec`). Called spray endpoint with that UUID -> 23 offense players (11 Lincoln Sox + 12 opponent).
+**Verified fix**: `POST /search` by team name, filter hits by `public_id` exact match, extract `id` = gc_uuid. Confirmed for <CITY-REDACTED> Sox 12U (`public_id=<PUBLIC-ID-REDACTED>` -> `gc_uuid=03b1e8ec`). Called spray endpoint with that UUID -> 23 offense players (11 <CITY-REDACTED> Sox + 12 opponent).
 
 Full evidence: `.project/research/spray-endpoint-asymmetry.md` and `.project/research/epic-prompt-fix-spray-asymmetry.md`.
 

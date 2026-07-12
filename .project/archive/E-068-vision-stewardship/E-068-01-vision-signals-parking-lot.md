@@ -7,15 +7,15 @@
 `DONE`
 
 ## Description
-After this story is complete, `docs/vision-signals.md` will exist as an ultra-lightweight parking lot for raw vision signals. It will contain a brief header explaining the file's purpose and format, plus one seed signal capturing the LLM-powered coaching chat agent idea that Jason mentioned in conversation. The format is intentionally minimal -- no frontmatter, no template, no ceremony.
+After this story is complete, `docs/vision-signals.md` will exist as an ultra-lightweight parking lot for raw vision signals. It will contain a brief header explaining the file's purpose and format, plus one seed signal capturing the LLM-powered coaching chat agent idea that <OPERATOR-REDACTED> mentioned in conversation. The format is intentionally minimal -- no frontmatter, no template, no ceremony.
 
 ## Context
-Vision signals are statements about what the project will become or how it will be used. They currently evaporate when sessions end. This file is the first of two vision artifacts (the other being the already-existing `docs/VISION.md`). The parking lot must be so simple that any agent can append a line without friction. Jason specifically mentioned wanting an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights -- this signal already exists in `docs/VISION.md` (Layer 5: Conversational Intelligence) and is being backfilled into the parking lot as its first seed entry to establish the format.
+Vision signals are statements about what the project will become or how it will be used. They currently evaporate when sessions end. This file is the first of two vision artifacts (the other being the already-existing `docs/VISION.md`). The parking lot must be so simple that any agent can append a line without friction. <OPERATOR-REDACTED> specifically mentioned wanting an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights -- this signal already exists in `docs/VISION.md` (Layer 5: Conversational Intelligence) and is being backfilled into the parking lot as its first seed entry to establish the format.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: `docs/vision-signals.md` exists with a brief header (2-4 lines) explaining what the file is, who writes to it, and the expected entry format
 - [ ] **AC-2**: The entry format shown in the header is minimal: date, one or two sentences, optional source context. No structured template or frontmatter.
-- [ ] **AC-3**: The file contains at least one seed signal capturing the LLM-powered coaching chat agent idea (date: 2026-03-07, content: Jason envisions an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights)
+- [ ] **AC-3**: The file contains at least one seed signal capturing the LLM-powered coaching chat agent idea (date: 2026-03-07, content: <OPERATOR-REDACTED> envisions an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights)
 - [ ] **AC-4**: The file uses an `## Signals` markdown heading to separate the header from the signals section (this exact heading is required -- downstream stories key off it to detect unprocessed signals)
 
 ## Technical Approach
@@ -37,4 +37,4 @@ claude-architect
 - [ ] No regressions in existing tests
 
 ## Notes
-The seed signal text should be concise -- one or two sentences capturing the essence of what Jason described. Do not elaborate or speculate beyond what was said.
+The seed signal text should be concise -- one or two sentences capturing the essence of what <OPERATOR-REDACTED> described. Do not elaborate or speculate beyond what was said.

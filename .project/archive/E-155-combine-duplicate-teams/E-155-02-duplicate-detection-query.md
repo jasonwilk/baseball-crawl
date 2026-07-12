@@ -14,7 +14,7 @@ Auto-detection of duplicates is a coaching must-have (per discovery). This story
 
 ## Acceptance Criteria
 - [ ] **AC-1**: A `find_duplicate_teams(db)` function exists in `src/db/merge.py` that returns a list of duplicate groups. Each group contains 2+ team records (id, name, season_year, gc_uuid, public_id, game_count, has_stats) that share the same normalized name and season_year.
-- [ ] **AC-2**: Name matching is case-insensitive. "Lincoln East", "lincoln east", and "LINCOLN EAST" are treated as the same name.
+- [ ] **AC-2**: Name matching is case-insensitive. "<CITY-REDACTED> East", "lincoln east", and "LINCOLN EAST" are treated as the same name.
 - [ ] **AC-3**: Only tracked teams (`membership_type = 'tracked'`) are included in duplicate detection. Member teams are excluded.
 - [ ] **AC-4**: Teams with the same name but different `season_year` values are NOT flagged as duplicates. Teams with the same name and both having `season_year IS NULL` ARE flagged as duplicates.
 - [ ] **AC-5**: Each team in a duplicate group includes a `game_count` (number of games where the team appears as `home_team_id` or `away_team_id`) and a `has_stats` boolean (true if the team has any rows in `player_season_batting`, `player_season_pitching`, or `scouting_runs`) to help the admin identify which is the canonical team.

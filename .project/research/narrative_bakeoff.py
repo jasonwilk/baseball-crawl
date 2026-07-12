@@ -84,9 +84,9 @@ _PITCHES_PER_INNING = 15
 JUDGE_MODEL = "openai/gpt-5.1"
 
 TEAMS = [
-    (147, "2026", "Standing Bear Freshman"),
-    (160, "2026", "Standing Bear Varsity"),
-    (185, "2026", "Gretna Post 216 Reserve"),
+    (147, "2026", "<OWN-PROGRAM-REDACTED> Freshman"),
+    (160, "2026", "<OWN-PROGRAM-REDACTED> Varsity"),
+    (185, "2026", "<CITY-REDACTED> Post 216 Reserve"),
     (126, "2026", "Grand Island Home Federal Bank 18U"),
     (202, "2026", "Griffs Post 216 Juniors"),
     (91, "2026", "PrimeTime Westview Reserve"),
@@ -94,13 +94,13 @@ TEAMS = [
     (215, "2026", "Cornhusker LSW 2026"),
     (279, "2026", "Jr Bluejays 15U"),
     (189, "2026", "Gene's Auto Papio Post 32 Reserves"),
-    (290, "2026", "Gretna Post 216 Seniors"),
-    (3, "2026", "Epp Foundation Repair Juniors"),
-    (128, "2026", "Lincoln Hotel Group 18U"),
-    (100, "2026", "Lincoln East Reserve 15U"),
+    (290, "2026", "<CITY-REDACTED> Post 216 Seniors"),
+    (3, "2026", "<ORG-REDACTED> Repair Juniors"),
+    (128, "2026", "<CITY-REDACTED> Hotel Group 18U"),
+    (100, "2026", "<CITY-REDACTED> East Reserve 15U"),
     (336, "2026", "Nebraska Prospect 29s 15U"),
-    (114, "2026", "Five Star Bath Solutions"),
-    (186, "2026", "Braxter Construction"),
+    (114, "2026", "<ORG-REDACTED> Solutions"),
+    (186, "2026", "<TEAM-REDACTED> Construction"),
 ]
 
 

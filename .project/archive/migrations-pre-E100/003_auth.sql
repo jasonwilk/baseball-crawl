@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- ---------------------------------------------------------------------------
 -- user_team_access
 -- ---------------------------------------------------------------------------
--- Grants a user access to a specific team's data. A user with no rows here
+-- Gives a user access to a specific team's data. A user with no rows here
 -- sees no team data (unless is_admin=1, which bypasses this check).
 -- References teams(team_id) from 001_initial_schema.sql.
 CREATE TABLE IF NOT EXISTS user_team_access (

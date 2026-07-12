@@ -512,7 +512,7 @@ If GameChanger ever publishes an official API spec, converting FROM structured m
 
 **What about the beautiful Redoc HTML?**
 
-It is genuinely beautiful. But the primary consumers of this documentation are Claude Code agents, not humans browsing a web page. The secondary consumers (Jason, coaching staff) will interact with the data through the dashboard, not through API docs. If a human-browsable view is ever needed, a simple script that assembles the markdown index into a single rendered page would take an afternoon.
+It is genuinely beautiful. But the primary consumers of this documentation are Claude Code agents, not humans browsing a web page. The secondary consumers (<OPERATOR-REDACTED>, coaching staff) will interact with the data through the dashboard, not through API docs. If a human-browsable view is ever needed, a simple script that assembles the markdown index into a single rendered page would take an afternoon.
 
 ### Secondary recommendation: Capture MCP server as a future idea
 

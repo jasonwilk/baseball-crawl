@@ -30,7 +30,7 @@ Should be done before the next dependency addition. The matplotlib gap is alread
 - Does the pip-tools workflow need to change? `pip-compile pyproject.toml -o requirements.txt` is supported.
 
 ## Notes
-- Discovered during E-187 evaluation: `bb report generate` for Lincoln Southwest Freshman failed to render spray charts because matplotlib wasn't installed in the devcontainer.
+- Discovered during E-187 evaluation: `bb report generate` for <CITY-REDACTED> Southwest Freshman failed to render spray charts because matplotlib wasn't installed in the devcontainer.
 - The story file written during E-187 evaluation (`E-187-04.md`, since deleted) has detailed ACs and technical approach that can be reused when this promotes to an epic.
 - This is a ~1-2 story epic: one story for pyproject.toml + devcontainer, potentially one for verifying pip-tools compatibility.
 

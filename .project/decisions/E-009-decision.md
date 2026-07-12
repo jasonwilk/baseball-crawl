@@ -56,9 +56,9 @@ Both options can deliver server-rendered HTML browsable by the baseball-coach ag
 
 The head-to-head comparison quantified the trade-offs across eight dimensions: local dev experience, language consistency, operational burden, team velocity, feature parity, cost, risk, and dev/prod parity. Option B won 13 comparisons; Option A won 4; 9 were ties.
 
-The decisive factor from R-04: the n8n-wilk-io pattern is already running in production. Jason has lived experience operating this exact architecture. That single fact reduces Option B's implementation risk to near-zero. It is not speculative.
+The decisive factor from R-04: the n8n-wilk-io pattern is already running in production. <OPERATOR-REDACTED> has lived experience operating this exact architecture. That single fact reduces Option B's implementation risk to near-zero. It is not speculative.
 
-**R-04 recommends Option B**: "For Jason solo-operating baseball-crawl with Python expertise and a proven reference implementation, Option B is the stronger choice."
+**R-04 recommends Option B**: "For <OPERATOR-REDACTED> solo-operating baseball-crawl with Python expertise and a proven reference implementation, Option B is the stronger choice."
 
 ---
 
@@ -66,7 +66,7 @@ The decisive factor from R-04: the n8n-wilk-io pattern is already running in pro
 
 Option A (Native Cloudflare) is a technically sound choice. It is not being rejected for capability reasons. It is rejected because:
 
-1. **Language friction is real and ongoing.** TypeScript for the serving layer means Jason switches mental models every time he works on the API or dashboard. For a solo operator who is also writing Python crawlers, this tax compounds indefinitely.
+1. **Language friction is real and ongoing.** TypeScript for the serving layer means <OPERATOR-REDACTED> switches mental models every time he works on the API or dashboard. For a solo operator who is also writing Python crawlers, this tax compounds indefinitely.
 
 2. **Python Workers are not production-ready.** As of February 2026, Python Workers require a beta compatibility flag. The one scenario that would make Option A attractive -- Python end-to-end on Cloudflare -- is not available today. If that changes (when Cloudflare removes the beta flag), revisit this decision.
 
@@ -74,7 +74,7 @@ Option A (Native Cloudflare) is a technically sound choice. It is not being reje
 
 4. **True cost favors Option B.** Option A's zero infrastructure cost is offset by 4-6 weeks of TypeScript ramp-up time. Option B's VPS cost (~$60-75/year at Hetzner CX11) is trivially smaller than the opportunity cost of learning a new language.
 
-5. **The n8n-wilk-io reference is decisive.** Option A has no equivalent reference implementation that Jason has personally operated. Option B is a pattern he has running in production today. When both options are technically viable, the one with lived operational experience wins.
+5. **The n8n-wilk-io reference is decisive.** Option A has no equivalent reference implementation that <OPERATOR-REDACTED> has personally operated. Option B is a pattern he has running in production today. When both options are technically viable, the one with lived operational experience wins.
 
 ---
 
@@ -85,7 +85,7 @@ The core reasons are straightforward:
 - Python end-to-end. One language for crawlers, API, dashboard, migrations, and tests.
 - Zero learning curve for the serving layer. FastAPI + Jinja2 + SQLite are beginner-accessible Python patterns.
 - Near-perfect dev/prod parity. The same `docker-compose.yml` runs locally and in production. Environment variables are the only difference.
-- Proven reference architecture. The n8n-wilk-io deployment already runs this pattern in production with Cloudflare Tunnel, Zero Trust Access, and Docker Compose on a VPS. Jason can troubleshoot from lived experience, not documentation.
+- Proven reference architecture. The n8n-wilk-io deployment already runs this pattern in production with Cloudflare Tunnel, Zero Trust Access, and Docker Compose on a VPS. <OPERATOR-REDACTED> can troubleshoot from lived experience, not documentation.
 - Low vendor lock-in. Docker and Python are portable. If Cloudflare's pricing changes or service quality declines, the compute layer can be migrated independently.
 
 ---
@@ -158,7 +158,7 @@ E-004 is currently DRAFT with no stories, blocked pending E-009 completion. Now 
 This decision stands until one of the following occurs:
 
 1. **Cloudflare removes the beta flag from Python Workers.** At that point, Option A becomes Python end-to-end and the language friction argument disappears. Re-evaluate with a fresh spike.
-2. **VPS operational burden becomes untenable.** If Jason consistently spends more than 4 hours/month on VPS maintenance, Option A's zero-ops appeal becomes economically rational.
+2. **VPS operational burden becomes untenable.** If <OPERATOR-REDACTED> consistently spends more than 4 hours/month on VPS maintenance, Option A's zero-ops appeal becomes economically rational.
 3. **The project grows beyond single-VPS capacity.** If the database exceeds 1 GB, user count exceeds 50, or multi-region performance becomes a requirement, revisit. (This is unlikely given scope: 4 teams, ~15 players each.)
 4. **n8n-wilk-io pattern is retired or changes significantly.** If the reference implementation shifts, re-evaluate compatibility.
 

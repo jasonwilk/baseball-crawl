@@ -7,7 +7,7 @@
 `DONE`
 
 ## Description
-After this story is complete, the gc_uuid resolver's Tier 3 search will prefer public_id-based filtering when the team's public_id is available, falling back to the existing name+season_year matching when public_id is NULL or when the public_id filter finds no match. This eliminates ambiguous matches for common team names (e.g., "Lincoln" returning dozens of results).
+After this story is complete, the gc_uuid resolver's Tier 3 search will prefer public_id-based filtering when the team's public_id is available, falling back to the existing name+season_year matching when public_id is NULL or when the public_id filter finds no match. This eliminates ambiguous matches for common team names (e.g., "<CITY-REDACTED>" returning dozens of results).
 
 ## Context
 The three-tier gc_uuid resolver (`src/gamechanger/resolvers/gc_uuid_resolver.py`) receives `public_id` as a parameter but Tier 3 ignores it. Instead, it strips classification suffixes and searches by name + season_year, requiring exactly 1 match. For common names, this produces multiple matches and resolution fails. The report generator (`src/reports/generator.py:_resolve_gc_uuid`) uses public_id exact-match filtering and succeeds reliably. The resolver should use the same approach when public_id is available.

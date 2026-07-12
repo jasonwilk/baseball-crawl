@@ -5,10 +5,10 @@
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
-Replace "LSB Baseball" and "Lincoln Standing Bear" with the generic brand "Baseball Stats" in the 17 inventoried in-scope items across 14 files (see Brand Replacement Map in Technical Notes) so that public-facing pages do not identify the school. This is a privacy-motivated cosmetic change -- no functional behavior changes.
+Replace "LSB Baseball" and "<CITY-REDACTED> <OWN-PROGRAM-REDACTED>" with the generic brand "Baseball Stats" in the 17 inventoried in-scope items across 14 files (see Brand Replacement Map in Technical Notes) so that public-facing pages do not identify the school. This is a privacy-motivated cosmetic change -- no functional behavior changes.
 
 ## Background & Context
-The app currently displays "LSB Baseball" and "Lincoln Standing Bear" on login pages, nav headers, email messages, error pages, passkey registration, and the FastAPI description. The user wants these replaced with "Baseball Stats" so that anyone visiting the public URL cannot identify which school the app serves.
+The app currently displays "LSB Baseball" and "<CITY-REDACTED> <OWN-PROGRAM-REDACTED>" on login pages, nav headers, email messages, error pages, passkey registration, and the FastAPI description. The user wants these replaced with "Baseball Stats" so that anyone visiting the public URL cannot identify which school the app serves.
 
 A full-codebase inventory was conducted (2026-03-30) covering 8 categories of references. The user chose to change **categories 1-3 only** (public pages, authenticated UI, backend/API). Categories 4-8 are explicitly deferred -- the full inventory is preserved in Technical Notes for future reference.
 
@@ -30,7 +30,7 @@ A full-codebase inventory was conducted (2026-03-30) covering 8 categories of re
 
 ## Success Criteria
 - All 17 inventoried in-scope items are updated to use "Baseball Stats" (or generic equivalent for the FastAPI description)
-- No occurrence of "LSB Baseball" or "Lincoln Standing Bear" remains in the 14 in-scope files
+- No occurrence of "LSB Baseball" or "<CITY-REDACTED> <OWN-PROGRAM-REDACTED>" remains in the 14 in-scope files
 - Existing tests pass without modification (brand strings are not asserted in tests for these surfaces)
 
 ## Stories
@@ -65,7 +65,7 @@ All replacements are literal string substitutions except the FastAPI description
 | 14 | `Your login link for LSB Baseball` | `Your login link for Baseball Stats` | `src/api/email.py:22` | Email subject |
 | 15 | `log in to LSB Baseball` | `log in to Baseball Stats` | `src/api/email.py:51` | Email body |
 | 16 | `LSB Baseball` (rp_name) | `Baseball Stats` | `src/api/routes/auth.py:561` | Passkey `rp_name` |
-| 17 | `Lincoln Standing Bear High School` | Remove school name, keep purpose (e.g., "High school baseball coaching analytics platform.") | `src/api/main.py:81` | FastAPI description |
+| 17 | `<CITY-REDACTED> <OWN-PROGRAM-REDACTED> High School` | Remove school name, keep purpose (e.g., "High school baseball coaching analytics platform.") | `src/api/main.py:81` | FastAPI description |
 
 ### Files Modified (14 files)
 
@@ -119,14 +119,14 @@ The following categories were inventoried but explicitly deferred by the user. P
 
 | File | Line | String | Context |
 |------|------|--------|---------|
-| `migrations/001_initial_schema.sql` | 33 | `Lincoln Standing Bear HS` | SQL comment |
+| `migrations/001_initial_schema.sql` | 33 | `<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS` | SQL comment |
 | `migrations/001_initial_schema.sql` | 35 | `lsb-hs` | SQL comment |
-| `migrations/001_initial_schema.sql` | 36 | `Lincoln Standing Bear HS` | Column doc comment |
-| `migrations/001_initial_schema.sql` | 509 | `('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear')` | Seed INSERT |
-| `config/teams.yaml` | 1 | `Lincoln Standing Bear High School` | File header comment |
+| `migrations/001_initial_schema.sql` | 36 | `<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS` | Column doc comment |
+| `migrations/001_initial_schema.sql` | 509 | `('lsb-hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS', 'hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED>')` | Seed INSERT |
+| `config/teams.yaml` | 1 | `<CITY-REDACTED> <OWN-PROGRAM-REDACTED> High School` | File header comment |
 | `config/teams.yaml` | 7 | `LSB` | Comment |
 | `config/teams.yaml` | 18 | `LSB` | Comment |
-| `config/teams.yaml` | 21-34 | `REPLACE_WITH_LSB_*_TEAM_ID`, `Lincoln Standing Bear *` | Placeholder IDs + team names (8 items) |
+| `config/teams.yaml` | 21-34 | `REPLACE_WITH_LSB_*_TEAM_ID`, `<CITY-REDACTED> <OWN-PROGRAM-REDACTED> *` | Placeholder IDs + team names (8 items) |
 
 **Note**: The `lsb-hs` program seed in the migration is the root source for production DB. Changing it would require a new migration and cascading test fixture updates.
 
@@ -146,7 +146,7 @@ The following categories were inventoried but explicitly deferred by the user. P
 
 #### Category 7: Tests (DEFERRED)
 
-~200+ occurrences across 28 test files. All are fixture data (`'lsb-hs'` program seeds, `'LSB Varsity'`/`'LSB JV'` team names). One exception: `test_migrations.py:236` asserts the seed row contains "Lincoln Standing Bear".
+~200+ occurrences across 28 test files. All are fixture data (`'lsb-hs'` program seeds, `'LSB Varsity'`/`'LSB JV'` team names). One exception: `test_migrations.py:236` asserts the seed row contains "<CITY-REDACTED> <OWN-PROGRAM-REDACTED>".
 
 #### Category 8: Docs/Archive (DEFERRED)
 
@@ -161,7 +161,7 @@ The following categories were inventoried but explicitly deferred by the user. P
 - 2026-03-30: Codex spec review iteration 1. 2 findings accepted (scope overclaim narrowed, E-178/E-181 clarify pass strengthened). Consistency sweep completed.
 - 2026-03-30: Codex spec review iteration 2. 1 finding accepted (scope language further tightened from "categories 1-3 surfaces" to "17 inventoried in-scope items across 14 files"). Consistency sweep completed.
 - 2026-03-30: Set to READY after 4 review passes.
-- 2026-03-30: COMPLETED. All 17 brand string replacements applied across 14 files. "LSB Baseball" and "Lincoln Standing Bear" removed from all public-facing UI surfaces (auth templates, error pages, base layouts, email, passkey config, FastAPI description). Zero findings across CR and Codex code review. No ideas unblocked. 26+ unprocessed vision signals exist (pre-existing, advisory). Open question remains: PM must perform E-178/E-181 clarify pass to update dependent ACs before those epics are dispatched.
+- 2026-03-30: COMPLETED. All 17 brand string replacements applied across 14 files. "LSB Baseball" and "<CITY-REDACTED> <OWN-PROGRAM-REDACTED>" removed from all public-facing UI surfaces (auth templates, error pages, base layouts, email, passkey config, FastAPI description). Zero findings across CR and Codex code review. No ideas unblocked. 26+ unprocessed vision signals exist (pre-existing, advisory). Open question remains: PM must perform E-178/E-181 clarify pass to update dependent ACs before those epics are dispatched.
 
 ### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

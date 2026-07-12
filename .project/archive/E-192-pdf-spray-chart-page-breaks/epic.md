@@ -7,7 +7,7 @@
 Spray charts in scouting reports break across pages when printing to PDF via the browser print dialog. Charts split mid-image because Chrome's print engine ignores `page-break-inside: avoid` inside CSS Grid containers. This epic switches both affected templates to flexbox layout with a 4-column grid so that 8+ spray charts fit per printed page without splitting.
 
 ## Background & Context
-The user confirmed the problem with two real reports (York Varsity Dukes and Lincoln North Star Reserve 26'). Both scouting report templates use CSS Grid for spray chart layout. Chrome's print engine has a well-known limitation: it poorly handles fragmentation hints (`break-inside: avoid`, `page-break-inside: avoid`) on items inside CSS Grid containers, routinely splitting content mid-element across page boundaries.
+The user confirmed the problem with two real reports (York Varsity Dukes and <CITY-REDACTED> North Star Reserve 26'). Both scouting report templates use CSS Grid for spray chart layout. Chrome's print engine has a well-known limitation: it poorly handles fragmentation hints (`break-inside: avoid`, `page-break-inside: avoid`) on items inside CSS Grid containers, routinely splitting content mid-element across page boundaries.
 
 Two templates are affected:
 

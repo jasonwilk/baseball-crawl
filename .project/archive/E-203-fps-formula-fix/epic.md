@@ -8,7 +8,7 @@ Our FPS% calculation excludes HBP and Intentional Walk plate appearances from bo
 
 ## Background & Context
 Verified by comparing CSV exports against our report output:
-- **Freshman Grizzlies**: Caiden Strauss shows 70.0% (ours) vs 50.0% (GC) -- 20pp gap from 4 excluded PAs out of 14 BF.
+- **Freshman <TEAM-REDACTED>**: <PLAYER-NAME-REDACTED> shows 70.0% (ours) vs 50.0% (GC) -- 20pp gap from 4 excluded PAs out of 14 BF.
 - **Rebels 14U**: Average delta 0.90pp across 12 pitchers after formula correction.
 - After formula fix, a residual ~0.5-1.5pp gap remains due to plays endpoint data limitations (plays data does not perfectly match boxscore BF counts). This residual gap is NOT fixable and is acceptable.
 

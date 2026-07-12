@@ -10,7 +10,7 @@
 After this story is complete, the admin team management page will display all teams in a flat table with program, division, and membership columns. All admin team routes will use INTEGER `id` path parameters. The `is_owned` and `level` references are replaced with `membership_type` and `classification`. A two-phase add-team flow (URL input -> confirm page with gc_uuid discovery and operator-selected membership) replaces the current single-step form. This is a merged story combining the team list/edit UI with the add-team flow — both touch the same files (admin.py, admin templates).
 
 ## Context
-The vision pivot established team-and-season as the primary lens. The admin team list replaces the current two-section layout ("Lincoln Program" / "Tracked Opponents") with a flat team-first table. The two-phase add-team flow resolves the team and discovers gc_uuid via the reverse bridge; the operator explicitly selects membership_type (default: tracked). With the INTEGER PK schema (E-100-01) and data layer migration (E-100-02), admin routes use INTEGER team IDs throughout.
+The vision pivot established team-and-season as the primary lens. The admin team list replaces the current two-section layout ("<CITY-REDACTED> Program" / "Tracked Opponents") with a flat team-first table. The two-phase add-team flow resolves the team and discovers gc_uuid via the reverse bridge; the operator explicitly selects membership_type (default: tracked). With the INTEGER PK schema (E-100-01) and data layer migration (E-100-02), admin routes use INTEGER team IDs throughout.
 
 ## Acceptance Criteria
 

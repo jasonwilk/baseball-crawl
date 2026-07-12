@@ -76,7 +76,7 @@ curl -s -H "Host: baseball.localhost" http://localhost:8000/dashboard
 
 **Stat table fragment (first 500 characters of table section)**:
 ```html
-<h1 class="text-xl font-bold mb-4">Lincoln HS Varsity &mdash; Batting Stats</h1>
+<h1 class="text-xl font-bold mb-4"><CITY-REDACTED> HS Varsity &mdash; Batting Stats</h1>
 <div class="overflow-x-auto">
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white">

@@ -10,7 +10,7 @@
 After this story is complete, a `bb data repair-opponents` CLI command exists that propagates all existing `opponent_links` resolutions to `team_opponents` and activates resolved teams. This fixes the data disconnect for opponents that were resolved before E-173-01 shipped.
 
 ## Context
-E-173-01 fixes the forward flow -- new resolutions will propagate correctly. But opponents already resolved (like Lincoln East Freshman, team 44) still have stale `team_opponents` rows pointing to the wrong stub team. This one-time repair command back-fills the missing propagation for all existing resolved `opponent_links` rows.
+E-173-01 fixes the forward flow -- new resolutions will propagate correctly. But opponents already resolved (like <CITY-REDACTED> East Freshman, team 44) still have stale `team_opponents` rows pointing to the wrong stub team. This one-time repair command back-fills the missing propagation for all existing resolved `opponent_links` rows.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: A CLI command `bb data repair-opponents` exists under the `bb data` group.

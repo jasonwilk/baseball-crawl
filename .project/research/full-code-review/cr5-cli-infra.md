@@ -28,7 +28,7 @@
 
 ### H-2: `src/cli/status.py:196` -- PII-adjacent string manipulation on credential check message
 - **File**: `src/cli/status.py:196`
-- **Issue**: The line `display = msg.replace("valid -- logged in as ", "valid (logged in as ") + ")"` does string manipulation on the credential check message to convert `"valid -- logged in as Jason Smith"` to `"valid (logged in as Jason Smith)"`. This is brittle -- if the upstream message format changes (e.g., changes `--` to `-` or modifies the phrasing), the replace fails silently and produces malformed output like `"valid -- logged in as Jason Smith)"` (trailing parenthesis with no opening match).
+- **Issue**: The line `display = msg.replace("valid -- logged in as ", "valid (logged in as ") + ")"` does string manipulation on the credential check message to convert `"valid -- logged in as <OPERATOR-REDACTED> Smith"` to `"valid (logged in as <OPERATOR-REDACTED> Smith)"`. This is brittle -- if the upstream message format changes (e.g., changes `--` to `-` or modifies the phrasing), the replace fails silently and produces malformed output like `"valid -- logged in as <OPERATOR-REDACTED> Smith)"` (trailing parenthesis with no opening match).
 - **Impact**: Display corruption if the upstream message format changes. Not a security issue but poor coupling.
 - **Recommendation**: Have `check_single_profile()` return structured data (name, status) rather than a pre-formatted string, or use the existing `ProfileCheckResult` dataclass for the status command.
 

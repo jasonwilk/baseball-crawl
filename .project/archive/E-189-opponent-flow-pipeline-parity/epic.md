@@ -15,9 +15,9 @@ E-173 fixed the core opponent workflow (resolution write-through, auto-scout on 
 
 1. **Web pipeline missing spray stages**: `run_scouting_sync` in `src/pipeline/trigger.py` runs `ScoutingCrawler` + `ScoutingLoader` but never instantiates `ScoutingSprayChartCrawler` or `ScoutingSprayChartLoader`. The CLI (`bb data scout`) has Steps 1.5 (gc_uuid resolution), 2 (spray crawl), 3 (spray load) -- none exist in the web trigger.
 
-2. **Auto-resolved opponents never scouted**: `_discover_opponents()` in trigger.py runs the schedule seeder + `OpponentResolver.resolve()`, which successfully auto-resolves ~7 of ~25 opponents. But it never triggers `run_scouting_sync` for them. Auto-scout exists only in admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman Grizzlies sync resolved 7 opponents; 3 were never scouted at all.
+2. **Auto-resolved opponents never scouted**: `_discover_opponents()` in trigger.py runs the schedule seeder + `OpponentResolver.resolve()`, which successfully auto-resolves ~7 of ~25 opponents. But it never triggers `run_scouting_sync` for them. Auto-scout exists only in admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman <TEAM-REDACTED> sync resolved 7 opponents; 3 were never scouted at all.
 
-3. **gc_uuid resolver ambiguity**: The three-tier cascade in `gc_uuid_resolver.py` Tier 3 strips classification suffixes and searches by name + season_year. For common names ("Lincoln"), this returns dozens of results and the "exactly 1 match" filter fails. The report generator's approach (search by name, filter by public_id exact match) is strictly better for teams that have a public_id. The resolver already receives `public_id` as a parameter but doesn't use it.
+3. **gc_uuid resolver ambiguity**: The three-tier cascade in `gc_uuid_resolver.py` Tier 3 strips classification suffixes and searches by name + season_year. For common names ("<CITY-REDACTED>"), this returns dozens of results and the "exactly 1 match" filter fails. The report generator's approach (search by name, filter by public_id exact match) is strictly better for teams that have a public_id. The resolver already receives `public_id` as a parameter but doesn't use it.
 
 4. **Dashboard opponent detail lacks data-depth context**: `opponent_detail.html` shows batting/pitching tables with GP annotations but no PA/IP badges, no heat-map coloring per E-187's display philosophy. The standalone reports have graduated heat intensity and PA/IP badges; the dashboard should match.
 
@@ -40,7 +40,7 @@ Promoted from IDEA-059. No expert consultation required for Gaps 1-3 (pure pipel
 ## Success Criteria
 - When an operator clicks "Sync" on an opponent in the admin UI, spray chart data is fetched and loaded (not just batting/pitching stats)
 - After a member team sync that auto-resolves opponents, those opponents have scouting data within minutes without manual intervention
-- gc_uuid resolution succeeds for teams with common names (e.g., "Lincoln") when public_id is available
+- gc_uuid resolution succeeds for teams with common names (e.g., "<CITY-REDACTED>") when public_id is available
 - The dashboard opponent detail page shows PA badges on batting rows, IP badges on pitching rows, and graduated heat-map coloring consistent with the display philosophy rule
 
 ## Stories

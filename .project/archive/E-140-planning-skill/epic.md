@@ -4,10 +4,10 @@
 `COMPLETED`
 
 ## Overview
-Formalize Jason's planning workflow (plan → spec review → triage → refine → READY) as a skill at `.claude/skills/plan/SKILL.md`. Today the 5-step planning process is entirely ad-hoc -- Jason manually spawns teams, invokes spec review, triages findings, refines, and sets READY across multiple separate interactions. This skill codifies those steps into a repeatable, enforceable workflow that the main session loads on planning triggers.
+Formalize <OPERATOR-REDACTED>'s planning workflow (plan → spec review → triage → refine → READY) as a skill at `.claude/skills/plan/SKILL.md`. Today the 5-step planning process is entirely ad-hoc -- <OPERATOR-REDACTED> manually spawns teams, invokes spec review, triages findings, refines, and sets READY across multiple separate interactions. This skill codifies those steps into a repeatable, enforceable workflow that the main session loads on planning triggers.
 
 ## Background & Context
-Analysis across 137+ epics reveals Jason follows a consistent planning pattern:
+Analysis across 137+ epics reveals <OPERATOR-REDACTED> follows a consistent planning pattern:
 
 1. **Plan with relevant team members** -- spawn a team (PM + domain experts), discuss requirements, PM writes epic/stories
 2. **Codex spec review** -- run headless or generate prompt, get findings
@@ -50,7 +50,7 @@ Expert consultation: claude-architect (context-layer skill architecture -- CA as
 - Replacing PM judgment with automation (the skill provides structure, not decisions)
 
 ## Success Criteria
-- Jason can say "plan an epic for X" and get a structured planning session with suggested team composition
+- <OPERATOR-REDACTED> can say "plan an epic for X" and get a structured planning session with suggested team composition
 - Codex spec review runs automatically after PM completes DRAFT stories (no manual "spec review E-NNN" needed)
 - Post-refinement consistency sweep catches value drift across story files
 - "Plan and dispatch E-NNN" produces a READY epic and seamlessly chains into dispatch
@@ -212,7 +212,7 @@ The spec review → refine loop has a circuit breaker: maximum 3 iterations. If 
 None -- all design decisions resolved during team consultation.
 
 ## History
-- 2026-03-19: Created by PM during E-planning-workflow team session. Based on analysis of Jason's actual planning workflow across 137+ epics and CA's architectural assessment.
+- 2026-03-19: Created by PM during E-planning-workflow team session. Based on analysis of <OPERATOR-REDACTED>'s actual planning workflow across 137+ epics and CA's architectural assessment.
 - 2026-03-19: Codex spec review returned 7 findings (4 P1, 3 P2). All fixed: (1) serialized stories 01→02→03→04→05→06 to eliminate shared-file conflicts on SKILL.md, (2) narrowed consultation mode to implementing-type agents only per workflow-discipline.md, (3) expanded E-140-05 AC-3 to cover all implement skill sections assuming fresh team, (4) recorded actual CA consultation in Background, (5) replaced vague "same scope" prerequisite with user escalation path, (6) added AC-5 to E-140-06 for reconciling PM's "Optional: Codex Spec Review" section, (7) corrected agent-team-compliance pattern reference from Pattern 2 to Pattern 1+2.
 - 2026-03-19: PM holistic review found 3 additional issues, all fixed: TN-2/TN-7 contradiction (skill vs script), stale Files comment in E-140-05, missing Handoff Context in stories 02/04/05. CA holistic review returned clean (2 minor informational items, no changes needed). Status set to READY.
 - 2026-03-19: Dispatch completed. 6 stories implemented by claude-architect: plan skill file created with 6 phases (E-140-01), team composition logic (E-140-02), spec review integration (E-140-03), consistency sweep automation (E-140-04), implement skill handoff (E-140-05), PM agent definition updates (E-140-06). Codex review: 3 findings (2 P1, 1 P2) -- 2 fixed (PM guaranteed on team, double-spawn eliminated), 1 deferred to user (worktree isolation in handoff). Integration CR: 3 SHOULD FIX findings fixed (circuit breaker reset value, CR double-spawn note, skip label clarification). Epic COMPLETED.

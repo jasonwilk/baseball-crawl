@@ -8,8 +8,8 @@ The opponent scouting flow (dashboard + `bb data scout`) has four gaps discovere
 
 ## Why It Matters
 - **Spray charts missing on dashboard**: When a coach clicks "Sync" on an opponent in the admin UI, `run_scouting_sync` runs. It does crawl + load but NO spray crawl. Spray data is never fetched for opponents synced via the web UI.
-- **Auto-resolved opponents never scouted**: When a member team syncs, `_discover_opponents()` seeds opponent_links and auto-resolves 7 of 25 opponents via progenitor_team_id and POST /search. But it never triggers `run_scouting_sync` for any of them. Auto-scout only exists in the admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman Grizzlies sync resolved 7 opponents, 3 were never scouted at all (Elkhorn North, Lincoln Lutheran, Lincoln NW).
-- **gc_uuid resolution gap**: The CLI (`bb data scout`) runs `_resolve_missing_gc_uuids()` which uses the three-tier cascade. Tier 3 (POST /search) uses name + season_year matching without public_id filtering -- ambiguous for common names ("Lincoln" returns dozens of results). The report generator's approach (search by name, filter by public_id exact match) is more reliable but only exists in `src/reports/generator.py`.
+- **Auto-resolved opponents never scouted**: When a member team syncs, `_discover_opponents()` seeds opponent_links and auto-resolves 7 of 25 opponents via progenitor_team_id and POST /search. But it never triggers `run_scouting_sync` for any of them. Auto-scout only exists in the admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman <TEAM-REDACTED> sync resolved 7 opponents, 3 were never scouted at all (Elkhorn North, <CITY-REDACTED> Lutheran, <CITY-REDACTED> NW).
+- **gc_uuid resolution gap**: The CLI (`bb data scout`) runs `_resolve_missing_gc_uuids()` which uses the three-tier cascade. Tier 3 (POST /search) uses name + season_year matching without public_id filtering -- ambiguous for common names ("<CITY-REDACTED>" returns dozens of results). The report generator's approach (search by name, filter by public_id exact match) is more reliable but only exists in `src/reports/generator.py`.
 - **Dashboard shows raw numbers with no context**: The opponent detail page dumps stat tables with no PA/IP badges, no heat-map coloring, no data-depth indicators. The "never suppress, always contextualize" philosophy from E-187 applies here too, but the dashboard wasn't in scope.
 
 ## Root Cause Analysis
@@ -22,7 +22,7 @@ The opponent scouting flow (dashboard + `bb data scout`) has four gaps discovere
 
 Auto-scout triggering exists **only** in admin HTTP routes (`src/api/routes/admin.py` lines 2519-2528 for manual connect, lines 2821-2829 for search resolve) via FastAPI `background_tasks.add_task()`. The background pipeline has no equivalent mechanism.
 
-Evidence: Freshman Grizzlies member sync resolved 7 opponents. Zero `scouting_crawl` crawl_jobs were created. Teams 137 (Elkhorn North), 138 (Lincoln Lutheran), and 32 (Lincoln NW) were newly resolved during this sync and have **zero scouting_runs** -- the system knows who they are but never fetched their data.
+Evidence: Freshman <TEAM-REDACTED> member sync resolved 7 opponents. Zero `scouting_crawl` crawl_jobs were created. Teams 137 (Elkhorn North), 138 (<CITY-REDACTED> Lutheran), and 32 (<CITY-REDACTED> NW) were newly resolved during this sync and have **zero scouting_runs** -- the system knows who they are but never fetched their data.
 
 ### Gap 2: Three-tier resolver vs. public_id filtering
 `src/gamechanger/resolvers/gc_uuid_resolver.py` Tier 3 (`_tier3_search`, line 236):

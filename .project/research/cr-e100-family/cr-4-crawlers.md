@@ -39,7 +39,7 @@ The query `SELECT DISTINCT public_id FROM opponent_links WHERE public_id IS NOT 
 
 ### 3. scouting.py _ensure_team_row uses public_id as name stub (scouting.py:386-387)
 
-When inserting a new team row, the name is set to the `public_id` slug (e.g., `"8O8bTolVfb9A"`). While `opponent_resolver._ensure_opponent_team_row` has logic to update UUID-as-name stubs (line 375), there's no equivalent for public_id-as-name stubs. These stub names persist until something else updates them.
+When inserting a new team row, the name is set to the `public_id` slug (e.g., `"<PUBLIC-ID-REDACTED>"`). While `opponent_resolver._ensure_opponent_team_row` has logic to update UUID-as-name stubs (line 375), there's no equivalent for public_id-as-name stubs. These stub names persist until something else updates them.
 
 ### 4. Unused import: datetime in roster.py (roster.py:29)
 

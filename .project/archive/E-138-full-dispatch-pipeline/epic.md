@@ -7,7 +7,7 @@
 Automate the full post-dispatch pipeline — codex review, code-reviewer integration review, remediation, and commit — into a single "and review" modifier on the dispatch trigger. Today this requires 4+ manual interactions; the pipeline absorbs them all while gracefully degrading when the diff is too large for headless codex review.
 
 ## Background & Context
-Jason's current workflow after dispatch completes:
+<OPERATOR-REDACTED>'s current workflow after dispatch completes:
 
 ```
 [All stories DONE]
@@ -26,11 +26,11 @@ His desired workflow:
   → approve commit
 ```
 
-The "and review" modifier exists in the implement skill (Phase 4) but currently only chains codex-review. Jason has never used it — his pattern is explicit separate interactions. This epic deepens "and review" to mean the full pipeline, making it worth using.
+The "and review" modifier exists in the implement skill (Phase 4) but currently only chains codex-review. <OPERATOR-REDACTED> has never used it — his pattern is explicit separate interactions. This epic deepens "and review" to mean the full pipeline, making it worth using.
 
-Key constraint from Jason: "it will only flow smoothly if the changes are small enough for codex to review without timing out. Otherwise we have to revert to a codex prompt that I can run async." This requires a graceful degradation path: headless → timeout/too-large → generate prompt → pause → user pastes findings → resume.
+Key constraint from <OPERATOR-REDACTED>: "it will only flow smoothly if the changes are small enough for codex to review without timing out. Otherwise we have to revert to a codex prompt that I can run async." This requires a graceful degradation path: headless → timeout/too-large → generate prompt → pause → user pastes findings → resume.
 
-Also incorporates Jason's triage feedback (implemented in E-137): all real findings get fixed. No dismiss track for real issues.
+Also incorporates <OPERATOR-REDACTED>'s triage feedback (implemented in E-137): all real findings get fixed. No dismiss track for real issues.
 
 Expert consultation: claude-architect (skill architecture), software-engineer (script changes), product-manager (pipeline UX).
 

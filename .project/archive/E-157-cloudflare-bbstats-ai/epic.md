@@ -10,7 +10,7 @@ Prepare the baseball-crawl coaching analytics platform for production deployment
 The application stack (FastAPI + Traefik + cloudflared) is already containerized and has been tested in local dev. The Cloudflare infrastructure is partially in place:
 - **bbstats.ai** zone exists in Cloudflare with empty DNS records
 - An Access application named "bbstats-ai" exists with two active blocking policies that **must be removed** before the tunnel goes live (see TN-3)
-- A scoped RW API token is being created (teams:write, access:write, dns_records:edit, zone:read -- scoped to bbstats.ai zone and Jason's account)
+- A scoped RW API token is being created (teams:write, access:write, dns_records:edit, zone:read -- scoped to bbstats.ai zone and <OPERATOR-REDACTED>'s account)
 - docker-compose.yml already has `cloudflared` service reading `TUNNEL_TOKEN` from env
 - docker-compose.override.yml profiles cloudflared out for local dev
 - The existing n8n-wilk-io deployment (tunnel -> Traefik -> app) is the reference pattern
@@ -89,7 +89,7 @@ Cloudflare Access application `bbstats-ai` exists with **two active blocking pol
 1. **"WARP Allow (jason@wilkinson.nu)"** — allow rule for jason@wilkinson.nu only
 2. **"Google Auth Policy (jason@wilkinson.nu)"** — allow rule requiring jason@wilkinson.nu via Google Auth
 
-**These policies MUST be removed before the tunnel goes live.** Once DNS points bbstats.ai to the tunnel, CF Access will enforce these policies and block all traffic except Jason's. Coaches cannot access the dashboard.
+**These policies MUST be removed before the tunnel goes live.** Once DNS points bbstats.ai to the tunnel, CF Access will enforce these policies and block all traffic except <OPERATOR-REDACTED>'s. Coaches cannot access the dashboard.
 
 **Required action**: Remove both named policies from the `bbstats-ai` Access app (Zero Trust → Access → Applications → bbstats-ai → Policies). This preserves the Access app shell for future CF Email OTP adoption (vision signal) while allowing all traffic through to the app's internal auth.
 
@@ -135,7 +135,7 @@ Required production values in `.env`:
 | `MAILGUN_API_KEY` | `<key>` | Required for email delivery |
 | `MAILGUN_DOMAIN` | `mg.bbstats.ai` (or existing domain) | Sending domain |
 | `MAILGUN_FROM_EMAIL` | `noreply@mg.bbstats.ai` | From address |
-| `ADMIN_EMAIL` | Jason's email | Bootstrap admin access |
+| `ADMIN_EMAIL` | <OPERATOR-REDACTED>'s email | Bootstrap admin access |
 
 Must NOT be set in production:
 - `DEV_USER_EMAIL` (app fails to start if set with `APP_ENV=production`)
@@ -149,7 +149,7 @@ No longer needed (CF Access not blocking):
 A least-privilege API token is being created with:
 - **Permissions**: Account:Teams:Write, Account:Access:Write, Zone:DNS Records:Edit, Zone:Zone:Read
 - **Zone scope**: bbstats.ai only
-- **Account scope**: Jason@wilkinson.nu's Account (9c7859820fa98ff0b6e91401c7b9736b)
+- **Account scope**: <OPERATOR-REDACTED>@wilkinson.nu's Account (9c7859820fa98ff0b6e91401c7b9736b)
 
 This token is stored in `.env` as `CLOUDFLARE_API_TOKEN` for programmatic Cloudflare API management (e.g., scripts, direct API calls). It is NOT used by the Cloudflare MCP server in `.mcp.json` -- the MCP uses OAuth (browser-based authentication). It is also NOT the tunnel token. The three credentials serve different purposes:
 - `CLOUDFLARE_API_TOKEN`: Management token for programmatic CF API calls (stored in `.env`)

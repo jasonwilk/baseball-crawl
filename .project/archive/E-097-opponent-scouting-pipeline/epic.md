@@ -7,7 +7,7 @@
 Build the end-to-end opponent scouting data pipeline: document the verified multi-endpoint API flow, design storage for opponent rosters and boxscores, implement the ETL crawler that executes the scouting chain, and update the context layer to reflect this new capability. Using only an opponent's `public_id`, we fetch their game schedule (1 unauthenticated call), player roster (1 call), and per-game boxscores (N calls) -- then compute season aggregates from the boxscores ourselves. The entire chain works via public endpoints without needing the team's private UUID or following the team. This gives us game-by-game splits, not just totals -- a better scouting product.
 
 ## Background & Context
-On 2026-03-12, the operator verified the complete opponent scouting chain works via **public endpoints** -- no team UUID required, no following required. Tested on unfollowed team `8O8bTolVfb9A`:
+On 2026-03-12, the operator verified the complete opponent scouting chain works via **public endpoints** -- no team UUID required, no following required. Tested on unfollowed team `<PUBLIC-ID-REDACTED>`:
 
 1. Start with an opponent's `public_id` (already in `opponent_links` from E-088)
 2. `GET /public/teams/{public_id}/games` -- game schedule with `id` values that ARE the `game_stream_id` for boxscores (NO auth required)
@@ -17,11 +17,11 @@ On 2026-03-12, the operator verified the complete opponent scouting chain works 
 
 **Key simplification**: The public `/games` endpoint returns an `id` field that works directly as `game_stream_id` for boxscores. No need for the authenticated `game-summaries` endpoint or the `best-game-stream-id` bridge call. The schedule step requires NO authentication at all.
 
-Test data confirmed on two teams: Lincoln Southwest Varsity 2025 (`public_id: DolZd7TTaXj5`, UUID `d8b05a1b-1a4d-4455-b7ae-cea398c30a53`) -- 28 games; and unfollowed team `8O8bTolVfb9A` -- 24 games, full boxscores, 19 players on roster.
+Test data confirmed on two teams: <CITY-REDACTED> Southwest Varsity 2025 (`public_id: <PUBLIC-ID-REDACTED>`, UUID `d8b05a1b-1a4d-4455-b7ae-cea398c30a53`) -- 28 games; and unfollowed team `<PUBLIC-ID-REDACTED>` -- 24 games, full boxscores, 19 players on roster.
 
 ### Season-Stats Forbidden for Non-Owned Teams (discovered 2026-03-12)
 
-`GET /teams/{team_id}/season-stats` returns **HTTP 403 Forbidden** when called with a non-owned team's UUID (tested with Lincoln Southwest: `d8b05a1b-1a4d-4455-b7ae-cea398c30a53`, web profile). The players endpoint works fine for any team UUID, but season-stats is locked to teams you are on the coaching staff for.
+`GET /teams/{team_id}/season-stats` returns **HTTP 403 Forbidden** when called with a non-owned team's UUID (tested with <CITY-REDACTED> Southwest: `d8b05a1b-1a4d-4455-b7ae-cea398c30a53`, web profile). The players endpoint works fine for any team UUID, but season-stats is locked to teams you are on the coaching staff for.
 
 **Discrepancy note**: The endpoint doc at `docs/api/endpoints/get-teams-team_id-season-stats.md` has a mobile observation note (session 063531, 2026-03-09) claiming it worked with an opponent's `progenitor_team_id`. Web profile returns Forbidden. This discrepancy is unresolved -- mobile may have different access controls, or the observation may have been against an owned team variant.
 
@@ -47,7 +47,7 @@ No expert consultation required -- the user directly verified the API flow and s
 - Spray chart data for opponents (IDEA-009 scope)
 
 ## Success Criteria
-- A coach can ask "what are Lincoln Southwest's batting stats this season?" and the data is in the database (aggregated from boxscores)
+- A coach can ask "what are <CITY-REDACTED> Southwest's batting stats this season?" and the data is in the database (aggregated from boxscores)
 - Running `bb data scout` crawls schedules, rosters, and boxscores for all opponents with a `public_id`
 - The scouting flow is documented as an API integration guide alongside `opponent-resolution.md`
 - CLAUDE.md and relevant context-layer files reflect the new scouting pipeline capability
@@ -155,7 +155,7 @@ For scouting: use `GameLoader.load_file()` directly (not `load_all()`, which rea
 `game_loader.py:648` has `int(raw_stats["IP"]) * 3` which truncates fractional innings (e.g., 3.333 → 3, then 3*3=9 outs instead of the correct 10). The correct conversion is `round(float(raw_stats["IP"]) * 3)`, which `season_stats_loader.py` already uses via `_ip_to_ip_outs()`. This bug affects all pitchers with partial-inning appearances in existing production data. E-097-03 must fix this as part of the scouting work since the scouting loader reuses GameLoader.
 
 ### Auto-Follow Not Required
-Following is NOT required for any step in the public-endpoint scouting chain. Confirmed on unfollowed team `8O8bTolVfb9A` on 2026-03-12: schedule (200, no auth), roster (200, gc-token only), boxscore (200, gc-token only). `POST /teams/{team_id}/follow` enables "follow as fan" and unlocks follow-gated endpoints (e.g., reverse bridge), but the scouting chain uses none of those. Auto-follow is intentionally excluded.
+Following is NOT required for any step in the public-endpoint scouting chain. Confirmed on unfollowed team `<PUBLIC-ID-REDACTED>` on 2026-03-12: schedule (200, no auth), roster (200, gc-token only), boxscore (200, gc-token only). `POST /teams/{team_id}/follow` enables "follow as fan" and unlocks follow-gated endpoints (e.g., reverse bridge), but the scouting chain uses none of those. Auto-follow is intentionally excluded.
 
 ### Endpoint Documentation References
 - `/public/teams/{public_id}/games`: `docs/api/endpoints/get-public-teams-public_id-games.md` (PRIMARY -- schedule, no auth, `id` = game_stream_id)
@@ -180,7 +180,7 @@ This pipeline assumes opponents have a non-null `public_id` in `opponent_links`.
 - `src/cli/data.py`: Existing CLI commands (`bb data crawl`, `bb data load`)
 
 ## Confirmed Findings (moved from Open Questions, 2026-03-12)
-- **Public-endpoint scouting chain works without following (CONFIRMED 2026-03-12):** Tested on unfollowed team `8O8bTolVfb9A`: schedule (200, no auth), roster (200, gc-token), boxscore (200, gc-token). No team UUID needed. The `public_id` alone is sufficient for the entire scouting chain.
+- **Public-endpoint scouting chain works without following (CONFIRMED 2026-03-12):** Tested on unfollowed team `<PUBLIC-ID-REDACTED>`: schedule (200, no auth), roster (200, gc-token), boxscore (200, gc-token). No team UUID needed. The `public_id` alone is sufficient for the entire scouting chain.
 - **Public games `id` = game_stream_id (CONFIRMED 2026-03-12):** The `id` field from `GET /public/teams/{public_id}/games` works directly as the `game_stream_id` parameter for boxscore requests. No `best-game-stream-id` bridge call needed.
 - **Reverse bridge is follow-gated (CONFIRMED):** `GET /teams/public/{public_id}/id` returns 403 for non-followed teams, 200 for followed teams. Two independent controlled tests on 2026-03-12. Irrelevant to this epic — the scouting chain does not use the reverse bridge.
 - **Season-stats Forbidden even with following (CONFIRMED):** `GET /teams/{team_id}/season-stats` returns 403 consistently for non-owned teams (3/3 attempts), even when following as fan. Likely requires coaching staff membership. Reinforces the boxscore-aggregation approach.

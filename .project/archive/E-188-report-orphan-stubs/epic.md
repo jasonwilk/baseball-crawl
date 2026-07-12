@@ -9,9 +9,9 @@ The standalone report generation flow creates ~30 orphan team rows per report, a
 ## Background & Context
 Promoted from IDEA-057. The report generator (`src/reports/generator.py`) calls `ScoutingLoader.load_team()`, which delegates boxscore loading to `GameLoader.load_file()`. The `games` table has `NOT NULL` FK references to `teams(id)` for both `home_team_id` and `away_team_id`, forcing the GameLoader to create a tracked team row for every opponent encountered in boxscores. Additionally, `ScoutingLoader._record_uuid_from_boxscore_path()` creates stubs as a redundant safety net.
 
-A report for a team with 30 games creates ~30 UUID-named stub rows with no `public_id`, no human-readable name, and no purpose in the reports context. The Lincoln Sox 12U report created ~30 orphan teams. Each new report adds more.
+A report for a team with 30 games creates ~30 UUID-named stub rows with no `public_id`, no human-readable name, and no purpose in the reports context. The <CITY-REDACTED> Sox 12U report created ~30 orphan teams. Each new report adds more.
 
-**Real-world impact (North Star case, E-186)**: Stubs created in one flow can pollute `ensure_team_row` name matching for another flow. Team 35 ("Lincoln North Star Reserve 26'") was matched by name to a row with stale gc_uuid, causing all spray endpoint calls to 404. Eliminating orphan stubs prevents this class of collision.
+**Real-world impact (North Star case, E-186)**: Stubs created in one flow can pollute `ensure_team_row` name matching for another flow. Team 35 ("<CITY-REDACTED> North Star Reserve 26'") was matched by name to a row with stale gc_uuid, causing all spray endpoint calls to 404. Eliminating orphan stubs prevents this class of collision.
 
 **Expert consultation**: SE and DE consulted on approach selection. SE recommended the snapshot-and-diff approach (track team IDs before/after load, delete the difference) with a critical ordering insight: query game-dependent data BEFORE orphan cleanup, since cleanup deletes the game rows the queries depend on. DE confirmed FK cascade safety of the deletion order. SE advised against embedding gc_uuid verification in the generator (violates the "never overwrite gc_uuid" rule from `gc-uuid-bridge.md`; the North Star case is a data quality issue better addressed by a separate repair tool).
 

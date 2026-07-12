@@ -28,7 +28,7 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 **Expert consultation completed:** UX designer (admin UI layout, team list visual hierarchy, URL input flow), data-engineer (migration 005 validation, public_id-as-team_id soundness, opponent model, season derivation), software-engineer (URL parser feasibility, file conflict assessment, sync API call pattern, crawl script integration), api-scout (confirmed public games endpoint lacks opponent identifiers -- name-only discovery, added during codex spec review triage 2026-03-06).
 
 ## Goals
-- Admin can add a team by pasting a GameChanger URL and selecting whether it is an owned (Lincoln) team or a tracked opponent
+- Admin can add a team by pasting a GameChanger URL and selecting whether it is an owned (<CITY-REDACTED>) team or a tracked opponent
 - Admin can view, edit, and deactivate teams from the admin interface
 - Admin can assign teams to coaches (extending existing user_team_access)
 - System can auto-discover opponents from a team's public schedule
@@ -44,7 +44,7 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 
 ## Success Criteria
 - An admin can paste a GameChanger team URL, the system resolves it to a team name and location, and the team appears in the teams list
-- An admin can mark a team as owned (Lincoln program) or tracked (opponent/scouting target)
+- An admin can mark a team as owned (<CITY-REDACTED> program) or tracked (opponent/scouting target)
 - An admin can deactivate a team to stop it from being crawled
 - An admin can see which opponents have been discovered from a team's schedule
 - The crawl pipeline (`scripts/crawl.py`) reads active teams from the database when the `--source db` flag is used (YAML remains the default)
@@ -77,7 +77,7 @@ The GC web app serves team pages at URLs like:
 ```
 https://web.gc.com/teams/{public_id}/{url_encoded_name}
 ```
-Example: `https://web.gc.com/teams/a1GFM9Ku0BbF/2025-summer-lincoln-rebels-14u`
+Example: `https://web.gc.com/teams/<PUBLIC-ID-REDACTED>/2025-summer-lincoln-rebels-14u`
 
 The URL parser must:
 1. Accept the full URL or just the `public_id` slug directly
@@ -108,10 +108,10 @@ Follow the existing admin UI patterns from E-023:
 - Tailwind CDN for styling (same as existing admin pages)
 
 ### Admin UI Design (UX consultation)
-- **Team list visual hierarchy**: Two sections on the teams page -- "Lincoln Program" (is_owned=1) at top, "Tracked Opponents" (is_owned=0) below. Each section is a separate table. This makes the page scannable at a glance. If either section is empty, show a placeholder message ("No opponents tracked yet -- use Discover Opponents on a Lincoln team").
+- **Team list visual hierarchy**: Two sections on the teams page -- "<CITY-REDACTED> Program" (is_owned=1) at top, "Tracked Opponents" (is_owned=0) below. Each section is a separate table. This makes the page scannable at a glance. If either section is empty, show a placeholder message ("No opponents tracked yet -- use Discover Opponents on a <CITY-REDACTED> team").
 - **Admin sub-navigation**: Add a simple horizontal nav bar at the top of all admin pages linking Users and Teams. Both pages currently lack sub-navigation -- this connects them.
 - **URL input flow**: Direct submit (no preview step). The success flash message includes the resolved team name and location so the admin can verify. If the resolution is wrong, the edit page (E-042-04) provides correction. A two-step preview flow adds complexity without proportional value for a rarely-used admin action.
-- **Opponent discovery results**: Flash message with count ("Discovered 8 new opponents for Lincoln Varsity"). Newly discovered opponents appear in the Tracked Opponents section with status "Inactive" -- visually clear. No separate results page needed.
+- **Opponent discovery results**: Flash message with count ("Discovered 8 new opponents for <CITY-REDACTED> Varsity"). Newly discovered opponents appear in the Tracked Opponents section with status "Inactive" -- visually clear. No separate results page needed.
 - **Mobile considerations**: Admin pages are operator-focused (desktop primary). Standard form element sizes are fine -- no 44px touch target requirement. Basic readability on mobile is still good practice (responsive table wrappers).
 
 ### Route Structure
@@ -189,7 +189,7 @@ All resolved during expert consultation. See History.
 ## History
 - 2026-03-05: Created as DRAFT. Expert consultation pending (UX designer, data-engineer, software-engineer).
 - 2026-03-05: **Expert consultation completed.** Three experts consulted (UX designer, software-engineer, data-engineer). Key changes:
-  - **UX**: Two-section team list (Lincoln Program / Tracked Opponents). Admin sub-nav linking Users and Teams pages. Direct submit for URL input (no preview step). Flash message for opponent discovery results.
+  - **UX**: Two-section team list (<CITY-REDACTED> Program / Tracked Opponents). Admin sub-nav linking Users and Teams pages. Direct submit for URL input (no preview step). Flash message for opponent discovery results.
   - **SE**: URL parser liberal acceptance pattern (any URL with `/teams/` path). E-042-05 dependency changed from (01, 02) to (03) to avoid file conflicts on `teams.html`. Synchronous API calls via `run_in_threadpool` confirmed acceptable. 10-second HTTP timeout recommended.
   - **DE**: Migration 005 approach validated (ALTER TABLE + partial unique index). public_id-as-team_id confirmed safe (TEXT PK, no UUID assumptions in codebase). Flat teams table sufficient for opponent model (no join table needed). Season derivation query improved to `ORDER BY year DESC LIMIT 1` with note about multi-season ambiguity.
   - **Open questions resolved**: (1) URL pattern: parser is liberal, accepts any `/teams/{slug}` URL. (2) Opponent discovery: explicit admin action (button click). (3) Discovered opponents: `is_active=0` default (admin enables manually).

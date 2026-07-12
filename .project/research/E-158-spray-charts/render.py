@@ -309,7 +309,7 @@ def main() -> None:
     # Team chart
     draw_spray_chart(
         events,
-        title=f"Freshman Grizzlies — All ({len(events)} BIP)",
+        title=f"Freshman <TEAM-REDACTED> — All ({len(events)} BIP)",
         filename=f"{prefix}team_spray.png",
         enhanced=args.enhanced,
     )

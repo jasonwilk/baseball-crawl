@@ -9,7 +9,7 @@ Promoted to E-197.
 Loaders (game_loader, plays_loader, season_stats_loader, and others) derive `season_id` from the crawl directory path (e.g., `2026-spring-hs`). This is wrong for teams whose real season context differs from the directory they were crawled into -- e.g., a 2025 summer USSSA team crawled under `2026-spring-hs/` gets all its data tagged with the wrong season_id.
 
 ## Why It Matters
-1. **Cross-team player stat merging**: Players on multiple teams (e.g., Kadyn Lichtenberg on both Rebels 14U and Freshman Grizzlies) have plays from different real seasons lumped under the same `season_id`, making per-season validation and display impossible.
+1. **Cross-team player stat merging**: Players on multiple teams (e.g., Kadyn Lichtenberg on both Rebels 14U and Freshman <TEAM-REDACTED>) have plays from different real seasons lumped under the same `season_id`, making per-season validation and display impossible.
 2. **Incorrect season context**: The Rebels 14U's 92 games are tagged as 2026 spring HS when they're actually 2025 summer USSSA.
 3. **Validation false positives**: The FPS/QAB validation script groups by `(player_id, season_id)` but gets wrong groupings because season_id doesn't reflect reality.
 4. **Multi-program expansion**: As more non-HS teams are onboarded (Legion, USSSA), this problem will multiply. Every team whose real season differs from the crawl directory gets wrong season_id.

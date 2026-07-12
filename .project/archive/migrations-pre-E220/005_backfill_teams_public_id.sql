@@ -5,7 +5,7 @@
 -- is missing its public_id.
 --
 -- The manual SQL fix applied on 2026-03-25 patched 6 rows for the
--- Freshman Grizzlies. This migration generalises that fix to cover any
+-- Freshman <TEAM-REDACTED>. This migration generalises that fix to cover any
 -- resolved opponents regardless of when they were resolved.
 --
 -- Safety properties:

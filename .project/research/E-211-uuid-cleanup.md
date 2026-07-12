@@ -78,10 +78,10 @@ ls data/raw/{CRAWL_SEASON_ID}/scouting/{PUBLIC_ID}/boxscores/*.json \
   | xargs -n1 basename | sed 's/\.json$//' | sort
 ```
 
-Example for Waverly (public_id = `8O8bTolVfb9A`, crawl_season_id = `2026-spring-hs`):
+Example for Waverly (public_id = `<PUBLIC-ID-REDACTED>`, crawl_season_id = `2026-spring-hs`):
 
 ```bash
-ls data/raw/2026-spring-hs/scouting/8O8bTolVfb9A/boxscores/*.json \
+ls data/raw/2026-spring-hs/scouting/<PUBLIC-ID-REDACTED>/boxscores/*.json \
   | xargs -n1 basename | sed 's/\.json$//' | sort
 ```
 
@@ -202,7 +202,7 @@ rm -v data/raw/{CRAWL_SEASON_ID}/scouting/{PUBLIC_ID}/plays/{OPP_GAME_ID}.json
 Example for Waverly with one opponent-perspective game `game-opp-123`:
 
 ```bash
-rm -v data/raw/2026-spring-hs/scouting/8O8bTolVfb9A/plays/game-opp-123.json
+rm -v data/raw/2026-spring-hs/scouting/<PUBLIC-ID-REDACTED>/plays/game-opp-123.json
 ```
 
 ## Phase 3: Verification

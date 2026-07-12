@@ -20,7 +20,7 @@
 -- Add public_id column to teams
 -- ---------------------------------------------------------------------------
 -- public_id is the short alphanumeric slug used by the GameChanger public API
--- and web UI (e.g., "a1GFM9Ku0BbF"). Nullable to support opponents that have
+-- and web UI (e.g., "<PUBLIC-ID-REDACTED>"). Nullable to support opponents that have
 -- not yet had their public profile resolved.
 ALTER TABLE teams ADD COLUMN public_id TEXT;
 

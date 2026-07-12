@@ -43,7 +43,7 @@ The schedule endpoint (`GET /teams/{team_id}/schedule`) returns games for teams 
 
 For teams with `gc_uuid=NULL`, the scouting spray crawler extracts opponent UUIDs from cached boxscores and calls the spray endpoint with those UUIDs. This fetches spray data **for the opponents, not for the scouted team**.
 
-Evidence: Lincoln Sox 12U (team 51, gc_uuid=NULL) report generation:
+Evidence: <CITY-REDACTED> Sox 12U (team 51, gc_uuid=NULL) report generation:
 - 56 games crawled via boxscore-UUID fallback
 - 2021 spray events loaded into DB
 - **0 events attributed to team 51** (all belong to opponents)
@@ -56,7 +56,7 @@ The E-176-03 resolver has three tiers:
 2. **Tier 2 (progenitor_team_id)**: Requires opponents.json cache from member team crawl. No member team link → always fails.
 3. **Tier 3 (POST /search)**: Could work, but depends on unambiguous name match.
 
-For Lincoln Sox 12U (pasted URL, no member-team connection), all three tiers fail.
+For <CITY-REDACTED> Sox 12U (pasted URL, no member-team connection), all three tiers fail.
 
 ### Even WITH gc_uuid, the Endpoint Is Still Asymmetric
 

@@ -24,14 +24,14 @@ from src.reports.starter_prediction import compute_starter_prediction  # noqa: E
 
 TEAMS = [
     (147, "2026", "LSB Freshman"), (160, "2026", "LSB Varsity"),
-    (185, "2026", "Gretna 216 Reserve"), (126, "2026", "GI Home Federal 18U"),
+    (185, "2026", "<CITY-REDACTED> 216 Reserve"), (126, "2026", "GI Home Federal 18U"),
     (202, "2026", "Griffs 216 Juniors"), (91, "2026", "PrimeTime Reserve"),
     (227, "2024", "Cornhusker JV"), (215, "2026", "Cornhusker LSW 2026"),
     (279, "2026", "Jr Bluejays 15U"), (189, "2026", "Papio Post 32 Reserves"),
-    (290, "2026", "Gretna 216 Seniors"), (3, "2026", "Epp Foundation Juniors"),
-    (128, "2026", "Lincoln Hotel 18U"), (100, "2026", "Lincoln East Reserve 15U"),
-    (336, "2026", "Neb Prospect 15U"), (114, "2026", "Five Star Bath"),
-    (186, "2026", "Braxter Construction"),
+    (290, "2026", "<CITY-REDACTED> 216 Seniors"), (3, "2026", "<ORG-REDACTED> Juniors"),
+    (128, "2026", "<CITY-REDACTED> Hotel 18U"), (100, "2026", "<CITY-REDACTED> East Reserve 15U"),
+    (336, "2026", "Neb Prospect 15U"), (114, "2026", "<ORG-REDACTED>"),
+    (186, "2026", "<TEAM-REDACTED> Construction"),
 ]
 DB = str(ROOT / "data" / "app.db")
 LEAGUE = "nsaa_varsity"

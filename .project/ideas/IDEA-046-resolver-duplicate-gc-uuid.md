@@ -7,7 +7,7 @@
 `_ensure_opponent_team_row` in `src/gamechanger/crawlers/opponent_resolver.py` does `INSERT OR IGNORE INTO teams WHERE gc_uuid=?` without first checking whether any existing team already owns the target `public_id`. When a stub team already has the public_id (e.g., from a manual connect or earlier seeding), the resolver creates a NEW team row with the gc_uuid, hits a UNIQUE collision on public_id, logs a warning, and leaves the new team orphaned with a gc_uuid but no public_id.
 
 ## Why It Matters
-Duplicate team rows cause data fragmentation: stats, opponent links, and scouting data split across two rows for the same real-world team. The operator must manually detect and clean up duplicates, which risks data loss (the gc_uuid on the orphaned row is not recoverable without log archaeology). Observed in production on 2026-03-26 when sync for Standing Bear Varsity created duplicate team id=454 for Bennington. Team 454 was deleted during cleanup, losing the gc_uuid until it was recovered from logs and manually written back to team 280.
+Duplicate team rows cause data fragmentation: stats, opponent links, and scouting data split across two rows for the same real-world team. The operator must manually detect and clean up duplicates, which risks data loss (the gc_uuid on the orphaned row is not recoverable without log archaeology). Observed in production on 2026-03-26 when sync for <OWN-PROGRAM-REDACTED> Varsity created duplicate team id=454 for Bennington. Team 454 was deleted during cleanup, losing the gc_uuid until it was recovered from logs and manually written back to team 280.
 
 ## Rough Timing
 - Promotable now -- the bug is actively causing production duplicates during routine syncs.

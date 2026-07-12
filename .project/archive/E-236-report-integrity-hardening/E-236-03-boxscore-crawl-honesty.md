@@ -15,13 +15,13 @@ After this story is complete, the run record will carry `boxscores_fetched` and 
 ## Acceptance Criteria
 - [ ] **AC-1**: The run record records `boxscores_fetched` (= `ScoutingCrawlResult.games_crawled`, which already exists), and `crawl_status` is derived via `classify_stage_status` from `boxscores_fetched` vs `completed_games` (M), per Technical Notes TN-1/TN-7. No `_fetch_boxscores_in_memory` tuple-arity change is introduced (TN-7).
 - [ ] **AC-2**: Given a crawl where some but not all boxscores are fetched (M>0, `0 < boxscores_fetched < M`), when the report generates, then `crawl_status == "partial"`.
-- [ ] **AC-3**: Given an all-blocked crawl (M>0, `boxscores_fetched == 0`), when the report generates, then `crawl_status == "failed"`, `overall_status == "failed"`, `GenerationResult.outcome == "failed"`, and the CLI exits non-zero with NO shareable page produced — per the SQ1 resolution in Technical Notes TN-6 (FINAL, Jason signed off 2026-06-14; repairing the dormant fatal gate at `generator.py:1460`).
+- [ ] **AC-3**: Given an all-blocked crawl (M>0, `boxscores_fetched == 0`), when the report generates, then `crawl_status == "failed"`, `overall_status == "failed"`, `GenerationResult.outcome == "failed"`, and the CLI exits non-zero with NO shareable page produced — per the SQ1 resolution in Technical Notes TN-6 (FINAL, <OPERATOR-REDACTED> signed off 2026-06-14; repairing the dormant fatal gate at `generator.py:1460`).
 - [ ] **AC-4**: Given a fully-fetched crawl (`boxscores_fetched == M`, M>0), when the report generates, then `crawl_status == "completed"`.
 - [ ] **AC-5**: Given an all-blocked crawl, the FAILURE branch is taken — `crawl_status == "failed"`, `overall_status == "failed"`, `outcome == "failed"` — NOT the no_games branch. (This story asserts only its own all-blocked → failed terminal state. The cross-comparison "failed value ≠ no_games value" requires both terminal values to exist and is asserted in story 05 and the story 08 E2E, where the `no_games` value is set — Codex P1-b; keeps this story self-contained against its blocked-by set.) NOTE (DE F4): a PARTIALLY-blocked crawl (`0 < boxscores_fetched < M`) whose fetched boxscores are all empty can coherently produce `crawl_status == "partial"` AND a `no_games` outcome simultaneously — this is honest (some fetches errored; the ones that succeeded had no data), not a contradiction.
 - [ ] **AC-6**: An error-path test (testing.md Error-Path Testing) proves the all-blocked case surfaces as `failed`, not a misleading `no_games` / exit-0.
 
 ## Technical Approach
-Write `boxscores_fetched` from the existing `crawl_result.games_crawled` to the run record where the crawl stage status is recorded; derive `crawl_status` via the classifier. Repair the tier-1 fatal gate (`generator.py:1460`) so it fires on `games_crawled == 0 AND completed_games > 0`. If the implementer finds `games_crawled` insufficient to express the honest crawl status (TN-7), flag before adding a separate error tally. SQ1 is FINAL (TN-6; Jason signed off 2026-06-14) — implement the `failed` outcome.
+Write `boxscores_fetched` from the existing `crawl_result.games_crawled` to the run record where the crawl stage status is recorded; derive `crawl_status` via the classifier. Repair the tier-1 fatal gate (`generator.py:1460`) so it fires on `games_crawled == 0 AND completed_games > 0`. If the implementer finds `games_crawled` insufficient to express the honest crawl status (TN-7), flag before adding a separate error tally. SQ1 is FINAL (TN-6; <OPERATOR-REDACTED> signed off 2026-06-14) — implement the `failed` outcome.
 
 ## Dependencies
 - **Blocked by**: E-236-01, E-236-02
@@ -42,4 +42,4 @@ software-engineer
 - [ ] No regressions in existing tests
 
 ## Notes
-SE S3 + DE D2; PM reconciled to DE's count approach (TN-7). SQ1 = `failed` — FINAL (Jason signed off 2026-06-14, TN-6).
+SE S3 + DE D2; PM reconciled to DE's count approach (TN-7). SQ1 = `failed` — FINAL (<OPERATOR-REDACTED> signed off 2026-06-14, TN-6).

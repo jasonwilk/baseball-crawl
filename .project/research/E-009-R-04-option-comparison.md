@@ -21,10 +21,10 @@ Option B is the stronger choice for baseball-crawl because:
 1. **Python end-to-end eliminates language context switching** — a significant advantage for a Python-first developer maintaining crawlers and serving layer in the same codebase
 2. **Proven production pattern** — the user already operates this exact architecture (n8n-wilk-io), reducing implementation risk and enabling rapid troubleshooting
 3. **Superior agent browsability** — Jinja2 server-rendered HTML is native to Option B, enabling tight feedback loops with the baseball-coach agent
-4. **Developer velocity matters more than operational simplicity** for a solo operator (Jason) who can manage basic VPS maintenance
+4. **Developer velocity matters more than operational simplicity** for a solo operator (<OPERATOR-REDACTED>) who can manage basic VPS maintenance
 5. **Lower switching costs** — Python knowledge is immediately applicable; no TypeScript ramp-up
 
-**Option A remains viable if** zero operational overhead is worth 2-4 weeks of TypeScript learning and the loss of Python homogeneity. The research does not rule out Option A—it simply shows Option B aligns better with project constraints and Jason's existing expertise.
+**Option A remains viable if** zero operational overhead is worth 2-4 weeks of TypeScript learning and the loss of Python homogeneity. The research does not rule out Option A—it simply shows Option B aligns better with project constraints and <OPERATOR-REDACTED>'s existing expertise.
 
 ---
 
@@ -87,14 +87,14 @@ Option B is the stronger choice for baseball-crawl because:
 - ⚠️ Hiring: Future developers must know both Python and TypeScript
 - ⚠️ Code reuse: Utilities written in Python can't be imported into TypeScript workers
 - ⚠️ Python Workers (beta, Feb 2026) not production-ready; TypeScript required for now
-- 💰 Learning cost: Jason needs 2-4 weeks of TypeScript study (detailed in R-02)
+- 💰 Learning cost: <OPERATOR-REDACTED> needs 2-4 weeks of TypeScript study (detailed in R-02)
 
 **Option B**:
 - 🟢 **Homogeneous**: Python crawlers + Python FastAPI + Python migrations
 - ✅ Single language throughout; context switching eliminated
 - ✅ Code reuse: Utilities, models, and database code can be shared
 - ✅ Hiring: Easier to find Python developers for maintenance
-- ✅ Ramp-up time: Zero; Jason already knows FastAPI patterns from research
+- ✅ Ramp-up time: Zero; <OPERATOR-REDACTED> already knows FastAPI patterns from research
 - 💰 Learning cost: ~2 weeks to learn FastAPI + SQLite concurrency patterns (documented in R-02)
 
 **Verdict**: **Option B wins decisively.** Language homogeneity is a significant advantage for a solo operator maintaining both crawlers and serving layer. The learning curve for FastAPI is lower than TypeScript.
@@ -129,20 +129,20 @@ Option B is the stronger choice for baseball-crawl because:
 ### 4. Team Capability & Velocity
 
 **Option A**:
-- ⚠️ **Jason's ramp time**: 4-6 weeks total (2-4 weeks TypeScript + 2 weeks Cloudflare/D1-specific patterns)
-- ⚠️ Parallel work blocked: All serving-layer development waits for Jason's TypeScript proficiency
+- ⚠️ **<OPERATOR-REDACTED>'s ramp time**: 4-6 weeks total (2-4 weeks TypeScript + 2 weeks Cloudflare/D1-specific patterns)
+- ⚠️ Parallel work blocked: All serving-layer development waits for <OPERATOR-REDACTED>'s TypeScript proficiency
 - ⚠️ Future hires: Must know TypeScript; narrows the talent pool
 - ✅ Type safety: TypeScript provides compile-time error checking; fewer runtime surprises
 - ✅ Cloudflare documentation is mature and well-organized
 
 **Option B**:
-- ✅ **Jason's ramp time**: 2-3 weeks (FastAPI basics + SQLite concurrency patterns)
+- ✅ **<OPERATOR-REDACTED>'s ramp time**: 2-3 weeks (FastAPI basics + SQLite concurrency patterns)
 - ✅ Parallel work possible: General-dev agent could begin dashboard work immediately if needed
 - ✅ Future hires: Easier to find Python developers; larger talent pool
 - ✅ Python debugging: Simpler; print statements, pdb debugger work naturally
-- ✅ Existing pattern: n8n-wilk-io reference means Jason can ask questions about the architecture
+- ✅ Existing pattern: n8n-wilk-io reference means <OPERATOR-REDACTED> can ask questions about the architecture
 
-**Verdict**: **Option B wins on velocity.** Jason gets to productivity faster, and the codebase remains more maintainable for future developers.
+**Verdict**: **Option B wins on velocity.** <OPERATOR-REDACTED> gets to productivity faster, and the codebase remains more maintainable for future developers.
 
 ---
 
@@ -191,7 +191,7 @@ Current pricing (Feb 2026):
 **Hidden costs**:
 - No egress fees (Cloudflare R2 or Cloudflare Tunnel uses zero egress)
 - Potential cost surprises if pricing model changes (Cloudflare has a history of surprises; e.g., Durable Objects storage fees enabled in Jan 2026)
-- Learning investment: 2-4 weeks of Jason's time (unpaid)
+- Learning investment: 2-4 weeks of <OPERATOR-REDACTED>'s time (unpaid)
 
 **Total annual cost**: $0-60 (mostly free tier)
 
@@ -221,12 +221,12 @@ Current pricing (Feb 2026):
 | Metric | Option A | Option B |
 |--------|----------|----------|
 | Infrastructure cost | $0-60/year | $60-150/year |
-| Jason's learning time | 4-6 weeks (~160-240 hours) | 2-3 weeks (~80-120 hours) |
-| Opportunity cost of learning | ~$4,000-6,000 (if Jason's hourly rate is $25-50) | ~$2,000-3,000 |
+| <OPERATOR-REDACTED>'s learning time | 4-6 weeks (~160-240 hours) | 2-3 weeks (~80-120 hours) |
+| Opportunity cost of learning | ~$4,000-6,000 (if <OPERATOR-REDACTED>'s hourly rate is $25-50) | ~$2,000-3,000 |
 | **Total true cost (year 1)** | ~$4,000-6,060 | ~$2,060-3,150 |
 | **Total cost (year 2+)** | ~$60-100/year | ~$60-150/year |
 
-**Verdict**: **Option B is cheaper on a true-cost basis (including learning time).** Option A's zero-ops appeal is offset by the significant time investment in TypeScript. If Jason's hourly rate is $25-50/hour (reasonable for a skilled operator), the learning cost of Option A is $4,000-6,000 in year 1, dwarfing any infrastructure savings.
+**Verdict**: **Option B is cheaper on a true-cost basis (including learning time).** Option A's zero-ops appeal is offset by the significant time investment in TypeScript. If <OPERATOR-REDACTED>'s hourly rate is $25-50/hour (reasonable for a skilled operator), the learning cost of Option A is $4,000-6,000 in year 1, dwarfing any infrastructure savings.
 
 ---
 
@@ -248,7 +248,7 @@ Current pricing (Feb 2026):
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
 | **VPS downtime** | Medium | Complete application outage if VPS provider has issues | Monitor VPS uptime; switch providers if needed; keep config in git |
-| **Ops overhead** | Low | Linux patching, disk management become Jason's responsibility | Automated updates; monitoring scripts; Litestream backups |
+| **Ops overhead** | Low | Linux patching, disk management become <OPERATOR-REDACTED>'s responsibility | Automated updates; monitoring scripts; Litestream backups |
 | **Cloudflare Tunnel fragility** | Low | Tunnel disconnection = outage | Cloudflare Tunnel is battle-tested; n8n-wilk-io runs this in production |
 | **SQLite concurrency issues** | Low | WAL mode issues under high load | Research confirms WAL is safe for 1-5 concurrent users; test before production |
 | **Database corruption** | Low | SQLite file corruption without proper fsync | Litestream backups provide recovery; docker-compose health checks monitor |
@@ -291,7 +291,7 @@ This research **confirms and strengthens that prior**:
 | `wrangler dev` provides good local dev experience | R-03 | Neutral; both are viable |
 | n8n-wilk-io pattern is proven in production | Epic context | **Yes, decisively**; this is the strongest point |
 
-**Key finding that shifts the needle**: The discovery that n8n-wilk-io already runs this exact pattern in production means Option B is not speculative—it is battle-tested, documented, and Jason can troubleshoot it from lived experience. This single fact reduces Option B's implementation risk dramatically.
+**Key finding that shifts the needle**: The discovery that n8n-wilk-io already runs this exact pattern in production means Option B is not speculative—it is battle-tested, documented, and <OPERATOR-REDACTED> can troubleshoot it from lived experience. This single fact reduces Option B's implementation risk dramatically.
 
 ---
 
@@ -353,7 +353,7 @@ This research **confirms and strengthens that prior**:
 
 ### Conclusion
 
-Both migration paths are similarly expensive (~4-5 weeks). **This argues for choosing the option that feels right immediately, rather than betting on future flexibility.** Option B feels right because Jason already knows the pattern (n8n-wilk-io), and Python is his native language.
+Both migration paths are similarly expensive (~4-5 weeks). **This argues for choosing the option that feels right immediately, rather than betting on future flexibility.** Option B feels right because <OPERATOR-REDACTED> already knows the pattern (n8n-wilk-io), and Python is his native language.
 
 ---
 
@@ -380,11 +380,11 @@ Both migration paths are similarly expensive (~4-5 weeks). **This argues for cho
 **Option A = Zero ops + TypeScript cost**
 **Option B = Minimal ops + Python cost**
 
-For Jason alone, maintaining a small baseball-crawl deployment:
+For <OPERATOR-REDACTED> alone, maintaining a small baseball-crawl deployment:
 - TypeScript cost (learning + context switching) = ~4-6 weeks initially; ~30 min/week ongoing
 - Ops cost (VPS management + backups) = ~1-2 hours/month during active season; ~0.5 hours/month off-season
 
-**The math favors Option B**: Jason's time is more valuable than the server cost.
+**The math favors Option B**: <OPERATOR-REDACTED>'s time is more valuable than the server cost.
 
 ---
 
@@ -392,7 +392,7 @@ For Jason alone, maintaining a small baseball-crawl deployment:
 
 **What should E-009-01 (Technology Decision Record) ask to make a definitive choice?**
 
-1. **Priority ranking** (for Jason + product-manager):
+1. **Priority ranking** (for <OPERATOR-REDACTED> + product-manager):
    - Is zero operational overhead worth 2-4 weeks of TypeScript learning? (A) or would you rather minimize ramp-up and manage a small VPS? (B)
    - Rate on 1-10: Learning curve vs. Ops overhead
 
@@ -412,7 +412,7 @@ For Jason alone, maintaining a small baseball-crawl deployment:
    - Is the ability to migrate away from Cloudflare important? (Option B)
    - Or is Cloudflare the permanent platform choice? (Option A)
 
-**Recommendation for E-009-01**: Ask these five questions. If Option B answers 3-5, choose Option B. If Option A answers 3-5, choose Option A. If split, **the tiebreaker is the n8n-wilk-io reference**—Jason already knows this pattern works.
+**Recommendation for E-009-01**: Ask these five questions. If Option B answers 3-5, choose Option B. If Option A answers 3-5, choose Option A. If split, **the tiebreaker is the n8n-wilk-io reference**—<OPERATOR-REDACTED> already knows this pattern works.
 
 ---
 
@@ -426,7 +426,7 @@ For Jason alone, maintaining a small baseball-crawl deployment:
 | Dev/prod parity | Good (same D1) | Excellent (same docker-compose.yml) | B |
 | **Language & Velocity** |
 | Language homogeneity | Split (Python + TS) | Homogeneous (Python) | B |
-| Ramp-up time (Jason) | 4-6 weeks | 2-3 weeks | B |
+| Ramp-up time (<OPERATOR-REDACTED>) | 4-6 weeks | 2-3 weeks | B |
 | Code sharing crawlers ↔ API | No | Yes | B |
 | **Local Development** |
 | Setup time | 2-5s | 10-30s | A |
@@ -526,9 +526,9 @@ The key finding is that **this is not a technical decision—it is a strategic t
 - Option A = **Operational simplicity + Language friction**
 - Option B = **Developer velocity + Manageable ops burden**
 
-For Jason solo-operating baseball-crawl with Python expertise and a proven reference implementation in n8n-wilk-io, **Option B is the stronger choice.**
+For <OPERATOR-REDACTED> solo-operating baseball-crawl with Python expertise and a proven reference implementation in n8n-wilk-io, **Option B is the stronger choice.**
 
-If the situation changes (e.g., Jason gets a team of TypeScript developers, or zero operational overhead becomes a hard requirement), Option A remains viable. But based on current constraints, **Option B wins.**
+If the situation changes (e.g., <OPERATOR-REDACTED> gets a team of TypeScript developers, or zero operational overhead becomes a hard requirement), Option A remains viable. But based on current constraints, **Option B wins.**
 
 The decision should be finalized in E-009-01 using the decision criteria provided above. Once chosen, that decision cascades to:
 - E-009-02/03: Docker Compose or Cloudflare Pages configuration

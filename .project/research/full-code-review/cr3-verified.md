@@ -78,7 +78,7 @@ The `opponent.py` correctly re-raises `CredentialExpiredError` at line 263-271. 
 
 ### M-3 — `scouting.py` `_ensure_team_row` uses identifier as team name for stub rows
 **Verdict**: CONFIRMED
-**Evidence**: `src/gamechanger/crawlers/scouting.py:384-386` — `INSERT OR IGNORE INTO teams (name, ...) VALUES (?, 'tracked', ?, 0)` with `(public_id, public_id)`. The `name` column gets the public_id slug (e.g., `"8O8bTolVfb9A"`). Lines 397-399 do the same with `gc_uuid`. UUID-named stubs are resolved by opponent_resolver, but public_id-as-name stubs may not be updated.
+**Evidence**: `src/gamechanger/crawlers/scouting.py:384-386` — `INSERT OR IGNORE INTO teams (name, ...) VALUES (?, 'tracked', ?, 0)` with `(public_id, public_id)`. The `name` column gets the public_id slug (e.g., `"<PUBLIC-ID-REDACTED>"`). Lines 397-399 do the same with `gc_uuid`. UUID-named stubs are resolved by opponent_resolver, but public_id-as-name stubs may not be updated.
 **Notes**: Not covered by E-122. The admin UI would show slugs instead of team names for these stubs. Medium impact.
 
 ### M-4 — `scouting.py` `_record_uuid_from_boxscore` doesn't commit

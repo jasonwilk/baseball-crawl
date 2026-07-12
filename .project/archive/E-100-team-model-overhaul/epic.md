@@ -7,7 +7,7 @@
 Fresh-start rebuild of the team data model into a team-first architecture. Drops all existing data (user confirmed), rewrites the schema from scratch with INTEGER PK for teams, programs as organizational metadata, membership_type replacing is_owned, and complete stat coverage per endpoint: per-game stats bounded by the boxscore endpoint, season aggregate stats bounded by the season-stats endpoint. All application code (db.py, auth.py, pipeline, admin, dashboard) is updated in one coordinated epic with no backward-compatibility concerns.
 
 ## Background & Context
-The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distinguishes "our" teams from opponents, `level` stores HS-specific values, and the admin UI splits teams into "Lincoln Program" and "Tracked Opponents." The user's GameChanger account spans 19 teams across travel ball (8U-14U), high school, and Legion — none fit the current model.
+The current model hardcodes <CITY-REDACTED> <OWN-PROGRAM-REDACTED> assumptions: `is_owned` distinguishes "our" teams from opponents, `level` stores HS-specific values, and the admin UI splits teams into "<CITY-REDACTED> Program" and "Tracked Opponents." The user's GameChanger account spans 19 teams across travel ball (8U-14U), high school, and Legion — none fit the current model.
 
 **Fresh-start authorization (2026-03-14):** User authorized dropping all data and rebuilding from scratch. No migration compatibility, no xfail patterns, no intermediate broken states. Each story writes clean code and clean tests against the new schema. Data will be re-seeded after the epic completes.
 
@@ -49,7 +49,7 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 - **Stat blending logic**: Loaders that merge API season stats with boxscore-derived stats are follow-up scope. E-100 creates the provenance columns; population strategy is deferred.
 
 ## Success Criteria
-- `programs` table exists with at least one seeded program (Lincoln Standing Bear HS)
+- `programs` table exists with at least one seeded program (<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS)
 - `teams` table has INTEGER AUTOINCREMENT PK (`id`), plus `program_id`, `membership_type`, `classification`, `gc_uuid`, and `public_id` columns
 - `team_opponents` junction table exists
 - All non-computed stats from the boxscore endpoint have columns in player_game_batting and player_game_pitching; all non-computed stats from the season-stats endpoint have columns in player_season_batting and player_season_pitching (see Complete Stat Column Reference in Technical Notes; fielding/catcher/pitch-type stats are explicitly deferred)
@@ -98,7 +98,7 @@ User authorized dropping all data ("drop everything, rebuild from scratch"). Thi
 ```
 programs
   program_id    TEXT PK        -- slug: 'lsb-hs', 'lsb-legion', 'nebraska-quakes-14u'
-  name          TEXT NOT NULL   -- 'Lincoln Standing Bear HS'
+  name          TEXT NOT NULL   -- '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS'
   program_type  TEXT NOT NULL   -- CHECK(program_type IN ('hs', 'usssa', 'legion'))
   org_name      TEXT            -- optional umbrella org name
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -181,7 +181,7 @@ CHECK(classification IS NULL OR classification IN (
 -- Lookups by external identifier use the gc_uuid/public_id UNIQUE indexes.
 ```
 
-**Seed data in migration:** One program row: `('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear')`
+**Seed data in migration:** One program row: `('lsb-hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS', 'hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED>')`
 
 ### Complete Stat Column Reference
 

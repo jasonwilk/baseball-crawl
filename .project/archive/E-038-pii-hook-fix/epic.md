@@ -7,7 +7,7 @@
 The PII pre-commit hook is silently failing in the devcontainer because `install-hooks.sh` stores an absolute path in `core.hooksPath`. When the repo is cloned on macOS and then opened in a devcontainer, the host path does not exist inside the container, so git silently skips the hook. No `[pii-scan]` confirmation appears, and no error is raised -- the safety net is disabled without warning.
 
 ## Background & Context
-The `scripts/install-hooks.sh` script runs `git config core.hooksPath "$REPO_ROOT/.githooks"`, which resolves `$REPO_ROOT` to an absolute path at execution time. Jason ran this on his macOS host, so `.git/config` contains `core.hooksPath = /Users/jason/Documents/code/baseball-crawl/.githooks`. Inside the devcontainer, the repo lives at `/workspaces/baseball-crawl/`, so the stored path does not exist and git silently skips hook execution.
+The `scripts/install-hooks.sh` script runs `git config core.hooksPath "$REPO_ROOT/.githooks"`, which resolves `$REPO_ROOT` to an absolute path at execution time. <OPERATOR-REDACTED> ran this on his macOS host, so `.git/config` contains `core.hooksPath = /Users/jason/Documents/code/baseball-crawl/.githooks`. Inside the devcontainer, the repo lives at `/workspaces/baseball-crawl/`, so the stored path does not exist and git silently skips hook execution.
 
 The fix is simple: use a relative path (`git config core.hooksPath .githooks`). Git resolves relative `core.hooksPath` values from the repo root, so `.githooks` works in any environment -- macOS host, Linux devcontainer, any clone location. The devcontainer should also auto-run hook setup so new containers get the hook without manual intervention.
 

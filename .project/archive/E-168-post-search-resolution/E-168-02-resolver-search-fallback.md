@@ -12,7 +12,7 @@ After this story is complete, the `OpponentResolver` will attempt to resolve unl
 ## Context
 ~14% of opponents have null `progenitor_team_id` and cannot be resolved by the existing progenitor chain. They fall through as unlinked rows in `opponent_links`. The experimental `resolve_unlinked()` follow→bridge→unfollow flow is unreliable. `POST /search` returns both `id` (gc_uuid) and `public_id` per result, enabling name-based resolution for these opponents.
 
-The fallback is conservative by design: it only auto-resolves when there's an unambiguous match. This avoids misidentification (e.g., "Lincoln" matching 50 teams) while closing the gap on clearly identifiable opponents.
+The fallback is conservative by design: it only auto-resolves when there's an unambiguous match. This avoids misidentification (e.g., "<CITY-REDACTED>" matching 50 teams) while closing the gap on clearly identifiable opponents.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: Given the resolver completes the progenitor chain pass, when unlinked opponents exist (no `resolution_method`, not hidden), then a second pass runs that calls `POST /search` for each unlinked opponent using the opponent's name.

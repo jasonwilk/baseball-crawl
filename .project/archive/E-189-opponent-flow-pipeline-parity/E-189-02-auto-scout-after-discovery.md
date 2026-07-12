@@ -10,7 +10,7 @@
 After this story is complete, `_discover_opponents()` in `src/pipeline/trigger.py` will trigger scouting for opponents that were newly resolved during the discovery phase. When a member team syncs and the resolver auto-matches opponents to GC teams, those opponents will be scouted automatically -- eliminating the need for the operator to manually click "Sync" on each one.
 
 ## Context
-`_discover_opponents()` runs the schedule seeder and `OpponentResolver.resolve()` after a member team sync. The resolver successfully auto-resolves opponents via progenitor_team_id and POST /search fallback, writing to `opponent_links` and calling `finalize_opponent_resolution()`. But the function never enqueues scouting for them. Auto-scout exists only in admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman Grizzlies sync resolved 7 opponents, 3 were never scouted.
+`_discover_opponents()` runs the schedule seeder and `OpponentResolver.resolve()` after a member team sync. The resolver successfully auto-resolves opponents via progenitor_team_id and POST /search fallback, writing to `opponent_links` and calling `finalize_opponent_resolution()`. But the function never enqueues scouting for them. Auto-scout exists only in admin HTTP routes (manual connect + search resolve via BackgroundTasks). Verified 2026-03-29: Freshman <TEAM-REDACTED> sync resolved 7 opponents, 3 were never scouted.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: After `_discover_opponents()` completes resolution, opponents whose `resolved_at` timestamp is >= the sync cycle start time AND whose resolved team has `public_id IS NOT NULL` AND that pass the freshness filter in AC-3 are scouted by calling `run_scouting_sync`

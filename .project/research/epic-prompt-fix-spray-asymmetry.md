@@ -26,7 +26,7 @@ We only need the scouted team's spray data. One call with the scouted team's own
 
 E-176 assumed the endpoint returns both teams' data "regardless of which team's UUID is used." It added a "boxscore-UUID fallback" that extracts the *opponent's* UUID from cached boxscores. Because of the asymmetry, this fetches spray data for the opponents, not the scouted team.
 
-**Evidence from Lincoln Sox 12U (team 51, `gc_uuid=NULL`, report slug `Qr1YBRqZQGuvPaVw`):**
+**Evidence from <CITY-REDACTED> Sox 12U (team 51, `gc_uuid=NULL`, report slug `Qr1YBRqZQGuvPaVw`):**
 - 56 games crawled via boxscore-UUID fallback
 - 2,021 spray events loaded -- all attributed to 31 different opponent teams, 0 to team 51
 - Report renders with 0 spray chart images
@@ -40,7 +40,7 @@ The E-176-03 gc_uuid resolver has three tiers, all of which fail for teams added
 2. **Tier 2 (progenitor_team_id)**: Requires opponents.json cache from member team crawl. No member-team link exists. Always fails.
 3. **Tier 3 (POST /search)**: Could work via name matching, but isn't wired into the report generator flow.
 
-For Lincoln Sox 12U (12U travel ball, unrelated to our HS Freshman Grizzlies member team), all three tiers fail.
+For <CITY-REDACTED> Sox 12U (12U travel ball, unrelated to our HS Freshman <TEAM-REDACTED> member team), all three tiers fail.
 
 ---
 
@@ -65,11 +65,11 @@ The report generator already fetches the team name from `GET /public/teams/{publ
 3. Filter for `result.public_id == our_public_id` — **exact match, zero ambiguity**
 4. Take `result.id` — that's the `gc_uuid`
 
-**Proof** (Lincoln Sox 12U, `public_id=0kfqCjpbDcSH`):
-- Search for "Lincoln Sox 12U" → 33 results (multiple seasons/levels)
-- Result #2: `public_id=0kfqCjpbDcSH`, `id=03b1e8ec-123e-47bb-bc0c-c5d80fba8acf`
-- Called spray endpoint with that UUID → 23 offense players (11 Lincoln Sox + 12 opponent)
-- Lincoln Sox's own spray data is present. This is the missing piece.
+**Proof** (<CITY-REDACTED> Sox 12U, `public_id=<PUBLIC-ID-REDACTED>`):
+- Search for "<CITY-REDACTED> Sox 12U" → 33 results (multiple seasons/levels)
+- Result #2: `public_id=<PUBLIC-ID-REDACTED>`, `id=03b1e8ec-123e-47bb-bc0c-c5d80fba8acf`
+- Called spray endpoint with that UUID → 23 offense players (11 <CITY-REDACTED> Sox + 12 opponent)
+- <CITY-REDACTED> Sox's own spray data is present. This is the missing piece.
 
 This costs 1 API call per report generation. The resolved `gc_uuid` should be stored on the team row so subsequent operations (dashboard scouting, re-reports) don't need to search again.
 
@@ -123,9 +123,9 @@ The ~2,021 spray events for opponents (teams 52-82) and the ~30 orphan team rows
 
 These were verified with live API calls on 2026-03-29. The planner can treat them as ground truth:
 
-1. **`POST /search` returns `gc_uuid` and `public_id` per hit.** Searching by name, then filtering hits by `public_id`, yields an exact `gc_uuid` match. Confirmed for Lincoln Sox 12U (`0kfqCjpbDcSH` → `03b1e8ec`).
+1. **`POST /search` returns `gc_uuid` and `public_id` per hit.** Searching by name, then filtering hits by `public_id`, yields an exact `gc_uuid` match. Confirmed for <CITY-REDACTED> Sox 12U (`<PUBLIC-ID-REDACTED>` → `03b1e8ec`).
 
-2. **The spray endpoint with that resolved `gc_uuid` returns the scouted team's spray data.** Called with `03b1e8ec` → 23 offense players (11 Lincoln Sox, 12 opponent). This is the data the report needs.
+2. **The spray endpoint with that resolved `gc_uuid` returns the scouted team's spray data.** Called with `03b1e8ec` → 23 offense players (11 <CITY-REDACTED> Sox, 12 opponent). This is the data the report needs.
 
 3. **The spray endpoint is asymmetric.** Calling with an opponent's UUID returns only the opponent's spray data. Calling with an unrelated UUID returns 404. Only the team's OWN UUID yields their batters' spray data.
 

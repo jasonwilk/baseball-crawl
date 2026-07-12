@@ -7,7 +7,7 @@
 The report generation flow creates orphan team rows for every opponent encountered in boxscores. A report for a team with 56 games creates ~30 stub team rows named with UUIDs (e.g., `521a249b-528c-4db5-b43d-ec893b07ad02`). These stubs serve the opponent scouting flow but are unnecessary noise for standalone reports.
 
 ## Why It Matters
-- **Data hygiene**: The teams table accumulates junk rows (UUID-named stubs with no public_id, no human-readable name, no purpose in the reports context). Lincoln Sox 12U report created ~30 orphan teams. Each new report adds more.
+- **Data hygiene**: The teams table accumulates junk rows (UUID-named stubs with no public_id, no human-readable name, no purpose in the reports context). <CITY-REDACTED> Sox 12U report created ~30 orphan teams. Each new report adds more.
 - **Confusion risk**: These stubs can interfere with `ensure_team_row` name matching for future operations. The North Star Reserve report (team 35) was a case where a prior stub's gc_uuid (from a stale GC registration) caused 404s on the spray endpoint because `ensure_team_row` matched on name to the wrong team row.
 - **No value for reports**: The report flow uses game rows for W/L record and recent form, but the opponent team identity is cosmetic (opponent name in recent-form display). The full opponent team row with gc_uuid is not needed.
 
@@ -48,12 +48,12 @@ Compute W/L record and recent form directly from boxscore JSON files instead of 
 ## Related Issues
 
 ### North Star Reserve team identity mismatch (E-186 evaluation)
-Team 35 ("Lincoln North Star Reserve 26'") was created by the opponent scouting flow with `gc_uuid=822cc0a7` (a stale GC registration with 0 games). When the user generated a report for `public_id=LHIYRnPoo8DC` (correct gc_uuid `dc590640`), `ensure_team_row` matched by name to team 35. The wrong gc_uuid caused all spray endpoint calls to 404. The report generator doesn't backfill `public_id` onto name-matched teams, and E-186-02's `_resolve_gc_uuid` skips when an existing gc_uuid is present (even if it's wrong).
+Team 35 ("<CITY-REDACTED> North Star Reserve 26'") was created by the opponent scouting flow with `gc_uuid=822cc0a7` (a stale GC registration with 0 games). When the user generated a report for `public_id=LHIYRnPoo8DC` (correct gc_uuid `dc590640`), `ensure_team_row` matched by name to team 35. The wrong gc_uuid caused all spray endpoint calls to 404. The report generator doesn't backfill `public_id` onto name-matched teams, and E-186-02's `_resolve_gc_uuid` skips when an existing gc_uuid is present (even if it's wrong).
 
 This is a symptom of the same underlying problem: stubs created in one flow pollute the teams table for another flow.
 
-### Lincoln Sox stale spray files (E-186 evaluation)
-The E-176 broken fallback created spray files with opponent UUIDs. These files block re-crawling with the correct UUID. One-time manual cleanup (`rm -rf data/raw/2025-spring-hs/scouting/0kfqCjpbDcSH/spray/`). Not directly related to stubs, but part of the same "prior flow pollution" pattern.
+### <CITY-REDACTED> Sox stale spray files (E-186 evaluation)
+The E-176 broken fallback created spray files with opponent UUIDs. These files block re-crawling with the correct UUID. One-time manual cleanup (`rm -rf data/raw/2025-spring-hs/scouting/<PUBLIC-ID-REDACTED>/spray/`). Not directly related to stubs, but part of the same "prior flow pollution" pattern.
 
 ## Scope If Promoted
 

@@ -1,7 +1,7 @@
 # GameChanger Season Stats -- Raw Response Research Artifact
 
 **Endpoint:** `GET /teams/{team_id}/season-stats`
-**Team ID:** `72bb77d8-54ca-42d2-8547-9da4880d0cb4`
+**Team ID:** `00000000-REDACTED`
 **Captured:** 2026-03-04
 **HTTP Status:** 200 OK
 **Credentials:** REDACTED -- token and device-id stripped before storage
@@ -11,7 +11,7 @@
 ## Request (redacted)
 
 ```
-GET https://api.team-manager.gc.com/teams/72bb77d8-54ca-42d2-8547-9da4880d0cb4/season-stats
+GET https://api.team-manager.gc.com/teams/00000000-REDACTED/season-stats
 
 Accept: application/vnd.gc.com.team_season_stats+json; version=0.2.0
 accept-language: en-US,en;q=0.9
@@ -81,7 +81,7 @@ The response is a single JSON object (not an array) with three top-level keys:
 | Player UUID | GP (general) | Sample offense stats |
 |-------------|-------------|----------------------|
 | b7790d88-ce4c-4197-92c5-d6086547ce92 | 84 | AVG .255, OBP .423, OPS .709 |
-| 77c74470-5d1c-4723-a7e3-348c0ed84e5f | 80 | AVG .177, OBP .443, OPS .643 |
+| 00000000-REDACTED | 80 | AVG .177, OBP .443, OPS .643 |
 | e9a04fc5-f49d-44b4-bf3a-c8ff04bb5e4a | 68 | AVG .323, OBP .431, OPS .824 |
 | c4fca852-ec12-47eb-bf5b-772d1306f0b1 | 73 | AVG .136, OBP .277, OPS .421 |
 | e8534cc3-fc54-435f-8878-743499e2f2d4 | 87 | AVG .373, OBP .546, OPS 1.083 |

@@ -7,7 +7,7 @@
 When two tracked teams play each other, the GameChanger public games API returns different game IDs for the same real-world game depending on which team's perspective is queried. The scouting loader inserts both as separate `games` rows, inflating batting and pitching stats. This epic adds a pre-load dedup check that prevents duplicate game rows from being created, and post-load data validation that verifies the loaded data matches expectations before it's used.
 
 ## Background & Context
-**Trigger**: Grand Island Varsity (team 471) vs Lincoln High Varsity (team 476) on 2026-03-19. The same 11-1 game appeared as two different game_ids (`b2313a7a` from one perspective, `676e023a` from the other), inflating Ian Arends from 9 GP / 36 PA to 10 GP / 40 PA.
+**Trigger**: Grand Island Varsity (team 471) vs <CITY-REDACTED> High Varsity (team 476) on 2026-03-19. The same 11-1 game appeared as two different game_ids (`b2313a7a` from one perspective, `676e023a` from the other), inflating Ian Arends from 9 GP / 36 PA to 10 GP / 40 PA.
 
 **Root cause**: `ScoutingLoader._build_games_index()` (`src/gamechanger/loaders/scouting_loader.py`:287-288) reads the public games endpoint's `id` field and uses it as both `event_id` and `game_stream_id` in the `GameSummaryEntry`. When team A is scouted, a game gets ID X. When team B is scouted later for the same game, it gets ID Y. Both flow through `GameLoader.load_file()` -> `_upsert_game(game_id=summary.event_id, ...)` and create separate `games` rows because they have different primary keys.
 
@@ -28,7 +28,7 @@ When two tracked teams play each other, the GameChanger public games API returns
 - Building another cleanup CLI command (the pre-load check + validation should prevent the problem; if they don't, we fix the root cause)
 
 ## Success Criteria
-- The known duplicate (Grand Island vs Lincoln High, 2026-03-19) does not recur on the next `bb data scout` run
+- The known duplicate (Grand Island vs <CITY-REDACTED> High, 2026-03-19) does not recur on the next `bb data scout` run
 - Running `bb data scout` for two tracked teams that share a matchup produces exactly one `games` row per real-world game
 - After loading, the scouting loader validates that game count and roster count match expectations and warns on mismatch
 - Season aggregates (batting and pitching) reflect correct game counts
@@ -115,7 +115,7 @@ No file conflicts between stories.
 - None (resolved during discovery)
 
 ## History
-- 2026-04-07: Created (DRAFT). SE consulted (pre-load prevention). DE consulted (post-load sweep). User redirected approach: validation over cleanup tools. Revised to prevention (E-216-01) + post-load validation (E-216-02). Dropped global merge sweep, `bb data dedup-games` CLI, and `src/db/game_dedup.py`. Existing duplicate (Grand Island vs Lincoln High, 2026-03-19) manually resolved prior to epic creation.
+- 2026-04-07: Created (DRAFT). SE consulted (pre-load prevention). DE consulted (post-load sweep). User redirected approach: validation over cleanup tools. Revised to prevention (E-216-01) + post-load validation (E-216-02). Dropped global merge sweep, `bb data dedup-games` CLI, and `src/db/game_dedup.py`. Existing duplicate (Grand Island vs <CITY-REDACTED> High, 2026-03-19) manually resolved prior to epic creation.
 - 2026-04-07: Set to READY after 2 internal review iterations. Codex validation deferred to separate server.
 - 2026-04-07: COMPLETED. All 2 stories delivered. E-216-01 added pre-load game dedup via `_find_duplicate_game()` with order-insensitive team matching and doubleheader tiebreakers. E-216-02 added post-load validation (`_check_duplicate_games()` + `_validate_roster_count()`). Codex caught nondeterministic candidate ordering and missing season_id filter -- both remediated. 15 new tests (9 dedup + 6 validation).
 

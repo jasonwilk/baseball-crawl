@@ -10,7 +10,7 @@ Newly added teams are invisible in the dashboard due to three independent data-d
 
 ## Background & Context
 
-Jason reported that team 954 (Standing Bear Freshman Grizzlies 2026) was added via the admin UI as a member team, with `user_team_access` correctly linking user 1 to team 954, but the dashboard at `/dashboard?year=2026` doesn't show it. The root cause: `get_team_year_map()` only returns teams with rows in `player_season_batting` or `player_season_pitching`. Additionally, Jason noted general friction with team management ("I can't ever get it to work"), and opponents also don't appear until game data exists.
+<OPERATOR-REDACTED> reported that team 954 (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED> 2026) was added via the admin UI as a member team, with `user_team_access` correctly linking user 1 to team 954, but the dashboard at `/dashboard?year=2026` doesn't show it. The root cause: `get_team_year_map()` only returns teams with rows in `player_season_batting` or `player_season_pitching`. Additionally, <OPERATOR-REDACTED> noted general friction with team management ("I can't ever get it to work"), and opponents also don't appear until game data exists.
 
 **Expert consultation (2026-03-20):**
 - **Coach**: Teams MUST be visible immediately after add. Opponents MUST appear when linked. Empty state should feel "ready and waiting," not broken.

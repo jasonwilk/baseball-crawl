@@ -14,8 +14,8 @@ The root cause of name degradation is that two loaders (`roster.py:_upsert_playe
 
 ## Acceptance Criteria
 - [ ] **AC-1**: A new function `ensure_player_row(db, player_id, first_name, last_name)` exists in `src/db/players.py` that implements the name-preference rule per TN-1.
-- [ ] **AC-2**: Given a player row with first_name="Oliver", when `ensure_player_row()` is called with first_name="O" for the same player_id, then the stored first_name remains "Oliver" (no downgrade).
-- [ ] **AC-3**: Given a player row with first_name="O", when `ensure_player_row()` is called with first_name="Oliver" for the same player_id, then the stored first_name is updated to "Oliver" (upgrade).
+- [ ] **AC-2**: Given a player row with first_name="<NAME-REDACTED>", when `ensure_player_row()` is called with first_name="O" for the same player_id, then the stored first_name remains "<NAME-REDACTED>" (no downgrade).
+- [ ] **AC-3**: Given a player row with first_name="O", when `ensure_player_row()` is called with first_name="<NAME-REDACTED>" for the same player_id, then the stored first_name is updated to "<NAME-REDACTED>" (upgrade).
 - [ ] **AC-4**: Given a player row with first_name="Unknown", when `ensure_player_row()` is called with any non-"Unknown" first_name, then the stored first_name is updated (upgrade from stub).
 - [ ] **AC-5**: The same upgrade-only logic applies to `last_name` independently.
 - [ ] **AC-6**: All 7 loader paths listed in TN-8 call `ensure_player_row()` instead of their own inline player upsert SQL. For compound methods that also write to other tables (e.g., `scouting_loader._upsert_roster_player()` writes to both `players` and `team_rosters`), only the `players` INSERT/UPDATE is replaced; the `team_rosters` INSERT stays in the loader method.

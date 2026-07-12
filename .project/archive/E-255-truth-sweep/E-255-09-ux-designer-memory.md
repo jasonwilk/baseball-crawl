@@ -5,14 +5,14 @@
 
 ## Status
 `DONE`
-<!-- ux repurpose-or-retire RESOLVED 2026-07-07 by Jason: REPURPOSE. The REPURPOSED ACs below apply;
+<!-- ux repurpose-or-retire RESOLVED 2026-07-07 by <OPERATOR-REDACTED>: REPURPOSE. The REPURPOSED ACs below apply;
      the RETIRED branch is retained for record only (moot). -->
 
 ## Description
 After this story is complete, ux-designer's own memory (`.claude/agent-memory/ux-designer/`) is rewritten around the surviving report/serving surfaces, consistent with the refocused charter (E-255-03).
 
 ## Context
-Own-memory edit routed to ux-designer under the own-memory carve-out. The ux repurpose-or-retire question is RESOLVED (Jason 2026-07-07: REPURPOSE — refocus, do not retire; matches VISION D4), so the REPURPOSED ACs below are the operative branch (the RETIRED branch is kept for record only and does not apply). The ux-designer docket recon (relayed via main) verified the current surviving surfaces and the stale content. The story depends on E-255-03 (the refocused charter must land first, so the memory aligns to it).
+Own-memory edit routed to ux-designer under the own-memory carve-out. The ux repurpose-or-retire question is RESOLVED (<OPERATOR-REDACTED> 2026-07-07: REPURPOSE — refocus, do not retire; matches VISION D4), so the REPURPOSED ACs below are the operative branch (the RETIRED branch is kept for record only and does not apply). The ux-designer docket recon (relayed via main) verified the current surviving surfaces and the stale content. The story depends on E-255-03 (the refocused charter must land first, so the memory aligns to it).
 
 Verified surviving surfaces (ux recon): `base.html` = top-nav "Baseball Stats" + single "Admin" link (NO bottom nav); `admin/_subnav.html` = 2 tabs Reports|Users; live surfaces = `admin/{reports,users,edit_user}.html`, `reports/scouting_report.html`, `auth/*`, `errors/*`. STALE (all deleted in E-239): Base Layout "bottom nav 4 tabs Batting/Pitching/Games/Opponents"; Admin Sub-Nav "Users|Teams|(Opponents)" (teams.html deleted); Card Pattern dashboard framing; E-178 Coach-Friendly Language table; E-088 Status Badge (opponent link state); Key File Paths (4 of 5 dead — only base.html survives). KEEP: generic Table/Button/Form/Flash/Back-Link patterns; Reference Impl → `admin/reports.html`; `feedback_coach_async_workflow.md`; `design_principles.md` principles 1 & 2 (principle 3 "Unified Verbs Sync/Merge/Connect" references deleted flows).
 
@@ -25,7 +25,7 @@ Verified surviving surfaces (ux recon): `base.html` = top-nav "Baseball Stats" +
 - [ ] **AC-6**: Given the refocused ux-designer charter from E-255-03, when this rewrite completes, then the memory is consistent with that charter (report-layout / trust-surface / tools-hub docket).
 
 ## Acceptance Criteria (RETIRED branch — MOOT, record only; NOT applied)
-- [ ] ~~**AC-R1**~~: (Would have applied only if the agent were retired — Jason decided REPURPOSE, so this branch does not apply. Kept for record.)
+- [ ] ~~**AC-R1**~~: (Would have applied only if the agent were retired — <OPERATOR-REDACTED> decided REPURPOSE, so this branch does not apply. Kept for record.)
 
 ## Technical Approach
 Read the refocused charter (E-255-03 output) and the current templates first; rewrite around surviving surfaces; verify each Key File Path resolves. Keep it lightweight (net-growth counterweight).
@@ -48,4 +48,4 @@ ux-designer
 - [ ] Every Key File Path resolves; no dashboard surface presented as a live design target
 
 ## Notes
-The repurpose-or-retire question is decided (Jason 2026-07-07: REPURPOSE); the RETIRED branch above is moot and kept for record only.
+The repurpose-or-retire question is decided (<OPERATOR-REDACTED> 2026-07-07: REPURPOSE); the RETIRED branch above is moot and kept for record only.

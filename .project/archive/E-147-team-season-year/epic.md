@@ -5,10 +5,10 @@
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
-Add a `season_year` column to the `teams` table so each team carries its own year, then rewrite the dashboard navigation to group teams into year-based cohorts. This eliminates the bug where two identically-named teams (e.g., "Standing Bear Freshman Grizzlies" 2025 vs. 2026) appear side-by-side because `get_team_year_map()` derives year from stat data rather than from team metadata.
+Add a `season_year` column to the `teams` table so each team carries its own year, then rewrite the dashboard navigation to group teams into year-based cohorts. This eliminates the bug where two identically-named teams (e.g., "<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>" 2025 vs. 2026) appear side-by-side because `get_team_year_map()` derives year from stat data rather than from team metadata.
 
 ## Background & Context
-Two teams named "Standing Bear Freshman Grizzlies" appear side-by-side in the dashboard, both showing "2026". Team 8 is last year's freshman team (should be 2025), team 78 is this year's (2026). Both map to 2026 because `get_team_year_map()` in `src/api/db.py` derives year from a UNION+JOIN on stat tables, and both teams have stats in the `2026-spring-hs` season. The root cause: the `teams` table has no `season_year` column.
+Two teams named "<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>" appear side-by-side in the dashboard, both showing "2026". Team 8 is last year's freshman team (should be 2025), team 78 is this year's (2026). Both map to 2026 because `get_team_year_map()` in `src/api/db.py` derives year from a UNION+JOIN on stat tables, and both teams have stats in the `2026-spring-hs` season. The root cause: the `teams` table has no `season_year` column.
 
 **Expert consultation completed:**
 - **data-engineer**: Identified 7 team INSERT paths, recommended `season_year INTEGER` column, prioritized admin add-team as golden path. `TeamProfile` dataclass already parses `year` from API -- it's discarded at the INSERT boundary.

@@ -8,7 +8,7 @@ Spray charts are completely broken for tracked opponent teams that lack a `gc_uu
 
 ## Background & Context
 
-**Immediate trigger**: Team 33 ("Lincoln Northeast Reserve/Freshman Rockets", `public_id=VJdJBnYuw4Ya`) has `gc_uuid=NULL`. The scouting spray crawler (`ScoutingSprayChartCrawler`) does `SELECT gc_uuid FROM teams WHERE public_id = ?` and skips any team where the result is NULL. Zero spray data is crawled or loaded for this team.
+**Immediate trigger**: Team 33 ("<CITY-REDACTED> Northeast Reserve/Freshman Rockets", `public_id=VJdJBnYuw4Ya`) has `gc_uuid=NULL`. The scouting spray crawler (`ScoutingSprayChartCrawler`) does `SELECT gc_uuid FROM teams WHERE public_id = ?` and skips any team where the result is NULL. Zero spray data is crawled or loaded for this team.
 
 **Report generator workaround (commit e802bae)**: Added `_resolve_and_crawl_spray()` with three resolution tiers: (1) DB lookup, (2) POST /search exact name match, (3) boxscore-UUID extraction. This was never deployed (container not rebuilt) and has architectural issues:
 - Duplicated crawl logic (`_crawl_spray_via_boxscore_uuids` reimplements the core crawl loop)

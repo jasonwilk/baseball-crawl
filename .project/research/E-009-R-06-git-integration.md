@@ -60,8 +60,8 @@ gh api repos/{owner}/{repo}/commits \
 Output:
 ```json
 [
-  {"sha": "a1b2c3d", "message": "feat(E-009-02): add docker-compose.yml", "author": "Jason", "date": "2026-03-01T12:00:00Z"},
-  {"sha": "e4f5g6h", "message": "fix(E-006-04): pii scanner regex", "author": "Jason", "date": "2026-02-28T18:00:00Z"}
+  {"sha": "a1b2c3d", "message": "feat(E-009-02): add docker-compose.yml", "author": "<OPERATOR-REDACTED>", "date": "2026-03-01T12:00:00Z"},
+  {"sha": "e4f5g6h", "message": "fix(E-006-04): pii scanner regex", "author": "<OPERATOR-REDACTED>", "date": "2026-02-28T18:00:00Z"}
 ]
 ```
 

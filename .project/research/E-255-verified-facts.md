@@ -198,9 +198,9 @@ Evidence:
 - `docker-compose.yml` — the `app` service is `build: .` (L2-3), so `bb` and `scripts/` live only in that container's environment.
 - Consequently the runbook's bare `bb creds setup web` (production-deployment L144) and bare `python scripts/backup_db.py` (L300/411/455, incl. the host cron at L428) cannot run on the bare host as written.
 
-### FYI for the READY summary (Jason's deployment-owner call, non-blocking)
+### FYI for the READY summary (<OPERATOR-REDACTED>'s deployment-owner call, non-blocking)
 
-Whether the **daily backup cron** ultimately uses `docker compose exec -T app python scripts/backup_db.py` vs. a documented host-side install of the package is a deployment-owner decision for Jason. The **truth-sweep default is `docker compose exec`** (matches the actual current install topology); surface the host-install option as an alternative for Jason to decide, but do not block the sweep on it.
+Whether the **daily backup cron** ultimately uses `docker compose exec -T app python scripts/backup_db.py` vs. a documented host-side install of the package is a deployment-owner decision for <OPERATOR-REDACTED>. The **truth-sweep default is `docker compose exec`** (matches the actual current install topology); surface the host-install option as an alternative for <OPERATOR-REDACTED> to decide, but do not block the sweep on it.
 
 ### Sources
 - Config: `Dockerfile:22,30`; `docker-compose.yml:2-3` (`app` service `build: .`).

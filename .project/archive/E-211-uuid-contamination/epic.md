@@ -12,7 +12,7 @@ When generating standalone reports for scouted teams (e.g., Waverly Vikings Vars
 1. **Duplicate players** -- "C Dewing" (10.2 IP) and "Cy Dewing" (1.0 IP) appear as separate pitchers. Same person, different UUIDs from different API perspectives.
 2. **Missing spray charts** -- the spray endpoint returns 404 for every game because the stored `gc_uuid` is the opponent-perspective UUID, not the schedule-owning UUID.
 
-**Root cause**: The GC API returns different UUIDs for the same team depending on which endpoint and perspective is used. When Standing Bear's member pipeline processes a boxscore, the opponent team is keyed by an opponent-perspective UUID (e.g., `18bf858f` for Waverly). Three pipeline paths store this as `gc_uuid` on the tracked team row. But the real gc_uuid (from `POST /search`) is `370cb40c`. The spray endpoint only works with the real UUID.
+**Root cause**: The GC API returns different UUIDs for the same team depending on which endpoint and perspective is used. When <OWN-PROGRAM-REDACTED>'s member pipeline processes a boxscore, the opponent team is keyed by an opponent-perspective UUID (e.g., `18bf858f` for Waverly). Three pipeline paths store this as `gc_uuid` on the tracked team row. But the real gc_uuid (from `POST /search`) is `370cb40c`. The spray endpoint only works with the real UUID.
 
 **Verified data** (2026-04-03):
 - Waverly (team 93): DB has `gc_uuid = 18bf858f` (wrong). Search returns `370cb40c` (correct).

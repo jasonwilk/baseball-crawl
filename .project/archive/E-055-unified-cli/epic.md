@@ -17,7 +17,7 @@ The project has accumulated 13+ operator-facing scripts across two directories (
 - The right order of operations (refresh creds -> check creds -> crawl -> load, or just bootstrap)
 - Flag names that differ across scripts (`--crawler NAME` vs `--loader NAME` vs `--profile mobile`)
 
-This creates unnecessary cognitive overhead for the single operator (Jason) who runs the system. A unified CLI makes operations self-documenting and reduces the gap between "what do I need to do?" and "how do I do it?".
+This creates unnecessary cognitive overhead for the single operator (<OPERATOR-REDACTED>) who runs the system. A unified CLI makes operations self-documenting and reduces the gap between "what do I need to do?" and "how do I do it?".
 
 **Expert consultation**: UX designer consulted for CLI interaction design (command grouping, help text, discoverability). Software engineer consulted for implementation approach (framework selection, entry point configuration, migration strategy).
 
@@ -39,7 +39,7 @@ The UX designer recommends organizing commands around **operator tasks** rather 
 4. **Actionable error messages**: When creds are expired, tell the operator exactly what to run next.
 5. **Color and formatting**: Use color for status output (green=healthy, red=error, yellow=warning) but degrade gracefully when piped.
 
-**One-command status check**: The designer strongly recommends a `bb status` command that shows the overall system health at a glance -- credential validity, proxy state, last crawl timestamp, database size. This is the "dashboard for the operator" and should be the first thing Jason runs each morning.
+**One-command status check**: The designer strongly recommends a `bb status` command that shows the overall system health at a glance -- credential validity, proxy state, last crawl timestamp, database size. This is the "dashboard for the operator" and should be the first thing <OPERATOR-REDACTED> runs each morning.
 
 ### Software Engineer Consultation Summary
 

@@ -1,67 +1,67 @@
 # Raw narratives + judge scores
 
 ## Scenario: committee
-- Standing Bear Freshman (147) 2026-03-26 estimate=False | arms: Liam Beiermann (available, 7d), Jace Stanczyk (available, 5d), Thomas Saddler (discounted, 2d)
+- <OWN-PROGRAM-REDACTED> Freshman (147) 2026-03-26 estimate=False | arms: <PLAYER-NAME-REDACTED> (available, 7d), <PLAYER-NAME-REDACTED> (available, 5d), <PLAYER-NAME-REDACTED> (discounted, 2d)
 
 ### [new] anthropic/claude-opus-4.8 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Look for Liam Beiermann (#3) on the mound today — he's fully rested with seven days off since his last outing, when he threw just 27 pitches over one inning. If they go a different direction, Jace Stanczyk (#0) is the next most likely arm, sitting on five days of rest after 42 pitches. Watch for Thomas Saddler (#7) as well; he's eligible but on short rest, having thrown 37 pitches just two days ago, so he's more of a backup option today.
+Look for <PLAYER-NAME-REDACTED> (#3) on the mound today — he's fully rested with seven days off since his last outing, when he threw just 27 pitches over one inning. If they go a different direction, <PLAYER-NAME-REDACTED> (#0) is the next most likely arm, sitting on five days of rest after 42 pitches. Watch for <PLAYER-NAME-REDACTED> (#7) as well; he's eligible but on short rest, having thrown 37 pitches just two days ago, so he's more of a backup option today.
 _judge: Correct order, clear primary, specific rest/pitch counts, concise and bench-usable._
 
 ### [new] anthropic/claude-sonnet-4.6 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is your most likely starter today, coming off seven days of rest after throwing just 27 pitches a week ago and likely ready to go deep into this one. Jace Stanczyk is your next option in good shape as well, fully rested on five days after a 42-pitch outing. Thomas Saddler is technically eligible but threw 37 pitches just two days ago, so he's best kept in reserve unless you need him out of the bullpen in a pinch.
+<PLAYER-NAME-REDACTED> is your most likely starter today, coming off seven days of rest after throwing just 27 pitches a week ago and likely ready to go deep into this one. <PLAYER-NAME-REDACTED> is your next option in good shape as well, fully rested on five days after a 42-pitch outing. <PLAYER-NAME-REDACTED> is technically eligible but threw 37 pitches just two days ago, so he's best kept in reserve unless you need him out of the bullpen in a pinch.
 _judge: Correct order, clear rest/pitch info, no hedging, concise and bench-usable._
 
 ### [new] anthropic/claude-haiku-4.5 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann has seven days of rest and is your primary concern on the mound today. Jace Stanczyk is also fully rested with five days off since his last outing and represents a secondary option. Thomas Saddler is eligible to pitch but only has two days of rest after throwing 37 pitches two days ago, so expect him in a relief role if at all.
+<PLAYER-NAME-REDACTED> has seven days of rest and is your primary concern on the mound today. <PLAYER-NAME-REDACTED> is also fully rested with five days off since his last outing and represents a secondary option. <PLAYER-NAME-REDACTED> is eligible to pitch but only has two days of rest after throwing 37 pitches two days ago, so expect him in a relief role if at all.
 _judge: Correct order, clear primary/secondary, all data used, concise and bench-ready._
 
 ### [new] openai/gpt-5.1 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the most likely arm today, coming in fully rested on 7 days since his 27-pitch outing over 1 inning. Behind him, Jace Stanczyk is also fully ready after 42 pitches 5 days ago and could be the next option, while Thomas Saddler is available but on short rest after throwing 37 pitches just 2 days back.
+<PLAYER-NAME-REDACTED> is the most likely arm today, coming in fully rested on 7 days since his 27-pitch outing over 1 inning. Behind him, <PLAYER-NAME-REDACTED> is also fully ready after 42 pitches 5 days ago and could be the next option, while <PLAYER-NAME-REDACTED> is available but on short rest after throwing 37 pitches just 2 days back.
 _judge: Correct order, clear reasons with numbers, concise and fully bench-usable briefing._
 
 ### [new] openai/gpt-5-mini — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the most likely arm today — he has seven days' rest and is fully rested. Behind him, Jace Stanczyk is available with five days' rest after throwing 42 pitches five days ago, and Thomas Saddler is eligible but on short rest with two days' rest following 37 pitches two days ago. No pitchers are unavailable today.
+<PLAYER-NAME-REDACTED> is the most likely arm today — he has seven days' rest and is fully rested. Behind him, <PLAYER-NAME-REDACTED> is available with five days' rest after throwing 42 pitches five days ago, and <PLAYER-NAME-REDACTED> is eligible but on short rest with two days' rest following 37 pitches two days ago. No pitchers are unavailable today.
 _judge: Correctly ordered, specific rest/pitch counts, no hedging, concise and bench-ready._
 
 ### [new] google/gemini-3.1-pro-preview — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the most likely starter for Standing Bear today because he is fully rested after throwing 27 pitches seven days ago. Jace Stanczyk is another fully rested option available to take the mound after throwing 42 pitches five days ago. Thomas Saddler is also eligible to pitch, though he would be operating on short rest after throwing 37 pitches just two days ago.
+<PLAYER-NAME-REDACTED> is the most likely starter for <OWN-PROGRAM-REDACTED> today because he is fully rested after throwing 27 pitches seven days ago. <PLAYER-NAME-REDACTED> is another fully rested option available to take the mound after throwing 42 pitches five days ago. <PLAYER-NAME-REDACTED> is also eligible to pitch, though he would be operating on short rest after throwing 37 pitches just two days ago.
 _judge: Correct ordering, clear primary, all rest/pitch counts used, concise and bench-ready_
 
 ### [new] google/gemini-2.5-flash-lite — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is your most likely arm today, as he's had a full seven days of rest since his last outing. Jace Stanczyk is also fully rested with five days off, while Thomas Saddler is available but on short rest after throwing 37 pitches two days ago.
-_judge: Follows ranking, names Beiermann with rest detail, concise and numerically specific._
+<PLAYER-NAME-REDACTED> is your most likely arm today, as he's had a full seven days of rest since his last outing. <PLAYER-NAME-REDACTED> is also fully rested with five days off, while <PLAYER-NAME-REDACTED> is available but on short rest after throwing 37 pitches two days ago.
+_judge: Follows ranking, names <NAME-REDACTED> with rest detail, concise and numerically specific._
 
 ### [new] x-ai/grok-4.3 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the arm most likely to start for Standing Bear today after seven days of rest. Jace Stanczyk is also available on five days of rest, while Thomas Saddler remains an option despite pitching on short rest two days ago.
+<PLAYER-NAME-REDACTED> is the arm most likely to start for <OWN-PROGRAM-REDACTED> today after seven days of rest. <PLAYER-NAME-REDACTED> is also available on five days of rest, while <PLAYER-NAME-REDACTED> remains an option despite pitching on short rest two days ago.
 _judge: Correct order, clear primary starter with specific rest/pitch details, concise and bench-ready._
 
 ### [new] meta-llama/llama-4-maverick — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the most likely starter today, having thrown just 27 pitches seven days ago and having seven days of rest. Jace Stanczyk is the next most likely candidate, with five days of rest and 42 pitches thrown five days ago. Thomas Saddler is also eligible, but is on short rest having pitched just two days ago.
+<PLAYER-NAME-REDACTED> is the most likely starter today, having thrown just 27 pitches seven days ago and having seven days of rest. <PLAYER-NAME-REDACTED> is the next most likely candidate, with five days of rest and 42 pitches thrown five days ago. <PLAYER-NAME-REDACTED> is also eligible, but is on short rest having pitched just two days ago.
 _judge: Names correct arm, order, reasons with numbers; concise, plain, no hedging or omissions._
 
 ### [new] mistralai/mistral-large-2512 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is almost certain to start today—he threw only 27 pitches a full seven days ago and has been held back since. Jace Stanczyk is also fully rested after 42 pitches five days back, so he’s the next man up if Liam doesn’t go. Thomas Saddler threw 37 pitches two days ago and is eligible but on short rest, so he’s a distant third option.
+<PLAYER-NAME-REDACTED> is almost certain to start today—he threw only 27 pitches a full seven days ago and has been held back since. <PLAYER-NAME-REDACTED> is also fully rested after 42 pitches five days back, so he’s the next man up if <NAME-REDACTED> doesn’t go. <PLAYER-NAME-REDACTED> threw 37 pitches two days ago and is eligible but on short rest, so he’s a distant third option.
 _judge: Correct order, clear primary, specific pitch counts/rest, concise and bench-usable._
 
 ### [new] deepseek/deepseek-v3.2 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is your most likely starter today with a full seven days of rest. Jace Stanczyk is also fully rested with five days off, while Thomas Saddler is eligible but on short rest after throwing 37 pitches two days ago. No one is listed as unavailable for this game.
+<PLAYER-NAME-REDACTED> is your most likely starter today with a full seven days of rest. <PLAYER-NAME-REDACTED> is also fully rested with five days off, while <PLAYER-NAME-REDACTED> is eligible but on short rest after throwing 37 pitches two days ago. No one is listed as unavailable for this game.
 _judge: Correct order, clear lead arm, all rest/pitch details, concise and bench-usable._
 
 ### [new] qwen/qwen3-max — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Liam Beiermann is the most likely starter today, fully rested with seven days off after throwing just 27 pitches in one inning last week. Jace Stanczyk is also fully rested with five days off and could be a strong secondary option after tossing 42 pitches five days ago. Thomas Saddler is eligible but on short rest after throwing 37 pitches just two days ago, making him less likely to start unless needed in relief.
+<PLAYER-NAME-REDACTED> is the most likely starter today, fully rested with seven days off after throwing just 27 pitches in one inning last week. <PLAYER-NAME-REDACTED> is also fully rested with five days off and could be a strong secondary option after tossing 42 pitches five days ago. <PLAYER-NAME-REDACTED> is eligible but on short rest after throwing 37 pitches just two days ago, making him less likely to start unless needed in relief.
 _judge: Correct order, clear rest/pitch details, no hedging, concise and bench-ready._
 
 ### [new] google/gemini-3.5-flash — total 14/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=0)
-Liam Beiermann is the most likely arm we will see today, as he is fully rested after throwing only 27 pitches seven days ago. Behind him, Jace Stanczyk is also fully
+<PLAYER-NAME-REDACTED> is the most likely arm we will see today, as he is fully rested after throwing only 27 pitches seven days ago. Behind him, <PLAYER-NAME-REDACTED> is also fully
 _judge: Correct order and details but briefing is cut off, not concise/bench-ready._
 
 ### [OLD] openai/gpt-5.1 — total 12/18  (c1=1 c2=3 c3=2 c4=0 c5=2 c6=2 c7=2)
-This looks like a true committee game with no clear workhorse; the most likely starter is Liam Beiermann given 7 days rest and only 27 pitches last outing, which keeps him fully fresh. Jace Stanczyk is a realistic alternative if they want a similar low-pitch starter on 5 days rest, while Saddler is less likely to open given only 2 days rest after 37 pitches. Expect them to treat the starter as a short stint and spread the game across multiple arms. Overall, rotation usage so far and the 2-2 record both point to flexibility rather than a locked-in ace.
+This looks like a true committee game with no clear workhorse; the most likely starter is <PLAYER-NAME-REDACTED> given 7 days rest and only 27 pitches last outing, which keeps him fully fresh. <PLAYER-NAME-REDACTED> is a realistic alternative if they want a similar low-pitch starter on 5 days rest, while <NAME-REDACTED> is less likely to open given only 2 days rest after 37 pitches. Expect them to treat the starter as a short stint and spread the game across multiple arms. Overall, rotation usage so far and the 2-2 record both point to flexibility rather than a locked-in ace.
 _judge: Leads with committee hedge, then correct order and specifics but leans heavily on committee framing._
 
 ### [OLD] anthropic/claude-haiku-4.5 — total 9/18  (c1=0 c2=2 c3=2 c4=0 c5=1 c6=2 c7=2)
-This is a low-confidence committee scenario with only 4 games played and incomplete rest data. Liam Beiermann shows the strongest candidacy (100% likelihood, 7 days rest, minimal pitch load), but the anomalously low pitch count (27) in his last outing raises questions about whether he actually started or was pulled early. Thomas Saddler has 2 GS already but only 2 days rest, making him unavailable. Without full rest dates and 7-day workload totals, any prediction is speculative.
-_judge: Opens with committee hedge, mislabels Saddler unavailable, adds extra doubt and speculation._
+This is a low-confidence committee scenario with only 4 games played and incomplete rest data. <PLAYER-NAME-REDACTED> shows the strongest candidacy (100% likelihood, 7 days rest, minimal pitch load), but the anomalously low pitch count (27) in his last outing raises questions about whether he actually started or was pulled early. <PLAYER-NAME-REDACTED> has 2 GS already but only 2 days rest, making him unavailable. Without full rest dates and 7-day workload totals, any prediction is speculative.
+_judge: Opens with committee hedge, mislabels <NAME-REDACTED> unavailable, adds extra doubt and speculation._
 
 ## Scenario: tired_arm
 - Cornhusker LSW JV 2024 (227) 2024-06-05 estimate=False | arms: Ian Draus (available, 7d), Zach Hirschbrunner (available, 8d), Jaxon Pieper (discounted, 3d)
@@ -184,10 +184,10 @@ Blake Caspar is the most likely starter today, coming in fully rested after thro
 _judge: Correct naming/order and rest detail, but unfinished, no unavailable arm, too short._
 
 ## Scenario: clear_rotation
-- Standing Bear Varsity (160) 2026-03-31 estimate=False | arms: Renton LaHolt (available, 5d), Jaxson Minzel (available, 4d), Drake Von Seggern (available, 4d)
+- <OWN-PROGRAM-REDACTED> Varsity (160) 2026-03-31 estimate=False | arms: Renton LaHolt (available, 5d), Jaxson Minzel (available, 4d), Drake Von Seggern (available, 4d)
 
 ### [new] anthropic/claude-sonnet-4.6 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Renton LaHolt (#25) is your most likely arm today, coming off five days of rest after throwing 80 pitches in a 6.7-inning outing — he's as fresh as you'll see a starter. If LaHolt isn't your guy, Jaxson Minzel (#2) and Drake Von Seggern (#9) are both fully rested on four days, with Minzel logging 57 pitches and Von Seggern just 9 pitches in their last appearances. Nobody on this staff is unavailable today — all three arms are cleared to go against Standing Bear.
+Renton LaHolt (#25) is your most likely arm today, coming off five days of rest after throwing 80 pitches in a 6.7-inning outing — he's as fresh as you'll see a starter. If LaHolt isn't your guy, Jaxson Minzel (#2) and Drake Von Seggern (#9) are both fully rested on four days, with Minzel logging 57 pitches and Von Seggern just 9 pitches in their last appearances. Nobody on this staff is unavailable today — all three arms are cleared to go against <OWN-PROGRAM-REDACTED>.
 _judge: Accurate, ordered, specific, concise; no hedging or jargon, surfaces availability correctly._
 
 ### [new] openai/gpt-5.1 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
@@ -203,7 +203,7 @@ Renton LaHolt is the most likely arm today, coming in with five days of rest aft
 _judge: Named correct ace with reasons, preserves order, clear, specific, concise, no hedging._
 
 ### [new] x-ai/grok-4.3 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)
-Renton LaHolt is the most likely starter for Standing Bear today after five days of rest following his 80-pitch outing. Jaxson Minzel is the next option with four days of rest after throwing 57 pitches, while Drake Von Seggern also has four days of rest after a short 9-pitch appearance.
+Renton LaHolt is the most likely starter for <OWN-PROGRAM-REDACTED> today after five days of rest following his 80-pitch outing. Jaxson Minzel is the next option with four days of rest after throwing 57 pitches, while Drake Von Seggern also has four days of rest after a short 9-pitch appearance.
 _judge: Correct order, clear reasons, concise and bench-ready with no jargon or hedging._
 
 ### [new] mistralai/mistral-large-2512 — total 16/18  (c1=3 c2=3 c3=2 c4=2 c5=2 c6=2 c7=2)

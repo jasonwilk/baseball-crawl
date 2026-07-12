@@ -22,21 +22,21 @@ The right internal proxy is the **novel-starter rate**: the share of scored game
 | team_id | name | games w/ data | scored games | novel-starter % |
 |---|---|---|---|---|
 | 160 | LSB Varsity (own, fully charted) | 30 | 26 | **7.7%** |
-| 186 | Braxter Construction | 24 | 20 | 10.0% |
+| 186 | <TEAM-REDACTED> Construction | 24 | 20 | 10.0% |
 | 189 | Papio Post 32 Reserves | 20 | 16 | 12.5% |
-| 290 | Gretna 216 Seniors | 24 | 20 | 15.0% |
-| 114 | Five Star Bath | 23 | 19 | 15.8% |
+| 290 | <CITY-REDACTED> 216 Seniors | 24 | 20 | 15.0% |
+| 114 | <ORG-REDACTED> | 23 | 19 | 15.8% |
 | 227 | Cornhusker JV (2024) | 47 | 43 | 16.3% |
 | 202 | Griffs 216 Juniors | 21 | 17 | 17.6% |
 | 147 | LSB Freshman (own) | 26 | 22 | 18.2% |
 | 91 | PrimeTime Reserve | 23 | 19 | 21.1% |
-| 3 | Epp Foundation Juniors | 35 | 31 | 22.6% |
+| 3 | <ORG-REDACTED> Juniors | 35 | 31 | 22.6% |
 | 126 | GI Home Federal 18U | 25 | 21 | 23.8% |
 | 279 | Jr Bluejays 15U | 16 | 12 | 25.0% |
-| 128 | Lincoln Hotel 18U | 29 | 25 | 32.0% |
+| 128 | <CITY-REDACTED> Hotel 18U | 29 | 25 | 32.0% |
 | 215 | Cornhusker LSW 2026 | 25 | 21 | 33.3% |
-| 100 | Lincoln East Reserve 15U | 22 | 18 | 33.3% |
-| 185 | Gretna 216 Reserve | 21 | 17 | 35.3% |
+| 100 | <CITY-REDACTED> East Reserve 15U | 22 | 18 | 33.3% |
+| 185 | <CITY-REDACTED> 216 Reserve | 21 | 17 | 35.3% |
 | 336 | Neb Prospect 15U | 14 | 10 | 50.0% |
 | **Pooled** | | | **357** | **21.6% (77/357)** |
 

@@ -1,7 +1,7 @@
 # E-073: API Documentation Validation Sweep
 
 ## Status
-`ABANDONED` (2026-07-08, E-255-06; Jason-decided 2026-07-07)
+`ABANDONED` (2026-07-08, E-255-06; <OPERATOR-REDACTED>-decided 2026-07-07)
 
 **Abandonment reason**: Superseded and premise-stale. This epic was written 2026-03-07 to systematically validate all ~90 `docs/api/` endpoint docs against live API + proxy ground truth. Since then: (1) the accuracy corrections that actually mattered were delivered piecemeal — E-254-07 scrubbed PII across 24 endpoint docs, and E-255-04 corrected the boxscore IP contradiction, the `game_stream.id`/`event_id` routing across ~12 files (AC-5b cross-file consistency sweep — confirmed complete, so that work does NOT fall between epics), the `team_season` shape, the README count, and more; (2) the doc corpus grew 90→120 files; (3) the broad "programmatically confirm every doc's `last_confirmed` against live API" premise needs credentials that are now ~4 months stale, and the reports-first reframe narrowed which endpoints are load-bearing. The one un-addressed residual — normalizing the `/game-stream-processing/{id}/` path-variable naming across sibling endpoint filenames (`{game_stream_id}` vs `{event_id}`) — is captured as **IDEA-107** so it is not lost. Archived unshipped; no stories were dispatched.
 

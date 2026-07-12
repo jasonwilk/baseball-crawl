@@ -7,7 +7,7 @@
 `TODO`
 
 ## Description
-After this story is complete, the dedup infrastructure will be assessed and simplified. Hooks and tools that existed solely to compensate for cross-perspective duplication will be removed or simplified. Components that serve genuine name-variant dedup (e.g., "O" vs "Oliver") will be retained.
+After this story is complete, the dedup infrastructure will be assessed and simplified. Hooks and tools that existed solely to compensate for cross-perspective duplication will be removed or simplified. Components that serve genuine name-variant dedup (e.g., "O" vs "<NAME-REDACTED>") will be retained.
 
 ## Context
 Multiple dedup mechanisms were built across E-215 and E-216 to compensate for cross-perspective player duplication. With the root cause fixed (E-219-01, E-219-02), some of this infrastructure is no longer needed. However, genuine name-variant dedup (prefix-matching first names on the same roster) is a real need unrelated to cross-perspective UUIDs and should be preserved. See TN-7 in the epic for the full list.

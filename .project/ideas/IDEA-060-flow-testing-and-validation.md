@@ -17,7 +17,7 @@ Every flow tested so far has revealed at least one gap. The report flow found th
 | 2 | Report generation (admin UI) | Admin generate button x2 | Same as CLI |
 | 3 | Add tracked team (admin UI) | Added Reserve + Bennington | Clean |
 | 4 | Sync tracked team (admin Sync) | Synced Reserve + Bennington | No spray crawl (IDEA-059 Gap 1) |
-| 5 | Member sync (pipeline trigger) | `run_member_sync` for Freshman Grizzlies | Auto-resolved opponents never scouted (IDEA-059 Gap 1b) |
+| 5 | Member sync (pipeline trigger) | `run_member_sync` for Freshman <TEAM-REDACTED> | Auto-resolved opponents never scouted (IDEA-059 Gap 1b) |
 
 ## Flows Not Yet Tested
 
@@ -47,7 +47,7 @@ After E-187, E-178, and E-180 are complete. Before coaching staff begins using t
 
 ## Notes
 - Every tested flow found gaps. Expect the untested flows to find more.
-- The 18 unresolved opponents from the Freshman Grizzlies sync are ideal test data for flows 6 and 8.
+- The 18 unresolved opponents from the Freshman <TEAM-REDACTED> sync are ideal test data for flows 6 and 8.
 - Dashboard views (flows 9-11) need the app running with a valid session -- can test via the admin UI.
 
 ---

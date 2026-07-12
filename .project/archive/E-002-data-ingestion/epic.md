@@ -14,7 +14,7 @@ With API access established (E-001), the next step is actually pulling data. The
 
 Keeping these separate means: if the database schema changes, we can re-process from raw without re-crawling. If the API changes, we can re-crawl without touching the schema.
 
-Scope for this epic covers Lincoln Standing Bear High School teams (Freshman, JV, Reserve, Varsity) and the opponents they play. Legion teams are explicitly out of scope but the design should not prevent adding them later.
+Scope for this epic covers <CITY-REDACTED> <OWN-PROGRAM-REDACTED> High School teams (Freshman, JV, Reserve, Varsity) and the opponents they play. Legion teams are explicitly out of scope but the design should not prevent adding them later.
 
 **Expert consultation**: No baseball-coach consultation required -- this is pure data pipeline infrastructure. Coaching stat requirements are expressed via E-003 schema, which loaders consume. No data-engineer consultation performed -- the schema is finalized (E-003 COMPLETED), and loaders are mechanical JSON-to-SQLite upserts with no complex ETL patterns. FK prerequisite handling is documented in Technical Notes.
 
@@ -173,10 +173,10 @@ A `config/teams.yaml` file (committed to version control -- contains no credenti
 season: "2025"
 owned_teams:
   - id: "abc123"
-    name: "Lincoln Freshman"
+    name: "<CITY-REDACTED> Freshman"
     level: "freshman"
   - id: "def456"
-    name: "Lincoln Varsity"
+    name: "<CITY-REDACTED> Varsity"
     level: "varsity"
 ```
 

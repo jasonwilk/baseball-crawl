@@ -59,7 +59,7 @@ The docs-writer should read the source files to verify current reality, but here
 - Old migrations 002-008 archived; single `001_initial_schema.sql` contains all DDL
 
 **Admin UI:**
-- Team list is a flat table (no Lincoln/Opponents split). Columns: name, program, division (classification), membership badge, active/inactive, opponent count, edit link
+- Team list is a flat table (no <CITY-REDACTED>/Opponents split). Columns: name, program, division (classification), membership badge, active/inactive, opponent count, edit link
 - Two-phase add-team flow: Phase 1 = URL input only. Phase 2 = confirm page with resolved team info, gc_uuid status, membership radio (default: tracked), program/division dropdowns
 - Edit page: name, program, division (classification), membership radio, active toggle
 - All routes use INTEGER `{id}` path parameters

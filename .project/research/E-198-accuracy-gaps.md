@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-02
 **Purpose**: Systematically investigate and close the remaining accuracy gaps in plays-vs-boxscore reconciliation, with the goal of reaching near-100% match rates for all major pitcher signals.
-**Dataset**: 101 games (Lincoln Rebels 14U 2025 summer), 5,648 plays, 1,042 pitcher signal comparisons across all signals.
+**Dataset**: 101 games (<CITY-REDACTED> Rebels 14U 2025 summer), 5,648 plays, 1,042 pitcher signal comparisons across all signals.
 
 ---
 
@@ -398,7 +398,7 @@ Codex, please evaluate the findings above and:
 ### Key Files for Codex
 - `src/gamechanger/parsers/plays_parser.py` -- pitch event classification, pitch_count derivation
 - `src/reconciliation/engine.py` -- signal computation, correction algorithm
-- `data/raw/plays-exploration/a1GFM9Ku0BbF/` -- raw plays JSON files (92 games)
+- `data/raw/plays-exploration/<PUBLIC-ID-REDACTED>/` -- raw plays JSON files (92 games)
 - `data/raw/plays-exploration/FINDINGS.md` -- 165-game template exploration
 
 ---
@@ -830,8 +830,8 @@ These are fixable but require the boxscore JSON files to be present. They'll be 
 ### Investigation Context
 
 Compared FPS% values between our standalone reports and GameChanger's official stats CSVs for two teams:
-- **Standing Bear Freshman Grizzlies** (Spring 2026): 15 pitchers, 259 total BF
-- **Lincoln Rebels 14U** (Summer 2025): 12 pitchers, 2,418 total BF (101 games)
+- **<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>** (Spring 2026): 15 pitchers, 259 total BF
+- **<CITY-REDACTED> Rebels 14U** (Summer 2025): 12 pitchers, 2,418 total BF (101 games)
 
 ### Finding 1: Formula Mismatch (Systematic, Fixable)
 
@@ -841,7 +841,7 @@ Compared FPS% values between our standalone reports and GameChanger's official s
 
 This was a deliberate design choice documented in CLAUDE.md ("exclusions (HBP, Intentional Walk) applied at query time only"), but it diverges from what coaches see in the GC app and CSV exports.
 
-**Impact**: Systematic overcount of ~1-4pp for pitchers with HBP/IBB events. Extreme case: Caiden Strauss (14 BF, 4 excluded PAs) shows 70.0% (ours) vs 50.0% (GC) — a 20pp gap.
+**Impact**: Systematic overcount of ~1-4pp for pitchers with HBP/IBB events. Extreme case: <PLAYER-NAME-REDACTED> (14 BF, 4 excluded PAs) shows 70.0% (ours) vs 50.0% (GC) — a 20pp gap.
 
 **Fix**: Change the 3 FPS% queries in `generator.py` to use `COUNT(*)` as denominator. Epic E-203 planned.
 
@@ -854,18 +854,18 @@ This was a deliberate design choice documented in CLAUDE.md ("exclusions (HBP, I
 
 After correcting for the formula mismatch, residual per-pitcher deltas remain:
 
-**Freshman Grizzlies (w/o exclusion formula applied)**:
+**Freshman <TEAM-REDACTED> (w/o exclusion formula applied)**:
 | Pitcher | BF | Our FPS/BF | GC FPS% | Delta | Notes |
 |---------|-----|-----------|---------|-------|-------|
-| Grant Oliver | 13 | 5/13 = 38.5% | 46.15% | -7.6pp | 1 missing FPS event |
-| Jace Stanczyk | 41 | 21/41 = 51.2% | 51.22% | ~0.0pp | Matches after formula fix |
+| <PLAYER-NAME-REDACTED> | 13 | 5/13 = 38.5% | 46.15% | -7.6pp | 1 missing FPS event |
+| <PLAYER-NAME-REDACTED> | 41 | 21/41 = 51.2% | 51.22% | ~0.0pp | Matches after formula fix |
 | Brody Henninger | 36 | 26/36 = 72.2% | 72.22% | ~0.0pp | Matches after formula fix |
-| Liam Beiermann | 39 | 18/39 = 46.2% | 46.15% | ~0.0pp | Matches after formula fix |
+| <PLAYER-NAME-REDACTED> | 39 | 18/39 = 46.2% | 46.15% | ~0.0pp | Matches after formula fix |
 
 **Rebels 14U (report values include formula error + endpoint gaps)**:
 Average absolute delta: 0.90pp across 12 pitchers. Deltas go both directions (±1.5pp max). High-volume pitchers (200+ BF) are within ~0.5pp.
 
-### Grant Oliver Deep Dive
+### <PLAYER-NAME-REDACTED> Deep Dive
 
 All 13 BF correctly attributed (boxscore BF = plays BF = 13). All 8 non-FPS PAs verified against raw JSON (`at_plate_details`) — each genuinely starts with `Ball 1`. The plays endpoint reports one fewer first-pitch strike than GC's internal scoring data.
 
@@ -882,7 +882,7 @@ All 13 BF correctly attributed (boxscore BF = plays BF = 13). All 8 non-FPS PAs 
 
 | Team | Pitchers | Avg |Delta| | Max |Delta| | Notes |
 |------|----------|-------------|-------------|-------|
-| Freshman Grizzlies | 15 | ~0.5pp (est.) | ~7.6pp (Oliver, 13 BF) | Low-volume outlier |
+| Freshman <TEAM-REDACTED> | 15 | ~0.5pp (est.) | ~7.6pp (<NAME-REDACTED>, 13 BF) | Low-volume outlier |
 | Rebels 14U | 12 | ~0.9pp | ~1.5pp | High-volume, bidirectional |
 
 ### Open Question: Can Boxscore Data Cross-Reference Improve FPS Accuracy?
@@ -901,8 +901,8 @@ This is speculative and may not be tractable. Documenting for Codex analysis.
 
 Compared S% (Strike percentage = `total_strikes / pitches`) between reports and GC CSVs for both teams:
 
-**Lincoln Rebels 14U** (12 pitchers, 101 games): All 12 match GC within ±0.04pp (rounding).
-**Standing Bear Freshman Grizzlies** (13 pitchers matched): All 13 match GC within ±0.04pp.
+**<CITY-REDACTED> Rebels 14U** (12 pitchers, 101 games): All 12 match GC within ±0.04pp (rounding).
+**<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>** (13 pitchers matched): All 13 match GC within ±0.04pp.
 
 S% is sourced from boxscore aggregates (`player_season_pitching.total_strikes / player_season_pitching.pitches`), which are loaded directly from GC boxscore data. This data path has zero accuracy issues.
 

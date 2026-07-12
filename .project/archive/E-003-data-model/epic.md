@@ -8,7 +8,7 @@ Design and implement the SQLite database schema that stores all baseball data in
 
 ## Background & Context
 The data model has some non-obvious complexity:
-- **Multi-team**: Four Lincoln teams (Freshman, JV, Reserve, Varsity) plus future Legion/travel teams
+- **Multi-team**: Four <CITY-REDACTED> teams (Freshman, JV, Reserve, Varsity) plus future Legion/travel teams
 - **Multi-season**: 30-game seasons, data should accumulate year over year. Seasons have types (spring-hs, summer-legion, fall) and temporal ordering.
 - **Player mobility**: Players move between teams (Freshman -> JV -> Varsity progression is standard). A player has one `player_id` (from GameChanger) that is stable across their career.
 - **Opponent data**: Stats exist for opponents we've played but whose teams we don't "own." They need to live in the same schema.

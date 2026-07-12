@@ -9,7 +9,7 @@ Extend the mitmproxy endpoint logger addon to capture complete request/response 
 ## Background & Context
 The current `proxy/addons/endpoint_logger.py` deliberately omits bodies, query parameter values, and headers -- logging only lightweight metadata (method, host, path, query key names, content-types, status code, timestamp, source). This was originally conservative, but the session data files (`proxy/data/sessions/`) are gitignored, local-only, and secured. The operator wants full payload capture so proxy sessions become a complete API reference source.
 
-Separately, the API endpoint documentation in `docs/api/endpoints/` currently has an inconsistent approach to example JSON -- some files include real team names, real city names, and real UUIDs in example responses (e.g., `get-me-teams.md` shows "Lincoln Rebels 14U", "Lincoln", and real UUIDs). The PII pre-commit hook catches credentials but not team names or other identifying data in documentation. The API doc rules (`.claude/rules/api-docs.md`) and ingest-endpoint skill (`.claude/skills/ingest-endpoint/SKILL.md`) need guidance on safe placeholder values for committed example JSON.
+Separately, the API endpoint documentation in `docs/api/endpoints/` currently has an inconsistent approach to example JSON -- some files include real team names, real city names, and real UUIDs in example responses (e.g., `get-me-teams.md` shows "<CITY-REDACTED> Rebels 14U", "<CITY-REDACTED>", and real UUIDs). The PII pre-commit hook catches credentials but not team names or other identifying data in documentation. The API doc rules (`.claude/rules/api-docs.md`) and ingest-endpoint skill (`.claude/skills/ingest-endpoint/SKILL.md`) need guidance on safe placeholder values for committed example JSON.
 
 **Expert consultation**: SE consulted on storage format (inline vs. sidecar files, size thresholds, auth header stripping) for E-087-01. API scout consulted on PII taxonomy completeness, GC API response patterns, and ingest-endpoint workflow impact for E-087-02. Claude-architect consulted on context-layer file placement, ingest-endpoint skill integration, and .env.example structure for E-087-02. All answers incorporated into Technical Notes below.
 
@@ -72,7 +72,7 @@ Committed API doc files (`docs/api/endpoints/*.md`) must use clearly fake/redact
 - **Venue/field names**: `"Anytown Field"`, `"Example Park"`
 - **Person names (players, coaches, staff, parents)**: `"Jane Doe"`, `"Player One"`
 - **Phone numbers**: `"+1 (555) 555-0100"` or `"+15550001234"`
-- **UUIDs**: Redact to `"72bb77d8-REDACTED"` or `"00000000-0000-0000-0000-000000000001"`. This rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
+- **UUIDs**: Redact to `"00000000-REDACTED-REDACTED"` or `"00000000-0000-0000-0000-000000000001"`. This rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
 - **Dates**: Keep realistic but not identifying (any recent date is fine)
 - **Emails**: use `example.com` domain placeholders
 - **public_id slugs**: `"xXxXxXxXxXxX"` or similar clearly fake values

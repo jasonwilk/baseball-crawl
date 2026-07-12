@@ -54,16 +54,16 @@ CREATE TABLE players (
 -- ---------------------------------------------------------------------------
 -- teams (REFINED -- crawl configuration added)
 -- ---------------------------------------------------------------------------
--- Every team: both Lincoln teams we own and opponent teams.
+-- Every team: both <CITY-REDACTED> teams we own and opponent teams.
 -- is_active controls whether the crawler fetches this team: 1 = crawl, 0 = skip.
 -- Defaults to 1 -- newly discovered teams are crawled by default.
 -- The crawler reads: SELECT * FROM teams WHERE is_active = 1
 CREATE TABLE teams (
     team_id     TEXT    PRIMARY KEY,
     name        TEXT    NOT NULL,
-    -- Level within the Lincoln program (null for opponents)
+    -- Level within the <CITY-REDACTED> program (null for opponents)
     level       TEXT,                             -- 'varsity' | 'jv' | 'freshman' | 'reserve' | 'legion' | NULL
-    -- 1 if this is a Lincoln team we manage; 0 for opponents
+    -- 1 if this is a <CITY-REDACTED> team we manage; 0 for opponents
     is_owned    INTEGER NOT NULL DEFAULT 0,
     -- Crawl configuration
     source      TEXT    NOT NULL DEFAULT 'gamechanger',  -- data source identifier

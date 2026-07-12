@@ -21,7 +21,7 @@ Fresh-start rewrite — user authorized dropping all data. The existing `migrati
 - [ ] **AC-4**: All auth tables (users, user_team_access, magic_link_tokens, passkey_credentials, sessions, coaching_assignments) are included in `001_initial_schema.sql`. Single migration file is the complete schema.
 
 ### Core Tables
-- [ ] **AC-5**: `programs` table exists with columns: `program_id TEXT PK`, `name TEXT NOT NULL`, `program_type TEXT NOT NULL CHECK(program_type IN ('hs', 'usssa', 'legion'))`, `org_name TEXT`, `created_at`. One seed row: `('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear')`.
+- [ ] **AC-5**: `programs` table exists with columns: `program_id TEXT PK`, `name TEXT NOT NULL`, `program_type TEXT NOT NULL CHECK(program_type IN ('hs', 'usssa', 'legion'))`, `org_name TEXT`, `created_at`. One seed row: `('lsb-hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED> HS', 'hs', '<CITY-REDACTED> <OWN-PROGRAM-REDACTED>')`.
 - [ ] **AC-6**: `teams` table has `id INTEGER PK AUTOINCREMENT`, `name`, `program_id FK`, `membership_type CHECK(... IN ('member', 'tracked'))`, `classification` (with CHECK for known values + NULL), `public_id TEXT UNIQUE`, `gc_uuid TEXT UNIQUE`, `source`, `is_active`, `last_synced`, `created_at`. No `is_owned` column. No `level` column. No `team_id TEXT` column.
 - [ ] **AC-7**: `team_opponents` table exists with INTEGER FKs to `teams(id)`, UNIQUE constraint, and `CHECK(our_team_id != opponent_team_id)`.
 - [ ] **AC-8**: `seasons` table has `program_id TEXT FK -> programs` (nullable).

@@ -7,7 +7,7 @@
 A system for scheduling, monitoring, and managing recurring crawl runs -- including credential rotation awareness, run history tracking, error alerting, and automated crawl/load cycles on a schedule.
 
 ## Why It Matters
-After E-050 (bootstrap), the operator can run a full crawl-and-load cycle with one command. But this is still manual -- the operator must remember to run it, check for errors, and refresh credentials before they expire. For a system tracking 4 Lincoln teams + opponents across a 30-game season, manual triggering becomes tedious. A scheduling system would keep data fresh automatically and alert the operator only when intervention is needed (expired credentials, API errors, etc.).
+After E-050 (bootstrap), the operator can run a full crawl-and-load cycle with one command. But this is still manual -- the operator must remember to run it, check for errors, and refresh credentials before they expire. For a system tracking 4 <CITY-REDACTED> teams + opponents across a 30-game season, manual triggering becomes tedious. A scheduling system would keep data fresh automatically and alert the operator only when intervention is needed (expired credentials, API errors, etc.).
 
 ## Rough Timing
 After E-050 (bootstrap) is complete and the operator has run several manual crawl cycles. The pain of manual triggering will become clear during the first few weeks of the season when games happen every 2-3 days and data needs refreshing after each game.

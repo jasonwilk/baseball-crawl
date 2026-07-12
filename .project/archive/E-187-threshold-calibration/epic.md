@@ -12,7 +12,7 @@ After E-186 delivered standalone scouting reports with spray charts, evaluation 
 
 1. **Heat maps nearly blank for early-season teams.** Millard South (5 games, 18 batters) showed almost no heat-map coloring because only 2 batters exceeded the 20 PA threshold. York Varsity (5 games, 15 batters) had the same issue -- 3 qualified at 20 PA vs 10 at 5 PA.
 
-2. **Suppression removes useful information.** Lincoln Southwest Freshman's C Johnson had a 189.0 ERA on 0.1 IP -- mathematically correct and coaching-relevant ("this kid got shelled, pounce if he comes in"). The current renderer dims this to gray and adds an asterisk, making it easy to miss. The user's guidance: "I'd rather see it. We just have to display it in a way that gives it context."
+2. **Suppression removes useful information.** <CITY-REDACTED> Southwest Freshman's C Johnson had a 189.0 ERA on 0.1 IP -- mathematically correct and coaching-relevant ("this kid got shelled, pounce if he comes in"). The current renderer dims this to gray and adds an asterisk, making it easy to miss. The user's guidance: "I'd rather see it. We just have to display it in a way that gives it context."
 
 The user's design philosophy: **The system presents data; the coach is the analyst.** Show every number at full visual weight. Give context (PA/IP count) so the coach knows the depth. Don't dim, hide, or suppress based on sample size. Heat-map coloring is a visual signal layer whose richness scales with data depth (graduated intensity per TN-2a) -- it's about progressively adding signal as confidence grows, not hiding data.
 

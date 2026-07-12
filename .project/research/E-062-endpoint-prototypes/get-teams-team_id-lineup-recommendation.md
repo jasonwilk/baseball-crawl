@@ -90,12 +90,12 @@ Single JSON object with `lineup` array and `metadata` object.
     {"player_id": "e8534cc3-REDACTED", "field_position": "LF", "batting_order": 5},
     {"player_id": "996c48ba-REDACTED", "field_position": "SS", "batting_order": 6},
     {"player_id": "3050e40b-REDACTED", "field_position": "3B", "batting_order": 7},
-    {"player_id": "77c74470-REDACTED", "field_position": "2B", "batting_order": 8},
+    {"player_id": "00000000-REDACTED-REDACTED", "field_position": "2B", "batting_order": 8},
     {"player_id": "b7790d88-REDACTED", "field_position": "CF", "batting_order": 9}
   ],
   "metadata": {
     "generated_at": "2026-03-07T04:09:32.884Z",
-    "team_id": "72bb77d8-REDACTED"
+    "team_id": "00000000-REDACTED-REDACTED"
   }
 }
 ```
@@ -113,7 +113,7 @@ Single JSON object with `lineup` array and `metadata` object.
 - **Accept header unconfirmed.** The exact vendor-typed Accept header was not captured. The endpoint returned 200 OK with whatever Accept header the probe tool sent.
 - **9-player limit.** Only 9 players appear (standard starting lineup). No bench players or DH extension observed. Whether a 10-player lineup appears when the team uses a DH is unknown.
 - **Algorithm opacity.** The recommendation algorithm is not documented. Whether it uses recent performance, historical patterns, handedness, or all of the above is unknown.
-- **Single team confirmed.** Team UUID `72bb77d8-...` (Lincoln Rebels 14U). Behavior for teams without enough historical data to generate a recommendation is unknown.
+- **Single team confirmed.** Team UUID `00000000-REDACTED-...` (<CITY-REDACTED> Rebels 14U). Behavior for teams without enough historical data to generate a recommendation is unknown.
 
 **Coaching Relevance:** HIGH. The GC recommendation serves as a data-driven baseline for lineup construction. Comparing this recommendation to the coach's actual lineup reveals which players GC ranks higher or lower than the coach's judgment.
 

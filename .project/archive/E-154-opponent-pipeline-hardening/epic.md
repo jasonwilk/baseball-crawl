@@ -13,7 +13,7 @@ Two scouting paths exist with different `public_id` sources:
 - **CLI** (`bb data scout` → `scout_all()`): Queries `opponent_links.public_id` — works because the resolver writes `public_id` there.
 - **Admin UI** (`POST /admin/teams/{id}/sync` → `run_scouting_sync()`): Reads `teams.public_id` — **broken** because it's NULL.
 
-DB state observed 2026-03-25 (Standing Bear Freshman Grizzlies, team_id=89): 25 opponent_links rows, 6 resolved with `public_id` in `opponent_links` but NULL in `teams`, 19 unresolved (no progenitor_team_id). Manual SQL fix was applied to copy `public_id` to `teams` for the 6 resolved opponents.
+DB state observed 2026-03-25 (<OWN-PROGRAM-REDACTED> Freshman <TEAM-REDACTED>, team_id=89): 25 opponent_links rows, 6 resolved with `public_id` in `opponent_links` but NULL in `teams`, 19 unresolved (no progenitor_team_id). Manual SQL fix was applied to copy `public_id` to `teams` for the 6 resolved opponents.
 
 Expert consultation: api-scout confirmed `public_id` is NOT nullable in the GC team detail spec. The `GET /teams/{progenitor_team_id}` response also includes `season_year` and other fields capturable at zero extra API cost. DE recommended `teams.public_id` as single source of truth with a backfill migration to document healing intent.
 

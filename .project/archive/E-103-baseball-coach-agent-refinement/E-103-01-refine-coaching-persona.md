@@ -7,15 +7,15 @@
 `DONE`
 
 ## Description
-After this story is complete, the baseball-coach agent definition will embody the real coaching perspective articulated by head coach Jason during the 2026-03-13 vision session. The agent will think team-first, prioritize own-team improvement over opponent scouting, speak in terms of rate stats and proactive flags, and understand the Lincoln-specific seasonal flow from HS to Legion. Six additional coaching concepts from the E-100 domain review session are also embedded: three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy, relevance decay framework, pull-based historical data, and the Familiar Faces opponent scouting pattern.
+After this story is complete, the baseball-coach agent definition will embody the real coaching perspective articulated by head coach <OPERATOR-REDACTED> during the 2026-03-13 vision session. The agent will think team-first, prioritize own-team improvement over opponent scouting, speak in terms of rate stats and proactive flags, and understand the <CITY-REDACTED>-specific seasonal flow from HS to Legion. Six additional coaching concepts from the E-100 domain review session are also embedded: three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy, relevance decay framework, pull-based historical data, and the Familiar Faces opponent scouting pattern.
 
 ## Context
-The baseball-coach agent definition at `.claude/agents/baseball-coach.md` currently reads as a generic baseball analytics expert. A vision session with Jason (head coach) on 2026-03-13 revealed nine specific insights about how coaches actually think. This story reshapes the agent definition to reflect that real coaching perspective while preserving the existing structural strengths (statistics knowledge, sample size awareness, anti-patterns, inter-agent coordination).
+The baseball-coach agent definition at `.claude/agents/baseball-coach.md` currently reads as a generic baseball analytics expert. A vision session with <OPERATOR-REDACTED> (head coach) on 2026-03-13 revealed nine specific insights about how coaches actually think. This story reshapes the agent definition to reflect that real coaching perspective while preserving the existing structural strengths (statistics knowledge, sample size awareness, anti-patterns, inter-agent coordination).
 
 ## Acceptance Criteria
 - [ ] **AC-1**: The Identity section frames the agent as a coach focused on one team, one season at a time -- not as a program-level analytics expert. The team-first mental model is the primary frame.
 - [ ] **AC-2**: The agent definition explicitly prioritizes own-team improvement insights over opponent scouting. Own-team analysis is the primary responsibility; opponent scouting is secondary and clearly labeled as such.
-- [ ] **AC-3**: Lincoln-specific knowledge is embedded: HS-to-Legion seasonal transitions, ~80% roster carryover, LSB Reserve to sophomore-level Legion alignment, and the sequential (not parallel) nature of seasons. Cross-season player and opponent intersection is addressed: the same player may appear on USSSA, HS, and Legion teams across consecutive seasons; the same opponent pitcher from HS may reappear on a Legion opponent weeks later.
+- [ ] **AC-3**: <CITY-REDACTED>-specific knowledge is embedded: HS-to-Legion seasonal transitions, ~80% roster carryover, LSB Reserve to sophomore-level Legion alignment, and the sequential (not parallel) nature of seasons. Cross-season player and opponent intersection is addressed: the same player may appear on USSSA, HS, and Legion teams across consecutive seasons; the same opponent pitcher from HS may reappear on a Legion opponent weeks later.
 - [ ] **AC-4**: Rate stats (K/9, BB/9, OBP, K%, ERA, SB%) are emphasized as the mandatory baseline for coaching decisions. The definition explicitly states that counting stats alone are insufficient and must be accompanied by rate equivalents.
 - [ ] **AC-5**: Proactive flags are defined as a core requirement, not an afterthought. The agent knows that coaches need to be told about short rest, high pitch count, hot/cold streaks, and high walk rates without having to ask or calculate.
 - [ ] **AC-6**: The agent's tone for surfacing insights is "bubble up, never push." Safety flags (rest days, pitch counts) can push — they're compliance. Performance insights (streaks, splits, matchup patterns) bubble up quietly: "I noticed Thompson is 8-for-12 against lefties this month." Never prescriptive — the system observes, the coach decides. The goal is to get the coach into a flow state with the data, not make them feel managed or chaotic.
@@ -31,7 +31,7 @@ The file to modify is `.claude/agents/baseball-coach.md`. This is a context-laye
 
 Key areas to reshape:
 - **Identity section**: Shift from "baseball analytics domain expert" to a coach-first persona
-- **Your Context section**: Add Lincoln-specific seasonal knowledge
+- **Your Context section**: Add <CITY-REDACTED>-specific seasonal knowledge
 - **Core Responsibilities**: Reorder to lead with own-team improvement; add proactive flags and rate stats emphasis
 - **Key Baseball Analytics Knowledge**: Strengthen rate stat emphasis; add proactive flags subsection
 - **What Coaches Actually Use**: Refine to reflect the game-day consumption patterns (one-pager, quick lookups)

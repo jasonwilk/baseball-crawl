@@ -7,7 +7,7 @@
 <!-- Only READY and ACTIVE epics can be dispatched. -->
 
 ## Overview
-Create a documentation agent and structured documentation for both audiences of baseball-crawl: Jason (system operator/developer) and the coaching staff (dashboard consumers). Today the project has six technical docs in `docs/` -- all developer-facing, none providing an overview of how the system works, and nothing at all for coaches. This epic establishes a docs-writer agent, creates initial documentation for both audiences, and puts conventions in place to keep docs current as the project evolves.
+Create a documentation agent and structured documentation for both audiences of baseball-crawl: <OPERATOR-REDACTED> (system operator/developer) and the coaching staff (dashboard consumers). Today the project has six technical docs in `docs/` -- all developer-facing, none providing an overview of how the system works, and nothing at all for coaches. This epic establishes a docs-writer agent, creates initial documentation for both audiences, and puts conventions in place to keep docs current as the project evolves.
 
 ## Background & Context
 The project has accumulated significant complexity across its agent ecosystem (6 agents), data pipeline (GameChanger API -> crawl -> parse -> SQLite -> FastAPI dashboard), deployment infrastructure (Docker Compose + Cloudflare Tunnel + Zero Trust), and project management system (epics, stories, ideas). All of this knowledge is scattered across CLAUDE.md, agent definitions, epic files, and individual docs -- useful for agents but not for a human trying to understand or operate the system.
@@ -18,7 +18,7 @@ The coaching staff audience does not exist yet as documentation consumers becaus
 
 ## Goals
 - A `docs-writer` agent exists in the agent ecosystem with clear responsibilities, conventions, and PM dispatch routing
-- Admin/developer documentation provides a comprehensive overview of the system for Jason as operator
+- Admin/developer documentation provides a comprehensive overview of the system for <OPERATOR-REDACTED> as operator
 - End-user documentation structure is established with initial content appropriate for the current state of the dashboard
 - Documentation maintenance is enforced as a required workflow step in the PM's epic completion protocol -- not a convention that relies on agents remembering to check
 
@@ -52,7 +52,7 @@ The coaching staff audience does not exist yet as documentation consumers becaus
 ### Documentation Architecture
 
 **Two audience directories:**
-- `docs/admin/` -- System operator/developer documentation. Audience: Jason. Assumes technical competence (Python, Docker, SQL, CLI). Covers architecture, data flows, agent ecosystem, deployment, operations.
+- `docs/admin/` -- System operator/developer documentation. Audience: <OPERATOR-REDACTED>. Assumes technical competence (Python, Docker, SQL, CLI). Covers architecture, data flows, agent ecosystem, deployment, operations.
 - `docs/coaching/` -- End-user documentation. Audience: coaching staff. Assumes zero technical knowledge. Covers what the system shows them, how to read the data, what the stats mean.
 
 **Existing docs stay in place:**

@@ -96,7 +96,7 @@ The auto-resolution flow for null-progenitor opponents:
 
 ### TN-6: Fan-out UPDATE for multi-member-team opponents
 
-`opponent_links` is keyed by `(our_team_id, root_team_id)`. The same opponent (same `root_team_id`) may appear under multiple member teams (Lincoln Varsity, Lincoln JV, etc.). When `resolve_unlinked()` successfully obtains a `public_id` for a `root_team_id`, it must UPDATE all rows sharing that `root_team_id` -- not just one. A single UPDATE with `WHERE root_team_id = ? AND resolution_method IS NULL` handles both the fan-out and the manual-link protection (rows with `resolution_method='manual'` or `resolution_method='auto'` are already resolved and excluded).
+`opponent_links` is keyed by `(our_team_id, root_team_id)`. The same opponent (same `root_team_id`) may appear under multiple member teams (<CITY-REDACTED> Varsity, <CITY-REDACTED> JV, etc.). When `resolve_unlinked()` successfully obtains a `public_id` for a `root_team_id`, it must UPDATE all rows sharing that `root_team_id` -- not just one. A single UPDATE with `WHERE root_team_id = ? AND resolution_method IS NULL` handles both the fan-out and the manual-link protection (rows with `resolution_method='manual'` or `resolution_method='auto'` are already resolved and excluded).
 
 ### TN-4: Pipeline sequencing
 

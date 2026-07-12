@@ -5,7 +5,7 @@
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
-Provide an admin "combine teams" feature that detects and merges duplicate opponent rows in the `teams` table. Duplicate teams destroy coaching trust: a coach sees "Lincoln East" twice, one with stats and one blank, and doesn't know which to trust. This epic gives the operator (Jason) the tools to spot duplicates and merge them into a single canonical team, reassigning all FK references atomically.
+Provide an admin "combine teams" feature that detects and merges duplicate opponent rows in the `teams` table. Duplicate teams destroy coaching trust: a coach sees "<CITY-REDACTED> East" twice, one with stats and one blank, and doesn't know which to trust. This epic gives the operator (<OPERATOR-REDACTED>) the tools to spot duplicates and merge them into a single canonical team, reassigning all FK references atomically.
 
 ## Background & Context
 The same real-world opponent can appear as multiple `teams` rows due to four independent creation paths:
@@ -14,7 +14,7 @@ The same real-world opponent can appear as multiple `teams` rows due to four ind
 3. Manual admin linking via the opponent connect page can create yet another entry
 4. Different `root_team_id` values in GameChanger can map to the same real school
 
-The result: a coach sees "Lincoln East" multiple times in their schedule/opponents view. The completed game against Lincoln East doesn't link to the scouted version. There is currently no way to fix this.
+The result: a coach sees "<CITY-REDACTED> East" multiple times in their schedule/opponents view. The completed game against <CITY-REDACTED> East doesn't link to the scouted version. There is currently no way to fix this.
 
 **Expert consultations:**
 - **baseball-coach**: Duplicate teams destroy coaching trust fast. Pre-game review (the night before or 30 minutes before first pitch) is when coaches notice and it's the worst possible time. Auto-detection is a MUST HAVE. Season year is the merge guard -- same-season teams merge, cross-year teams are distinct. Coaches should never see or deal with duplicates; this is purely an admin task.

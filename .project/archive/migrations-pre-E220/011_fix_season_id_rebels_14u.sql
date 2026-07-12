@@ -1,4 +1,4 @@
--- Migration 011: Fix season_id for Lincoln Rebels 14U (team_id 126)
+-- Migration 011: Fix season_id for <CITY-REDACTED> Rebels 14U (team_id 126)
 --
 -- The Rebels 14U team was crawled under the HS config directory, producing
 -- season_id='2026-spring-hs' in all DB rows. The correct season_id is
@@ -15,7 +15,7 @@ PRAGMA foreign_keys=ON;
 
 -- Step 2: Create USSSA program and assign team 126
 INSERT OR IGNORE INTO programs (program_id, name, program_type)
-VALUES ('rebels-usssa', 'Lincoln Rebels', 'usssa');
+VALUES ('rebels-usssa', '<CITY-REDACTED> Rebels', 'usssa');
 
 UPDATE teams
 SET program_id = 'rebels-usssa'

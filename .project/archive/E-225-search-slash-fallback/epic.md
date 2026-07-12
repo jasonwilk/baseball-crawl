@@ -4,7 +4,7 @@
 `COMPLETED`
 
 ## Overview
-GameChanger's `POST /search` backend returns zero hits for team names containing certain punctuation characters -- historically observed: `/`, straight apostrophe `'` (U+0027), `%`, and `#` -- even though the indexed name stores the character. Replacing punctuation (any `[^\w ]` character) with spaces recovers the correct match. This epic adds a shared punctuation-normalization fallback to every call site that searches by team name, so punctuation-named teams stop silently failing to resolve. The motivating user impact: standalone reports for "Lincoln Northwest JV/Reserve Falcons" generate with zero spray charts because `gc_uuid` cannot be resolved.
+GameChanger's `POST /search` backend returns zero hits for team names containing certain punctuation characters -- historically observed: `/`, straight apostrophe `'` (U+0027), `%`, and `#` -- even though the indexed name stores the character. Replacing punctuation (any `[^\w ]` character) with spaces recovers the correct match. This epic adds a shared punctuation-normalization fallback to every call site that searches by team name, so punctuation-named teams stop silently failing to resolve. The motivating user impact: standalone reports for "<CITY-REDACTED> Northwest JV/Reserve Falcons" generate with zero spray charts because `gc_uuid` cannot be resolved.
 
 ## Background & Context
 
@@ -21,8 +21,8 @@ GameChanger's `POST /search` backend returns zero hits for team names containing
 
 User-impact probe for `public_id=yecaUcoSVpJa`:
 
-- `{"name": "Lincoln Northwest JV/Reserve Falcons"}` -> 0 hits across all pages
-- `{"name": "Lincoln Northwest JV Reserve Falcons"}` (slash replaced by space) -> exact single hit
+- `{"name": "<CITY-REDACTED> Northwest JV/Reserve Falcons"}` -> 0 hits across all pages
+- `{"name": "<CITY-REDACTED> Northwest JV Reserve Falcons"}` (slash replaced by space) -> exact single hit
 - Recovered `gc_uuid` for `public_id=yecaUcoSVpJa`: `ac053e2c-ee27-4f55-9b16-ed77c1bdfebb`
 
 **Non-obvious Unicode trap**: GameChanger's index stores the **curly** apostrophe `'` (U+2019), not the straight form. Real production traffic uses the curly form (typed or auto-corrected), so names like "Kearney A's 10U" work in practice. But any call site constructing a query from a name source that uses a straight `'` (keyboard input, copy-paste from plain text, our own teams.name column if it was seeded from a straight-apostrophe source) hits the zero-hit failure. The failure is invisible -- the two apostrophe glyphs are visually identical in most fonts. This trap is the specific reason the fix is a defensive general normalization, not a narrow four-character list.
@@ -54,8 +54,8 @@ api-scout's 2026-04-16 probe observed that a straight apostrophe (U+0027) in `{"
 ### Call sites affected
 Four call sites in `src/` issue `POST /search` with `{"name": ...}`:
 
-1. `src/reports/generator.py::_resolve_gc_uuid` (lines ~415-471) -- standalone report generation. **User-impact confirmed**: reports `o02avokZOgA5p8W6` and `fXQ5uCAP560GSBEE` (both 2026-04-15/16, Lincoln Northwest JV/Reserve Falcons) generated with zero spray rows across 13 completed games.
-2. `src/gamechanger/resolvers/gc_uuid_resolver.py::_tier3_search` -- tracked team gc_uuid resolution cascade (Tier 3). Partially masked by `_strip_classification_suffix()`, which for "Lincoln Northwest JV/Reserve Falcons" produces "Lincoln Northwest Falcons" (slash removed as a side effect of stripping JV and Reserve). However, a name whose problem character is NOT inside a classification-suffix pair (e.g., a straight-apostrophe team name like "O'Connor Academy Varsity", or a `%`/`#` name) still hits the bug.
+1. `src/reports/generator.py::_resolve_gc_uuid` (lines ~415-471) -- standalone report generation. **User-impact confirmed**: reports `o02avokZOgA5p8W6` and `fXQ5uCAP560GSBEE` (both 2026-04-15/16, <CITY-REDACTED> Northwest JV/Reserve Falcons) generated with zero spray rows across 13 completed games.
+2. `src/gamechanger/resolvers/gc_uuid_resolver.py::_tier3_search` -- tracked team gc_uuid resolution cascade (Tier 3). Partially masked by `_strip_classification_suffix()`, which for "<CITY-REDACTED> Northwest JV/Reserve Falcons" produces "<CITY-REDACTED> Northwest Falcons" (slash removed as a side effect of stripping JV and Reserve). However, a name whose problem character is NOT inside a classification-suffix pair (e.g., a straight-apostrophe team name like "O'Connor Academy Varsity", or a `%`/`#` name) still hits the bug.
 3. `src/gamechanger/crawlers/opponent_resolver.py::_search_resolve_opponent` -- auto-discovery of opponents during `_discover_opponents()` in `run_member_sync`. Sends raw `opponent_name` with no suffix stripping. **Same bug applies** -- punctuation-named opponents fail to auto-resolve and remain in the admin "needs resolution" queue indefinitely.
 4. `src/api/routes/admin.py::_gc_search_teams` -- admin UI manual opponent search. Operator typing a name containing any problem character (typically a straight apostrophe from normal keyboard input) hits the bug.
 
@@ -69,7 +69,7 @@ Patching each call site independently would duplicate the fallback logic four ti
 ### Existing broken reports
 Reports `o02avokZOgA5p8W6` and `fXQ5uCAP560GSBEE` are ephemeral (14-day expiry) and will either age out or be regenerated by the user after the fix lands. No data backfill is needed -- the reports flow is in-memory crawl-to-load, so rerunning `bb report generate <public_id>` after the fix will produce complete spray data. This is a post-dispatch manual step for the user, explicitly NOT in epic scope.
 
-### Team-row gc_uuid for Lincoln Northwest JV/Reserve Falcons
+### Team-row gc_uuid for <CITY-REDACTED> Northwest JV/Reserve Falcons
 The user may wish to check whether the team row for `public_id=yecaUcoSVpJa` already has a `gc_uuid` populated via another tier (e.g., Tier 1 boxscore extraction from an LSB member team that played them). If not, the first post-fix run of any affected pipeline will populate it. This is also a post-dispatch manual check, not an epic deliverable.
 
 ### Expert consultation
@@ -86,7 +86,7 @@ Trigger #3 of the context-layer assessment gate (footgun / failure mode / bounda
 
 ## Non-Goals
 - Regenerating the two existing broken reports (`o02avokZOgA5p8W6`, `fXQ5uCAP560GSBEE`). The user can regenerate after the fix lands.
-- Backfilling `gc_uuid` for the Lincoln Northwest JV/Reserve Falcons team row. Pipelines will populate on next run.
+- Backfilling `gc_uuid` for the <CITY-REDACTED> Northwest JV/Reserve Falcons team row. Pipelines will populate on next run.
 - Changing the `public_id` exact-match filter logic, pagination caps, or any other resolver behavior beyond the punctuation fallback.
 - Any change to the three tiers of `gc_uuid_resolver.py`'s cascade (Tier 1 boxscore, Tier 2 progenitor) -- only the Tier 3 search call is touched.
 - A broader refactor of the four resolver call sites (different return shapes, different filtering logic). Each call site keeps its existing post-search filtering; only the raw search step is centralized.
@@ -95,7 +95,7 @@ Trigger #3 of the context-layer assessment gate (footgun / failure mode / bounda
 
 ## Success Criteria
 - A single call to `search_teams_by_name(client, team_name)` returns hits for a punctuation-containing name that previously returned zero hits (verified against fixtures mimicking the confirmed API behavior for each of `/`, `'` (U+0027), `%`, and `#`).
-- `_resolve_gc_uuid()` in `src/reports/generator.py` resolves `gc_uuid` for `public_id=yecaUcoSVpJa` (the Lincoln Northwest JV/Reserve Falcons case) using the helper -- verified by a regression test with mocked responses matching the confirmed probe output.
+- `_resolve_gc_uuid()` in `src/reports/generator.py` resolves `gc_uuid` for `public_id=yecaUcoSVpJa` (the <CITY-REDACTED> Northwest JV/Reserve Falcons case) using the helper -- verified by a regression test with mocked responses matching the confirmed probe output.
 - The curly-apostrophe case (name stored with U+2019) is explicitly tested: the first attempt returns hits, the fallback does NOT fire, and the helper passes the curly-apostrophe name through unchanged. This protects against future regressions where someone "fixes" the helper to always normalize.
 - Each of the four call sites delegates the raw `POST /search` step to the shared helper; no call site retains its own `_SEARCH_CONTENT_TYPE` constant or inline `client.post_json("/search", ...)` call.
 - All existing tests in `tests/test_report_generator.py`, `tests/test_e211_report_generator.py`, `tests/test_gc_uuid_resolver.py`, `tests/test_crawlers/test_opponent_resolver.py`, and `tests/test_admin_resolve.py` pass after the call-site migration.
@@ -165,9 +165,9 @@ Exact output examples (these are AC-locked in Story 1):
 
 | Input | Normalized output |
 |-------|-------------------|
-| `Lincoln Northwest JV/Reserve Falcons` | `Lincoln Northwest JV Reserve Falcons` |
-| `Lincoln // JV  Team` | `Lincoln JV Team` |
-| `Lincoln\tJV\nTeam` | `Lincoln JV Team` |
+| `<CITY-REDACTED> Northwest JV/Reserve Falcons` | `<CITY-REDACTED> Northwest JV Reserve Falcons` |
+| `<CITY-REDACTED> // JV  Team` | `<CITY-REDACTED> JV Team` |
+| `<CITY-REDACTED>\tJV\nTeam` | `<CITY-REDACTED> JV Team` |
 | `O'Connor Academy Varsity` (U+0027) | `O Connor Academy Varsity` |
 | `Kearney A\u2019s 10U` (U+2019) | `Kearney A s 10U` |
 | `Gonzàlez Varsity/JV` | `Gonzàlez Varsity JV` (accent preserved) |
@@ -185,9 +185,9 @@ Both attempts (first + fallback) honor the shared `GameChangerClient` session, w
 ### TN-7: Testing pattern
 Per `.claude/rules/testing.md`, tests mock at the HTTP layer (the `client.post_json` method). Test data matches the authoritative probe output:
 
-- The user-impact case: a hit with `result.public_id == "yecaUcoSVpJa"`, `result.id == "ac053e2c-ee27-4f55-9b16-ed77c1bdfebb"`, `result.name == "Lincoln Northwest JV/Reserve Falcons"`.
+- The user-impact case: a hit with `result.public_id == "yecaUcoSVpJa"`, `result.id == "ac053e2c-ee27-4f55-9b16-ed77c1bdfebb"`, `result.name == "<CITY-REDACTED> Northwest JV/Reserve Falcons"`.
 - The mock distinguishes calls by inspecting the `body` argument: it returns `{"hits": []}` when the body's `name` contains any `[^\w ]` character, else the matching hit payload. This lets a single mock verify both "first attempt hits zero" and "normalized attempt finds match".
-- **Exact-string assertions are required.** Wherever an AC describes "calls with the normalized name" (Story 1 AC-3, AC-5, AC-7; Story 2 AC-5, AC-6), the test MUST assert the literal body string on each mocked call: e.g., `mock_post_json.call_args_list[0].kwargs["body"]["name"] == "Lincoln Northwest JV/Reserve Falcons"` and `mock_post_json.call_args_list[1].kwargs["body"]["name"] == "Lincoln Northwest JV Reserve Falcons"`. Asserting resolution alone is insufficient -- a helper that ignores the gate and always normalizes would pass resolution-only tests.
+- **Exact-string assertions are required.** Wherever an AC describes "calls with the normalized name" (Story 1 AC-3, AC-5, AC-7; Story 2 AC-5, AC-6), the test MUST assert the literal body string on each mocked call: e.g., `mock_post_json.call_args_list[0].kwargs["body"]["name"] == "<CITY-REDACTED> Northwest JV/Reserve Falcons"` and `mock_post_json.call_args_list[1].kwargs["body"]["name"] == "<CITY-REDACTED> Northwest JV Reserve Falcons"`. Asserting resolution alone is insufficient -- a helper that ignores the gate and always normalizes would pass resolution-only tests.
 
 ### TN-8: Unicode apostrophe trap -- explicit coverage
 Two test cases cover the U+0027 vs. U+2019 distinction and document the trap in-code (tests are executable documentation):
@@ -238,7 +238,7 @@ None. Bug is fully diagnosed and fix shape is confirmed by api-scout's 14-charac
 
   Counts are reconstructed from the incorporation record in earlier History entries. Exact per-round raise counts could not be reconstructed from the artifacts present and are marked approximate.
 
-- 2026-04-18: **COMPLETED.** Shared `search_teams_by_name()` helper in `src/gamechanger/search.py` replaces four duplicated `POST /search` by-team-name call sites (`src/reports/generator.py::_resolve_gc_uuid`, `src/gamechanger/resolvers/gc_uuid_resolver.py::_tier3_search`, `src/gamechanger/crawlers/opponent_resolver.py::_search_resolve_opponent`, `src/api/routes/admin.py::_gc_search_teams`). The helper transparently retries with a normalized name (`[^\w ]+` -> space, whitespace collapsed, `re.UNICODE`) when the first attempt returns zero hits AND the name contains at least one non-word non-space character. Duplicate `_SEARCH_CONTENT_TYPE` constants consolidated. `_resolve_gc_uuid` adds a caller-level short-circuit that bounds API cost at 2 calls per not-found paginated lookup (down from 10). Four trigger characters confirmed by api-scout probes (`/`, `'` U+0027, `%`, `#`); curly-vs-straight apostrophe trap covered with an explicit test. 17 new tests in `tests/test_gamechanger_search.py` plus per-call-site regression tests in `tests/test_report_generator.py`, `tests/test_gc_uuid_resolver.py`, and `tests/test_crawlers/test_opponent_resolver.py`. User-impact case resolved: standalone reports for "Lincoln Northwest JV/Reserve Falcons" (`public_id=yecaUcoSVpJa`) will now resolve `gc_uuid=ac053e2c-ee27-4f55-9b16-ed77c1bdfebb` and populate spray charts on the next regeneration.
+- 2026-04-18: **COMPLETED.** Shared `search_teams_by_name()` helper in `src/gamechanger/search.py` replaces four duplicated `POST /search` by-team-name call sites (`src/reports/generator.py::_resolve_gc_uuid`, `src/gamechanger/resolvers/gc_uuid_resolver.py::_tier3_search`, `src/gamechanger/crawlers/opponent_resolver.py::_search_resolve_opponent`, `src/api/routes/admin.py::_gc_search_teams`). The helper transparently retries with a normalized name (`[^\w ]+` -> space, whitespace collapsed, `re.UNICODE`) when the first attempt returns zero hits AND the name contains at least one non-word non-space character. Duplicate `_SEARCH_CONTENT_TYPE` constants consolidated. `_resolve_gc_uuid` adds a caller-level short-circuit that bounds API cost at 2 calls per not-found paginated lookup (down from 10). Four trigger characters confirmed by api-scout probes (`/`, `'` U+0027, `%`, `#`); curly-vs-straight apostrophe trap covered with an explicit test. 17 new tests in `tests/test_gamechanger_search.py` plus per-call-site regression tests in `tests/test_report_generator.py`, `tests/test_gc_uuid_resolver.py`, and `tests/test_crawlers/test_opponent_resolver.py`. User-impact case resolved: standalone reports for "<CITY-REDACTED> Northwest JV/Reserve Falcons" (`public_id=yecaUcoSVpJa`) will now resolve `gc_uuid=ac053e2c-ee27-4f55-9b16-ed77c1bdfebb` and populate spray charts on the next regeneration.
 
   Review Scorecard:
 
