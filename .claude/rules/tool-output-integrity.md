@@ -5,7 +5,7 @@ paths:
 
 # Tool-Output Integrity
 
-The harness transport layer can drop or corrupt tool output in bursts -- even on zero-IO commands like a bare `echo` -- and recover on retry. This corruption is not always empty: a nonempty result can be wrong. No tool can detect a garbled-but-nonempty read; only an agent applying this discipline can. This rule binds every agent and the main session on every session.
+The harness transport layer can drop or corrupt tool output in bursts -- even on zero-IO commands like a bare `echo` -- and recover on retry. This corruption is not always empty: a nonempty result can be wrong. No tool can detect a garbled-but-nonempty read; only an agent applying this discipline can.
 
 ## Failure taxonomy
 
@@ -32,7 +32,3 @@ When two channels disagree, **the clean read wins** over a flaky empty or garble
 1. **Never assert or relay file content or a tool outcome you have not seen cleanly in your own context.** Report what you observed, not what you expect.
 2. **Never co-batch a relay or report with the same-batch command whose output it reports.** A report must describe output already in context from a prior, completed call -- never expected output and never output produced in the same tool batch as the report.
 3. **Never rule on a grep / OR-pattern match -- Read and quote the literal line.** A grep hit proves a line matched *something*; it says NOTHING about which alternative of an OR-pattern matched, and an omitted or truncated matching line (`[Omitted long matching line]`) is not evidence of any particular content -- it just means the line was long. grep finds candidates; only a clean Read of the exact line range confirms the current literal text. Never report a defect, rule a claim stale-or-current, or characterize content from a match alone.
-
-## Related discipline
-
-Prohibition 3 (grep-match) and Response-protocol step 5 (read-findings-first) are promoted from the clean-reread-before-defect discipline in `.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md` -- a committed memory that reminds the PM; the promoted forms above now bind every agent. This rule is also the behavioral half of the detect-and-defend layer whose tooling half is the E-231-02 PostToolUse hook (catches empty/truncated/silent-partial-edit) and whose triage-time application is the E-231-03 triage gate.

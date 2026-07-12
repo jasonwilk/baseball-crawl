@@ -223,7 +223,7 @@ Database writes that do not match current migration state. Loader fields that do
 
 Violations of documented conventions in CLAUDE.md, `.claude/rules/python-style.md`, or `.claude/rules/testing.md`. Examples: missing type hints in `src/` modules, `print()` for diagnostic output instead of `logging` (note: `print()` is acceptable for CLI user-facing output), raw `httpx.Client()` instead of `create_session()`, `os.path` instead of `pathlib`, bare `except:`, `sys.path` manipulation in `src/` modules, missing `from __future__ import annotations`.
 
-**MUST FIX classification guardrail**: Any finding that violates a documented convention (CLAUDE.md, `.claude/rules/python-style.md`, `.claude/rules/testing.md`) is MUST FIX by default. A convention violation MAY be downgraded to SHOULD FIX only when ALL THREE conditions are met: (a) the violation has no functional impact (runtime behavior, correctness, security, or test reliability is unaffected), (b) the violation is in code that follows an established pattern already present in the same file or module (the implementer matched existing style, not invented something new), and (c) the violation is NOT in: security rules, credential handling, SQL scope, or test coverage (those are always MUST FIX). SHOULD FIX remains the classification for genuinely optional improvements not mandated by project rules.
+**Severity floor (two tiers only)**: A finding is **MUST FIX** only if it names a concrete functional consequence -- one of: incorrect behavior, a security weakness, a data-integrity risk, or compromised test validity. Every finding that does not name such a consequence is **SHOULD FIX**, delivered as one message with no dedicated review round. There is no third tier -- SHOULD FIX absorbs everything below MUST. This governs convention violations too: a documented-convention violation (CLAUDE.md, `.claude/rules/python-style.md`, `.claude/rules/testing.md`) is MUST FIX when it carries one of those functional consequences, and SHOULD FIX otherwise.
 
 **Scope guardrail**: Convention-violation findings must be scoped to code written or modified in the current story. Do not flag pre-existing code that was not changed by the implementer.
 
@@ -301,7 +301,7 @@ The review assignment will include worktree-absolute paths in the `## Files Chan
 
 ### Test Execution Constraint
 
-Do NOT run `pytest` from the epic worktree for **per-story review**. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path -- pytest from the worktree tests main's code, not the worktree's changes. Instead:
+Do NOT run `pytest` from the epic worktree for **per-story review**. A worktree pytest run actually exercises the *worktree's* own uncommitted `src/` -- `tests/__init__.py` puts the repo root on `sys.path[0]`, where `PathFinder` resolves `src` ahead of the appended editable-install finder -- so it tests only this story's partial, unmerged state, not the merged tree the epic closes against; a green per-story run is therefore not authoritative evidence about the closure tree. Instead:
 
 - The implementer runs tests during implementation and reports results.
 - You verify AC compliance primarily through **file inspection** (reading changed source and test files).

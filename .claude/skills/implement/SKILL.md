@@ -29,7 +29,7 @@ Codify the full workflow for dispatching and coordinating an epic when the user 
 
 **Subagent model**: The agents this skill spawns are long-lived, resumable named subagents (spawned via the `Agent` tool, with the team forming implicitly on the first spawn); the runtime flag they depend on is stated once in `CLAUDE.md` (Agent Ecosystem) and is not repeated in the spawn blocks below.
 
-**Enforcement model**: A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to the main checkout during dispatch (all paths except `.claude/agent-memory/`). Outside dispatch, it blocks implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). This provides deterministic enforcement that dispatch work happens in worktrees. The hook is the primary mechanism; instruction-based constraints in this skill are backup for edge cases the hook cannot cover (e.g., Bash file writes).
+**Enforcement model**: A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to the main checkout during dispatch (all paths, with no agent-memory exception -- own-memory writes go to the worktree copy). Outside dispatch, it blocks implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). This provides deterministic enforcement that dispatch work happens in worktrees. The hook is the primary mechanism; instruction-based constraints in this skill are backup for edge cases the hook cannot cover (e.g., Bash file writes).
 
 When invoked via plan skill handoff (`handoff_from_plan = true`), the planning team is already active with PM and domain experts. The implement skill reuses these agents rather than creating a fresh team, preserving expert context from the planning session (unified team lifecycle).
 
@@ -157,7 +157,7 @@ You are the product-manager subagent. Your role during dispatch is status manage
 Epic file: [absolute path to epic.md in epic worktree]
 Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use absolute paths under the epic worktree for all file operations (story files, epic files, status updates).
-Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree. Exception: `.claude/agent-memory/product-manager/` (your persistent memory in the main checkout).
+Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree. This includes your own memory: write `.claude/agent-memory/product-manager/` in the WORKTREE copy (the dispatch-active hook denies main-checkout Write/Edit with no agent-memory exception), so your closure memory updates ride the closure patch.
 ```
 
 **PM context window recovery**: The normal path is `SendMessage` resumption -- PM is a long-lived resumable subagent, so the main session re-engages it with its context intact. As a documented fallback, if PM's context fills during large epics, the main session respawns PM with a fresh summary of current epic state: which stories are DONE, which are IN_PROGRESS, and a reminder of PM's role. No state is lost because PM's work products (status files, epic table) persist on disk.
@@ -225,7 +225,7 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 - `git commit`, `git merge`, `git rebase`, `git worktree remove`, `git branch -d/-D`
 - `cd /workspaces/baseball-crawl` -- stay in the epic worktree
 
-**Pytest limitation**: pytest tests the **main checkout's** code (not worktree changes) due to the editable install's meta path finder. Run tests for verification but understand this. Report results in your completion message.
+**Pytest limitation**: a pytest run from the worktree exercises the *worktree's* own uncommitted `src/` (not the merged tree the epic closes against) -- `tests/__init__.py` puts the repo root on `sys.path[0]`, ahead of the editable-install finder. Run tests for verification, but understand a green worktree run is not evidence about the merged closure tree. Report results in your completion message.
 
 **Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached main` = prior stories' staged changes. Edit files via Write/Edit tools with absolute worktree paths.
 
@@ -234,13 +234,11 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 **Completion**: Report with `## Files Changed` (absolute worktree paths, e.g., `[epic-worktree-path]/src/foo.py (modified)`), `## Test Results` (command, pass/fail, failures), and `## Behavioral Changes`. The Behavioral Changes section is ALWAYS present. List any function whose signature, return type, raised exceptions, or documented side effects changed. Internal refactors that preserve the function's contract are NOT behavioral changes. Format: `- \`function_name()\` in \`file.py\`: [what changed]`. Write "None" when no behavioral changes occurred -- this makes it explicit that you considered the question. This section supplements (does not replace) the code-reviewer's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes. Do NOT run `git add -A` (main session manages staging). Do not modify story status files or epic tables.
 ```
 
-**Context block requirements**: Include the full story file text and full Technical Notes verbatim (never summarize). Include Handoff Context from completed upstream dependencies.
+**Context block requirements**: Include the full story file text and full Technical Notes verbatim. Include Handoff Context from completed upstream dependencies.
 
 ### Step 5: Monitor, review, and verify
 
 > **Boundary reminder:** If you are about to read source files, run `git log`, `grep`, or inspect the implementation to "quickly check" something -- stop. That is domain work regardless of size, and it must be routed to the appropriate agent. Route it through the review/verification sequence below (see Domain Work During Dispatch in `dispatch-pattern.md`).
-
-> **Relay integrity:** when relaying review findings (CR or Codex) between the reviewer and implementer, relay only findings you have read from the persisted source to completion -- never content composed from empty/truncated/garbled output (no-relay-of-unread-content rule, `.claude/rules/dispatch-pattern.md`).
 
 When the implementer reports completion (with `## Files Changed`):
 
@@ -258,7 +256,7 @@ Story file: [epic-worktree-path]/epics/E-NNN-slug/E-NNN-SS.md
 [Full story file text]
 Epic Technical Notes: [Full Technical Notes]
 Epic worktree path: [epic-worktree-path]
-Review via `cd [epic-worktree-path] && git diff` (unstaged = this story). Do NOT run pytest for this per-story worktree review -- verify through file inspection (worktree pytest tests main's code via the editable install, so it is misleading per-story). The one place you run `python -m pytest tests/` is the Phase 5 Step 1b closure gate, against the main checkout.
+Review via `cd [epic-worktree-path] && git diff` (unstaged = this story). Do NOT run pytest for this per-story worktree review -- verify through file inspection (a worktree pytest run exercises the worktree's own uncommitted `src/`, not the merged tree, so a green per-story run is not authoritative about the closure state). The one place you run `python -m pytest tests/` is the Phase 5 Step 1b closure gate, against the main checkout.
 Implementer files changed: [Files Changed section]
 Implementer test results: [Test Results section]
 [If applicable] ## API Endpoints Touched
@@ -289,7 +287,7 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
    **PM-Reviewer AC Disagreement**: PM can override AC-related MUST FIX items (remove them from the valid findings list). Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override. If removing AC items empties the list, the story passes. PM fail always routes feedback to implementer regardless of reviewer verdict.
 
-5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings to the implementer with "Round 1 of 2 -- items to fix below." The implementer fixes in the epic worktree and reports again. Send updated work to the reviewer for Round 2 using the same template as round 1, adding: the round 1 findings verbatim, updated Files Changed and Test Results (annotating which files are new or changed in the remediation vs. carried forward from Round 1, so CR can focus the remediation regression guard on the new/changed files), updated Behavioral Changes from the implementer's revised completion report, the same structured context sections (API Endpoints Touched, Migration Files) from Round 1, and "Review round: 2 of 2 (circuit breaker)" with instructions to focus on whether round 1 findings are resolved and whether fixes introduced new issues.
+5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings to the implementer with "Round 1 of 2 -- items to fix below." The implementer fixes in the epic worktree and reports again. Send updated work to the reviewer for Round 2 using the same template as round 1, adding: updated Files Changed and Test Results (annotating which files are new or changed in the remediation vs. carried forward from Round 1, so CR can focus the remediation regression guard on the new/changed files), updated Behavioral Changes from the implementer's revised completion report, the same structured context sections (API Endpoints Touched, Migration Files) from Round 1, and "Review round: 2 of 2 (circuit breaker)" with instructions to focus on whether round 1 findings are resolved and whether fixes introduced new issues.
 
 6. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
    - (a) Fix it themselves
@@ -300,7 +298,7 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
 ### Gate Interaction
 
-When PM rejects ACs, route PM's feedback to the implementer alongside any code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. PM AC rejection does NOT have its own circuit breaker -- the code-reviewer's 2-round circuit breaker governs the overall loop. If the circuit breaker fires, escalate to the user regardless of PM AC status.
+When PM rejects ACs, route PM's feedback to the implementer alongside any code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. If the circuit breaker fires, escalate to the user regardless of PM AC status.
 
 ### Step 5a: Staging boundary
 
@@ -360,8 +358,6 @@ Capture the exit code and output.
 #### Step 3: Triage and remediation (headless findings)
 
 When headless codex succeeds with findings:
-
-> **Relay integrity:** before presenting or relaying these findings, you MUST have read the persisted codex output to completion -- never relay content composed from empty/truncated/garbled output (no-relay-of-unread-content rule, `.claude/rules/dispatch-pattern.md`).
 
 1. Present the full codex findings to the user.
 2. Classify each finding as **valid** or **invalid** using the same triage rules as Phase 3 Step 5 item 3.
@@ -459,11 +455,11 @@ After the Closure CR Integration Review completes (clean, remediated, or user ov
 
 Every epic closure is gated on a green full test suite -- `python -m pytest tests/` must report 0 failed in the **main checkout with the epic's changes applied** before the closure is finalized. This is the closure-time verification pass that makes "a closed epic has a green test suite" an executable invariant rather than inert policy (see `.claude/rules/workflow-discipline.md`, Full-Suite-Green Closure Gate). It is **unconditional** -- it runs on every epic closure regardless of what the epic touched. (For epics whose stories modify only context-layer files and no `src/`/`tests/`, the suite still runs -- it confirms no incidental breakage and costs ~90s.)
 
-**Why it runs in Step 8, not here.** The per-story "no pytest in the worktree" rule (the Phase 3 Step 5 item 2 code-reviewer template and `.claude/agents/code-reviewer.md` Test Execution Constraint) exists because the editable install's meta path finder makes worktree pytest test **main's** `src/`, not the worktree's changes -- so a worktree run is misleading. The only point at which pytest is authoritative for *this epic* is after Step 8's `git apply --3way` patches the epic's accumulated changes onto main. Running the gate here (before Step 8) would test main's *pre-epic* code -- meaningless. The reconciliation is therefore real, not a loophole: the per-story ban stands, and the one authoritative full-suite run happens at closure, in main, after the merge.
+**Why it runs in Step 8, not here.** The per-story "no pytest in the worktree" rule (the Phase 3 Step 5 item 2 code-reviewer template and `.claude/agents/code-reviewer.md` Test Execution Constraint) exists because a worktree pytest run exercises the worktree's own uncommitted `src/`, not the merged tree the epic closes against -- so a per-story worktree run is not authoritative about the closure state. The only point at which pytest is authoritative for *this epic* is after Step 8's `git apply --3way` patches the epic's accumulated changes onto main. Running the gate here (before Step 8) would test main's *pre-epic* code -- meaningless. The reconciliation is therefore real, not a loophole: the per-story ban stands, and the one authoritative full-suite run happens at closure, in main, after the merge.
 
 **Mechanics live in Step 8.** The actual `python -m pytest tests/` invocation is wired into the Step 8 closure sequence (a sub-step between `git apply --3way` and the commit approval gate): the code-reviewer runs the suite against the main checkout once the epic's changes are applied, and a red suite **aborts the closure commit** and routes the failures into the closure remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the **Remediation Spawn Context** (in the epic worktree), re-stage and re-apply, then re-run `python -m pytest tests/` until it reports 0 failed. The 2-round circuit breaker applies: if the suite is still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
 
-**Where and when the COMPLETED status flip happens.** PM authors the COMPLETED status transition in the **epic worktree's** `epic.md` (not the main checkout), during Step 8 sub-step 3 staging -- *before* sub-step 4 generates and applies the closure patch. This placement is forced by the `.claude/hooks/worktree-guard.sh` hook: while the epic worktree exists (dispatch is active), the hook blocks PM Write/Edit to the main checkout (except `.claude/agent-memory/*`), so PM cannot flip COMPLETED in main -- but PM *can* freely edit the worktree `epic.md`, and that flip rides the closure patch into main via sub-step 4's `git apply --3way`. Because the flip is authored in the worktree before sub-step 3, COMPLETED is *set on disk* before this gate runs at sub-step 5. That is intentional and safe: the binding invariant is enforced on the **commit**, not the on-disk string. **The closure commit MUST NOT happen until `python -m pytest tests/` reports 0 failed in main with the epic applied** (or the user explicitly overrides per the circuit breaker). A red gate aborts the commit *and* reverts the applied patch (sub-step 5 failure path), so the worktree's COMPLETED flip never reaches committed main -- COMPLETED is never *finalized* on a red suite. Step 2 performs all other closure bookkeeping (Stories table, History entry, scorecard, Step 3/3a assessments); only the COMPLETED flip itself is authored later, at sub-step 3 in the worktree.
+**Where and when the COMPLETED status flip happens.** PM authors the COMPLETED status transition in the **epic worktree's** `epic.md` (not the main checkout), during Step 8 sub-step 3 staging -- *before* sub-step 4 generates and applies the closure patch. This placement is forced by the `.claude/hooks/worktree-guard.sh` hook: while the epic worktree exists (dispatch is active), the hook blocks ALL PM Write/Edit to the main checkout (no agent-memory exception), so PM cannot flip COMPLETED -- or write its Active→Archived `MEMORY.md` flip -- in main; instead PM authors BOTH in the worktree copy (`epic.md` and `.claude/agent-memory/product-manager/MEMORY.md`), and they ride the closure patch into main via sub-step 4's `git apply --3way`. Because the flip is authored in the worktree before sub-step 3, COMPLETED is *set on disk* before this gate runs at sub-step 5. That is intentional and safe: the binding invariant is enforced on the **commit**, not the on-disk string. **The closure commit MUST NOT happen until `python -m pytest tests/` reports 0 failed in main with the epic applied** (or the user explicitly overrides per the circuit breaker). A red gate aborts the commit *and* reverts the applied patch (sub-step 5 failure path), so the worktree's COMPLETED flip never reaches committed main -- COMPLETED is never *finalized* on a red suite. Step 2 performs all other closure bookkeeping (Stories table, History entry, scorecard, Step 3/3a assessments); only the COMPLETED flip itself is authored later, at sub-step 3 in the worktree.
 
 ### Step 2: Update the epic completely
 
@@ -473,7 +469,7 @@ Route to PM, who performs:
 - Epic Stories table reflects current reality (all rows DONE).
 - History entry added with the completion date and a summary of what was accomplished.
 
-**Note on the COMPLETED status flip:** PM does NOT set the epic status to COMPLETED here at Step 2, and does NOT set it against the main checkout at all. PM authors the COMPLETED flip in the **epic worktree's** `epic.md` during Step 8 sub-step 3 staging (before the closure patch is generated), so it rides the patch into main. Reason: at Step 8 the `.claude/hooks/worktree-guard.sh` hook is in dispatch-active mode and blocks PM Write/Edit to the main checkout (except `.claude/agent-memory/*`), so PM cannot flip COMPLETED in main -- but PM can edit the worktree `epic.md` freely. COMPLETED is thus *set on disk* before the Step 8 sub-step 5 green gate, but is never *committed* on a red suite: a red gate aborts the commit and reverts the applied patch. The bookkeeping above (Stories table, History entry, scorecard below, and the Step 3/3a assessments) is performed here at Step 2; only the epic-status transition to COMPLETED is authored later, at Step 8 sub-step 3 in the worktree.
+**Note on the COMPLETED status flip:** PM does NOT set the epic status to COMPLETED here at Step 2, and does NOT set it against the main checkout at all. PM authors the COMPLETED flip in the **epic worktree's** `epic.md` during Step 8 sub-step 3 staging (before the closure patch is generated), so it rides the patch into main. Reason: at Step 8 the `.claude/hooks/worktree-guard.sh` hook is in dispatch-active mode and blocks ALL PM Write/Edit to the main checkout (no agent-memory exception), so PM cannot flip COMPLETED -- or write its Active→Archived `MEMORY.md` flip -- in main; PM authors both in the worktree copy freely, and they ride the closure patch. COMPLETED is thus *set on disk* before the Step 8 sub-step 5 green gate, but is never *committed* on a red suite: a red gate aborts the commit and reverts the applied patch. The bookkeeping above (Stories table, History entry, scorecard below, and the Step 3/3a assessments) is performed here at Step 2; only the epic-status transition to COMPLETED is authored later, at Step 8 sub-step 3 in the worktree.
 - Record a review scorecard table in the epic's History section using this format:
 
 ```
@@ -497,7 +493,7 @@ Per `.claude/rules/documentation.md`. If any trigger fires, spawn docs-writer be
 
 ### Step 3a: Context-layer assessment
 
-Per `.claude/rules/context-layer-assessment.md`. Eight triggers, explicit yes/no verdicts in epic History. If any fires, spawn claude-architect before archiving.
+Per `.claude/rules/context-layer-assessment.md`. Eight triggers, explicit yes/no verdicts in epic History. If any fires, spawn claude-architect before archiving. claude-architect's codification -- including updates to its OWN `.claude/agent-memory/` files -- is authored in the **worktree copy** (the dispatch-active hook denies main-checkout Write/Edit with no agent-memory exception), so it rides the closure patch.
 
 ### Step 4: Review ideas backlog
 
@@ -527,7 +523,7 @@ Stage any main-checkout session artifacts before the closure merge. During dispa
 
 1. **Recognized artifact paths** (stage these):
    - `docs/vision-signals.md` (if modified) -- single file, `git add docs/vision-signals.md`
-   - `.claude/agent-memory/` (leftover planning artifacts not committed by plan skill Step 2a, if any) -- mixed directory, enumerate with:
+   - `.claude/agent-memory/` (**pre-dispatch** leftover planning artifacts not committed by plan skill Step 2a, if any -- dispatch-time and closure-time own-memory writes ride the worktree/closure patch, not this main-checkout sweep) -- mixed directory, enumerate with:
      ```
      git diff --name-only -- .claude/agent-memory/
      git ls-files --others --exclude-standard -- .claude/agent-memory/
@@ -553,7 +549,7 @@ Stage any main-checkout session artifacts before the closure merge. During dispa
 
 ### Step 8: Closure merge and commit
 
-Merge the epic worktree's accumulated changes into the main checkout and produce a single atomic commit that contains the applied patch, the archive rename, and the PM memory update.
+Merge the epic worktree's accumulated changes into the main checkout and produce a single atomic commit that contains the applied patch (which carries the COMPLETED flip and PM's Active→Archived memory update) and the archive rename.
 
 **Closure sequence:**
 
@@ -566,21 +562,21 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
    ```
    If either command produces output, report the unexpected changes to the user and wait for instructions before proceeding. Do NOT proceed with `git apply` on a dirty working tree -- it may silently merge unrelated changes into the epic commit. Staged files from Step 7a are expected and will be captured in the closure commit.
 
-3. **Stage and diff the epic worktree:** `cd <epic-worktree-path> && git add -A` (stage all accumulated changes), then `git diff --binary --cached main > /tmp/E-NNN-epic.patch`.
+3. **Stage and diff the epic worktree:** `cd <epic-worktree-path> && git add -A` (stage all accumulated changes), then `git diff --binary --cached $(git merge-base epic/E-NNN main) > /tmp/E-NNN-epic.patch`.
 
 4. **Dry-run then apply the patch on main:** `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch`. If the dry-run succeeds, run `git apply --3way /tmp/E-NNN-epic.patch` to apply for real.
 
 5. **Full-suite green gate (`python -m pytest tests/`):** This is the authoritative execution of the Phase 5 Step 1b closure gate -- it runs here because the epic's changes are now applied to main (after sub-step 4) and pytest is finally authoritative for this epic. Spawn the code-reviewer to run `cd /workspaces/baseball-crawl && python -m pytest tests/`. It is **unconditional** (runs on every closure).
    - **0 failed**: the applied patch (sub-step 4) already carries the worktree's COMPLETED flip authored at sub-step 3 -- the green gate has passed, so that COMPLETED flip is now cleared to be committed. Proceed to sub-step 6.
-   - **Any failures**: do NOT commit. The applied patch (sub-step 4) carries the worktree's COMPLETED flip, so reverting the patch reverts COMPLETED along with it -- COMPLETED is never *committed* on a red suite. At this point sub-step 4's `git apply --3way` is the only main-checkout change (the archive rename in sub-step 6 and PM memory update in sub-step 7 have NOT run yet), so the minimal reset is `cd /workspaces/baseball-crawl && git reset HEAD && git apply -R --3way /tmp/E-NNN-epic.patch` (unstage, then symmetrically reverse the applied patch). Use `git apply -R`, NOT `git checkout -- .`: the reverse-apply reverses the patch INCLUDING any files it created, so the subsequent re-apply after remediation does not error on already-present/untracked files. `git checkout -- .` would only restore tracked files to HEAD and would leave patch-created untracked files (e.g. a new migration) behind, deadlocking the re-apply. The reverse-apply also restores main's `epic.md` to its ACTIVE on-disk status. Do NOT run the archive-undo `git mv` from sub-step 9 reject path (c) -- there is no archive rename to undo at sub-step 5, and that `git mv` would fail on a non-existent directory. Then route the failures into the closure remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the **Remediation Spawn Context** (in the epic worktree), then re-run the closure sequence from sub-step 3 (re-stage, re-diff, re-apply) and re-run pytest until it reports 0 failed. The 2-round circuit breaker applies: if still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
+   - **Any failures**: do NOT commit. The applied patch (sub-step 4) carries the worktree's COMPLETED flip, so reverting the patch reverts COMPLETED along with it -- COMPLETED is never *committed* on a red suite. At this point sub-step 4's `git apply --3way` is the only main-checkout change (the archive rename in sub-step 6 has NOT run yet; PM's Active→Archived memory flip rides the patch and is reversed by the `git apply -R` below, along with COMPLETED), so the minimal reset is `cd /workspaces/baseball-crawl && git reset HEAD && git apply -R --3way /tmp/E-NNN-epic.patch` (unstage, then symmetrically reverse the applied patch). Use `git apply -R`, NOT `git checkout -- .`: the reverse-apply reverses the patch INCLUDING any files it created, so the subsequent re-apply after remediation does not error on already-present/untracked files. `git checkout -- .` would only restore tracked files to HEAD and would leave patch-created untracked files (e.g. a new migration) behind, deadlocking the re-apply. The reverse-apply also restores main's `epic.md` to its ACTIVE on-disk status. Do NOT run the archive-undo `git mv` from sub-step 9 reject path (c) -- there is no archive rename to undo at sub-step 5, and that `git mv` would fail on a non-existent directory. Then route the failures into the closure remediation mechanics -- triage per Phase 3 Step 5 item 3, remediate valid findings **serially** via the **Remediation Spawn Context** (in the epic worktree), then re-run the closure sequence from sub-step 3 (re-stage, re-diff, re-apply) and re-run pytest until it reports 0 failed. The 2-round circuit breaker applies: if still red after 2 remediation rounds, escalate to the user with the failure summary and options (a) fix, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
 
    This run is a **hard precondition on the closure commit**: the closure commit (sub-step 10) MUST NOT proceed until `python -m pytest tests/` reports 0 failed in the main checkout with the epic's changes applied (or the user explicitly overrides per the circuit breaker). This is the authoritative execution of the Phase 5 Step 1b gate -- not an advisory check.
 
 6. **Archive rename:** `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` in the main checkout. The rename happens on disk before staging so that `epics/*/epic.md` no longer contains a `COMPLETED` epic file at commit time -- this is what allows a single atomic commit to clear `.claude/hooks/epic-archive-check.sh`.
 
-7. **PM memory update:** PM moves the epic from "Active Epics" to "Archived Epics" in `.claude/agent-memory/product-manager/MEMORY.md`. PM writes to the main-checkout path; `.claude/hooks/worktree-guard.sh` exempts `.claude/agent-memory/*` from the dispatch-active denylist, so this Write/Edit passes the hook while the epic worktree still exists.
+7. **PM memory update (authored earlier, in the worktree):** PM's Active→Archived `MEMORY.md` flip -- and any closure topic-file flushes (`archived-epics.md`, `epic-codifications.md`, numbering-state) -- were authored in the **worktree copy** during the sub-step-3 authoring window, alongside the COMPLETED `epic.md` flip, so they ride the sub-step-3 patch into main via sub-step 4's `git apply`. There is no separate main-checkout memory write here: the dispatch-active hook denies ALL main-checkout Write/Edit (no agent-memory exception), so every closure-time own-memory write MUST be authored in the worktree. (claude-architect's Step-3a closure codification, including its own agent-memory, is authored in the worktree for the same reason.)
 
-8. **Stage on main:** `cd /workspaces/baseball-crawl && git add -A` (stage the applied patch, the archive rename, and the PM memory update together). The pre-commit PII scan runs automatically on the subsequent `git commit`.
+8. **Stage on main:** `cd /workspaces/baseball-crawl && git add -A` (stage the applied patch -- which already carries PM's memory update -- and the archive rename together). The pre-commit PII scan runs automatically on the subsequent `git commit`.
 
 9. **Pause for explicit user approval.**
 
@@ -588,11 +584,11 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
 
    **User approval**: Wait for the user to respond with exactly one of "yes", "commit", "approve", or "go ahead". Any other response -- including silence, questions, or ambiguous acknowledgments ("looks good", "ok", "sure", "👍") -- does NOT count as approval. Do not proceed to the `git commit` sub-step (sequence step 10) until an explicit approval word is received.
 
-   **User rejects**: The main checkout is half-closed at this point (the patch was applied in sub-step 4, the full-suite gate passed in sub-step 5, the archive rename happened in sub-step 6, and the PM memory update happened in sub-step 7 -- all before the gate). Three reject paths:
+   **User rejects**: The main checkout is half-closed at this point (the patch was applied in sub-step 4 -- carrying PM's Active→Archived memory flip -- the full-suite gate passed in sub-step 5, and the archive rename happened in sub-step 6 -- all before the approval gate). Three reject paths:
 
    - (a) **'commit' to resume**: The user changed their mind. Proceed to sub-step 10 normally.
    - (b) **inspect**: Hold the staged state and let the user review. Do not commit. When the user is ready, they can return to (a) or (c).
-   - (c) **'abort'**: Individually reverse the three Step-8 closure actions -- the applied patch (sub-step 4), the archive rename (sub-step 6), and the sub-step-7 PM-memory Active->Archived edit -- while PRESERVING every Step 7a ancillary edit (vision-signals, ideas, AND any `.claude/agent-memory/` edits -- see Step 7a item 1). Those legitimately predate Step 8 and are the only main-only edits that survive. Do NOT use `git checkout -- .` here: it reverts ALL tracked modifications to HEAD, which would irreversibly destroy the staged Step 7a edits, and it would leave patch-created untracked files behind. The main session runs the git reset sequence:
+   - (c) **'abort'**: Individually reverse the two Step-8 closure actions -- the applied patch (sub-step 4), which carries PM's Active->Archived memory flip and reverses it too, and the archive rename (sub-step 6) -- while PRESERVING every Step 7a ancillary edit (vision-signals, ideas, AND any pre-dispatch `.claude/agent-memory/` plan-leftover edits -- see Step 7a item 1). Those legitimately predate Step 8 and are the only main-only edits that survive. Do NOT use `git checkout -- .` here: it reverts ALL tracked modifications to HEAD, which would irreversibly destroy the staged Step 7a edits, and it would leave patch-created untracked files behind. The main session runs the git reset sequence:
      ```
      cd /workspaces/baseball-crawl && git reset HEAD                    # unstage everything (all Step 7a edits stay present in the working tree)
      cd /workspaces/baseball-crawl && git mv .project/archive/E-NNN-slug/ epics/E-NNN-slug/  # reverse the archive rename (sub-step 6), restoring the patch's epics/ paths
@@ -600,13 +596,11 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
      ```
      The `git mv` back MUST precede the reverse-apply so the epic files are at their `epics/` patch paths when `git apply -R` reverses them.
 
-     **Reverse the sub-step-7 PM-memory edit surgically (not with `git checkout`).** The main session does NOT `git checkout -- .claude/agent-memory/product-manager/MEMORY.md` -- a whole-file revert to HEAD cannot distinguish the two hunks that MEMORY.md may carry at this point: (i) a legitimate Step 7a `.claude/agent-memory/` edit (e.g. a PM numbering-state flush), which MUST be preserved, and (ii) the sub-step-7 Active->Archived flip, which MUST be reversed. A whole-file checkout would destroy both -- the exact ancillary-destruction class this reset was corrected to eliminate. Instead, the main session directs PM (still on the team -- PM is not shut down until Step 10) via SendMessage to reverse its OWN sub-step-7 edit: move epic E-NNN from "Archived Epics" back to "Active Epics" in `.claude/agent-memory/product-manager/MEMORY.md`. Because PM edits only the lines it wrote at sub-step 7, this undoes hunk (ii) while leaving any Step 7a hunk (i) intact. This respects ownership boundaries: PM owns its memory file (the main session cannot edit it, and `worktree-guard.sh` exempts `.claude/agent-memory/*`), and the reversal is the exact inverse of the edit PM authored. The PM-memory flip MUST be reversed, not left in place: `git apply -R` flips `epic.md` back to ACTIVE, so a surviving "Archived" PM-memory entry would strand memory in an inconsistent state against an ACTIVE epic.
-
-     After the reset, the applied patch (including any files it created), the archive rename, and the sub-step-7 PM-memory flip are all reversed, and every Step 7a ancillary edit (vision-signals, ideas, and any agent-memory edit) remains (as working-tree modifications). The epic worktree is preserved for manual recovery. Step 9 (worktree cleanup) is skipped on the abort path -- it only runs after a successful closure commit.
+     After the reset, the applied patch (including any files it created and PM's memory flip it carries) and the archive rename are all reversed, and every Step 7a ancillary edit (vision-signals, ideas, and any pre-dispatch agent-memory plan-leftover edit) remains (as working-tree modifications). The epic worktree is preserved for manual recovery. Step 9 (worktree cleanup) is skipped on the abort path -- it only runs after a successful closure commit.
 
    If the pre-commit PII scan catches issues during sub-step 10's `git commit`, nothing is committed (the hook blocks the commit before any state change), but the staged half-closed state remains; treat the same as (b) inspect or (c) abort.
 
-10. `git commit -m "feat(E-NNN): <epic title>"`. The single commit atomically contains the applied patch, the archive rename, and the PM memory update.
+10. `git commit -m "feat(E-NNN): <epic title>"`. The single commit atomically contains the applied patch (which carries PM's memory update) and the archive rename.
 
 **Dry-run fails**: Present conflict report. User decides: (a) resolve manually and retry, or (b) abort (worktree preserved).
 
@@ -628,13 +622,13 @@ Send PM an explicit `shutdown_request` and wait for confirmation. Team teardown 
 
 ### Step 11: Post-shutdown reconciliation sweep
 
-PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMORY.md` update is sub-step 7, captured by the closure commit), but a final memory flush can land *after* the Step 8 closure commit -- as PM spins down at Step 10. After PM is shut down, re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
+PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMORY.md` update is authored in the worktree at sub-step 3 and captured by the closure patch), but a final memory flush can land *after* the Step 8 closure commit -- as PM spins down at Step 10. After PM is shut down, re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
 
 - **Tree clean**: done.
 - **Only `.claude/agent-memory/**` stragglers remain** (files written by agents that ran in this dispatch): fold them into the closure commit with `cd /workspaces/baseball-crawl && git commit --amend --no-edit` (safe while unpushed), then confirm the tree is clean.
 - **Any remaining change is outside `.claude/agent-memory/**`** (a new, unrecognized, or non-memory file): do NOT amend silently -- report it to the user and wait for instructions per the Step 8 sub-step 9 approval gate.
 
-**Narrow carve-out, not a loophole**: identical scope to the plan skill's Step 2b -- a deliberate exception to the "do not commit automatically / require user approval" gate (Anti-Pattern 5 and Step 8 sub-step 9), limited to a late flush of the *same pre-approved artifact class* (`.claude/agent-memory/**`) completing the *same logical unit* already inside the approved closure commit. The root cause is a timing race (async memory flush vs. the staging snapshot), so this is a post-shutdown reconciliation sweep, not a replacement for the approval gate. New or unrecognized files still require the user-approval pause.
+**Narrow carve-out, not a loophole**: identical scope to the plan skill's Step 2b -- a deliberate exception to the "do not commit automatically / require user approval" gate (Anti-Pattern 4 and Step 8 sub-step 9), limited to a late flush of the *same pre-approved artifact class* (`.claude/agent-memory/**`) completing the *same logical unit* already inside the approved closure commit. The root cause is a timing race (async memory flush vs. the staging snapshot), so this is a post-shutdown reconciliation sweep, not a replacement for the approval gate. New or unrecognized files still require the user-approval pause.
 
 ---
 
@@ -684,11 +678,10 @@ Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1c Closure CR Inte
 ## Anti-Patterns
 
 1. **Do not fall for the "quick check" trap.** The main session MUST NOT: create, modify, or delete any file; verify ACs or update statuses; bypass the code-reviewer; absorb a crashed agent's work; apply fixes -- not even trivial one-line fixes. When something feels too small to route, route it anyway.
-2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim.
-3. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back.
-4. **Do not skip the documentation assessment.** The epic cannot be archived until documentation impact is evaluated.
-5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure sequence (sequence step 8). The Step 11 post-shutdown reconciliation sweep is the sole, narrow exception: it folds *only* late `.claude/agent-memory/**` flushes (the same pre-approved artifact class, already inside the approved commit) via `--amend`. It does not authorize committing new, unrecognized, or non-memory files without approval.
-6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch.
-7. **Do not skip the context-layer assessment.** The epic cannot be archived until context-layer impact is evaluated.
-8. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. No deferral path exists.
-9. **Do not dismiss valid findings based on size or cosmetic nature.** If the finding is correct, it gets fixed. "Correct but not worth fixing" is not a valid dismissal reason.
+2. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back.
+3. **Do not skip the documentation assessment.** The epic cannot be archived until documentation impact is evaluated.
+4. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure sequence (sequence step 8). The Step 11 post-shutdown reconciliation sweep is the sole, narrow exception: it folds *only* late `.claude/agent-memory/**` flushes (the same pre-approved artifact class, already inside the approved commit) via `--amend`. It does not authorize committing new, unrecognized, or non-memory files without approval.
+5. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch.
+6. **Do not skip the context-layer assessment.** The epic cannot be archived until context-layer impact is evaluated.
+7. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. No deferral path exists.
+8. **Do not dismiss valid findings based on size or cosmetic nature.** If the finding is correct, it gets fixed. "Correct but not worth fixing" is not a valid dismissal reason.

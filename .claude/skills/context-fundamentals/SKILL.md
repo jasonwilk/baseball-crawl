@@ -71,18 +71,26 @@ When a session's context window approaches its limit, Claude Code automatically 
 
 ### Baseball-Crawl's Context Budget
 
-Every baseball-crawl agent session starts with approximately **614-886 lines of always-loaded ambient context** before any task-specific content is loaded:
+The context layer -- the four subtrees `.claude/rules`, `.claude/agents`, `.claude/skills`, and `.claude/agent-memory` -- totals **~12,000 lines** (point-in-time snapshot, 2026-07-11; the exact count drifts with every edit -- run the command below for the live figure). Treat any number here as a snapshot that rots; the regenerating command is the durable answer.
 
-| Source | Approximate Size | Notes |
+A single agent session does **not** load all of that. Only a subset loads ambiently, before any task-specific content is added:
+
+| Source | Approximate size (point-in-time) | Notes |
 |--------|-----------------|-------|
-| Root `CLAUDE.md` | ~156 lines | Project identity, stack, deployment, security, architecture (1-line invariants), commands |
-| Universal rules (6 files) | ~303 lines total | workflow-discipline (98), agent-team-compliance (52), dispatch-pattern (52), agent-routing (37), worktree-isolation (35), vision-signals (29) |
-| Triggered rules (0-24 files) | ~0-400 lines | Scoped by `paths:` frontmatter; loads only when matching files are touched. Highest for `src/gamechanger/` edits (~200+ lines: http-discipline, testing, api-docs, key-metrics, architecture-subsystems), lowest for context-layer edits (~36 lines: context-layer-guard, which scopes to `CLAUDE.md`, `.claude/rules/*.md`, and `.claude/agent-memory/*/MEMORY.md`) |
-| Agent definition (`.claude/agents/<agent>.md`) | ~125-315 lines | Varies by agent; code-reviewer is largest (315), claude-architect smallest (125) |
-| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | ~30-112 lines | Varies; ux-designer ~112, PM ~78, docs-writer ~30 |
-| **Total ambient** | **~614-886 lines** | Always-loaded context before any task begins |
+| Root `CLAUDE.md` | ~183 lines | Project identity, stack, deployment, security, architecture (1-line invariants), commands |
+| Universal rules (`paths: "**"` or no `paths:`) | a few hundred lines | e.g. workflow-discipline, agent-team-compliance, dispatch-pattern, agent-routing, worktree-isolation, vision-signals, tool-output-integrity |
+| Triggered rules (scoped by `paths:`) | ~0-400 lines | Loads only when matching files are touched. Highest for `src/gamechanger/` edits (http-discipline, testing, api-docs, key-metrics, architecture-subsystems). For context-layer edits, `context-layer-guard` loads -- the placement-framework rule for context (which content belongs in `CLAUDE.md` vs. a scoped rule vs. agent memory), scoped to `CLAUDE.md`, `.claude/rules/*.md`, and `.claude/agent-memory/*/MEMORY.md` |
+| Agent definition (`.claude/agents/<agent>.md`) | ~125-315 lines | Varies by agent |
+| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | varies | The agent's always-loaded memory index |
 
-These are actuals measured post-E-213 (2026-04-05). Triggered rules add 0-400 lines on top depending on files touched. Check the actual files if precision matters for a specific decision.
+**Regenerate the figures** (run from the repo root or an epic worktree):
+
+```
+find .claude/rules .claude/agents .claude/skills .claude/agent-memory -type f -name '*.md' -exec cat {} + | wc -l   # total context layer
+wc -l CLAUDE.md                                                                                                       # ambient project identity
+```
+
+Every number here is a point-in-time snapshot; the command is the durable answer. The ambient per-session load is a subset of the total (the rows above), not the whole layer.
 
 ### Task-Specific Context (Loaded on Demand)
 
@@ -192,7 +200,7 @@ A session becomes risky when demand-loaded files are large (full API response du
 
 ### Related Skills in This Project
 - **`filesystem-context`** (`.claude/skills/filesystem-context/SKILL.md`): The mechanism for loading context from files. `context-fundamentals` explains the why (context windows, token budgets, lost-in-the-middle); `filesystem-context` explains the how (which files to load, when, and in what order). These two skills are complementary.
-- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): In multi-agent dispatch chains, the context budget concern applies to the dispatch context block (story file + epic Technical Notes). Understanding the budget helps explain why verbatim relay is the right choice even when summarizing would save tokens -- the savings are modest and the loss is real.
+- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): In multi-agent dispatch chains, the context budget concern applies to the dispatch context block (story file + epic Technical Notes). Understanding the budget helps explain why *that spawn-prompt context block* is pasted verbatim rather than summarized -- the savings from summarizing are modest and the loss is real. This scoping is deliberate: it applies only to the dispatch context block a spawn prompt carries, not to relaying findings or other content between live agents.
 
 ### Source Material
 - **E-008-R-02 Research Summary**: `/.project/research/E-008-R-02-agent-skills-summary.md` -- Q7 identifies `context-fundamentals` as one of the three most applicable skills. The "Key Tensions" section (tension #2: progressive disclosure requires discipline) is directly relevant to the load-vs.-summarize decision in Decision 1.

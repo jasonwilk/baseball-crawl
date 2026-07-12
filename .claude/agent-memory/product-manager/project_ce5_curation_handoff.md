@@ -14,6 +14,7 @@ Physical home: `.claude/agents/ux-designer.md`, `.claude/agents/docs-writer.md` 
 **Decision: add a counterweight to the closure assessment.**
 Recommended shape: a closure-assessment **trigger 7** — "Did this epic grow the context layer net-positive? If so, what was compressed or retired to offset?" A review prompt at closure, NOT a hard line-count cap (the audit notes a line-count budget is density-gameable). Simple-first.
 Physical home: `.claude/rules/context-layer-assessment.md` — CA writes in CE-5.
+> **SUPERSEDED by E-260-07 (2026-07-12).** This "soft review prompt, NOT a hard cap" shape was codified by E-255-03 and then ran through the whole 1,652→4,061 growth without ever producing a shrink — the ungameable version never fired. E-260-07 replaced trigger 7 with a **hard ratchet**: the manual operator diagnostic `.claude/hooks/context-ratchet.sh` counts `*.md`+`*.sh` lines across the four subtrees vs a committed operator-owned baseline (`.project/baselines/context-layer-ratchet.json`) and exits non-zero on growth past baseline; net growth now requires an operator-signed exception, not any answer. The "density-gameable" objection was answered by the evidence (the soft version lost to whoever was doing the growing). Do NOT cite this section as the current trigger-7 design.
 
 ## 3. Persistent agent-memory lifecycle policy (audit §3 item #3)
 **Decision: record a lightweight lifecycle policy.**

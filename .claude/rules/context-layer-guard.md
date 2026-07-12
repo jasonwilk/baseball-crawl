@@ -21,13 +21,13 @@ Each piece of project context belongs in exactly one delivery mechanism:
 | **Agent definitions** (`.claude/agents/*.md`) | Role-scoped knowledge, responsibilities, anti-patterns, inter-agent coordination | Only for the specific agent |
 | **Agent memory** (`.claude/agent-memory/`) | Learned patterns, operational knowledge, domain discoveries | Only for the specific agent |
 
-## CLAUDE.md Target
+## CLAUDE.md Scope
 
-**~150 lines.** CLAUDE.md holds genuinely ambient project identity only. Before adding content to CLAUDE.md, ask: "Does every agent need this on every interaction?" If the answer is "only when touching certain files" or "only for certain agents," it belongs in a scoped rule or agent definition instead.
+CLAUDE.md holds genuinely ambient project identity only. Before adding content to CLAUDE.md, ask: "Does every agent need this on every interaction?" If the answer is "only when touching certain files" or "only for certain agents," it belongs in a scoped rule or agent definition instead. There is no unenforced prose line target here: CLAUDE.md growth is visible in the operator-reviewed closure diff, and the four context-layer subtrees are bounded by the ratchet (`.claude/hooks/context-ratchet.sh`, see `.claude/rules/context-layer-assessment.md` trigger 7).
 
-## MEMORY.md Target
+## MEMORY.md Scope
 
-**Under 150 lines.** MEMORY.md is an index, not a memory store. Content beyond line 200 is silently truncated by the platform. Extract detailed content to topic files in the same directory and link from MEMORY.md.
+MEMORY.md is an index, not a memory store: the platform silently truncates content beyond line 200, so extract detailed content to topic files in the same directory and link from MEMORY.md. MEMORY.md files live under `.claude/agent-memory`, so their line counts are priced by the ratchet baseline -- there is no separate unenforced line target.
 
 ## New Rule Guidelines
 

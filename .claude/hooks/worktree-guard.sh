@@ -5,8 +5,9 @@
 # Two modes, selected by whether an epic worktree exists:
 #
 # 1. DISPATCH ACTIVE (epic worktree at /tmp/.worktrees/baseball-crawl-E-* exists):
-#    Blocks ALL Write/Edit to /workspaces/baseball-crawl/ EXCEPT the allowlist:
-#      - .claude/agent-memory/*  (agents write to their own memory in main checkout)
+#    Blocks ALL Write/Edit to /workspaces/baseball-crawl/ with NO allowlist.
+#      - Own-memory deliverables AND closure-time memory writes go to the worktree
+#        copy (.claude/agent-memory/ included) and ride the closure patch.
 #    This fails closed -- any new path added to the project is automatically protected.
 #    The main session's git/Bash operations are unaffected (hook only intercepts Write/Edit).
 #
@@ -60,9 +61,9 @@ REL_PATH="${FILE_PATH#$MAIN_PREFIX}"
 # Reject any path containing a `..` segment before mode dispatch. The `tr -s '/'`
 # above collapses duplicate slashes, but a parent-dir segment can still resolve
 # PAST the guard: in no-dispatch mode "docs/../src/foo.py" sidesteps the src/
-# denylist (REL_PATH matches no glob yet the write lands in src/), and in
-# dispatch mode ".claude/agent-memory/../src/foo.py" would match the agent-memory
-# allowlist glob yet land outside it. No legitimate main-checkout Write/Edit uses
+# denylist (REL_PATH matches no glob yet the write lands in src/). In dispatch
+# mode every main-checkout write is denied regardless, so this mainly hardens the
+# no-dispatch denylist. No legitimate main-checkout Write/Edit uses
 # a ".." segment (canonical tooling writes clean, fully-resolved paths), so deny
 # fail-closed in BOTH modes. Wrapping REL_PATH in slashes matches ".." only as a
 # whole path segment -- never a filename that merely contains two dots
@@ -74,7 +75,7 @@ case "/$REL_PATH/" in
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: "Path contains a \"..\" segment, which can resolve past the worktree guard. Write to a clean, fully-resolved path (under the epic worktree during dispatch, or .claude/agent-memory/ in the main checkout)."
+        permissionDecisionReason: "Path contains a \"..\" segment, which can resolve past the worktree guard. Write to a clean, fully-resolved path (under the epic worktree during dispatch, or the main checkout outside dispatch)."
       }
     }'
     exit 0
@@ -85,17 +86,15 @@ esac
 WORKTREE_DIR=$(ls -d /tmp/.worktrees/baseball-crawl-E-* 2>/dev/null | head -1)
 
 if [ -n "$WORKTREE_DIR" ]; then
-  # --- DISPATCH ACTIVE: allowlist mode ---
-  # Only agent-memory writes are permitted in the main checkout during dispatch.
-  if [[ "$REL_PATH" == .claude/agent-memory/* ]]; then
-    exit 0
-  fi
-
+  # --- DISPATCH ACTIVE: block ALL main-checkout Write/Edit (no allowlist) ---
+  # Own-memory deliverables and closure-time memory writes go to the worktree copy
+  # and ride the closure patch; consultation-mode memory writes happen in mode 2
+  # (no worktree present) and are unaffected.
   jq -n --arg worktree "$WORKTREE_DIR" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: ("Dispatch is active (worktree: " + $worktree + "). During dispatch, Write/Edit to the main checkout is blocked -- use the epic worktree path instead. Only .claude/agent-memory/ is allowed in the main checkout during dispatch.")
+      permissionDecisionReason: ("Dispatch is active (worktree: " + $worktree + "). During dispatch, ALL Write/Edit to the main checkout is blocked -- use the epic worktree path instead (own-memory writes included: they ride the closure patch).")
     }
   }'
   exit 0

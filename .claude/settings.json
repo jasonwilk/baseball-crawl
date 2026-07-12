@@ -24,6 +24,23 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/secret-read-guard.sh",
             "timeout": 5,
             "statusMessage": "Checking for credential-file access..."
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/send-message-counter.sh",
+            "timeout": 5,
+            "statusMessage": "Recording dispatch send count..."
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/send-message-counter.sh",
+            "timeout": 5,
+            "statusMessage": "Recording dispatch send count..."
           }
         ]
       },

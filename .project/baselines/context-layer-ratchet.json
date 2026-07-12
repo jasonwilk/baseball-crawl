@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "generated": "2026-07-12T00:46:56Z",
+    "note": "OPERATOR-OWNED. Line counts of *.md + *.sh files across the four context-layer subtrees. No agent auto-refreshes this; the operator runs --update-baseline after a reviewed change and commits the JSON diff (the human review point)."
+  },
+  "counts": {
+    ".claude/rules": 2278,
+    ".claude/agents": 1775,
+    ".claude/skills": 3140,
+    ".claude/agent-memory": 4888,
+    "total": 12081
+  }
+}
