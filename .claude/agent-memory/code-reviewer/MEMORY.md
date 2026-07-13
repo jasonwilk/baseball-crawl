@@ -1,5 +1,8 @@
 # Code Reviewer Agent Memory
 
+## Closure-Smoke (Step 1d) Adjudication
+- [reconcile-scoreboard FAIL is usually stale-baseline drift](closure_smoke_reconcile_baseline_drift.md) — before calling a Step 1d reconcile exit-1 an epic-FAIL, check baseline `db_game_count`/`snapshot_date` vs live completed-game count; if drifted, verify exact% held + abs-Δ grew sublinearly + self_games/dropped_pitch_events invariants hold → operator-owned `--update-baseline`, NOT remediation. Also: `bb creds check` mobile-profile red is noise; reports path uses WEB profile only (E-261).
+
 ## Measured Tool Behavior
 - [Tool gotchas](tool_gotchas.md) — tools that silently return the wrong answer: `checkout-index` and skip-worktree, ruff's `include` walk-filter, unsplit `$files` exiting 0, `git show HEAD:` mid-epic, `fnmatch` and `**`, `core.quotePath`, `git diff` blind to untracked.
 - [Worktree pytest loads the WORKTREE's src/](worktree_pytest_loads_the_worktree_src.md) — MEASURED: `PathFinder` precedes the appended `_EditableFinder`, and pytest puts the repo root on `sys.path[0]` because `tests/__init__.py` exists. The Test Execution Constraint in my own agent definition is FALSE. Two conditions carry it; verify before relying.
