@@ -68,7 +68,7 @@ Single JSON object with team profile data.
 | `sport` | string | `"baseball"` |
 | `ngb` | **JSON-encoded string** | NGB affiliation. Same double-parse quirk as authenticated endpoints. |
 | `location` | object | Team location (city, state, etc.) |
-| `age_group` | string | Age bracket |
+| `age_group` | string | Age bracket. **Free-text, not a fixed enum:** usually a `NNU` bracket (e.g., `"14U"`), but coaches may instead enter a range as `"Between N - M"` (observed: `"Between 13 - 18"`). Parsers must tolerate both the bracket and the range form. |
 | `team_season` | object | Current season info: `season` (name), `year`, and `record` |
 | `team_season.season` | **string** | Season NAME (e.g., `"summer"`, `"spring"`). A bare string -- **NOT an object**. |
 | `team_season.year` | int | Season year (e.g., `2025`). **FLAT** sibling of `season` -- the correct year path is `team_season.year`; there is **no** `team_season.season.year` nesting. |

@@ -47,12 +47,13 @@ season-aggregate rows are NOT touched.
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.loaders.plays_reload import (
         reload_all_games,
         reload_game_plays,
     )
 
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
 
     # Single game + perspective (the reusable entry point E-245-04 calls):

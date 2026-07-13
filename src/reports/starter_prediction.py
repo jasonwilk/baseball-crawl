@@ -300,7 +300,17 @@ def detect_league_level(
 
     # ngb is empty -- check age_group
     if age_group:
-        if re.search(r"\d+U\b", age_group, re.IGNORECASE):
+        # Two youth-travel age_group forms both route to youth_travel (the
+        # labeled Pitch Smart 15-18 estimate in get_rules_for_league):
+        #   - the bracket form, e.g. "14U"
+        #   - GameChanger's free-text range form, e.g. "Between 13 - 18"
+        # Band-ambiguity caveat: a broad range like 13-18 dips below the 15-18
+        # curve, so PITCH_SMART_15_18 is applied as a *labeled estimate*,
+        # consistent with the existing coarse \d+U mapping -- not a precise
+        # per-age lookup.
+        if re.search(r"\d+U\b", age_group, re.IGNORECASE) or re.search(
+            r"\b\d+\s*-\s*\d+\b", age_group
+        ):
             return "youth_travel"
         # age_group suggests HS (e.g., "High School") → fall through to name
         # Other ambiguous age_group values also fall through

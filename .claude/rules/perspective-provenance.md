@@ -40,9 +40,10 @@ Per API Scout analysis (E-220 TN-6):
 
 | Category | Fields |
 |----------|--------|
-| **Stable** | `event_id` (= `game_stream.game_id`), stat numbers (scores, batting/pitching lines) |
-| **Perspective-specific** | player UUIDs, player names (initials vs. full), `home_away`, `owning_team_score`/`opponent_team_score` labels, boxscore top-level keys (slug vs. UUID), `team_players` keys in plays data, `game_stream.opponent_id` |
-| **Uncertain** | Public games `id` field -- treat as potentially perspective-specific |
+| **Stable** | `event_id` (= `game_stream.game_id`), stat numbers (scores¹, batting/pitching lines) |
+| **Perspective-specific** | player UUIDs, player names (initials vs. full), `home_away`, `owning_team_score`/`opponent_team_score` labels, boxscore top-level keys (slug vs. UUID), `team_players` keys in plays data, `game_stream.opponent_id`, public games `id` (the `id` field returned by `GET /public/teams/{public_id}/games`) -- the same real game gets a different `id` per team's schedule; post-E-239 the public path is its **sole** populator, so this is now **definitively** perspective-specific (was "Uncertain"). The stable cross-perspective key is `event_id` (= `game_stream.game_id`) in the Stable row above. |
+
+¹ Scores are stable across the **two authenticated perspectives** of a single game. They are NOT guaranteed byte-identical across independent PUBLIC scorebooks of the same game -- two separately-kept scorebooks can disagree by a run (E-261 observed 12-4 vs 12-5). Treat a cross-source public score as near-stable, not byte-identical.
 
 When assessing a new endpoint or data source, classify each field against this table. Perspective-specific fields require `perspective_team_id` tagging; stable fields do not.
 

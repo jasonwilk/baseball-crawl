@@ -48,7 +48,7 @@ caveats:
     still works as the boxscore/plays `event_id` for the perspective it came from.
 related_schemas: []
 see_also:
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: The `id` field from this response IS the event_id for boxscore (confirmed 2026-03-12, terminology corrected 2026-03-19) -- no bridge call needed
   - path: /public/teams/{public_id}/games/preview
     reason: Near-duplicate endpoint; uses event_id instead of id, lacks has_videos_available; prefer /games

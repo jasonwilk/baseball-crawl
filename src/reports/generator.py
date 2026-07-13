@@ -34,7 +34,11 @@ from src.api.db import (
     get_season_pitching,
 )
 from src.api.helpers import get_app_url
-from src.db.teams import ensure_team_row_with_provenance
+from src.db.teams import (
+    MATCH_ANCHOR,
+    MATCH_NAME_ONLY,
+    ensure_team_row_with_provenance,
+)
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
@@ -1648,6 +1652,27 @@ class _ReportGeneration:
                             "Backfilled public_id=%s on team_id=%d",
                             self.public_id, self.team_id,
                         )
+                        # IDEA-127: ensure_team_row matched this run's team as a
+                        # name-only opponent stub (public_id NULL at cascade), so
+                        # match_method came back name_only. When we establish a
+                        # REAL public_id anchor within the same run, the team is
+                        # not a low-trust name-only match -- downgrade the stamp
+                        # to 'anchor' so the operator wrong-team badge does not
+                        # fire on a correctly-resolved team.
+                        #
+                        # Guard is deliberately on a real anchor (self.public_id
+                        # IS NOT NULL *and* rowcount > 0), not rowcount alone: the
+                        # UPDATE's "WHERE public_id IS NULL" sets NULL->NULL with
+                        # rowcount=1 when self.public_id is None, establishing no
+                        # anchor -- so a genuinely unresolved name-only stub must
+                        # keep recording name_only (AC-2). The == name_only check
+                        # ensures we only downgrade, never disturb a genuine
+                        # anchor stamp.
+                        if (
+                            self.public_id is not None
+                            and self.identity_match_method == MATCH_NAME_ONLY
+                        ):
+                            self.identity_match_method = MATCH_ANCHOR
                 except sqlite3.IntegrityError:
                     logger.warning(
                         "Could not backfill public_id=%s on team_id=%d — "

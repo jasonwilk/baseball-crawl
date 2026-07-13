@@ -7,9 +7,9 @@ profiles:
   web:
     status: confirmed
     notes: >
-      HTTP 200 confirmed for event 3cab6a64 (Nighthawks Navy game) on 2026-03-09.
+      HTTP 200 confirmed for event 3cab6a64-REDACTED (redacted team game) on 2026-03-09.
       Query params game_stream_id and team_id observed in this call. HTTP 404
-      for event 1e0f8dfc on 2026-03-07 -- recap not generated for all games.
+      for event 1e0f8dfc-REDACTED on 2026-03-07 -- recap not generated for all games.
       Status upgraded from OBSERVED to CONFIRMED.
   mobile:
     status: unverified
@@ -37,7 +37,7 @@ caveats:
   - >
     HTTP 404 FOR SOME EVENTS: Returns 404 when a recap has not been generated for the
     event. May require the game to be fully processed and scored. Not available for
-    all games. Event 1e0f8dfc returned 404 on 2026-03-07; event 3cab6a64 returned
+    all games. Event 1e0f8dfc-REDACTED returned 404 on 2026-03-07; event 3cab6a64-REDACTED returned
     200 on 2026-03-09.
   - >
     RESPONSE BODY NOT CAPTURED: The proxy log confirms 200 OK and the query params
@@ -80,9 +80,9 @@ GET https://api.team-manager.gc.com/game-streams/gamestream-recap-story/{event_i
 
 ## Investigation Status
 
-**200 confirmed:** Event `3cab6a64-6c99-497d-8674-eb7576dda41e` (Nighthawks Navy vs. opponent, 2026-03-09 session) returned 200. The call included `game_stream_id` and `team_id` query params. Response body not captured -- schema unknown.
+**200 confirmed:** Event `3cab6a64-REDACTED` (redacted team, 2026-03-09 session) returned 200. The call included `game_stream_id` and `team_id` query params. Response body not captured -- schema unknown.
 
-**404 confirmed:** Event `1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6` returned 404 on 2026-03-07. Recap may not be generated for all games.
+**404 confirmed:** Event `1e0f8dfc-REDACTED` returned 404 on 2026-03-07. Recap may not be generated for all games.
 
 **Priority:** Capture the response body to document the recap schema. The narrative recap may contain structured team/player references useful for coaching context.
 

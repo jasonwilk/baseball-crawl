@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, two Step 1d procedure defects in `.claude/skills/implement/SKILL.md` are corrected: (1) the credential-liveness preflight checks the exact profile the smoke uses (`bb creds check --profile web`) instead of the bare multi-profile check, so a dead WEB profile masked by a valid mobile profile no longer passes; and (2) the generate → reconcile-scoreboard gate no longer false-FAILs on a self-caused plays-ingestion delta — resolved at the ROOT by requiring the `.smoke-fixture` generate target to be a TERMINAL GC team page (a completed season that gains no further games) with high play-by-play coverage, so the post-generate scoreboard reads a static corpus and measures only the epic's own derivation effect. Both are Step 1d preflight/gate corrections in the same file — bundled here as two distinct concerns.

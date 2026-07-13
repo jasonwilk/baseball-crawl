@@ -33,7 +33,7 @@ related_schemas: []
 see_also:
   - path: /teams/{team_id}/schedule
     reason: Full event schedule including practices and other events; includes pregame_data.opponent_id
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: Per-player box score -- path parameter is event_id (top-level field, = game_stream.game_id), NOT game_stream.id
   - path: /game-stream-processing/{game_stream_id}/plays
     reason: Pitch-by-pitch play log -- path parameter is event_id (top-level field, = game_stream.game_id), NOT game_stream.id

@@ -1,7 +1,7 @@
 # IDEA-136: Step 1d closure-smoke preflight should scope the credential check to the `web` profile only
 
 ## Status
-`CANDIDATE`
+`CANDIDATE` — **core concern RESOLVED by E-262-06 (2026-07-13):** the IDEA-122 fix landed a `bb creds check --profile web` Step 1d preflight (`implement/SKILL.md`), which no longer consults the dead-by-design mobile block — so this idea's false-env-FAIL-on-dead-mobile is addressed at the Step 1d gate. Kept CANDIDATE (not PROMOTED) because E-262-06 did NOT target this idea's BROADER scope: the operator smoke-doc affordance and an optional standalone `bb creds check --profile web` command affordance. Re-confirm at next idea review whether that residual scope is still wanted; discard if the Step 1d fix is sufficient. See [[IDEA-122]] (delivered → E-262-06).
 
 ## Summary
 The Step 1d closure-smoke preflight (implement skill Phase 5, and the operator smoke procedure) gates on `bb creds check`, which audits BOTH the `web` and `mobile` GC profiles. The `mobile` profile is permanently dead by design, so a healthy closure can be held on a spurious env-FAIL read off the dead mobile block. The preflight credential check should assert on the `web` profile only (or ignore the mobile block) so a permanently-dead mobile profile cannot produce a false closure hold.

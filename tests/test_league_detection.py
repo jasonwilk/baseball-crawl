@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import datetime
 
-import pytest
-
 from src.api.db import build_pitcher_profiles
 from src.reports.starter_prediction import (
     NSAA_SUBVARSITY,
@@ -161,11 +159,30 @@ class TestAgeGroupDetection:
             ngb="[]", age_group="High School", team_name="Lincoln JV",
         ) == "nsaa_subvarsity"
 
-    def test_age_group_between_13_18_falls_through(self) -> None:
-        """Ambiguous age_group falls through to name keywords."""
+    def test_age_group_between_range_is_youth_travel(self) -> None:
+        """IDEA-126: GameChanger's free-text range form ("Between 13 - 18")
+        resolves to youth_travel (the labeled PITCH_SMART_15_18 estimate),
+        not unknown/fall-through. age_group takes priority over the name
+        keyword, mirroring the existing \\d+U handling (so even a
+        legion-looking name yields youth_travel when the age range is present).
+        """
         assert detect_league_level(
             ngb="[]", age_group="Between 13 - 18", team_name="Post 143",
-        ) == "legion"
+        ) == "youth_travel"
+
+    def test_age_group_range_no_spaces_is_youth_travel(self) -> None:
+        """IDEA-126: the range form without surrounding spaces ("13-18") also
+        resolves to youth_travel."""
+        assert detect_league_level(
+            ngb="[]", age_group="13-18",
+        ) == "youth_travel"
+
+    def test_age_group_high_school_still_falls_through_with_range_fix(self) -> None:
+        """Regression: a non-range HS age_group ("High School", no digits/range)
+        still falls through to name keywords after the range-form fix."""
+        assert detect_league_level(
+            ngb="[]", age_group="High School", team_name="Lincoln Varsity",
+        ) == "nsaa_varsity"
 
 
 # ── Priority 3: Team name keywords ────────────────────────────────────
@@ -345,6 +362,20 @@ class TestGetRulesForLeague:
         rules = get_rules_for_league("youth_travel", ref)
         assert rules is PITCH_SMART_15_18
         assert rules.max_pitches == 105
+
+    def test_range_age_group_end_to_end_reaches_pitch_smart(self) -> None:
+        """IDEA-126 (AC-1): a no-NGB team with the free-text range age_group
+        resolves through detect_league_level -> youth_travel ->
+        PITCH_SMART_15_18, so the labeled-estimate rules are applied instead of
+        the projection being suppressed."""
+        import datetime
+
+        from src.reports.starter_prediction import PITCH_SMART_15_18
+
+        level = detect_league_level(ngb="[]", age_group="Between 13 - 18")
+        assert level == "youth_travel"
+        rules = get_rules_for_league(level, datetime.date(2026, 4, 15))
+        assert rules is PITCH_SMART_15_18
 
     def test_pitch_smart_is_distinct_constant_from_legion(self) -> None:
         """TN-4: distinct constant so a Legion-only change can't move it."""

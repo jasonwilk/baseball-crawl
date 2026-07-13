@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, four admin-doc items are cleared: stale local port references are corrected, the architecture.md historical schema changelog is reconciled to real migration files, the operations.md credential-recovery recipe is collapsed to the minimal current steps, and the Step 1d closure-smoke procedure in `production-deployment.md` is synced to the settled story-06 skill text (so the operator-facing procedure and the skill agree).

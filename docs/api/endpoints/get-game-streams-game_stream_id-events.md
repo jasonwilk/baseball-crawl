@@ -38,7 +38,7 @@ see_also:
     reason: Same events with additional created_at field and summary wrapper -- alternative access via event_id
   - path: /game-stream-processing/{event_id}/plays
     reason: Processed play-by-play -- FLATTENS this endpoint's structured pitch attributes (speed/style) into a template-string suffix and carries no timestamp; preferred for outcomes/sequence
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: Processed box score -- preferred for per-player stats
   - path: /teams/{team_id}/schedule/events/{event_id}/player-stats
     reason: Processed spray-chart / player-stats -- preferred view of the ball_in_play x/y coordinates this endpoint carries in transaction sub-events

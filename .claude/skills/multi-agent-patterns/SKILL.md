@@ -21,7 +21,7 @@ When a request passes through multiple agents, each relay risks losing informati
 
 ### Mitigation: Verbatim Relay
 
-Pass original content at every relay point. Never summarize.
+Pass the **dispatch context block** through verbatim at the one relay point that carries it -- the full story file text and epic Technical Notes (see below); never summarize *that* context. This is scoped to the dispatch context block only. It is **not** a blanket mandate to relay every inter-agent message verbatim -- E-260 removed the general live-agent verbatim-relay apparatus, and this line must not be re-cited to reintroduce it.
 
 **Main Session -> Implementing Agent**: Include the **full story file text** and **full epic Technical Notes** in every dispatch. Not a summary. Every acceptance criterion, file path, and constraint.
 

@@ -90,7 +90,7 @@ baseball-crawl/
 
 ## Schema Changes
 
-**Migration numbering note**: E-220-01 squashed every prior migration into a single new `migrations/001_initial_schema.sql` (see "E-100 Fresh-Start Schema Rewrite" below for the earlier squash it superseded). The `Migration 014`/`009`/`007`/`006` entries below predate that rewrite -- those specific files no longer exist standalone; the columns/tables they describe now live in `001_initial_schema.sql`. Current standalone migrations `002`-`010` postdate the E-220 squash and reuse some of the same numbers for unrelated changes (today's `006` is `drop_season_fallback.sql`, `007` is `play_events_pitch_columns.sql`, `009` is `spray_chart_type_unique.sql` -- see [operations.md: Schema Migrations](operations.md#schema-migrations) for the current file-by-file list). The entries below are accurate as history; only the migration *number* no longer maps to a live file for the pre-E-220 entries.
+**Migration numbering note**: E-220-01 squashed every prior migration into a single new `migrations/001_initial_schema.sql` (see "E-100 Fresh-Start Schema Rewrite" below for the earlier squash it superseded). The `Migration 014`/`009`/`007`/`006` entries below predate that rewrite -- those specific files no longer exist standalone; the columns/tables they describe now live in `001_initial_schema.sql`. Current standalone migrations `002`-`011` postdate the E-220 squash and reuse some of the same numbers for unrelated changes (today's `006` is `drop_season_fallback.sql`, `007` is `play_events_pitch_columns.sql`, `009` is `spray_chart_type_unique.sql` -- see [operations.md: Schema Migrations](operations.md#schema-migrations) for the current file-by-file list). `014` is not reused -- the live set tops out at `011`, so no current migration `014` exists at all. The entries below are accurate as history; only the migration *number* no longer maps to a live file for the pre-E-220 entries.
 
 ### E-235: Migration 002 -- Report Generation Run Records
 
@@ -110,6 +110,8 @@ A UNIQUE index on `report_id` enforces the 1:1 relationship and serves as the ad
 
 ### E-196: Migration 014 -- Game Start Time and Timezone
 
+**Historical -- consolidated into `001_initial_schema.sql`.** No current migration `014` exists; the live set runs `001`-`011` (see [operations.md: Schema Migrations](operations.md#schema-migrations)).
+
 `migrations/014_games_start_time_timezone.sql` adds two columns to the `games` table:
 
 | Addition | Notes |
@@ -122,6 +124,8 @@ A UNIQUE index on `report_id` enforces the 1:1 relationship and serves as the ad
 The migration is applied automatically on container startup. Existing rows receive `NULL` for both columns; values are populated on the next schedule crawl and load.
 
 ### E-195: Migration 009 -- Plays and Play Events Tables
+
+**Historical -- this schema is now part of `001_initial_schema.sql`.** The current `009_spray_chart_type_unique.sql` is an unrelated migration reusing the number (see [operations.md: Schema Migrations](operations.md#schema-migrations)).
 
 `migrations/009_plays_play_events.sql` adds two tables for play-by-play data ingestion.
 
@@ -145,6 +149,8 @@ Populated by the plays pipeline, which is alive -- every report generation runs 
 
 ### E-167: Migration 007 -- Case-Insensitive Name+Season Year Index
 
+**Historical -- this schema is now part of `001_initial_schema.sql`.** The current `007_play_events_pitch_columns.sql` is an unrelated migration reusing the number (see [operations.md: Schema Migrations](operations.md#schema-migrations)).
+
 `migrations/007_teams_name_index.sql` adds one index to the `teams` table:
 
 | Addition | Notes |
@@ -154,6 +160,8 @@ Populated by the plays pipeline, which is alive -- every report generation runs 
 The migration is applied automatically on container startup. No column additions or backfills were needed.
 
 ### E-158: Migration 006 -- Spray Chart Schema Additions
+
+**Historical -- this schema is now part of `001_initial_schema.sql`.** The current `006_drop_season_fallback.sql` is an unrelated migration reusing the number (see [operations.md: Schema Migrations](operations.md#schema-migrations)).
 
 `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (base table defined in 001, previously unpopulated):
 
@@ -256,4 +264,4 @@ Sub-navigation links the Reports and Users pages across all admin views.
 
 ---
 
-*Last updated: 2026-07-12 | Source: E-250-05 (migration 008 dropped `team_opponents`; corrected `opponent_links` description to remove the dead downstream reference), E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note), E-255-05 (Truth Sweep: fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/; added the migration-numbering note above; corrected the E-195 section's false "plays pipeline removed in E-239" claim -- it is alive, per E-255-R-01), E-256-10 (corrected the stale `data/seeds/` directory-structure line -- the surface and its Dockerfile COPY were removed in E-256-06 -- and the `scripts/` comment's stale "seeding" reference)*
+*Last updated: 2026-07-12 | Source: E-250-05 (migration 008 dropped `team_opponents`; corrected `opponent_links` description to remove the dead downstream reference), E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note), E-255-05 (Truth Sweep: fixed the same-dir cloudflare-access-setup.md link now that both runbooks live in docs/admin/; added the migration-numbering note above; corrected the E-195 section's false "plays pipeline removed in E-239" claim -- it is alive, per E-255-R-01), E-256-10 (corrected the stale `data/seeds/` directory-structure line -- the surface and its Dockerfile COPY were removed in E-256-06 -- and the `scripts/` comment's stale "seeding" reference), E-262-07 (reconciled the Schema Changes historical changelog to the real `001`-`011` migration set -- added an inline historical/consolidated-into-001 note to each phantom-numbered entry (014, 009, 007, 006); corrected the top note's current-migration range from `002`-`010` to `002`-`011`)*

@@ -1,7 +1,7 @@
 # synthetic-test-data
 """Characterization tests pinning the mixed-``appearance_order`` GS semantics.
 
-E-253-10 / audit Watch-List (``season_aggregates.py`` GS CASE). Since the E-259
+E-253-10 / audit Watch-List (``season_projection.py`` GS CASE). Since the E-259
 query-time cutover the games-started (``gs``) value is derived at READ time by
 ``src.api.db.get_season_pitching`` (which wraps the shared
 ``pitching_recompute_select`` projection):

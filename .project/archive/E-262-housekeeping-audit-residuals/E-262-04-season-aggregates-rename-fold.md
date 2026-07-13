@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the misnamed `src/db/season_aggregates.py` module no longer misleads: post-E-259, it computes nothing — it only holds the SUM projection its sole reader consumes — so it is renamed or folded next to that reader, removing the "where are aggregates computed?" orientation trap.

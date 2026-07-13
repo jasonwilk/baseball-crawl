@@ -22,7 +22,9 @@ Season batting/pitching aggregates are now DERIVED AT QUERY TIME by `src.api.db.
 
 ## The ONE carried-forward residual (STILL LIVE)
 The canonical-column decision below OUTLIVES the cutover. The shared SUM projection survived into
-`src/db/season_aggregates.py` — `batting_recompute_select` / `pitching_recompute_select` +
+`src/db/season_projection.py` (RENAMED from `season_aggregates.py` by E-262-04 / IDEA-113,
+2026-07-13 — the misnamed "aggregates" module computed nothing post-E-259; symbols kept for
+git-blame) — `batting_recompute_select` / `pitching_recompute_select` +
 `BATTING_RECOMPUTE_KEYS` / `PITCHING_RECOMPUTE_KEYS` — and is exactly ScoutingLoader's old canonical
 `boxscore_only` column set; the query-time readers consume it. Two facts remain load-bearing:
 - **Canonical column set = ScoutingLoader's set** (batting 16; pitching incl `gs`). The dedup-only
@@ -40,7 +42,9 @@ See [[season_tables_are_a_pure_cache.md]] for the E-259 design basis and [[etl-p
 
 The two divergent `boxscore_only` writers (#1 ScoutingLoader + #2 player_dedup) below
 were collapsed into ONE canonical module-level function:
-**`src/db/season_aggregates.py::canonical_recompute(conn, team_id, season_id)`**.
+**`src/db/season_aggregates.py::canonical_recompute(conn, team_id, season_id)`**
+(historical path — `canonical_recompute` was DELETED in E-259-02, and the module was later
+RENAMED to `season_projection.py` by E-262-04).
 
 - Scope = `(team_id, season_id)`: DELETE all `boxscore_only` rows for the scope, then INSERT
   every player (GROUP BY player_id). Perspective-filtered (`perspective_team_id = team_id`).
@@ -120,7 +124,9 @@ THREE writers of `player_season_batting`/`player_season_pitching`, and the two
 **POST-E-239 provenance reality**: with SeasonStatsLoader and member-sync deleted, NO writer
 produces `full`/`supplemented` rows anymore. Those two `stat_completeness` enum values are now
 READ-ONLY — the recompute provenance guard in `src/db/season_aggregates.py` (`_MEMBER_PROVENANCE
-= ("full", "supplemented")`) never deletes/rewrites them, and `src/db/player_dedup.py` still
+= ("full", "supplemented")`) [historical path: this guard was DELETED with `canonical_recompute`
+in E-259-02, and the module was later RENAMED to `season_projection.py` by E-262-04] never
+deletes/rewrites them, and `src/db/player_dedup.py` still
 ranks them (`_COMPLETENESS_RANK = {"full": 3, "supplemented": 2, "boxscore_only": 1}`) for
 merge-conflict resolution. The only live season-aggregate writer is `canonical_recompute`, which
 writes `boxscore_only` rows exclusively. Do NOT drop the `full`/`supplemented` enum values —

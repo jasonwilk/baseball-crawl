@@ -211,6 +211,31 @@ def test_dedup_players_error_path() -> None:
     assert "table missing" in result.output
 
 
+def test_dedup_players_dry_run_and_execute_are_mutually_exclusive() -> None:
+    """E-262-01 #1: passing both --dry-run and --execute is a loud error and
+    performs no merges -- the destructive path never runs.
+
+    Regression guard: the historical bug derived is_dry_run = not execute and
+    never read --dry-run, so `--dry-run --execute` silently executed. The DB
+    connection and planner must not be reached; both are patched to assert they
+    are never touched.
+    """
+    with (
+        patch("src.cli.data.sqlite3.connect") as mock_connect,
+        patch("src.db.player_dedup.plan_player_dedup") as mock_plan,
+        patch("src.db.player_dedup.execute_collapse") as mock_execute,
+    ):
+        result = runner.invoke(
+            app, ["data", "dedup-players", "--dry-run", "--execute"]
+        )
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+    mock_connect.assert_not_called()
+    mock_plan.assert_not_called()
+    mock_execute.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # bb data dedup-players -- E-249-02: delegation to the shared planner
 # ---------------------------------------------------------------------------
@@ -632,6 +657,33 @@ def test_reload_annotated_pitches_error_path() -> None:
     assert result.exit_code != 0
     assert "Error reloading annotated pitches" in result.output
     assert "db locked" in result.output
+
+
+def test_reload_annotated_pitches_nonzero_exit_when_games_errored() -> None:
+    """E-262-01 #2: a completed run with games_with_errors > 0 exits non-zero.
+
+    The pass finishes (no exception) but reports one or more failed games, so
+    the summary must not claim success -- a green exit would hide the failure
+    from the operator. The summary is still printed.
+    """
+    mock_conn = MagicMock()
+    mock_conn.execute = MagicMock()
+    summary = {
+        "games_processed": 3,
+        "games_changed": 1,
+        "plays_updated": 10,
+        "events_recovered": 20,
+        "games_with_errors": 2,
+    }
+    with patch("src.cli.data.sqlite3.connect", return_value=mock_conn):
+        with patch(
+            "src.gamechanger.loaders.plays_reload.reload_all_games",
+            return_value=summary,
+        ):
+            result = runner.invoke(app, ["data", "reload-annotated-pitches"])
+
+    assert result.exit_code != 0
+    assert "Games with errors: 2" in result.output
 
 
 # ---------------------------------------------------------------------------

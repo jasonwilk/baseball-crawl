@@ -17,10 +17,11 @@ stored ``player_season_*`` tables are dropped in E-259-03.
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.loaders.scouting_loader import ScoutingLoader
     from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = ScoutingLoader(conn)
     result = loader.load_team(crawl_result)

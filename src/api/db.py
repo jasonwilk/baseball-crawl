@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from src.db.paths import resolve_db_path
-from src.db.season_aggregates import (
+from src.db.season_projection import (
     batting_recompute_select,
     pitching_recompute_select,
 )
@@ -460,7 +460,7 @@ def get_season_batting(
 
     Derived at query time by SUMming ``player_game_batting`` per player
     (E-259-01 cutover). The per-game SUM projection is the shared
-    :func:`src.db.season_aggregates.batting_recompute_select` (the single
+    :func:`src.db.season_projection.batting_recompute_select` (the single
     source, so the reader and the retired write path can never drift); it is
     wrapped as a subquery and the ``players`` name / ``team_rosters`` jersey
     joins are layered on the OUTSIDE (the shared projection deliberately carries
@@ -525,7 +525,7 @@ def get_season_pitching(
     Derived at query time by SUMming ``player_game_pitching`` per player
     (E-259-01 cutover), mirroring :func:`get_season_batting`. The per-game SUM
     projection is the shared
-    :func:`src.db.season_aggregates.pitching_recompute_select` (the single
+    :func:`src.db.season_projection.pitching_recompute_select` (the single
     source). It is wrapped as a subquery with the ``players`` /
     ``team_rosters`` joins on the OUTSIDE. ``gs`` comes from the shared
     projection's NULL-safe CASE over ``appearance_order``.

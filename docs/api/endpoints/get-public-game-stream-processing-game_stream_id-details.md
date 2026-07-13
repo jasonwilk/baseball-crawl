@@ -46,7 +46,7 @@ caveats:
     totals[0] = Runs, totals[1] = Hits, totals[2] = Errors.
 related_schemas: []
 see_also:
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: Authenticated per-player box score using the same event_id (complementary -- details=game level, boxscore=player level)
   - path: /teams/{team_id}/game-summaries
     reason: Provides game_stream.id needed for this endpoint's path

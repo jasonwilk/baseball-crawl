@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, five defect-cited context-layer falsehoods and stale figures are corrected: two false/stale CLAUDE.md claims, an over-broad skill instruction, stale ambient skill figures, and two rule-table corrections — all mechanical prose fixes, no new machinery.
@@ -35,6 +35,7 @@ Mechanical prose corrections across CLAUDE.md, `.claude/skills/multi-agent-patte
 
 ## Files to Create or Modify
 - `CLAUDE.md`
+- `.claude/rules/http-discipline.md` (scope-completion, added during dispatch — see AC-1 doc-sweep note below)
 - `.claude/skills/multi-agent-patterns/SKILL.md`
 - `.claude/skills/context-fundamentals/SKILL.md`
 - `.claude/rules/perspective-provenance.md`
@@ -52,3 +53,5 @@ claude-architect
 Sources: audit residual #9; IDEA-114, 117, 118, 128. All defect-cited (concrete falsehood / staleness) → permitted under the E-260 freeze. No new context-layer machinery is added. IDEA-092 was DROPPED after CA review (F1) — its cited falsehood was already fixed by E-250-04; residual is freeze-barred enrichment (IDEA-092 → DISCARDED). E-261 (READY, parked) does NOT edit perspective-provenance.md, so AC-4 has no expected overlap with it (confirm E-261's file list at dispatch per CA coordination flag).
 
 **CA holistic review (2026-07-12, iter 1/3) incorporated:** F1 (drop IDEA-092 — already-fixed, freeze-barred); F4 (narrow IDEA-118 to `:28`/`:193`; the provenance/budget-section work is already done by E-260-04); F5 (correct IDEA-114 line refs to `report.py:530`). Verified-good by CA: audit #9, IDEA-117, IDEA-128, and the AC framing.
+
+**AC-1 doc-sweep scope-completion (dispatch, 2026-07-13):** The audit-#9 raw-archive concept correction (CLAUDE.md:115) has a contradicting copy at `.claude/rules/http-discipline.md:44` ("Store raw JSON responses before parsing (raw -> processed pipeline)") — a rule that loads on every `src/gamechanger/` edit. Per AC-1's mandated doc-sweep discipline (grep + synonym expansion + semantic read for each corrected concept), leaving the contradicting copy would be an incomplete sweep, so `http-discipline.md:44` was reworded in-place under AC-1 (defect-cited, same citation as audit #9; freeze-compliant correction, no new machinery). Same-defect, so no story-scope growth beyond doc-sweep completion. The reword is TWO-CASE (api-scout-confirmed facts): (i) the live in-memory pipelines (ScoutingLoader→GameLoader, morning-run, `bb report generate`) transform in-flight with no on-disk raw stage (matches CLAUDE.md:115); (ii) raw bytes persist only on the out-of-band capture/exploration paths — mitmproxy addons write redacted records to `proxy/data/` (gitignored) and the ingest-endpoint workflow saves a redacted curl body to `data/raw/<endpoint>-sample.json` as a doc sample. NOT a blind delete — the proxy/ingest path genuinely persists raw captures. Surfaced by CA's doc-sweep; scope ruled in by PM (sole AC gate for this context-layer story); api-scout facts confirmed. A separate stale-figure sibling in the context-fundamentals worked-example block (`:160-190`) was ruled OUT (deliberately scoped out by IDEA-118 / E-260-04; pre-existing inconsistency; larger coordinated refresh) → captured as a follow-up idea.

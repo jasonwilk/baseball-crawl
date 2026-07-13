@@ -25,7 +25,7 @@ Load this skill when you are about to:
 
 Every agent session's context window contains four types of content:
 
-1. **System prompt / ambient rules**: The project's root CLAUDE.md, universal `.claude/rules/*.md` files (those with `paths: "**"` or no `paths:` frontmatter), and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 614-886 lines of always-loaded text before any task-specific content is added. Scoped rules (those with specific `paths:` patterns) add 0-400 lines depending on which files are touched during the session.
+1. **System prompt / ambient rules**: The project's root CLAUDE.md, universal `.claude/rules/*.md` files (those with `paths: "**"` or no `paths:` frontmatter), and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 730-1,000 lines (point-in-time snapshot, 2026-07-13; see the regenerating command in the Context Budget section below) of always-loaded text before any task-specific content is added -- the spread reflects the lightest agent (docs-writer) through the heaviest (code-reviewer). Scoped rules (those with specific `paths:` patterns) add 0-400 lines depending on which files are touched during the session.
 
 2. **Conversation history**: The turn-by-turn exchange between the user and the agent, including all tool calls and tool results. This grows throughout the session. Long sessions with many file reads, bash commands, and edit operations accumulate substantial conversation history.
 
@@ -190,7 +190,7 @@ During task (demand-loaded):
 Total:                           ~1,715 lines (~27% of a 128k context window)
 ```
 
-This is a healthy context load. The main win from E-213's domain extractions is that agents working outside `src/gamechanger/` (e.g., claude-architect on context-layer files) see only ~750 lines of ambient context instead of loading all domain detail universally. Domain-specific reference material (key metrics, data model, admin UI, scouting flows) only loads when agents touch relevant files.
+This is a healthy context load. The main win from E-213's domain extractions is that agents working outside `src/gamechanger/` (e.g., claude-architect on context-layer files) see only ~780 lines of ambient context instead of loading all domain detail universally. Domain-specific reference material (key metrics, data model, admin UI, scouting flows) only loads when agents touch relevant files.
 
 A session becomes risky when demand-loaded files are large (full API response dumps, multiple research artifacts) or when conversation history grows from many debugging cycles. Watch the statusline.
 

@@ -22,9 +22,10 @@ Key data decisions
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.loaders.game_loader import GameLoader
 
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = GameLoader(conn, owned_team_ref=team_ref)
     result = loader.load_payload(boxscore_dict, summary)

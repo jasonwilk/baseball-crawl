@@ -26,11 +26,12 @@ The ``scouting_runs`` table tracks each run's status, counts, and timestamps.
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.client import GameChangerClient
     from src.gamechanger.crawlers.scouting import ScoutingCrawler
 
     client = GameChangerClient()
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     crawler = ScoutingCrawler(client, conn)
     result = crawler.scout_team("8O8bTolVfb9A")

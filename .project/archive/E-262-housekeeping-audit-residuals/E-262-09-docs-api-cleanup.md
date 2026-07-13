@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three `docs/api/` consistency items are cleared: the `/game-stream-processing/` endpoint-doc path-variable naming is normalized to `event_id`, the opponent-scouting flow doc's stat list is reconciled to the actual schema, and the `age_group` field doc records the free-text range form.

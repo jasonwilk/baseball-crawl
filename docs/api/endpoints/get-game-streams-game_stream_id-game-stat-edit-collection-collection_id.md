@@ -46,7 +46,7 @@ related_schemas: []
 see_also:
   - path: /game-streams/{game_stream_id}/events
     reason: Raw event stream for the same game (confirmed working)
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: Processed boxscore for the same game
   - path: /game-stream-processing/{game_stream_id}/plays
     reason: Play-by-play log for the same game

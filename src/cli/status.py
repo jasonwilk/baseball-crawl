@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from src.db.paths import resolve_db_path
 from src.gamechanger.credentials import ALL_PROFILES, check_single_profile
 from src.http.proxy_check import (
     ProxyCheckOutcome,
@@ -17,8 +18,6 @@ from src.http.proxy_check import (
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DATA_ROOT = _PROJECT_ROOT / "data"
-_DB_PATH = _DATA_ROOT / "app.db"
 _PROXY_SESSIONS_DIR = _PROJECT_ROOT / "proxy" / "data" / "sessions"
 
 
@@ -54,11 +53,23 @@ def _format_crawled_at(raw_ts: str) -> str:
 
 
 def _get_db_info() -> tuple[bool, str]:
-    """Return (exists, display_string) for data/app.db."""
-    if not _DB_PATH.exists():
+    """Return (exists, display_string) for the resolved database path.
+
+    Resolves the path through the canonical ``resolve_db_path()`` seam so a
+    ``DATABASE_PATH`` override is respected. The path is resolved inside the
+    function (not at import) so a test/runtime override takes effect.
+    """
+    db_path = resolve_db_path()
+    if not db_path.exists():
         return (False, "")
-    size = _DB_PATH.stat().st_size
-    return (True, f"{_DB_PATH.relative_to(_PROJECT_ROOT)} ({_human_size(size)})")
+    size = db_path.stat().st_size
+    # Prefer a repo-relative display; a resolved path outside the repo root
+    # (e.g. an absolute DATABASE_PATH override) is shown as-is.
+    try:
+        display_path = db_path.relative_to(_PROJECT_ROOT)
+    except ValueError:
+        display_path = db_path
+    return (True, f"{display_path} ({_human_size(size)})")
 
 
 def _get_proxy_connectivity() -> dict[str, ProxyCheckResult]:

@@ -1262,6 +1262,116 @@ class TestListReportsWithRunsJoin:
         assert "url" in r and "is_expired" in r      # CLI decoration preserved
 
 
+class TestEnsureTeamRowIdentityDowngrade:
+    """IDEA-127: _ensure_team_row downgrades identity_match_method from
+    name_only to anchor when a name-only opponent stub is resolved to a REAL
+    public_id anchor within the same run -- so the operator wrong-team badge
+    does not fire on a correctly-resolved team. A genuinely unresolved
+    name-only match (no public_id to back-fill) must still record name_only.
+    """
+
+    def _seed_name_only_stub(self, db_path, name="Summer Sluggers"):
+        """Seed a tracked team with NULL public_id/gc_uuid (a game-loader
+        name-only opponent stub) and return its id."""
+        conn = sqlite3.connect(str(db_path))
+        load_real_schema(conn)
+        cursor = conn.execute(
+            "INSERT INTO teams (name, public_id, gc_uuid, season_year, membership_type) "
+            "VALUES (?, NULL, NULL, 2026, 'tracked')",
+            (name,),
+        )
+        stub_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return stub_id
+
+    def _make_ctx(self, public_id, name="Summer Sluggers", season_year=2026):
+        ctx = _gen._ReportGeneration("https://web.gc.com/teams/summer-sluggers")
+        ctx.public_id = public_id
+        ctx.team_name_from_api = name
+        ctx.season_year_from_api = season_year
+        return ctx
+
+    def test_name_only_stub_downgraded_to_anchor_on_public_id_backfill(self, tmp_path):
+        """AC-2 positive: a name-only stub the run resolves (real public_id
+        back-filled) records 'anchor', and the anchor is persisted."""
+        db_path = tmp_path / "downgrade.db"
+        stub_id = self._seed_name_only_stub(db_path)
+
+        def _factory(*_a, **_k):
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON")
+            return c
+
+        ctx = self._make_ctx(public_id="realpub123")
+        with patch("src.reports.generator.get_connection", side_effect=_factory):
+            ctx._ensure_team_row()
+
+        # Matched the stub by name, then established a real anchor -> downgraded.
+        assert ctx.team_id == stub_id
+        assert ctx.identity_match_method == "anchor"
+        check = sqlite3.connect(str(db_path))
+        row = check.execute(
+            "SELECT public_id FROM teams WHERE id=?", (stub_id,)
+        ).fetchone()
+        check.close()
+        assert row[0] == "realpub123"
+
+    def test_unresolved_name_only_still_records_name_only(self, tmp_path):
+        """AC-2 negative / SE guard: with public_id=None the back-fill UPDATE
+        sets NULL->NULL (rowcount=1) but establishes NO anchor, so the stamp
+        must stay name_only -- the downgrade guards on self.public_id IS NOT
+        NULL, not rowcount alone."""
+        db_path = tmp_path / "unresolved.db"
+        stub_id = self._seed_name_only_stub(db_path)
+
+        def _factory(*_a, **_k):
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON")
+            return c
+
+        ctx = self._make_ctx(public_id=None)
+        with patch("src.reports.generator.get_connection", side_effect=_factory):
+            ctx._ensure_team_row()
+
+        assert ctx.team_id == stub_id
+        assert ctx.identity_match_method == "name_only"
+        check = sqlite3.connect(str(db_path))
+        row = check.execute(
+            "SELECT public_id FROM teams WHERE id=?", (stub_id,)
+        ).fetchone()
+        check.close()
+        assert row[0] is None  # no anchor established
+
+    def test_existing_public_id_anchor_not_disturbed(self, tmp_path):
+        """Regression: a team already carrying a public_id resolves via the
+        anchor path and is not touched by the downgrade branch (back-fill
+        rowcount=0), staying 'anchor'."""
+        db_path = tmp_path / "anchor.db"
+        conn = sqlite3.connect(str(db_path))
+        load_real_schema(conn)
+        cursor = conn.execute(
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES (?, 'realpub123', 2026, 'tracked')",
+            ("Summer Sluggers",),
+        )
+        team_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        def _factory(*_a, **_k):
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON")
+            return c
+
+        ctx = self._make_ctx(public_id="realpub123")
+        with patch("src.reports.generator.get_connection", side_effect=_factory):
+            ctx._ensure_team_row()
+
+        assert ctx.team_id == team_id
+        assert ctx.identity_match_method == "anchor"
+
+
 # ---------------------------------------------------------------------------
 # DB query helpers
 # ---------------------------------------------------------------------------

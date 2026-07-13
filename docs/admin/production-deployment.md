@@ -528,12 +528,32 @@ morning-run=<lsb-team-url-1> <lsb-team-url-2> ...
 Both values are real LSB identifiers and must never be committed -- `.smoke-fixture` is
 already in `.gitignore`.
 
+**`generate` target requirement: a terminal fixture team.** The team pinned for `generate`
+must be a **completed-season GC team page** -- one that will gain no further games -- with
+**high play-by-play coverage**. This is what makes the generate -> reconcile-scoreboard
+order below safe: because a terminal team's corpus is static, the closure's
+`bb report generate` ingests no net-new plays, so the reconciliation reading that follows
+measures only the epic's own derivation effect, never a self-caused ingestion delta that
+would false-trip the one-way ratchet.
+
+**One-time bootstrap when pinning the fixture team:**
+1. Verify the fixture team's play-by-play coverage in the dev DB -- a count of games that
+   actually carry play-by-play rows (data-bearing, not a bare games count, since
+   scored-but-empty games are the modal case) -- to confirm the corpus is plays-rich.
+2. Re-snapshot the reconciliation baseline once: `bb report reconcile-scoreboard --update-baseline`.
+
+There is no per-closure re-snapshot and no reordering the checks below -- a static terminal
+fixture kills the drift at the root instead of just moving it to the next epic.
+
 ### What the smoke checks (in order)
 
 1. **Preflight** (an environment problem, not an epic defect, if any of these fail):
    `.smoke-fixture` present with both fields non-empty; the app stack up -- rebuilt, not
    just started, when the closure touched a build input (`docker compose up -d --build app`);
-   credentials live (`bb creds check`); the reconciliation baseline present
+   credentials live for the web profile (`bb creds check --profile web` -- **not** the bare
+   multi-profile `bb creds check`, which can exit 0 on a mixed state where a valid mobile
+   profile masks a dead web profile, and the smoke's `bb report generate` uses the web
+   profile); the reconciliation baseline present
    (`.project/baselines/reconciliation-scoreboard.json`).
 2. **`bb report generate <generate public_id>`** -- runs first, so the reconciliation ratchet
    below measures the state this run produced. The printed `reference_date` must equal today
@@ -567,4 +587,4 @@ run the same sequence manually at any time as a health check against the live da
 
 ---
 
-*Last updated: 2026-07-12 | Source: E-259 (E-259-06: removed the `bb report verify-aggregates` closure sub-check from the Closure Runtime Smoke procedure -- the command and the stored `player_season_*` tables it checked were retired in E-259-03/04), E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure)*
+*Last updated: 2026-07-12 | Source: E-259 (E-259-06: removed the `bb report verify-aggregates` closure sub-check from the Closure Runtime Smoke procedure -- the command and the stored `player_season_*` tables it checked were retired in E-259-03/04), E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure), E-262-07 (synced Step 1d to the settled skill text: preflight now names `bb creds check --profile web`; added the terminal-fixture `generate`-target requirement, one-time bootstrap re-snapshot, and plays-coverage check to the `.smoke-fixture` section)*

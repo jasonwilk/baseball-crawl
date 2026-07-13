@@ -100,6 +100,16 @@ def dedup_players(
         preview_player_merge,
     )
 
+    # --dry-run and --execute are mutually exclusive: passing both is a
+    # contradictory request and must fail loudly rather than silently running
+    # the destructive path (--execute would otherwise win via `not execute`).
+    if dry_run and execute:
+        typer.echo(
+            "Error: --dry-run and --execute are mutually exclusive; pass at most one.",
+            err=True,
+        )
+        raise SystemExit(2)
+
     # --dry-run is the default; --execute overrides it
     is_dry_run = not execute
 
@@ -664,7 +674,9 @@ def reload_annotated_pitches(
         "pipeline recomputes plays-derived stats from the recovered pitches."
     )
 
-    raise SystemExit(0)
+    # A maintenance pass that reports success while games failed hides real
+    # ingestion failures -- exit non-zero when any game errored.
+    raise SystemExit(0 if summary["games_with_errors"] == 0 else 1)
 
 
 # ---------------------------------------------------------------------------

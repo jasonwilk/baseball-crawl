@@ -1,6 +1,6 @@
 ---
 method: GET
-path: /game-stream-processing/{game_stream_id}/boxscore
+path: /game-stream-processing/{event_id}/boxscore
 status: CONFIRMED
 auth: required
 profiles:
@@ -55,7 +55,7 @@ see_also:
     reason: Alternative endpoint returning both teams' per-player stats (includes spray charts)
 ---
 
-# GET /game-stream-processing/{game_stream_id}/boxscore
+# GET /game-stream-processing/{event_id}/boxscore
 
 **Status:** CONFIRMED LIVE -- 200 OK. Per-game box score for both teams. Last verified: 2026-03-18.
 
@@ -71,14 +71,14 @@ GET /teams/{team_id}/game-summaries -> event_id  (= game_stream.game_id -- alway
 Use `event_id` from game-summaries. **Do NOT use `game_stream.id`** -- that UUID returns 500 `{"error":"[scheduling] Cannot find event[...]"}`. Confirmed 2026-03-18 via direct A/B test. Prior documentation incorrectly stated the parameter was `game_stream.id`.
 
 ```
-GET https://api.team-manager.gc.com/game-stream-processing/{game_stream_id}/boxscore
+GET https://api.team-manager.gc.com/game-stream-processing/{event_id}/boxscore
 ```
 
 ## Path Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `game_stream_id` | UUID | The game's `event_id` from game-summaries (= `game_stream.game_id` -- always equal). NOT `game_stream.id` (that UUID returns 500). Corrected 2026-03-18 via direct A/B test. |
+| `event_id` | UUID | The game's `event_id` from game-summaries (= `game_stream.game_id` -- always equal). NOT `game_stream.id` (that UUID returns 500). Corrected 2026-03-18 via direct A/B test. |
 
 ## Headers (Web Profile)
 

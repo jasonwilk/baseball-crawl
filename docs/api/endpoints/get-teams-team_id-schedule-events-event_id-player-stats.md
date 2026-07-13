@@ -72,7 +72,7 @@ related_schemas: []
 see_also:
   - path: /teams/{team_id}/schedule
     reason: Source of event_id values used as path parameter here
-  - path: /game-stream-processing/{game_stream_id}/boxscore
+  - path: /game-stream-processing/{event_id}/boxscore
     reason: Complementary -- has player names, batting order, and position data. Lacks cumulative stats and spray charts.
   - path: /game-stream-processing/{game_stream_id}/plays
     reason: Pitch-by-pitch data for the same game. stream_id returned in this response body.
@@ -275,9 +275,9 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 
 ## Comparison to Boxscore Endpoint
 
-| Dimension | This endpoint | `GET /game-stream-processing/{game_stream_id}/boxscore` |
+| Dimension | This endpoint | `GET /game-stream-processing/{event_id}/boxscore` |
 |-----------|---------------|--------------------------------------------------------|
-| **ID required** | `team_id` + `event_id` (from schedule directly) | `game_stream_id` (requires prior lookup) |
+| **ID required** | `team_id` + `event_id` (from schedule directly) | `event_id` (from game-summaries/schedule directly) |
 | **Stat richness** | ~83 offense + ~149 defense fields + cumulative | 6 batting + 6 pitching main stats + ~10 sparse extras |
 | **Spray charts** | Yes -- x/y coordinates, play type, play result | No |
 | **Cumulative season stats** | Yes -- own team has full season totals | No -- game stats only |
@@ -293,9 +293,9 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 
 ```json
 {
-  "stream_id": "c05a5413-d250-4f28-bd92-efbe67bac348",
+  "stream_id": "c05a5413-REDACTED",
   "team_id": "72bb77d8-REDACTED",
-  "event_id": "1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6",
+  "event_id": "1e0f8dfc-REDACTED",
   "player_stats": {
     "players": {
       "<own_player_uuid>": {

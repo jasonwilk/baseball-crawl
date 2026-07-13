@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three low-severity hygiene residuals are cleared: seven docstrings (five loaders + two crawlers) no longer model a banned DB-connection pattern, the empty `tests/test_crawlers/` package is deleted, and the stale docker-compose comment is corrected.
@@ -20,7 +20,7 @@ Three LOW-severity platform-audit residuals ratified into this epic (sweep §1, 
 ## Acceptance Criteria
 - [ ] **AC-1**: Given the seven flagged docstrings (five in `src/gamechanger/loaders/`, two in `src/gamechanger/crawlers/`), when they are read, then none models the banned cwd-relative `sqlite3.connect("./data/app.db")` form; each either shows the canonical path-resolution approach or omits the connection example.
 - [ ] **AC-2**: Given the repository tree, when `tests/test_crawlers/` is checked, then the empty package no longer exists and the test suite still collects/passes.
-- [ ] **AC-3**: Given the `docker-compose.yml` comment (`:38-39`), when it is read, then it accurately describes the current override file (which carries no port mappings) and does NOT mislabel the live Traefik dashboard port `8180:8080` as deleted; the comment reflects current compose reality.
+- [x] **AC-3** (SATISFIED-AS-IS — premise corrected 2026-07-13): Given the `docker-compose.yml` comment (`:38-39`), when it is read, then it accurately describes the override file and does NOT mislabel the live Traefik dashboard port `8180:8080` as deleted; the comment reflects current compose reality. **Disposition:** During dispatch, SE + PM independently verified the files on disk. The story's stated premise ("the committed `docker-compose.override.yml.example` carries no port mappings") is FALSE — the override.example at `:37`/`:39` DOES carry both dev-only ports (`127.0.0.1:8000:80` app, `127.0.0.1:8180:8080` dashboard). The base comment already reads "Dev-only ports (8000:80 app traffic, 8180:8080 dashboard) are in docker-compose.override.yml" — accurate, and already labels 8180:8080 as the dashboard, not deleted. AC-3's underlying intent is therefore already met with NO edit; rewording to match the false premise would have INTRODUCED a falsehood into a correct comment. No change to `docker-compose.yml`. (Same re-verify-before-folding meta-lesson recorded at the epic level for audit residual #8.)
 
 ## Technical Approach
 Purely cosmetic/hygiene edits across the seven docstring files (five `loaders/`, two `crawlers/`), the `tests/test_crawlers/` directory (delete), and `docker-compose.yml`. The implementer confirms the docstring set via a grep for the banned `sqlite3.connect("./data/app.db")` form (SE's verified list is in Context) and confirms the current override-file contents before rewriting the compose comment — the comment must not present `8180:8080` as a deleted port (it is the live Traefik dashboard).

@@ -67,9 +67,10 @@ affected report (the reports generator re-runs the scouting spray load).
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
 
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = ScoutingSprayChartLoader(conn)
     result = loader.load_from_data({"event-id": player_stats_dict}, "opponentSlug")

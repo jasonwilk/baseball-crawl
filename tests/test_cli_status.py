@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -544,7 +544,7 @@ class TestGetDbInfo:
     def test_db_not_found_returns_false(self, tmp_path: Path) -> None:
         """Missing DB returns (False, '')."""
         fake_db = tmp_path / "app.db"
-        with patch.object(status_module, "_DB_PATH", fake_db):
+        with patch.object(status_module, "resolve_db_path", return_value=fake_db):
             exists, display = status_module._get_db_info()
         assert exists is False
         assert display == ""
@@ -554,10 +554,35 @@ class TestGetDbInfo:
         fake_db = tmp_path / "app.db"
         fake_db.write_bytes(b"x" * 2048)  # 2 KB
         with (
-            patch.object(status_module, "_DB_PATH", fake_db),
+            patch.object(status_module, "resolve_db_path", return_value=fake_db),
             patch.object(status_module, "_PROJECT_ROOT", tmp_path),
         ):
             exists, display = status_module._get_db_info()
         assert exists is True
         assert "app.db" in display
         assert "2.0 KB" in display
+
+    def test_db_info_resolves_database_path_override(self, tmp_path: Path) -> None:
+        """AC-3: a DATABASE_PATH override is reflected (not the hardcoded default).
+
+        Goes through the real ``resolve_db_path()`` seam via the env var, proving
+        ``bb status`` no longer reports on a hardcoded ``data/app.db``.
+        """
+        override_db = tmp_path / "elsewhere" / "custom.db"
+        override_db.parent.mkdir(parents=True)
+        override_db.write_bytes(b"x" * 1024)  # 1 KB
+        with patch.dict("os.environ", {"DATABASE_PATH": str(override_db)}):
+            exists, display = status_module._get_db_info()
+        assert exists is True
+        # The override lives outside the repo root, so it is shown as an
+        # absolute path (the .relative_to guard falls back to the full path).
+        assert str(override_db) in display
+        assert "1.0 KB" in display
+
+    def test_db_info_missing_override_returns_false(self, tmp_path: Path) -> None:
+        """AC-3: a DATABASE_PATH override that does not exist reports absent."""
+        override_db = tmp_path / "does-not-exist.db"
+        with patch.dict("os.environ", {"DATABASE_PATH": str(override_db)}):
+            exists, display = status_module._get_db_info()
+        assert exists is False
+        assert display == ""

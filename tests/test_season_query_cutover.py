@@ -3,7 +3,7 @@
 ``src.api.db.get_season_batting`` / ``get_season_pitching`` no longer read the
 stored ``player_season_*`` tables -- they derive the season line at query time by
 SUMming ``player_game_*`` (perspective-filtered), reusing the single shared SUM
-projection ``src.db.season_aggregates.batting_recompute_select`` /
+projection ``src.db.season_projection.batting_recompute_select`` /
 ``pitching_recompute_select``.
 
 Two properties carry the cutover and both need POPULATED fixtures (a green test

@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, two code-verified live bugs are fixed: `detect_league_level` recognizes GameChanger's free-text `age_group` range form, and the report generator no longer stamps a false-positive "name-only match" wrong-team badge on the first report of a pre-scouted opponent.

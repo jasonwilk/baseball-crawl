@@ -61,7 +61,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 
 ### Step 3: Get per-game boxscore (gc-token required)
 
-**Endpoint:** [`GET /game-stream-processing/{game_stream_id}/boxscore`](../endpoints/get-game-stream-processing-game_stream_id-boxscore.md)
+**Endpoint:** [`GET /game-stream-processing/{event_id}/boxscore`](../endpoints/get-game-stream-processing-event_id-boxscore.md)
 
 **Auth:** `gc-token` required
 
@@ -78,7 +78,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 - Cross-reference: match `stats[].player_id` with `players[].id` for player names (do not use boxscore's `players[]` in isolation -- use roster from step 2 as primary).
 
 **Edge cases:**
-- Asymmetric key detection: if key contains dashes → UUID (opponent); if no dashes → `public_id` slug (scouted team). See [boxscore endpoint doc](../endpoints/get-game-stream-processing-game_stream_id-boxscore.md) for detection details.
+- Asymmetric key detection: if key contains dashes → UUID (opponent); if no dashes → `public_id` slug (scouted team). See [boxscore endpoint doc](../endpoints/get-game-stream-processing-event_id-boxscore.md) for detection details.
 - Both teams' stats (batting and pitching) are present in a single call. No separate call needed for the opponent.
 - Player UUID from boxscore `players[].id` matches `id` in step 2 roster. Use for cross-referencing.
 
@@ -222,7 +222,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 - [opponent-resolution.md](opponent-resolution.md) -- How to obtain `public_id` from the authenticated opponent registry
 - [`GET /public/teams/{public_id}/games`](../endpoints/get-public-teams-public_id-games.md) -- Step 1: game schedule
 - [`GET /teams/public/{public_id}/players`](../endpoints/get-teams-public-public_id-players.md) -- Step 2: player roster
-- [`GET /game-stream-processing/{game_stream_id}/boxscore`](../endpoints/get-game-stream-processing-game_stream_id-boxscore.md) -- Step 3: per-game boxscore
+- [`GET /game-stream-processing/{event_id}/boxscore`](../endpoints/get-game-stream-processing-event_id-boxscore.md) -- Step 3: per-game boxscore
 - [`GET /teams/{team_id}/game-summaries`](../endpoints/get-teams-team_id-game-summaries.md) -- Authenticated fallback for game discovery
 - [`GET /teams/{team_id}/season-stats`](../endpoints/get-teams-team_id-season-stats.md) -- NOT usable for opponents (HTTP 403)
 - [`docs/gamechanger-stat-glossary.md`](../../gamechanger-stat-glossary.md) -- Authoritative stat abbreviation definitions

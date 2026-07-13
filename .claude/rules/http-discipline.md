@@ -41,7 +41,7 @@ All HTTP requests to GameChanger -- whether API calls or web scraping -- must pr
 ## Client & Fetching Conventions
 
 - Handle HTTP errors gracefully: log the error and continue, do not crash.
-- Store raw JSON responses before parsing (raw -> processed pipeline).
+- Raw-response persistence is path-dependent -- do not assume a stored raw tier. The live in-memory ingestion pipelines (ScoutingLoader -> GameLoader, morning-run, `bb report generate`) transform the API JSON in-flight straight into the DB with no on-disk raw stage. Raw bytes are persisted only on the out-of-band capture/exploration paths: the mitmproxy addons write redacted request/response records to `proxy/data/` (gitignored), and the ingest-endpoint workflow saves a single redacted curl response body to `data/raw/<endpoint>-sample.json` as a documentation sample.
 - Make fetching idempotent: re-running should not create duplicate data.
 - Use sessions (httpx.Client) for connection pooling.
 - Set reasonable timeouts on all HTTP requests (30 seconds default).

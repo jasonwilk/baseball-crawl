@@ -27,11 +27,12 @@ Rate limiting is handled automatically by the ``GameChangerClient`` session
 Usage::
 
     import sqlite3
+    from src.db.paths import resolve_db_path
     from src.gamechanger.client import GameChangerClient
     from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 
     client = GameChangerClient()
-    conn = sqlite3.connect("./data/app.db")
+    conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     crawler = ScoutingSprayChartCrawler(client, conn)
     result = crawler.crawl_team(public_id, games_data)

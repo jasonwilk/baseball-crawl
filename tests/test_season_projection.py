@@ -3,7 +3,7 @@
 Ported from ``tests/test_aggregate_parity.py`` (deleted in E-259-02) so the
 coverage of the SURVIVING projection is not lost when the parity apparatus is
 retired. Unlike the original, these reference only the public projection symbols
-that outlive the cutover -- ``src.db.season_aggregates.batting_recompute_select``
+that outlive the cutover -- ``src.db.season_projection.batting_recompute_select``
 / ``pitching_recompute_select`` and the ``*_RECOMPUTE_KEYS`` tuples -- which the
 query-time season readers (``src.api.db.get_season_*``, E-259-01) now consume.
 
@@ -28,7 +28,7 @@ _FIXTURES_DIR = _PROJECT_ROOT / "tests" / "fixtures"
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.db.season_aggregates import (  # noqa: E402
+from src.db.season_projection import (  # noqa: E402
     BATTING_RECOMPUTE_KEYS,
     PITCHING_RECOMPUTE_KEYS,
     batting_recompute_select,

@@ -1,9 +1,11 @@
 # E-262: Post-Program Housekeeping — Audit Residuals, Fold-In Ideas, and Live Bugs
 
 ## Status
-`READY` (set 2026-07-12)
+`COMPLETED` (set 2026-07-13)
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- READY set 2026-07-12 after internal review (CR + holistic SE/CA/docs-writer/api-scout) and Codex spec review (iter 1) incorporated, quality checklist passed, no open questions. 60-day READY-freshness clock starts 2026-07-12. -->
+<!-- ACTIVE set 2026-07-13 at dispatch start. -->
+<!-- COMPLETED authored 2026-07-13 in the worktree at the Step 8 staging window; finalized on the full-suite-green closure gate. -->
 
 ## Overview
 A single low-risk housekeeping epic that clears the enumerated tail left by the 2026-07 platform program: 7 in-scope audit residuals from the endgame sweep (one of the original 8 was dropped in review as mischaracterized), 10 mechanical fold-in ideas (2 of the 12 triaged were dropped as already-resolved), and 4 code-verified live bugs. Every item is a mechanical fix to an existing surface — no new features, no new process machinery, no scope growth.
@@ -40,15 +42,15 @@ The 2026-07 platform program (E-250..E-260) closed at commit 519e0cd. The endgam
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-262-01 | CLI behavioral audit fixes (dedup flag, reload exit code, bb status db-path) | TODO | None | software-engineer |
-| E-262-02 | Cosmetic hygiene sweep (loader docstrings, test pragma, empty package, compose comment) | TODO | None | software-engineer |
-| E-262-03 | Live source bugs (league-level range form, name-only badge sequencing) | TODO | None | software-engineer |
-| E-262-04 | Rename/fold season_aggregates.py post-cutover | TODO | None | data-engineer |
-| E-262-05 | Context-layer truth & staleness corrections | TODO | None | claude-architect |
-| E-262-06 | Step 1d preflight & gate-ordering corrections (creds-profile + generate/reconcile order) | TODO | None | claude-architect |
-| E-262-07 | Admin docs hygiene (port map, schema changelog, creds-recovery recipe, Step 1d doc sync) | TODO | E-262-06 (AC-4 only) | docs-writer |
+| E-262-01 | CLI behavioral audit fixes (dedup flag, reload exit code, bb status db-path) | DONE | None | software-engineer |
+| E-262-02 | Cosmetic hygiene sweep (loader docstrings, test pragma, empty package, compose comment) | DONE | None | software-engineer |
+| E-262-03 | Live source bugs (league-level range form, name-only badge sequencing) | DONE | None | software-engineer |
+| E-262-04 | Rename/fold season_aggregates.py post-cutover | DONE | None | data-engineer |
+| E-262-05 | Context-layer truth & staleness corrections | DONE | None | claude-architect |
+| E-262-06 | Step 1d preflight & gate-ordering corrections (creds-profile + generate/reconcile order) | DONE | None | claude-architect |
+| E-262-07 | Admin docs hygiene (port map, schema changelog, creds-recovery recipe, Step 1d doc sync) | DONE | E-262-06 (AC-4 only) | docs-writer |
 | E-262-08 | Coaching docs reports-first rewrite | ABANDONED | None | — (dropped: premise resolved by E-239) |
-| E-262-09 | docs/api cleanup (path-variable rename, scouting-flow stat audit, age_group note) | TODO | None | api-scout |
+| E-262-09 | docs/api cleanup (path-variable rename, scouting-flow stat audit, age_group note) | DONE | None | api-scout |
 
 ## Dispatch Team
 - software-engineer
@@ -71,7 +73,7 @@ Stories were partitioned so no two stories touch the same file. Test-file target
 - Story 02: five loader docstrings (`src/gamechanger/loaders/scouting_loader.py`, `plays_loader.py`, `plays_reload.py`, `game_loader.py`, `scouting_spray_loader.py`) + two crawler docstrings (`src/gamechanger/crawlers/scouting.py`, `scouting_spray.py`), `tests/test_crawlers/` (delete), `docker-compose.yml`. (`tests/test_no_inline_schemas.py` removed — audit #6 dropped in review. SE verified the 2 crawler files don't collide with stories 03/04.)
 - Story 03: `src/reports/starter_prediction.py`, `src/reports/generator.py`, `src/db/teams.py`; tests `tests/test_league_detection.py`, `tests/test_starter_prediction.py`, `tests/test_report_generator.py`, `tests/test_ensure_team_row.py`, `tests/test_admin_reports.py`. (`src/cli/creds.py` removed — IDEA-122 re-scoped to story 06; no story now touches creds.py.)
 - Story 04: `src/db/season_aggregates.py`, `src/api/db.py`; tests `tests/test_season_projection.py`, `tests/test_season_query_cutover.py`, `tests/test_gs_mixed_appearance_order.py`, `tests/fixtures/parity_consistent.sql`. (Importer surface verified by SE + Codex.)
-- Story 05: `CLAUDE.md`, `.claude/skills/multi-agent-patterns/SKILL.md`, `.claude/skills/context-fundamentals/SKILL.md`, `.claude/rules/perspective-provenance.md`. (data-engineer.md dropped — IDEA-092 removed in review.)
+- Story 05: `CLAUDE.md`, `.claude/rules/http-discipline.md` (added at dispatch — AC-1 doc-sweep scope-completion of the audit-#9 raw-archive correction; no other story touches it, isolation holds), `.claude/skills/multi-agent-patterns/SKILL.md`, `.claude/skills/context-fundamentals/SKILL.md`, `.claude/rules/perspective-provenance.md`. (data-engineer.md dropped — IDEA-092 removed in review.)
 - Story 06: `.claude/skills/implement/SKILL.md` (both the IDEA-122 creds-profile preflight edit and the IDEA-123 ordering edit are in this one Step 1d file).
 - Story 07: `docs/admin/getting-started.md`, `docs/admin/architecture.md`, `docs/admin/operations.md`, `docs/admin/production-deployment.md` (the last is the AC-4 Step 1d sync, `Blocked by: E-262-06`).
 - Story 08: ABANDONED (no files — dropped in review).
@@ -88,6 +90,41 @@ _Both open questions are now RESOLVED — no open questions remain (pre-dispatch
 - **IDEA-122 exit-code contract — RESOLVED (SE+CA consult, 2026-07-12).** The original "SE root fix = make `bb creds check` exit non-zero" direction was settled the OTHER way after both SE and CA verified the code: the single-profile and all-dead-multi paths already exit non-zero; the only false-green is the MIXED multi-profile case (valid mobile masks dead web), and the "any valid = usable" contract must hold — so there is NO correct `creds.py` change. The fix is skill-side: the Step 1d preflight calls `bb creds check --profile web` (the profile the smoke's `generate` uses). IDEA-122 moved from story 03 to story 06 (AC-1). This is a ready-now one-token fix with no remaining open question.
 
 ## History
+- 2026-07-13: **COMPLETED.** All 8 active stories DONE (01–07, 09); 08 ABANDONED. Pre-merge reviews passed (Closure CR Integration Review APPROVED, Codex Phase-4 dispositions incorporated). Closure assessments recorded: documentation (updated in-epic by 07 + 09), eight-trigger context-layer (trigger 7 = operator-signed ratchet re-snapshot, no offset owed by E-262; per-trigger verdicts below). Idea bookkeeping complete (14 PROMOTED, 2 DISCARDED, 3 follow-ups filed: IDEA-137/138/139). COMPLETED authored in the worktree at the Step 8 staging window; finalized on the full-suite-green closure gate. Two operator decisions carried to the operator summary: the ratchet `--update-baseline` re-snapshot and the IDEA-137 corpus-wide docs/api doc-PII certification sweep.
+- 2026-07-13: **Dispatch complete — all 8 active stories DONE (01–07, 09); 08 ABANDONED.** What landed: (01) three CLI behavioral fixes — dedup `--dry-run`/`--execute` mutual-exclusion, reload-annotated-pitches non-zero exit on errored games, `bb status` DB-path via `resolve_db_path()`; (02) cosmetic hygiene — 7 loader/crawler docstrings de-banned, empty `tests/test_crawlers/` deleted (AC-3 ruled SATISFIED-AS-IS: the story's compose-comment premise was contradicted by disk); (03) two live bugs — `detect_league_level` free-text age_group range form → `youth_travel`, and the name-only wrong-team badge false-positive guarded on a real anchor; (04) `season_aggregates.py` → `season_projection.py` byte-identical rename; (05) five context-layer truth/staleness corrections + an AC-1 doc-sweep scope-completion (`http-discipline.md:44` raw-persistence two-case reword); (06) Step 1d `--profile web` preflight + terminal-fixture generate/reconcile ordering; (07) admin-docs hygiene (port-map verify-only, schema-changelog reconcile to real 001–011, creds-recovery recipe collapse, production-deployment.md Step 1d sync); (09) docs/api boxscore path-variable rename (`game_stream_id` → `event_id`, token-scoped) + scouting-flow stat audit (near-no-op) + `age_group` range-form doc note. Pre-merge reviews all passed (Closure CR Integration Review APPROVED no findings; Codex Phase-4 done). Idea bookkeeping: 14 folded ideas confirmed PROMOTED, IDEA-078 + IDEA-092 DISCARDED, 3 follow-ups filed (IDEA-137 docs/api corpus doc-PII sweep, IDEA-138 /plays token normalization, IDEA-139 context-fundamentals worked-example figure refresh).
+
+### Dispatch & Closure Review Scorecard
+| Review Pass | Findings | Accepted/Fixed | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-262-01 | 0 MUST-FIX | — | — |
+| Per-story CR — E-262-02 | 0 MUST-FIX | — | — |
+| Per-story CR — E-262-03 | 0 MUST-FIX | — | — |
+| Per-story CR — E-262-04 | 0 MUST-FIX | — | — |
+| Per-story CR — E-262-07 | 0 MUST-FIX | — | — |
+| Per-story CR — E-262-09 | 1 MUST-FIX (PII) | 1 (remediated R2) | 0 |
+| Closure CR Integration Review | 0 | — | — |
+| Codex Phase-4 (gpt-5.6-terra, xhigh) | 2 | 1 (fixed) | 1 (pre-existing → IDEA-138) |
+| **Total** | **3** | **2** | **1** |
+
+Stories 05 and 06 were context-layer-only → PM-alone AC gate (no CR row, per the context-layer review model). Notable in-flight items (all resolved correctly, none a quality dismissal): **story 02 AC-3** — the story's compose-comment "override carries no port mappings" premise was contradicted by the file on disk; ruled SATISFIED-AS-IS (no edit; rewording would have injected a falsehood) — the re-verify-before-folding lesson firing again. **Story 05 http-discipline sibling** — the audit-#9 raw-archive correction had a contradicting copy at `http-discipline.md:44`; ruled a doc-sweep scope-completion (defect-cited, same citation) and reworded two-case in-epic. **Story 09 PII** — a real GC exposure (3 full UUIDs + team name "Nighthawks Navy") pre-existing in api-scout-owned files story 09 touched; redacted in-epic (verified 0 in docs/), CR re-approved Round 2. Codex Finding 1 (operations.md creds recipe validated a WEB import with bare `bb creds check`) was fixed in-epic (→ `--profile web`); Finding 2 (/plays token contradiction) was proven byte-for-byte pre-existing and correctly routed to IDEA-138, not a quality dismissal.
+
+### Documentation Assessment (closure)
+Documentation was updated IN-EPIC: story 07 (`docs/admin/` — architecture.md, operations.md, production-deployment.md) and story 09 (`docs/api/` — boxscore endpoint rename, opponent-scouting flow, get-public-teams-public_id age_group, README + sibling see_also refs). getting-started.md was verify-only (already correct). No additional documentation impact — the epic's doc surfaces were themselves the deliverables. docs-writer + api-scout owned their trees.
+
+### Context-Layer Assessment (closure — eight triggers)
+1. **New convention/constraint?** YES — the Step 1d terminal-fixture requirement + the `bb creds check --profile web` preflight convention. Codified in-epic (story 06, `implement/SKILL.md`).
+2. **Architectural decision?** NO — the `season_aggregates.py` → `season_projection.py` rename is a naming clarification, not an architectural change.
+3. **Footgun/failure mode?** YES — the bare `bb creds check` mixed-profile-mask false-green; the two-case raw-persistence reality (in-memory pipelines vs proxy/ingest). Codified in-epic (stories 05/06/07 + Codex-F1 operations.md).
+4. **Agent behavior/routing/closure change?** YES — the Step 1d closure-smoke procedure changed (story 06). Codified in-epic (`implement/SKILL.md`).
+5. **Domain knowledge?** YES — the public-scorebook cross-perspective disagreement caveat + public-games-`id` perspective-specificity (story 05, `perspective-provenance.md`); the `age_group` free-text range form (story 03 code + story 09 doc). Codified in-epic.
+6. **New CLI command/workflow?** NO — corrections to existing procedures only; no new command or skill.
+7. **Net context-layer ratchet?** YES — see the CA framing verdict below.
+
+> **Trigger 7 (context-layer ratchet) — FAIL, operator-signed re-snapshot (no offset owed by E-262).** `context-ratchet.sh` exits non-zero (~+160 vs the 2026-07-12 baseline), but the FAIL is dominated by pre-existing drift, not by this epic. E-262's OWN four-subtree contribution is trivial and fully defect-cited: ~+3 net to `.claude/rules`+`.claude/skills` (the stories 05/06 reword-in-place corrections), plus this closure's `.claude/agent-memory` reconciliation (DE/PM/CA). The remaining ~+157 is pre-existing `.claude/agent-memory` drift that is identical on `main` and the worktree (prior epics' closure codification the operator has not yet re-snapshotted) — the same situation E-261 recorded at +132. Under the E-260 freeze this is exactly the case the operator-owned baseline exists for: the correct resolution is an operator-signed re-snapshot at closure (`context-ratchet.sh --update-baseline`, operator-only — no agent refreshes it), NOT an offset obligation on E-262. Requiring this epic to delete unrelated pre-existing memory to "pay for" +3 defect-cited lines would be both scope creep and destruction of legitimate historical codification. Verdict: ratchet growth is operator-signed at closure; E-262 owes nothing.
+8. **Reusable behavioral lesson (gated)?** YES — "re-verify an idea's target file still exists AND still shows the defect before folding it" RECURRED hard this epic (audit #6/#8 false premises, IDEA-078/092 already-fixed, IDEA-010/105/111 drifted anchors, the docker-compose AC-3 premise contradicted by disk). It is already at its correct load target (PM feedback memory `feedback_reverify_idea_before_folding.md`). Plus the `season_aggregates`→`season_projection` deletion-side eviction — DE and CA reconcile their own agent-memory path tokens in-worktree at closure; PM reconciles its own `archived-epics.md` references (reconcile-not-strike, keeping the historical E-237/E-259 records accurate-at-the-time).
+
+No ADDITIONAL new context-layer machinery required — the in-story 05/06 edits ARE the codification; the E-260 meta-layer freeze holds (every context-layer edit was defect-cited).
+
 - 2026-07-12: **READY.** Refinement complete — internal review (CR spec audit + holistic SE/CA/docs-writer/api-scout) and Codex spec review (iter 1) both incorporated; quality checklist passed; no open questions remain; docs-writer confirmed the story-07 landing. 60-day READY-freshness clock starts today.
 
 ### Review Scorecard

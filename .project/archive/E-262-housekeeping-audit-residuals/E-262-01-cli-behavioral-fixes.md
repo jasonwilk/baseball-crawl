@@ -4,7 +4,7 @@
 [E-262: Post-Program Housekeeping](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three CLI correctness defects from the platform-audit residual table are fixed: `bb data dedup-players` no longer silently executes when both `--dry-run` and `--execute` are passed, `bb data reload-annotated-pitches` no longer reports success when games failed, and `bb status` resolves the database path through the canonical resolver instead of a hardcoded path.
