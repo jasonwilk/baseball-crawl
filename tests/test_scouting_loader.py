@@ -19,13 +19,13 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from migrations.apply_migrations import run_migrations
 from src.api.db import get_season_batting, get_season_pitching
-from src.gamechanger.loaders.game_loader import GameSummaryEntry
+from src.gamechanger.loaders.game_loader import GameSummaryEntry, _derive_game_date
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.types import TeamRef
 
@@ -280,6 +280,12 @@ def test_boxscore_loading_delegates_to_game_loader(
             db=loader._db,
             owned_team_ref=expected_team_ref,
             created_team_ids=loader._created_team_ids,
+            # E-261-03a: ScoutingLoader now precomputes the per-(date, opponent)
+            # schedule count and threads it into GameLoader. Its CONTENT (the
+            # count aggregate) is asserted directly by the
+            # test_build_schedule_counts_* tests below; here we only assert the
+            # kwarg is passed through.
+            schedule_counts=ANY,
         )
         mock_gl.load_payload.assert_called_once()
         # First arg should be the in-memory boxscore payload.
@@ -289,6 +295,130 @@ def test_boxscore_loading_delegates_to_game_loader(
         summary = call_args.args[1]
         assert isinstance(summary, GameSummaryEntry)
         assert summary.event_id == game_id
+
+
+# ---------------------------------------------------------------------------
+# E-261-03a: _build_schedule_counts (the doubleheader discriminator producer)
+# ---------------------------------------------------------------------------
+# The tolerant same-game signal is only as safe as the count aggregate that
+# feeds it: it MUST emit count==2 for a real doubleheader (else the guard would
+# fire on len(rows)==1 and SILENTLY COLLAPSE a real game -- the asymmetric
+# pitcher-rest/innings-limit hazard TN-4 names). These tests exercise the
+# producer directly (the load-path tests set loader._schedule_counts by hand).
+
+
+def _sched_summary(
+    stream_id: str,
+    *,
+    ts: str = "2025-05-10T14:00:00.000Z",
+    tz: str | None = "America/Chicago",
+) -> GameSummaryEntry:
+    """A minimal GameSummaryEntry for _build_schedule_counts key derivation."""
+    return GameSummaryEntry(
+        event_id=stream_id,
+        game_stream_id=stream_id,
+        home_away="home",
+        owning_team_score=5,
+        opponent_team_score=2,
+        opponent_id="",
+        last_scoring_update=ts,
+        start_time=ts,
+        timezone=tz,
+    )
+
+
+def test_build_schedule_counts_doubleheader_counts_two(
+    loader: ScoutingLoader,
+) -> None:
+    """Two same-date same-opponent summaries aggregate to count 2 (increment,
+    not overwrite) -- the real-doubleheader signal the guard must NOT collapse."""
+    games_index = {
+        "g1": _sched_summary("g1", ts="2025-05-10T18:00:00.000Z"),
+        "g2": _sched_summary("g2", ts="2025-05-10T22:00:00.000Z"),
+    }
+    opponent_name_index = {"g1": "Rival High", "g2": "Rival High"}
+
+    counts = loader._build_schedule_counts(games_index, opponent_name_index)
+
+    date_key = _derive_game_date(games_index["g1"])
+    assert _derive_game_date(games_index["g2"]) == date_key  # same local date
+    assert counts == {(date_key, "Rival High"): 2}
+
+
+def test_build_schedule_counts_single_game_counts_one(
+    loader: ScoutingLoader,
+) -> None:
+    """A lone game vs an opponent aggregates to count 1."""
+    games_index = {"g1": _sched_summary("g1")}
+    opponent_name_index = {"g1": "Rival High"}
+
+    counts = loader._build_schedule_counts(games_index, opponent_name_index)
+
+    assert counts == {(_derive_game_date(games_index["g1"]), "Rival High"): 1}
+
+
+def test_build_schedule_counts_excludes_none_opponent(
+    loader: ScoutingLoader,
+) -> None:
+    """A game with NO resolvable opponent name is EXCLUDED (AC-6 fail-safe on the
+    producer side: the loader then gets a None count and declines the signal). A
+    None-opponent game on a DIFFERENT date does not poison an unrelated resolved
+    date -- only its own date is treated as ambiguous."""
+    games_index = {
+        "g1": _sched_summary("g1", ts="2025-05-10T14:00:00.000Z"),  # vs X, 10th
+        "g2": _sched_summary("g2", ts="2025-05-12T14:00:00.000Z"),  # None opp, 12th
+    }
+    opponent_name_index = {"g1": "Rival High"}  # g2 absent -> None opponent
+
+    counts = loader._build_schedule_counts(games_index, opponent_name_index)
+
+    assert counts == {(_derive_game_date(games_index["g1"]), "Rival High"): 1}
+    assert all(key[1] is not None for key in counts)  # no None-opponent key
+
+
+def test_build_schedule_counts_ambiguous_date_fails_closed(
+    loader: ScoutingLoader,
+) -> None:
+    """Codex P1 regression: a real doubleheader vs X on date D where ONE sibling
+    summary lost its opponent name must NOT undercount (D, X) to 1 -- that would
+    let the tolerant guard silently collapse the OTHER sibling into a lone
+    cross-perspective candidate (deleted game data + masked pitcher-rest
+    violation, the asymmetric hazard TN-4 names). The whole date is AMBIGUOUS and
+    emits NO count, so the surviving sibling's lookup misses -> the loader
+    declines (fails CLOSED) instead of merging on the wrong count."""
+    games_index = {
+        "g1": _sched_summary("g1", ts="2025-05-10T18:00:00.000Z"),  # vs X @ 6:00 PM
+        "g2": _sched_summary("g2", ts="2025-05-10T22:00:00.000Z"),  # vs X but name lost
+    }
+    # g2's opponent name is missing -> the 2025-05-10 date is ambiguous.
+    opponent_name_index = {"g1": "Rival High"}
+
+    counts = loader._build_schedule_counts(games_index, opponent_name_index)
+
+    date_key = _derive_game_date(games_index["g1"])
+    assert _derive_game_date(games_index["g2"]) == date_key  # same local date
+    # No undercounted (date, X)=1 -- the ambiguous date emits nothing (fail closed).
+    assert (date_key, "Rival High") not in counts
+    assert counts == {}
+
+
+def test_build_schedule_counts_date_key_uses_shared_seam(
+    loader: ScoutingLoader,
+) -> None:
+    """The produced date key equals ``_derive_game_date(summary)`` -- the SAME
+    seam ``_load_boxscore_data`` uses, so the lookup cannot key-miss. Uses a
+    late-evening instant that rolls to the NEXT UTC day to prove the key is the
+    venue-LOCAL date, not a UTC slice (finding E(b))."""
+    # 02:30Z on 2025-05-11 = 21:30 CDT on 2025-05-10 -> local date 2025-05-10.
+    summary = _sched_summary("g1", ts="2025-05-11T02:30:00.000Z")
+    games_index = {"g1": summary}
+    opponent_name_index = {"g1": "Rival High"}
+
+    counts = loader._build_schedule_counts(games_index, opponent_name_index)
+
+    expected_date = _derive_game_date(summary)
+    assert expected_date == "2025-05-10"  # venue-local, NOT the UTC "2025-05-11"
+    assert list(counts.keys()) == [(expected_date, "Rival High")]
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-game-dates, reload-annotated-pitches, fix-self-games)."""
+"""bb data -- data maintenance commands (reconcile, dedup-players, backfill-game-dates, reload-annotated-pitches, fix-self-games, merge-duplicate-games)."""
 
 from __future__ import annotations
 
@@ -796,3 +796,193 @@ def fix_self_games(
         )
 
     raise SystemExit(0 if remaining == 0 else 1)
+
+
+# ---------------------------------------------------------------------------
+# bb data merge-duplicate-games
+# ---------------------------------------------------------------------------
+
+
+@app.command("merge-duplicate-games")
+def merge_duplicate_games(
+    db_path: Optional[Path] = typer.Option(
+        None,
+        "--db",
+        help="Path to the SQLite database (defaults to DATABASE_PATH or the project DB).",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Apply the merges + stream-id restores (default: dry-run, change nothing).",
+    ),
+) -> None:
+    """Repair cross-perspective duplicate games + poisoned stream ids (E-261-04).
+
+    Two offline repair actions over an ALREADY-PERSISTED DB:
+
+    (1) Detect historical cross-perspective duplicate ``games`` pairs -- the same
+    real game persisted under two ``game_id`` values because it was loaded from
+    two team perspectives -- and merge each via ``merge_duplicate_game()``. A
+    pair is planned ONLY when it clears the offline same-game corroboration
+    (disjoint single perspectives PRIMARY + bounded score-tolerance + near
+    play-count, ALL required); an ambiguous group (>= 3 rows, or a failed
+    corroboration) is REFUSED and left unmerged.
+
+    (2) Restore ``game_stream_id`` values clobbered by the pre-fix redirect: a
+    tracked-perspective game is self-keyed pre-clobber, so a poisoned value that
+    corroborates as a redirect source is reset to ``game_stream_id = game_id``.
+    Member-perspective games are never touched.
+
+    Dry-run (default) prints the plan and writes nothing; --execute applies it.
+    Failure model is CONTINUE-PER-ITEM: each item is processed under its own
+    try/except; a failed item is rolled back, logged, and skipped, and the
+    command exits non-zero if ANY item failed. Refusals alone do NOT fail the run.
+
+    Examples:
+        bb data merge-duplicate-games            # dry-run
+        bb data merge-duplicate-games --execute  # apply
+    """
+    from src.api.db import get_connection
+    from src.db.game_merge import (
+        merge_duplicate_game,
+        plan_duplicate_game_merges,
+        plan_stream_id_restores,
+        restore_stream_id,
+    )
+
+    is_dry_run = not execute
+    mode = "DRY RUN" if is_dry_run else "EXECUTE"
+
+    db_path = resolve_db_path(db_path)
+    with closing(get_connection(db_path)) as conn:
+        plan = plan_duplicate_game_merges(conn)
+        # Dry-run corroboration set for restores: the pairs we WOULD merge (their
+        # source ids become redirect sources). On --execute we recompute with the
+        # ids actually merged.
+        planned_sources = {m.source_game_id for m in plan.merges}
+        restores = plan_stream_id_restores(conn, planned_sources)
+
+        typer.echo(
+            f"[{mode}] {len(plan.merges)} duplicate pair(s) to merge, "
+            f"{len(plan.refusals)} group(s) refused, "
+            f"{len(restores)} stream-id restore(s).\n"
+        )
+
+        if plan.merges:
+            typer.echo("Duplicate pairs (source -> canonical):")
+            for m in plan.merges:
+                counts = (
+                    ", ".join(f"{t}={n}" for t, n in sorted(m.child_counts.items()))
+                    or "(no child rows)"
+                )
+                typer.echo(
+                    f"  {m.source_game_id} -> {m.canonical_game_id}  "
+                    f"{m.game_date} teams={m.team_pair}  "
+                    f"scores src={m.source_score} canon={m.canonical_score}  "
+                    f"plays src={m.source_play_count} canon={m.canonical_play_count}"
+                )
+                typer.echo(f"      child rows: {counts}")
+
+        if plan.refusals:
+            typer.echo("\nRefused groups (ambiguous -- left unmerged, review manually):")
+            for r in plan.refusals:
+                typer.echo(
+                    f"  {r.game_date} teams={r.team_pair}: {r.reason} "
+                    f"[{', '.join(r.game_ids)}]"
+                )
+
+        if restores:
+            typer.echo("\nStream-id restores (poisoned -> self-keyed):")
+            for s in restores:
+                typer.echo(
+                    f"  {s.game_id}: game_stream_id {s.poisoned_value} -> {s.game_id}"
+                )
+
+        if is_dry_run:
+            typer.echo(
+                "\nDry-run only. Re-run with --execute to apply the merges and "
+                "stream-id restores."
+            )
+            raise SystemExit(0)
+
+        # --- execute ------------------------------------------------------
+        # AC-3: one WARN per refused group (mirror dedup-players fork handling).
+        for r in plan.refusals:
+            logger.warning(
+                "merge-duplicate-games: refused group on %s teams=%s: %s; "
+                "candidate rows %s",
+                r.game_date,
+                r.team_pair,
+                r.reason,
+                r.game_ids,
+            )
+
+        merged = 0
+        refused_at_merge = 0
+        failed = 0
+        merged_sources: set[str] = set()
+
+        typer.echo("")
+        for m in plan.merges:
+            try:
+                result = merge_duplicate_game(
+                    conn, m.source_game_id, m.canonical_game_id
+                )
+                if result.refused:
+                    # Helper-level refusal (should not happen after the plan's
+                    # disjointness gate, but honored defensively): nothing was
+                    # written; roll back to be safe and do NOT count as a failure.
+                    conn.rollback()
+                    refused_at_merge += 1
+                    logger.warning(
+                        "merge-duplicate-games: helper refused %s -> %s: %s",
+                        m.source_game_id,
+                        m.canonical_game_id,
+                        result.refusal_reason,
+                    )
+                    continue
+                # CLI owns and commits the per-item transaction (AC-2).
+                conn.commit()
+                merged += 1
+                merged_sources.add(m.source_game_id)
+                typer.echo(
+                    f"  MERGED {m.source_game_id} -> {m.canonical_game_id}"
+                )
+            except Exception as exc:  # noqa: BLE001 -- per-item isolation (AC-5)
+                # Discard the failed item's partial writes on the shared
+                # connection so a later item's commit cannot persist them.
+                conn.rollback()
+                failed += 1
+                typer.echo(
+                    f"  ERROR merging {m.source_game_id} -> "
+                    f"{m.canonical_game_id}: {exc}",
+                    err=True,
+                )
+
+        # Restores: recompute against the ids ACTUALLY merged this run (their
+        # now-deleted source ids corroborate a poisoned stream id).
+        restored = 0
+        for s in plan_stream_id_restores(conn, merged_sources):
+            try:
+                restore_stream_id(conn, s.game_id)
+                conn.commit()
+                restored += 1
+                typer.echo(
+                    f"  RESTORED {s.game_id}: game_stream_id -> {s.game_id}"
+                )
+            except Exception as exc:  # noqa: BLE001 -- per-item isolation (AC-5)
+                conn.rollback()
+                failed += 1
+                typer.echo(
+                    f"  ERROR restoring stream id for {s.game_id}: {exc}",
+                    err=True,
+                )
+
+        typer.echo(
+            f"\nSummary: {merged} pair(s) merged, {refused_at_merge} refused at "
+            f"merge, {len(plan.refusals)} group(s) refused in plan, "
+            f"{restored} stream-id(s) restored, {failed} failure(s)."
+        )
+
+    # AC-5: non-zero exit iff any item failed. Refusals alone do NOT fail (AC-3).
+    raise SystemExit(0 if failed == 0 else 1)

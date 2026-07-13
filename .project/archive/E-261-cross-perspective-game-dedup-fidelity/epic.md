@@ -1,7 +1,7 @@
 # E-261: Cross-Perspective Game-Dedup Fidelity (degraded-report fix)
 
 ## Status
-`READY` (set 2026-07-12 — starts the 60-day freshness clock)
+`COMPLETED` (2026-07-13; dispatch started 2026-07-13; READY set 2026-07-12)
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -55,11 +55,11 @@ When `_find_duplicate_game()` detects a cross-perspective duplicate, the redirec
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-261-01 | Stop the redirect-path `game_stream_id` clobber | TODO | None | software-engineer |
-| E-261-02 | Canonical duplicate-game merge helper (`merge_duplicate_game`) | TODO | None | data-engineer |
-| E-261-03a | Tolerant cross-perspective same-game signal + uniform candidate-loop guard | TODO | E-261-01, E-261-02 | software-engineer |
-| E-261-03b | In-pipeline twin merge + redirect-site error handling | TODO | E-261-02, E-261-03a | software-engineer |
-| E-261-04 | Operator repair pass: `bb data merge-duplicate-games` | TODO | E-261-02, E-261-03b | data-engineer |
+| E-261-01 | Stop the redirect-path `game_stream_id` clobber | DONE | None | software-engineer |
+| E-261-02 | Canonical duplicate-game merge helper (`merge_duplicate_game`) | DONE | None | data-engineer |
+| E-261-03a | Tolerant cross-perspective same-game signal + uniform candidate-loop guard | DONE | E-261-01, E-261-02 | software-engineer |
+| E-261-03b | In-pipeline twin merge + redirect-site error handling | DONE | E-261-02, E-261-03a | software-engineer |
+| E-261-04 | Operator repair pass: `bb data merge-duplicate-games` | DONE | E-261-02, E-261-03b | data-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -119,6 +119,34 @@ All three prior Open Questions were resolved during the Phase-3 review (Coach + 
 - **E-261-04 necessity — RESOLVED: KEEP.** The in-pipeline twin merge (E-261-03b) self-heals any team on report regeneration, but the poisoned-`game_stream_id` restore has NO regeneration self-heal path at all, and teams nobody regenerates still need the pair-merge. Cheap, follows the `bb data` precedent — the offline sweep stays.
 
 ## History
+- 2026-07-13 (**dispatch complete**). All 5 stories implemented, per-story code-reviewed, and Codex-reviewed; full suite green after every fix (last: 3798 passed). Both cross-perspective game-dedup defects are fixed end-to-end: (01) the redirect-path `game_stream_id` clobber is stopped via keep-existing COALESCE and migration 010's premise corrected; (02) a canonical `merge_duplicate_game` helper (`src/db/game_merge.py`) re-points all six FK children with pre-classification refusal of non-disjoint pairs and delete-last ordering; (03a) the exact-score gate is replaced by a tolerant schedule-count discriminator applied perspective-agnostically across the whole candidate loop, with deterministic redirect score-ownership and a shared offline predicate factored into `game_merge.py`; (03b) the redirect site now merges an already-persisted source-event twin in-pipeline (self-healing on regeneration) with rollback-on-error; (04) `bb data merge-duplicate-games` gives the operator an offline repair pass (duplicate-pair merge + poisoned `game_stream_id` restore) with continue-per-item failure handling. The dedup path is now self-healing and idempotent.
+
+  ### Review Scorecard
+  | Review Pass | Findings | Accepted | Dismissed |
+  |---|---|---|---|
+  | Per-story CR — E-261-01 | 0 | 0 | 0 |
+  | Per-story CR — E-261-02 | 0 | 0 | 0 |
+  | Per-story CR — E-261-03a | 1 | 1 | 0 |
+  | Per-story CR — E-261-03b | 0 | 0 | 0 |
+  | Per-story CR — E-261-04 | 0 | 0 | 0 |
+  | Closure CR Integration Review | 1 | 1 | 0 |
+  | Codex code review | 3 | 3 | 0 |
+  | **Total** | **5** | **5** | **0** |
+
+  Notes: E-261-03a's 1 finding = the `_build_schedule_counts` producer-test gap, fixed in round 2. Closure CR's 1 finding = a SHOULD FIX to document the new `bb data merge-duplicate-games` command — accepted, actioned via the documentation + context-layer assessment gates (not a code change). Codex's 3 accepted+fixed: P1 = `_build_schedule_counts` doubleheader undercount when a sibling summary lost its opponent name (failed OPEN → could silently collapse a real doubleheader), fixed with a two-pass producer that marks any unresolved-opponent date ambiguous and emits NO count so the guard fails CLOSED (+2 tests); P2 = read-then-write TOCTOU where a concurrently-deleted source twin made `merge_duplicate_game` raise `GameMergeError` uncaught, fixed by catching it in `_merge_twin_or_rollback` (benign vanished-source → no-op under canonical; source-still-present → rollback + `LoadResult(errors=1)`) (+2 tests); P3 = `merge-duplicate-games` advertised an inert `--dry-run` flag (`--dry-run --execute` would still write), fixed by removing the vestigial flag to match the `fix-self-games` precedent (+1 test).
+
+  ### Closure Assessments
+  - **Documentation assessment: FIRES** — the epic adds a new operator CLI command (`bb data merge-duplicate-games`). docs-writer dispatched to document it in the admin surface before archival.
+  - **Context-layer assessment (8 triggers, explicit verdicts):**
+    - T1 (new canonical entry point / architectural pattern) — **YES**: the canonical `merge_duplicate_game` helper and the `src/db/game_merge.py` home for duplicate-game merge logic.
+    - T2 (single-home / de-dup-the-dedup consolidation) — **YES**: the single-home offline same-game predicate (`is_offline_same_game`) + merge helper shared by the in-pipeline path and the CLI.
+    - T3 (new footgun / correctness hazard worth codifying) — **YES**: schedule-count fail-open→fail-closed producer hazard and the twin-merge read-then-write TOCTOU; plus the migration-010 premise correction (tracked `game_stream_id` is non-null/perspective-specific/self-keyed).
+    - T4 — **NO**.
+    - T5 — **NO**.
+    - T6 (new operator command surface) — **YES**: `bb data merge-duplicate-games`.
+    - T7 (context-growth counterweight) — **evaluate-and-offset**: claude-architect runs the ratchet.
+    - T8 — **NO**.
+    - Triggers 1/2/3/6 fire → claude-architect dispatched to codify before archival.
 - 2026-07-12 (**READY** — review scorecard). Set READY after internal review (Phase-3: CR spec audit + Coach/SE/DE holistic) + Codex iteration 1 + api-scout GC-claim consultation; all findings incorporated, 0 dismissed. No third review round needed. Review-Scorecard:
 
   | Pass | Findings | Accepted | Dismissed |

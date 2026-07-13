@@ -4,7 +4,7 @@
 [E-261: Cross-Perspective Game-Dedup Fidelity](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, a single canonical helper merges a duplicate `games` row into its canonical twin: all six FK child tables are re-pointed or unioned, ambiguous (non-disjoint-perspective) pairs are refused rather than guessed, and the losing row is deleted. The helper is the shared foundation for the in-pipeline twin merge (E-261-03b) and the operator repair pass (E-261-04).

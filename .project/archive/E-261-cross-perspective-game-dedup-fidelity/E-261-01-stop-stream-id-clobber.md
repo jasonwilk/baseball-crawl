@@ -4,7 +4,7 @@
 [E-261: Cross-Perspective Game-Dedup Fidelity](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, a cross-perspective dedup redirect no longer overwrites the canonical `games` row's non-null `game_stream_id` with the incoming perspective's value. The silent poisoning that currently happens on EVERY clean redirect stops, and the `UNIQUE constraint failed: games.game_stream_id` load error can no longer be triggered by the clobber write itself. Migration 010's header premise is corrected to match reality.

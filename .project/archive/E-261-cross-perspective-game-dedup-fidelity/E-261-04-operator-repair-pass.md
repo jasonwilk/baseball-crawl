@@ -4,7 +4,7 @@
 [E-261: Cross-Perspective Game-Dedup Fidelity](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the operator can repair databases already damaged by the two dedup defects without regenerating every affected report: `bb data merge-duplicate-games` detects historical cross-perspective duplicate `games` pairs and merges them via the canonical helper, and restores `game_stream_id` values poisoned by the pre-fix redirect clobber. Dry-run by default, `--execute` to apply, following the `bb data fix-self-games` precedent.

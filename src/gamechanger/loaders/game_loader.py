@@ -37,6 +37,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass, replace
 
+from src.db.game_merge import GameMergeError, merge_duplicate_game
 from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
@@ -134,6 +135,28 @@ def _opt_int(value: object) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _derive_game_date(summary: GameSummaryEntry) -> str:
+    """Derive a game's venue-LOCAL calendar date from its summary.
+
+    The SINGLE derivation shared by ``_load_boxscore_data`` (the dedup decision)
+    and ``ScoutingLoader``'s schedule-count precompute (E-261-03a). Both MUST key
+    on the identical date string or the schedule-count lookup would silently
+    key-miss and disable the tolerant same-game signal (TN-4 finding E(b)).
+
+    Uses the game's own timezone when present, else the operating-tz seam
+    (bridged to its IANA name via ``.key`` -- ``derive_local_date`` takes a NAME,
+    never a ``ZoneInfo``). Falls back to the raw UTC date slice only when the
+    instant is unparseable, and to the ``"1900-01-01"`` sentinel when absent.
+    """
+    if summary.last_scoring_update:
+        tz_name = summary.timezone or get_operating_timezone().key
+        return (
+            derive_local_date(summary.last_scoring_update, tz_name)
+            or summary.last_scoring_update[:10]
+        )
+    return "1900-01-01"
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +259,14 @@ class GameLoader:
             THIS run inserted -- closing the cross-process team-deletion race
             without a global pre/post snapshot diff. ``None`` (the default)
             disables recording for all other callers.
+        schedule_counts: Optional ``{(game_date, opponent_name): count}`` map of
+            how many games the OWN crawl schedule has on each local date against
+            each opponent (E-261-03a / TN-4). Precomputed upstream by
+            ``ScoutingLoader`` because ``load_payload`` sees ONE summary at a time
+            and cannot count the schedule itself. Enables the tolerant
+            schedule-count same-game signal in ``_find_duplicate_game``; ``None``
+            (the default) leaves that signal OFF -- direct callers get the
+            legacy exact-match-only dedup behavior.
     """
 
     def __init__(
@@ -243,10 +274,12 @@ class GameLoader:
         db: sqlite3.Connection,
         owned_team_ref: TeamRef,
         created_team_ids: set[int] | None = None,
+        schedule_counts: dict[tuple[str, str], int] | None = None,
     ) -> None:
         self._db = db
         self._team_ref = owned_team_ref
         self._created_team_ids = created_team_ids
+        self._schedule_counts = schedule_counts
         self._season_id, self._season_year = derive_season_id_for_team(
             db, owned_team_ref.id
         )
@@ -354,19 +387,23 @@ class GameLoader:
         # Game date: the venue-LOCAL calendar date of the scoring instant
         # (CE-3 / E-253-04). Deriving it from the raw UTC prefix files an
         # evening game under the next UTC day, skewing rest math, the 7-day
-        # window, and cross-perspective dedup at UTC midnight. Use the game's
-        # own timezone when present, else the operating-tz seam -- bridging the
-        # seam's ZoneInfo to its IANA name via ``.key`` (derive_local_date takes
-        # a NAME, never a ZoneInfo object). Falls back to the old UTC slice only
-        # when the instant is absent/unparseable.
-        if summary.last_scoring_update:
-            tz_name = summary.timezone or get_operating_timezone().key
-            game_date = (
-                derive_local_date(summary.last_scoring_update, tz_name)
-                or summary.last_scoring_update[:10]
+        # window, and cross-perspective dedup at UTC midnight. Factored into the
+        # shared ``_derive_game_date`` seam so ScoutingLoader's schedule-count
+        # precompute keys on the IDENTICAL date (E-261-03a / TN-4 finding E(b)).
+        game_date = _derive_game_date(summary)
+
+        # Tolerant same-game signal context (E-261-03a / TN-4): how many games the
+        # OWN crawl schedule has on this date against this opponent. Naturally
+        # keyed by (date, opponent-NAME) upstream; resolved HERE where the name is
+        # in hand, then passed to _find_duplicate_game as a plain count. Fail-safe:
+        # a None opponent_name or a key-miss leaves the count None, which DECLINES
+        # the tolerant signal (exact-match dedup only) rather than merging on
+        # missing context (AC-6 / finding E(a)+(c)).
+        incoming_schedule_count: int | None = None
+        if self._schedule_counts is not None and opponent_name is not None:
+            incoming_schedule_count = self._schedule_counts.get(
+                (game_date, opponent_name)
             )
-        else:
-            game_date = "1900-01-01"
 
         # Pre-load dedup check: if a game already exists for this date and
         # team pair (in either home/away order), reuse the existing game_id
@@ -375,22 +412,62 @@ class GameLoader:
             summary.event_id, game_date,
             home_team_id, away_team_id, home_score, away_score,
             summary.start_time,
+            incoming_schedule_count=incoming_schedule_count,
         )
+        preserve_scores = False
         if canonical_id is not None:
+            # Capture the ORIGINAL source event id BEFORE replace() rewrites
+            # summary.event_id to the canonical value (E-261-03b AC-4 / finding
+            # CR LOW-5). Both the redirect_map key and the twin-existence check
+            # below MUST use this captured id, not the post-replace canonical.
+            source_event_id = summary.event_id
+
+            # Score ownership (E-261-03a / TN-1): a CROSS-perspective redirect must
+            # NOT overwrite the canonical row's first-loaded scores -- once the
+            # tolerant signal makes redirects fire on DISAGREEING scores,
+            # last-writer-wins would flap the canonical scores on every report
+            # regeneration. Cross-perspective == the incoming perspective is not
+            # yet among the canonical row's recorded perspectives. A SAME-
+            # perspective reload keeps preserve_scores False so a legitimate
+            # scorekeeper correction on re-scout still updates.
+            existing_perspectives = {
+                r[0] for r in self._db.execute(
+                    "SELECT perspective_team_id FROM game_perspectives "
+                    "WHERE game_id = ?",
+                    (canonical_id,),
+                ).fetchall()
+            }
+            preserve_scores = self._team_ref.id not in existing_perspectives
             logger.info(
                 "Dedup: redirecting game %s → %s (same date %s, same teams)",
-                summary.event_id, canonical_id, game_date,
+                source_event_id, canonical_id, game_date,
             )
-            # Record the redirect BEFORE replace() rewrites summary.event_id, so
-            # the source→canonical mapping is captured for the generator's
-            # plays/spray stages (E-244 TN-2). Only actual redirects are recorded.
-            self.redirect_map[summary.event_id] = canonical_id
+            # Record the redirect keyed by the SOURCE event id, so the generator's
+            # plays/spray stages file rows under the canonical id (E-244 TN-2).
+            self.redirect_map[source_event_id] = canonical_id
             summary = replace(summary, event_id=canonical_id)
+
+            # In-pipeline twin merge (E-261-03b, completes Defect A). If a games
+            # row ALREADY exists under the ORIGINAL source event id -- a
+            # historical un-merged twin an earlier dedup miss left behind -- merge
+            # it into the canonical row BEFORE the upsert so the pair collapses to
+            # one row (self-healing on regeneration). The common fresh-redirect
+            # case (source event never persisted) skips this: no source row, no
+            # merge, unchanged behavior.
+            if source_event_id != canonical_id and self._game_row_exists(
+                source_event_id
+            ):
+                merged = self._merge_twin_or_rollback(source_event_id, canonical_id)
+                if merged is not None:
+                    # A sqlite3.Error during the merge already rolled back and
+                    # returned errors=1 -- do not proceed with the upsert.
+                    return merged
 
         return self._upsert_game_and_stats(
             summary, game_date,
             home_team_id, away_team_id, home_score, away_score,
             own_data, own_team_id, opp_data, opp_team_id,
+            preserve_scores=preserve_scores,
         )
 
     def _resolve_team_ids(
@@ -506,6 +583,7 @@ class GameLoader:
         own_team_id: int,
         opp_data: dict | None,
         opp_team_id: int,
+        preserve_scores: bool = False,
     ) -> LoadResult:
         """Upsert the game row and load per-player stats for both teams.
 
@@ -520,6 +598,9 @@ class GameLoader:
             own_team_id: INTEGER PK of the owned team.
             opp_data: Boxscore data dict for the opponent team (or None).
             opp_team_id: INTEGER PK of the opponent team.
+            preserve_scores: When True (a CROSS-perspective redirect), the game
+                upsert keeps the canonical row's existing scores instead of
+                overwriting them (E-261-03a / TN-1 first-loaded-perspective-wins).
 
         Returns:
             ``LoadResult`` for this game.
@@ -531,6 +612,7 @@ class GameLoader:
                 summary.game_stream_id,
                 start_time=summary.start_time,
                 timezone=summary.timezone,
+                preserve_scores=preserve_scores,
             )
         except (sqlite3.Error, ValueError) as exc:
             # ValueError = the _upsert_game home != away invariant guard
@@ -913,6 +995,7 @@ class GameLoader:
         home_score: int | None,
         away_score: int | None,
         start_time: str | None,
+        incoming_schedule_count: int | None = None,
     ) -> str | None:
         """Check if a game already exists for this date and team pair.
 
@@ -928,6 +1011,13 @@ class GameLoader:
             home_score: Final home score.
             away_score: Final away score.
             start_time: ISO 8601 datetime string or None.
+            incoming_schedule_count: How many games the OWN crawl schedule has on
+                this date against this opponent (E-261-03a / TN-4). ``None`` (the
+                default -- direct callers, or an unresolved opponent) leaves the
+                tolerant schedule-count signal OFF, preserving the legacy
+                exact-match-only dedup. ``1`` with exactly one candidate row fires
+                the tolerant same-game guard (below); ``>= 2`` is a doubleheader
+                in the own schedule and NEVER collapses via the guard.
 
         Returns:
             The existing ``game_id`` to reuse, or ``None`` if no duplicate.
@@ -953,6 +1043,40 @@ class GameLoader:
 
         if not rows:
             return None
+
+        # Uniform tolerant same-game guard (E-261-03a / TN-4, findings B + E).
+        # PRIMARY schedule-count signal, applied PERSPECTIVE-AGNOSTICALLY across
+        # the whole candidate set (NOT only the cross-perspective sub-branch
+        # below). When the OWN crawl schedule shows exactly ONE game vs this pair
+        # on this date AND the DB holds exactly ONE candidate row, they are the
+        # same real game regardless of a score / start_time disagreement or which
+        # perspective loaded the candidate -- a real doubleheader would appear
+        # TWICE in the own schedule (incoming_schedule_count >= 2) and is never
+        # collapsed here. This is the ONLY standalone merge trigger; it DEFAULTS
+        # OFF when no count context is supplied (``incoming_schedule_count`` is
+        # None), preserving exact-match-only dedup for direct callers (SE-5b: the
+        # line-598 test supplies no count, so an 11-1 vs 10-1 pair still does not
+        # dedup). Placing it BEFORE the per-candidate loop also closes finding B:
+        # after a twin merge the canonical row carries the own perspective, so the
+        # next regeneration re-loads via the SAME-perspective branch -- which has
+        # the exact-score blindness -- and would re-insert a duplicate every run
+        # without this perspective-agnostic guard.
+        if incoming_schedule_count == 1 and len(rows) == 1:
+            existing_id = rows[0][0]
+            existing_home_score = rows[0][3]
+            existing_away_score = rows[0][4]
+            if (home_score, away_score) != (existing_home_score, existing_away_score):
+                logger.warning(
+                    "Tolerant same-game dedup (E-261-03a): redirecting %s → %s on "
+                    "%s. Scores DISAGREE across perspectives (incoming %s-%s vs "
+                    "canonical %s-%s); own schedule-count=1 and a single candidate "
+                    "confirm the same real game. Canonical scores are kept "
+                    "(first-loaded perspective wins).",
+                    game_id, existing_id, game_date,
+                    home_score, away_score,
+                    existing_home_score, existing_away_score,
+                )
+            return existing_id
 
         incoming_perspective_team_id = self._team_ref.id
         incoming_total = (
@@ -1072,6 +1196,106 @@ class GameLoader:
         return None
 
     # ------------------------------------------------------------------
+    # Twin merge (E-261-03b)
+    # ------------------------------------------------------------------
+
+    def _game_row_exists(self, game_id: str) -> bool:
+        """Return True if a ``games`` row already exists under ``game_id``."""
+        return (
+            self._db.execute(
+                "SELECT 1 FROM games WHERE game_id = ?", (game_id,)
+            ).fetchone()
+            is not None
+        )
+
+    def _merge_twin_or_rollback(
+        self, source_game_id: str, canonical_game_id: str,
+    ) -> LoadResult | None:
+        """Merge a persisted source-event twin into the canonical row (Defect A).
+
+        Called at the redirect site only when a ``games`` row already exists
+        under the ORIGINAL source event id -- an un-merged twin left by an earlier
+        dedup miss. Delegates the child re-point + delete-last to the shared
+        ``merge_duplicate_game`` primitive (E-261-02).
+
+        Returns:
+            ``None`` when the caller should PROCEED to the upsert -- the merge
+            succeeded, the helper structurally REFUSED a non-disjoint pair
+            (E-261-02 AC-2: leave both rows, still load under the canonical id),
+            OR the source twin VANISHED concurrently (Codex P2 benign race: the
+            twin is already gone, i.e. the healed end-state).
+            ``LoadResult(errors=1)`` when the merge raised ``sqlite3.Error`` (a
+            mid-merge DML failure) or an UNEXPECTED ``GameMergeError`` with the
+            source row still present: the shared connection is rolled back FIRST
+            (AC-3) so the partial merge cannot bleed into the next game's commit,
+            and the caller must return that result without upserting.
+        """
+        try:
+            result = merge_duplicate_game(
+                self._db, source_game_id, canonical_game_id
+            )
+        except sqlite3.Error as exc:
+            # Shared-connection partial-commit footgun (AC-3): a mid-merge failure
+            # may leave writes pending on the shared connection; roll them back so
+            # ``load_payload``'s per-game commit does not silently persist a
+            # half-merge.
+            logger.error(
+                "Twin merge %s → %s raised %s; rolling back and failing this game.",
+                source_game_id, canonical_game_id, exc,
+            )
+            self._db.rollback()
+            return LoadResult(errors=1)
+        except GameMergeError as exc:
+            # Read-then-write TOCTOU (Codex P2): the SQLite file is shared by
+            # multiple writers (admin UI, report CLI, morning-run cron -- CLAUDE.md
+            # "Canonical SQLite connection factory"), so another writer can delete
+            # the source twin BETWEEN our ``_game_row_exists`` check and this
+            # merge. ``merge_duplicate_game`` then raises "source not found". That
+            # is a BENIGN race -- the twin is already gone (the healed end-state) --
+            # NOT a programming bug, so it must not abort the whole load.
+            # ``GameMergeError`` is raised only from the helper's PRE-write
+            # validation, so no partial merge state exists.
+            if not self._game_row_exists(source_game_id):
+                # Source vanished concurrently: benign no-op. Do NOT roll back --
+                # there is no partial merge state, and this load's own pending
+                # team rows are still needed for the upsert below. Proceed under
+                # the canonical id (the twin is already collapsed).
+                logger.warning(
+                    "Twin merge %s → %s: source row vanished before merge "
+                    "(concurrent writer); benign no-op, loading under canonical "
+                    "(%s).",
+                    source_game_id, canonical_game_id, exc,
+                )
+                return None
+            # Source still present -> NOT the vanished-source race (e.g. the
+            # canonical row was concurrently deleted, or an unexpected argument).
+            # Do not silently swallow a potential real bug: roll back and fail
+            # THIS game (errors=1) rather than letting it abort the whole load.
+            logger.error(
+                "Twin merge %s → %s raised GameMergeError with source still "
+                "present: %s; rolling back and failing this game.",
+                source_game_id, canonical_game_id, exc,
+            )
+            self._db.rollback()
+            return LoadResult(errors=1)
+        if result.refused:
+            # Non-disjoint perspectives -- refuse rather than guess (E-261-02
+            # AC-2). Leave both rows intact; the game still loads under the
+            # canonical id (the operator repair pass E-261-04 handles these).
+            logger.warning(
+                "Twin merge %s → %s REFUSED (shared perspective(s) %s); leaving "
+                "both rows, loading under the canonical id.",
+                source_game_id, canonical_game_id, result.shared_perspectives,
+            )
+        else:
+            logger.info(
+                "Twin merge %s → %s complete (re-pointed %s).",
+                source_game_id, canonical_game_id,
+                result.table_counts or "no child rows",
+            )
+        return None
+
+    # ------------------------------------------------------------------
     # DB write helpers
     # ------------------------------------------------------------------
 
@@ -1086,6 +1310,7 @@ class GameLoader:
         game_stream_id: str,
         start_time: str | None = None,
         timezone: str | None = None,
+        preserve_scores: bool = False,
     ) -> None:
         """Upsert a game record into the ``games`` table.
 
@@ -1097,9 +1322,21 @@ class GameLoader:
             home_score: Final home score, or None when the summary omits it
                 (stored as NULL -- never coerced to 0, per E-253-06).
             away_score: Final away score, or None when the summary omits it.
-            game_stream_id: Stream ID from game-summaries (boxscore file key).
+            game_stream_id: Stream ID (boxscore file key); in the scouting/public
+                path this equals the row's own ``event_id`` (self-keyed). Written
+                verbatim on first insert; on an ``ON CONFLICT(game_id)`` update the
+                canonical row's existing value is KEPT (E-261-01 keep-existing).
             start_time: ISO 8601 datetime string from schedule/public endpoint.
             timezone: IANA timezone identifier (e.g., ``America/Chicago``).
+            preserve_scores: When True (a CROSS-perspective redirect), the
+                ``ON CONFLICT`` update keeps the canonical row's existing scores
+                (first-loaded perspective wins; fills only a NULL gap) instead of
+                overwriting them -- so the tolerant same-game signal firing on
+                DISAGREEING scores does not flap the canonical scores on every
+                regeneration (E-261-03a / TN-1). False (a first insert or a SAME-
+                perspective reload) writes the incoming scores, preserving the
+                scorekeeper-correction path. Scoped to the redirect site ONLY --
+                do NOT confuse with a blanket score COALESCE, which TN-1 forbids.
 
         Raises:
             ValueError: If ``home_team_id == away_team_id`` -- the home != away
@@ -1113,6 +1350,15 @@ class GameLoader:
                 f"home_team_id == away_team_id == {home_team_id} "
                 f"(E-245-04 / TN-6 home != away invariant)."
             )
+        # Score ownership (E-261-03a / TN-1): on a CROSS-perspective redirect
+        # (preserve_scores=True) keep the canonical row's existing scores
+        # (COALESCE existing-first, filling only a NULL gap) so disagreeing
+        # perspectives do not flap the canonical value; a first insert or a
+        # SAME-perspective reload (preserve_scores=False) writes the incoming
+        # scores, preserving the correction path. Bound as a 0/1 flag so the SQL
+        # stays static -- the ON CONFLICT clause is not evaluated on a plain
+        # insert, so ``games.*`` in the CASE is safe.
+        preserve_flag = 1 if preserve_scores else 0
         self._db.execute(
             """
             INSERT INTO games
@@ -1125,15 +1371,29 @@ class GameLoader:
                 game_date      = excluded.game_date,
                 home_team_id   = excluded.home_team_id,
                 away_team_id   = excluded.away_team_id,
-                home_score     = excluded.home_score,
-                away_score     = excluded.away_score,
+                home_score     = CASE WHEN ? THEN COALESCE(games.home_score, excluded.home_score)
+                                      ELSE excluded.home_score END,
+                away_score     = CASE WHEN ? THEN COALESCE(games.away_score, excluded.away_score)
+                                      ELSE excluded.away_score END,
                 status         = excluded.status,
-                game_stream_id = excluded.game_stream_id,
+                -- Keep-existing (E-261-01): preserve the canonical row's own
+                -- game_stream_id on a cross-perspective redirect. In the
+                -- scouting/public path game_stream_id is self-keyed to each
+                -- row's own event_id (see scouting_loader._build_games_index),
+                -- so it is non-null AND perspective-specific -- clobbering it
+                -- with the incoming perspective's id poisons the canonical row
+                -- and, when an un-merged twin still owns that value, trips
+                -- migration 010's partial UNIQUE index. EXISTING is the FIRST
+                -- COALESCE argument (NOT the prefer-new order used by the
+                -- adjacent start_time/timezone lines below). First-insert is
+                -- unaffected: existing is NULL, so the incoming value is written.
+                game_stream_id = COALESCE(games.game_stream_id, excluded.game_stream_id),
                 start_time     = COALESCE(excluded.start_time, games.start_time),
                 timezone       = COALESCE(excluded.timezone, games.timezone)
             """,
             (game_id, self._season_id, game_date, home_team_id, away_team_id,
-             home_score, away_score, game_stream_id, start_time, timezone),
+             home_score, away_score, game_stream_id, start_time, timezone,
+             preserve_flag, preserve_flag),
         )
         logger.debug(
             # %s (not %d): home/away score may be None for a score-less summary.

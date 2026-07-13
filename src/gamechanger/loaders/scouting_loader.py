@@ -35,7 +35,12 @@ from typing import TYPE_CHECKING, Any
 
 from src.db.players import ensure_player_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
-from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry, _opt_int
+from src.gamechanger.loaders.game_loader import (
+    GameLoader,
+    GameSummaryEntry,
+    _derive_game_date,
+    _opt_int,
+)
 from src.gamechanger.types import TeamRef
 
 if TYPE_CHECKING:
@@ -155,10 +160,17 @@ class ScoutingLoader:
 
         # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
         team_ref = self._build_team_ref(team_id)
+        # Precompute the per-(local-date, opponent-name) schedule count so
+        # GameLoader's tolerant same-game signal can tell a single game (score
+        # disagreement across perspectives) from a real doubleheader (E-261-03a /
+        # TN-4). ScoutingLoader holds the whole games_index; GameLoader sees one
+        # summary at a time, so the count MUST be built here.
+        schedule_counts = self._build_schedule_counts(games_index, opponent_name_index)
         game_loader = GameLoader(
             db=self._db,
             owned_team_ref=team_ref,
             created_team_ids=self._created_team_ids,
+            schedule_counts=schedule_counts,
         )
         bs_result = self._load_boxscores(
             game_loader, games_index,
@@ -261,6 +273,54 @@ class ScoutingLoader:
             index[entry.game_stream_id] = entry
         logger.info("Built games index from in-memory data: %d entries", len(index))
         return index
+
+    def _build_schedule_counts(
+        self,
+        games_index: dict[str, GameSummaryEntry],
+        opponent_name_index: dict[str, str],
+    ) -> dict[tuple[str, str], int]:
+        """Count OWN-schedule games per ``(local game_date, opponent name)``.
+
+        Feeds ``GameLoader``'s tolerant same-game signal (E-261-03a / TN-4): a
+        count of 1 vs a single DB candidate means "same real game, one book off
+        by a run"; a count of 2 means a real doubleheader that must NOT collapse.
+
+        The date is derived via the SHARED ``_derive_game_date`` seam so this key
+        is byte-identical to the one ``_load_boxscore_data`` builds -- a mismatch
+        would silently key-miss and disable the signal (finding E(b)).
+
+        FAIL-CLOSED on an ambiguous date (Codex P1): a summary with NO resolvable
+        opponent name could belong to ANY pair -- including a doubleheader partner
+        of a resolved sibling on the same date. Merely dropping it (the old
+        behavior) would UNDERCOUNT that pair to 1 and let the tolerant guard
+        silently collapse a real doubleheader (the asymmetric hazard TN-4 names:
+        deleted game data + masked pitcher-rest violation). So ANY date carrying
+        an unresolved-opponent summary is treated as AMBIGUOUS and emits NO count
+        at all -- every pair on that date then key-misses to a None count, and the
+        loader declines the tolerant signal (falls back to exact-score match)
+        rather than merging on a possibly-wrong count. A None-opponent summary
+        only poisons its OWN date; unrelated resolved dates are unaffected.
+        """
+        # First pass: any date with an unresolved-opponent summary is ambiguous.
+        ambiguous_dates: set[str] = set()
+        for stream_id, summary in games_index.items():
+            if opponent_name_index.get(stream_id) is None:
+                ambiguous_dates.add(_derive_game_date(summary))
+
+        # Second pass: count resolved games, skipping every summary on an
+        # ambiguous date so the whole date fails closed (no count -> loader
+        # declines) rather than failing open on an undercount.
+        counts: dict[tuple[str, str], int] = {}
+        for stream_id, summary in games_index.items():
+            opponent_name = opponent_name_index.get(stream_id)
+            if opponent_name is None:
+                continue
+            game_date = _derive_game_date(summary)
+            if game_date in ambiguous_dates:
+                continue
+            key = (game_date, opponent_name)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
     def _build_opponent_name_index_from_data(
         self, games_data: list[dict[str, Any]]

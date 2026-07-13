@@ -4,7 +4,7 @@
 [E-261: Cross-Perspective Game-Dedup Fidelity](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, the redirect site merges an already-persisted source-event twin row into the canonical row via `merge_duplicate_game()` (completing Defect A), and does so with correct error handling so a merge failure never bleeds partial writes into the next game's commit. The dedup path becomes self-healing: regenerating a report on a DB carrying a historical duplicate pair collapses the pair instead of erroring or perpetuating it, and re-running is idempotent.

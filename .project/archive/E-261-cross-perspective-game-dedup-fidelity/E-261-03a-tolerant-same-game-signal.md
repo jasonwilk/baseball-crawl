@@ -4,7 +4,7 @@
 [E-261: Cross-Perspective Game-Dedup Fidelity](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story, `_find_duplicate_game()` recognizes two perspectives of the same real game even when their scorekeepers disagree on the score (Defect B), using the **schedule-count** discriminator rather than score-tolerance. The signal is applied UNIFORMLY across the whole candidate loop (not only the cross-perspective sub-branch), so a healed DB does not re-accumulate duplicates on regeneration. Score ownership on a cross-perspective redirect is made deterministic (canonical scores win). This story is the same-game DECISION half of the fix; the in-pipeline twin merge that acts on it is E-261-03b.

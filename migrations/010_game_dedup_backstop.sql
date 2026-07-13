@@ -13,11 +13,27 @@
 --   cron all writing one SQLite file) there is a narrow race window: two
 --   writers can both SELECT-find-no-duplicate and both INSERT, creating two
 --   ``games`` rows for the SAME real game. There is no DB-level backstop today.
---   ``game_stream_id`` (from the authenticated game-summaries endpoint) is the
---   stable identifier for a real game across perspectives -- so two rows
---   carrying the same non-null ``game_stream_id`` are, by definition, the same
---   real game. This unique index makes the racing second INSERT fail loudly
---   (IntegrityError) instead of silently duplicating the game.
+--   ``game_stream_id`` is self-keyed to each row's own ``event_id`` (see
+--   scouting_loader._build_games_index) -- so it is globally distinct among
+--   non-null rows, and two rows carrying the SAME non-null ``game_stream_id``
+--   can only be a same-event_id double-insert (the race). This unique index
+--   makes the racing second INSERT fail loudly (IntegrityError) instead of
+--   silently duplicating the game.
+--
+-- CORRECTED PREMISE (E-261-01): an earlier version of this header claimed
+--   ``game_stream_id`` was "NULL for tracked games, stable across perspectives
+--   for member games." That is WRONG. It described the RETIRED authenticated
+--   game-summaries model, in which a stream id was a stable cross-perspective
+--   identifier. That path was removed in E-239; the scouting/public path is now
+--   the SOLE populator (api-scout confirmed), and it sets game_stream_id =
+--   event_id for every row. So the real shape is NON-NULL and
+--   PERSPECTIVE-SPECIFIC: the public /games endpoint returns a DIFFERENT id per
+--   perspective for the same real game, so cross-perspective twins carry
+--   DIFFERENT stream ids and are NOT caught by this index -- collapsing them is
+--   the SELECT-then-INSERT dedup path's job (the redirect). E-261-01's
+--   keep-existing conflict clause is what stops that redirect from writing a
+--   twin's id onto the canonical row (which, while an un-merged twin still owned
+--   that value, was tripping THIS index on every clean redirect).
 --
 -- WHY PARTIAL (gated on game_stream_id IS NOT NULL) -- three reasons this MUST
 --   NOT be a bare ``UNIQUE(game_date, team_lo, team_hi)`` (TN-6 HAZARD):
@@ -27,10 +43,12 @@
 --      both rows -- whereas an unordered-pair-on-date UNIQUE would wrongly
 --      reject the second game. The existing start_time/score doubleheader
 --      disambiguation in ``_find_duplicate_game`` is preserved unchanged.
---   2. TRACKED / PUBLIC-OPPONENT GAMES: these often have NO ``game_stream_id``
---      (it is NULL). The partial predicate leaves those rows UNINDEXED, so the
---      backstop does not apply and the existing SELECT-then-INSERT dedup path
---      continues to govern them (no behavior change).
+--   2. ROWS WITHOUT A STREAM ID: a row whose ``game_stream_id`` is NULL (e.g.
+--      an insert path that never populated it) is left UNINDEXED by the partial
+--      predicate, so the backstop does not apply and the existing
+--      SELECT-then-INSERT dedup path continues to govern it (no behavior
+--      change). (The scouting/public populator always self-keys a non-null id;
+--      the partial predicate is defensive against any future NULL-id path.)
 --   3. CROSS-STORY NON-CONFLICT: E-253-04 (game_date correction) and E-253-06
 --      (0-0 score coercion) also touch the game-dedup natural key; gating this
 --      index on ``game_stream_id IS NOT NULL`` (rather than on date/teams/score)
@@ -47,6 +65,17 @@
 --   ``ON CONFLICT(game_id)`` does NOT swallow a ``game_stream_id`` UNIQUE
 --   violation (different conflict target), so the racing INSERT surfaces as an
 --   IntegrityError -- exactly the intended backstop.
+--
+-- WHY THE INDEX REMAINS CORRECT under the corrected (self-keyed) premise: the
+--   DDL is unchanged and still sound. Because each non-null ``game_stream_id``
+--   equals its row's own ``event_id`` (a PK, hence globally unique), distinct
+--   real games -- doubleheaders and cross-perspective twins alike -- always
+--   carry DISTINCT stream ids, so the UNIQUE index never false-rejects a
+--   legitimate row. Its practical catch is narrower than the retired premise
+--   implied (it does NOT detect cross-perspective twins, which carry distinct
+--   perspective-specific ids -- that stays the SELECT-then-INSERT redirect's
+--   job), but it stays a valid loud backstop against a genuine same-event_id
+--   double-insert.
 --
 -- FK SAFETY / RUNNER: a partial UNIQUE INDEX is a plain schema-object create
 --   with no FK involvement; it applies cleanly under the E-253-03 runner, which
