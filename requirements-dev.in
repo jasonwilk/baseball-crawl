@@ -4,8 +4,8 @@
 -c requirements.txt   # Pin shared deps to same versions as production
 -r requirements.in
 
-pytest==8.3.4          # Test runner
-pytest-asyncio==0.25.0 # Async test support for pytest
+pytest==9.0.3          # Test runner (bumped from 8.3.4 for PYSEC-2026-1845 / GHSA predictable /tmp/pytest-of-* path)
+pytest-asyncio~=1.0    # Async test support for pytest (1.x required for pytest 9 compat)
 pytest-timeout==2.3.1  # Per-test timeout enforcement
 respx~=0.22            # HTTP mocking for httpx in tests
 pyyaml~=6.0            # YAML frontmatter parsing for API doc validation
