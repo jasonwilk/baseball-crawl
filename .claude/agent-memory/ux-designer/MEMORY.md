@@ -97,6 +97,11 @@ fresh against that surface — do not resurrect these.
   question-as-heading, unified-verbs discipline, coach modes. All are
   surface-agnostic; the unified-verbs principle no longer carries the removed
   member-sync / opponent-link verb registry.
+- [Pitcher Outings Breakdown design](design_pitcher_outings_breakdown.md) —
+  column curation via existing mob-hide classes, native `<details>`
+  progressive disclosure (+ print-force-open CSS trick), and why a per-outing
+  "notable" flag is a binary accent pair (reusing heat-4 green /
+  trust-loud red tokens), not the percentile heat ramp.
 
 ## Feedback
 
