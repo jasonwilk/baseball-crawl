@@ -80,6 +80,7 @@ Cross-team player identity and multi-season/longitudinal tracking are explicitly
 
 - [Pitcher outings-breakdown consultation (2026-07-15)](pitcher-outings-scouting-consultation.md) -- Stat ranking for opponent scouting, exploit/respect highlight direction (green rejected), tiered log-vs-summary artifact shape, ERA 7-vs-9-inning basis ruled a real defect
 - [E-264 ERA-basis scope consultation (2026-07-15)](e264-era-basis-scope-consultation.md) -- Fallback default=7 keyed off per-team field, basis-note AC required, K/9 ruled out of scope (leave on 9-inning basis, defer full K-rate redesign to pitcher-outings epic)
+- [E-265 K-rate + highlight ruling (2026-07-15)](e265-krate-and-highlight-ruling.md) -- IDEA-141 resolved: season line = K/BF|BB/INN|K/BB (not K/G), per-outing stays raw counts, green-only highlight thresholds under operator-locked scheme
 
 ## Topic File Index
 

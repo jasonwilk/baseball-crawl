@@ -1,7 +1,7 @@
 # IDEA-141: Pitcher-outings epic must own the K-rate stat/basis decision
 
 ## Status
-`CANDIDATE`
+`PROMOTED` — folded into E-265 (Pitcher Outings Breakdown) as Open Question #1; RESOLVED at E-265 refinement 2026-07-15.
 
 ## Summary
 The upcoming pitcher-outings epic (redesigning the pitching-stat presentation) must explicitly pick up the deliberate, holistic decision of which strikeout-rate stat(s) to show and on what basis — K/9 vs K/G vs K/BF vs K/BB — so that decision is not dropped in the gap between E-264 (ERA-basis fix) and that epic.
@@ -22,7 +22,7 @@ When the pitcher-outings epic is planned. This is a scope-inclusion reminder, no
 - If K/G is added, it reuses `teams.innings_per_game` (from E-264) — no new fetch needed.
 
 ## Notes
-Raised by baseball-coach during E-264 formation (2026-07-15). Related: E-264 (ERA-basis fix, its Non-Goals defer this) and the `teams.innings_per_game` basis E-264 introduces.
+Raised by baseball-coach during E-264 formation (2026-07-15). Related: E-264 (ERA-basis fix, its Non-Goals defer this) and the `teams.innings_per_game` basis E-264 introduces. **RESOLVED at E-265 refinement (2026-07-15):** baseball-coach ruled the new Outings Breakdown's K-rate set = **K/BF + BB/INN + K/BB** — drop BOTH the invented K/9 AND GC's K/G on this section. Rationale: it is a brand-new surface with no legacy number to protect (so the "coaches expect traditional K/9" argument that kept E-264 from touching the existing pitching-table K/9 does NOT transfer here), and K/BF sidesteps the innings-per-game basis question entirely — no per-team asterisk/footnote machinery like E-264's ERA disclosure. K/BF (miss-bats rate, BF denominator) is also more tactically honest for prepping to face the arm, independent of choppy HS relief IP; BB/INN is GC's real per-inning field; K/BB shares its numerator with K/BF. The existing pitching-table K/9 (a different surface) is unchanged. Decision recorded in E-265 epic Resolved Decisions.
 
 ---
 Created: 2026-07-15

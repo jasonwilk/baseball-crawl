@@ -44,4 +44,4 @@ Ruling: MUST match the league-regulation basis GameChanger itself displays for t
 Scope note: WHICH basis applies to a given team is a detection/schema question, routed to data-engineer/software-engineer -- not a coaching call. Flagged that the project already has a league x level x phase gate for pitch-count rules ([[league-pitch-rules]]) as reuse precedent for keying the ERA-basis decision rather than inventing a second convention.
 
 ## Status
-Consultation delivered as a recommendation, not yet an epic. Awaiting api-scout's feasibility ruling to intersect before this becomes epic stories.
+Consultation delivered as a recommendation; became epic E-265 (Pitcher Outings Breakdown). See [[e265-krate-and-highlight-ruling]] for the follow-on IDEA-141 K-rate decision and the locked green-only highlight thresholds ruled during E-265 refinement (2026-07-15).
