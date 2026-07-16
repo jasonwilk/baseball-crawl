@@ -2367,6 +2367,22 @@ class _ReportGeneration:
                             public_id=self.public_id,
                         )
 
+                # Outings Breakdown (E-265) -- mirrors the predicted-starter
+                # wiring above: flag read + builder call INSIDE the DB scope so
+                # the builder's own reads run on the open connection. The
+                # builder returns [] on no pitching history (non-fatal empty
+                # state), so no inner guard is needed here.
+                pitcher_outings: list = []
+                from src.reports.pitcher_outings import (
+                    build_pitcher_outings,
+                    is_pitcher_outings_enabled,
+                )
+                show_pitcher_outings = is_pitcher_outings_enabled()
+                if show_pitcher_outings:
+                    pitcher_outings = build_pitcher_outings(
+                        conn, team_id, season_id,
+                    )
+
                 # Plays-derived stats
                 plays_pitching = _query_plays_pitching_stats(
                     conn, team_id, season_id, game_ids=self.plays_game_ids,
@@ -2454,6 +2470,10 @@ class _ReportGeneration:
                 "starter_prediction": starter_prediction,
                 "enriched_prediction": enriched_prediction,
                 "show_predicted_starter": show_predicted_starter,
+                # Outings Breakdown (E-265): typed structure + boolean gate,
+                # mirroring starter_prediction + show_predicted_starter.
+                "pitcher_outings": pitcher_outings,
+                "show_pitcher_outings": show_pitcher_outings,
                 # Footer trust-block inputs (story 07):
                 "completed_games": self.completed_games,  # M
                 "completed_games_with_data": completed_games_with_data,  # N

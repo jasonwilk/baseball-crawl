@@ -46,6 +46,7 @@ Feature flags are set as environment variables in `.env`. Values `1`, `true`, or
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FEATURE_PREDICTED_STARTER` | off | Shows the Most Likely Arms section on standalone scouting reports. Temporary flag while the rest-days fix (E-214) is verified in production. Remove once verified stable. |
+| `FEATURE_PITCHER_OUTINGS` | off | Shows the per-pitcher Outings Breakdown section (game-by-game outing log + season rate line) on standalone scouting reports. Off by default until proven; see the coaching how-to `docs/coaching/pitcher-outings-breakdown.md`. Source: E-265. |
 
 **Post-merge spot-check**: If `FEATURE_PREDICTED_STARTER` is enabled alongside an LLM key, open one generated report for a youth or travel opponent and verify the narrative block contains no program-specific brand names. One-time check after deploying E-243.
 

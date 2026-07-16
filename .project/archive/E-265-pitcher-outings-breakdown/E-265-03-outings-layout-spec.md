@@ -4,7 +4,7 @@
 [E-265: Pitcher Outings Breakdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, there is a concrete, implementable layout spec for the Outings Breakdown section that E-265-02 builds against: the per-pitcher grouping (season summary line heading a per-appearance outing log), the per-outing column set/order and mobile column tiering (`mob-hide`/`mob-hide-extra`), the native `<details>` disclosure structure with a `<summary>`-line green indicator, the GREEN strong-outing treatment, the small-sample caveat badges, the season-line inline-text shape, the Opp-column truncation, the print-pagination override, and how plays-derived values (FPS%, HR-allowed) are indicated as computed-from-plays.

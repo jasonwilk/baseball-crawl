@@ -84,6 +84,12 @@ def _build_jinja_env() -> Environment:
     env.filters["ip_display"] = ip_display
     env.filters["format_avg"] = format_avg
     env.filters["format_date"] = format_date
+    # E-265-02 / spec §9: expose the existing rate formatters as template
+    # filters so the Outings section can format E-265-01's raw dataclass floats
+    # at the render boundary (formatting stays out of the derivation layer).
+    env.filters["pct"] = _format_pct     # 0-1 ratio -> "75.0%" (em-dash on None)
+    env.filters["rate"] = _format_rate   # 1-decimal (em-dash on None)
+    env.filters["rate2"] = _format_era   # 2-decimal ERA/WHIP grain (em-dash on None)
     return env
 
 
@@ -478,6 +484,17 @@ def _format_rate(value: float | None) -> str:
     return f"{value:.1f}"
 
 
+def _format_era(value: float | None) -> str:
+    """Format an ERA/WHIP-grain rate to two decimals, e.g. 3.5 -> '3.50'.
+
+    Matches the sitewide 2-decimal ERA/WHIP convention (E-265-03 spec \u00a79);
+    returns an em-dash on None like the other rate formatters.
+    """
+    if value is None:
+        return "\u2014"
+    return f"{value:.2f}"
+
+
 def _format_plays_pitching(pitching: list[dict]) -> None:
     """Add formatted plays-derived pitching columns (mutates in place)."""
     for p in pitching:
@@ -791,6 +808,11 @@ def render_report(data: dict[str, Any]) -> str:
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),
         "show_predicted_starter": data.get("show_predicted_starter", True),
+        # Outings Breakdown (E-265). Default False so a render_report call made
+        # WITHOUT the key (older callers, tests) leaves the section unrendered --
+        # the byte-identical-when-unset contract.
+        "show_pitcher_outings": data.get("show_pitcher_outings", False),
+        "pitcher_outings": data.get("pitcher_outings") or [],
         # Footer trust block (E-235-07 / TN-7).
         "trust_block": _build_trust_block(data),
     }

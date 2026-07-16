@@ -4,7 +4,7 @@
 [E-265: Pitcher Outings Breakdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/coaching/` carries a short how-to that explains the Outings Breakdown section to coaching staff: how the section is organized (a season summary line per pitcher heading a game-by-game outing log), what each column means, how to read the green highlighting, and which values are computed from play-by-play rather than official GameChanger boxscore stats.

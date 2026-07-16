@@ -4,7 +4,7 @@
 [E-265: Pitcher Outings Breakdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the standalone scouting report renders a per-pitcher Outings Breakdown section INLINE in `scouting_report.html` behind the `FEATURE_PITCHER_OUTINGS` flag, consuming the E-265-01 derivation and following the E-265-03 layout spec: per-pitcher season summary line + a per-appearance outing log, green highlighting on strong outings, mobile column tiering, and a native `<details>` disclosure. With the flag unset the report is byte-identical to the post-E-264 baseline.

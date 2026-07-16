@@ -479,6 +479,63 @@
         margin: 0 auto;
       }
     }
+
+{% if show_pitcher_outings %}
+    /* ---- Outings Breakdown (E-265) ---- */
+    /* Gated on the same flag as the body section so a flag-OFF report emits
+       ZERO outings CSS too -- the Success Criterion "adds and removes nothing"
+       makes flag-off byte-identical to a pre-feature render (stricter than the
+       always-on predicted-starter precedent; PM ruling). */
+    .outings-section { page-break-before: always; }
+
+    .outing-log { margin: 6px 0; }
+    .outing-log-summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 9pt;
+      padding: 4px 2px;
+    }
+    .outing-log-flag { color: #16a34a; margin-left: 2px; }
+
+    .outing-season-line {
+      font-size: 8pt;
+      color: #374151;
+      margin: 2px 0 6px;
+      padding-left: 2px;
+    }
+
+    .outing-opp {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 140px;
+    }
+
+    tr.outing-strong td { background: #f0fdf4; }
+    tr.outing-strong td:first-child { border-left: 3px solid #16a34a; }
+
+    .depth-badge-strong { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+
+    @media print {
+      details.outing-log { display: block; }
+      details.outing-log > summary { display: none; }
+      details.outing-log > *:not(summary) { display: block !important; }
+      .outing-season-line { page-break-after: avoid; }
+      table.outing-log-table { page-break-inside: auto; }
+      table.outing-log-table tr { page-break-inside: avoid; }
+    }
+
+    /* Tighter Opp truncation on mobile. MUST trail the base .outing-opp rule
+       above: media queries add no specificity, so at <=640px this equal-
+       specificity override only wins by coming LATER in source order (F16). */
+    @media screen and (max-width: 640px) {
+      .outing-opp { max-width: 60px; }
+    }
+{% endif %}
   </style>
 </head>
 <body>
@@ -726,6 +783,77 @@
 {% if era_basis.assumed %}<p class="era-basis-footnote">{{ era_basis.footnote }}</p>{% endif %}
 {% else %}
 <p class="no-data-msg">No data available</p>
+{% endif %}
+
+{# ===== OUTINGS BREAKDOWN (E-265) =====
+   Outer gate: byte-identical flag-off contract -- with the flag unset this
+   whole block renders NOTHING (no h2, no note, no empty-state). Inner
+   `pitcher_outings` check is the honest flag-on-but-no-data empty state. #}
+{% if show_pitcher_outings %}
+<div class="outings-section">
+<h2 class="section-header">Outings Breakdown</h2>
+<div class="sort-annotation">FPS% and HR-allowed below are computed from charted pitch-by-pitch play data, not GameChanger's boxscore totals &mdash; see pitch-charting coverage above.</div>
+{% if pitcher_outings %}
+  {% for pitcher in pitcher_outings %}
+  {% set season = pitcher.season %}
+  <details class="outing-log">
+    <summary class="outing-log-summary">
+      {{ pitcher.name | e }}
+      {% if pitcher.outings | selectattr("is_strong") | list %}<span class="outing-log-flag" title="Includes a standout outing">&#9679;</span>{% endif %}
+    </summary>
+    <div class="outing-season-line">
+      {% if season.small_sample %}<span class="depth-badge">{{ season.ip_outs | ip_display }} IP</span>{% else %}{{ season.ip_outs | ip_display }} IP{% endif %}
+      &middot; {{ season.games }} G ({% if season.games_started is none %}&mdash;{% else %}{{ season.games_started }}{% endif %} GS)
+      &middot; {{ season.era | rate2 }} ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}
+      &middot; {{ season.whip | rate2 }} WHIP
+      &middot; {{ season.fps_pct | pct }} FPS%
+      &middot; {{ season.k_per_bf | pct }} K/BF
+      &middot; {{ season.bb_per_inn | rate }} BB/INN
+      &middot; {% if season.zero_bb %}<span class="depth-badge depth-badge-strong">0 BB</span> K/BB{% elif season.k_per_bb is not none %}{{ season.k_per_bb | rate }} K/BB{% if season.low_bb %} <span class="depth-badge">{{ season.bb }} BB</span>{% endif %}{% else %}&mdash; K/BB{% endif %}
+      &middot; {{ season.h_per_bf | pct }} H/BF
+    </div>
+    <div style="overflow-x:auto;">
+    <table class="outing-log-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Opp</th>
+          <th>IP</th>
+          <th class="mob-hide-extra">BF</th>
+          <th class="mob-hide">H</th>
+          <th class="mob-hide-extra">HR</th>
+          <th class="mob-hide">BB</th>
+          <th>K</th>
+          <th>R</th>
+          <th class="mob-hide">FPS%</th>
+          <th>ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in pitcher.outings %}
+        <tr class="{{ 'outing-strong' if o.is_strong else '' }}">
+          <td>{{ o.game_date | format_date }}</td>
+          <td class="outing-opp" title="{{ o.opponent | e if o.opponent else '' }}">{{ o.opponent | e if o.opponent else "&mdash;" | safe }}</td>
+          <td>{{ o.ip_outs | ip_display }}</td>
+          <td class="mob-hide-extra">{{ o.bf if o.bf is not none else "&mdash;" | safe }}</td>
+          <td class="mob-hide">{{ o.h if o.h is not none else "&mdash;" | safe }}</td>
+          <td class="mob-hide-extra">{{ o.hr_allowed if o.hr_allowed is not none else "&mdash;" | safe }}</td>
+          <td class="mob-hide">{{ o.bb if o.bb is not none else "&mdash;" | safe }}</td>
+          <td>{{ o.so if o.so is not none else "&mdash;" | safe }}</td>
+          <td>{{ o.r if o.r is not none else "&mdash;" | safe }}</td>
+          <td class="mob-hide">{{ o.fps_pct | pct }}</td>
+          <td>{{ o.era | rate2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endfor %}
+{% else %}
+<p class="no-data-msg">No data available</p>
+{% endif %}
+</div>
 {% endif %}
 
 {# ===== BATTING (AC-6, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-3) ===== #}

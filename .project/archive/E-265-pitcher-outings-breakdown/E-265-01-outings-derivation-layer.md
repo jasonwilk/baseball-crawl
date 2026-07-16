@@ -4,7 +4,7 @@
 [E-265: Pitcher Outings Breakdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a new derivation module produces, for the scouted opponent, one typed structure per pitcher: a season summary line (IP, G, GS, ERA on E-264's basis, WHIP, FPS%, plus the rate set K/BF | BB/INN | K/BB | H/BF with small-sample flags) and a chronological list of per-appearance outings (Date, Opponent, IP, BF, H, HR-allowed, BB, K, R, FPS%, per-outing ERA, and a computed green "strong-outing" flag). This is the data the renderer (E-265-02) consumes; it writes nothing to the DB.

@@ -1,7 +1,7 @@
 # E-265: Pitcher Outings Breakdown
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- READY set 2026-07-16 (operator-approved; freshness clock starts here — re-confirm by 2026-09-14 if not yet dispatched). Hardened through internal review iter 1 (19 findings) + Codex spec review iter 1 (2 findings), all accepted. -->
 <!-- Dispatch BLOCKED on E-264 completing (hard blocker) and requires SEPARATE operator authorization — READY marks planning-complete, not dispatch. -->
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
@@ -45,10 +45,10 @@ This epic is **blocked by E-264** (League-Aware ERA Basis Fix, READY): the outin
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-265-01 | Per-pitcher per-appearance derivation layer (boxscore + FPS%/HR-allowed from plays; per-outing ERA on E-264 basis; season rate line; green-outing flag) | TODO | E-264 (epic) | software-engineer |
-| E-265-02 | Renderer + template: flag-gated inline Outings Breakdown section | TODO | E-264 (epic), E-265-01, E-265-03 | software-engineer |
-| E-265-03 | ux-designer layout spec (columns, tiering, disclosure, green treatment, small-sample badges) | TODO | None | ux-designer |
-| E-265-04 | docs-writer coaching how-to for the Outings Breakdown | TODO | E-265-02 | docs-writer |
+| E-265-01 | Per-pitcher per-appearance derivation layer (boxscore + FPS%/HR-allowed from plays; per-outing ERA on E-264 basis; season rate line; green-outing flag) | DONE | E-264 (epic) | software-engineer |
+| E-265-02 | Renderer + template: flag-gated inline Outings Breakdown section | DONE | E-264 (epic), E-265-01, E-265-03 | software-engineer |
+| E-265-03 | ux-designer layout spec (columns, tiering, disclosure, green treatment, small-sample badges) | DONE | None | ux-designer |
+| E-265-04 | docs-writer coaching how-to for the Outings Breakdown | DONE | E-265-02 | docs-writer |
 
 ## Dispatch Team
 - software-engineer (E-265-01, E-265-02)
@@ -151,8 +151,37 @@ Both E-264 and E-265 edit `src/api/templates/reports/scouting_report.html` AND `
 - 2026-07-15: **Internal review iteration 1 incorporated** (code-reviewer spec audit + coach/ux/SE/DE holistic — 19 findings, all accepted, 0 dismissed). Notable: F1 replaced the phantom "E-264 accessor" language with the concrete `teams.innings_per_game` read + required fallback re-application (TN-5); F8 gated the Aggression green criterion on charted-PA not raw BF (TN-4); F10 (operator RIDE) added H/BF to the season set (TN-3); F11 made the K/BB zero-BB case a distinguishable strength (TN-3/TN-6); F12 drove plays off the completed-game boxscore outings (TN-6). Consistency sweep clean.
 - 2026-07-16: **Codex spec review iteration 1 incorporated** — 2 findings, both accepted, 0 dismissed: P1 (propagation completeness — the full season-line context set IP/G/GS/ERA/WHIP/FPS% propagated into E-265-01/02/03/04 ACs, not just the four rates) and P2 (dependency correctness — pinned the layout-spec artifact to `.project/research/E-265-outings-layout-spec.md` and made E-265-02's consumption explicit via a Handoff Context "Consumes" reference). Consistency sweep clean.
 - 2026-07-16: Set **READY** (operator-approved). Both open questions resolved (RD-1 rate set = K/BF + BB/INN + K/BB + H/BF; RD-2 inline); operator decisions F10 (add H/BF) + F11 (0-BB "0 BB" strength badge) incorporated. Freshness clock starts 2026-07-16 (re-confirm by 2026-09-14 if not yet dispatched). **Dispatch remains BLOCKED on E-264 completing (hard blocker) and requires SEPARATE operator authorization** — READY marks planning-complete, not dispatch.
+- 2026-07-16: **Dispatched, implemented, and reviewed** (operator-authorized "implement E-265 and review"; E-264 hard blocker cleared same day). All 4 stories shipped: **E-265-01** derivation layer (new `src/reports/pitcher_outings.py` — per-appearance boxscore + plays-derived FPS%/HR-allowed, per-outing ERA on E-264's `teams.innings_per_game` basis via `era_basis_innings`, season rate line K/BF+BB/INN+K/BB+H/BF, green-outing flag); **E-265-03** layout spec (`.project/research/E-265-outings-layout-spec.md`); **E-265-02** renderer + flag-gated INLINE template section (`generator.py` wiring in DB-connection scope, three render-boundary Jinja rate filters `pct`/`rate`/`rate2` in `renderer.py`, inline section + scoped CSS in `scouting_report.html`); **E-265-04** coaching how-to (`docs/coaching/pitcher-outings-breakdown.md`). Each code story passed per-story code-reviewer + PM AC verification serially. **Phase 4 Codex code review → 3 findings, all accepted/remediated:** F1 (gate the outings `<style>` CSS under the same `{% if show_pitcher_outings %}` so a flag-OFF report is truly byte-identical to a pre-feature render — CR refuted it as a code defect on the always-on-CSS precedent, but **PM ruled FIX on AC intent**: epic.md:39's "adds and removes nothing" is the goal, "mirroring FEATURE_PREDICTED_STARTER" only the how-guide, and gating the CSS is the sole reading where both clauses hold + makes the off-by-default kill switch provably inert); F2 (`SeasonSummary.games_started` → `int | None`, rendering "—" not a false "0 GS" for an all-NULL `appearance_order` scope, mirroring `get_season_pitching`'s unknown-vs-zero semantics — a real coach-facing correctness fix); F3 (per-pitcher blocks sorted season-IP-desc, matching the Pitching table / spec §4). All ACs re-verified post-remediation. **Step 1c Closure CR Integration Review APPROVED** (1 SHOULD FIX — a stale code comment — fixed). Full-suite green gate + Step 1d runtime smoke pending at Step 8.
 
-### Review Scorecard
+### Dispatch & Closure Review Scorecard
+| Review pass | Findings | Accepted | Dismissed |
+|-------------|---------:|---------:|----------:|
+| Per-story CR — E-265-01 | 1 | 1 | 0 |
+| Per-story CR — E-265-03 | 4 | 4 | 0 |
+| Per-story CR — E-265-02 | 2 | 2 | 0 |
+| Per-story CR — E-265-04 | 3 | 3 | 0 |
+| Closure CR Integration Review | 1 | 1 | 0 |
+| Codex (code review) | 3 | 3 | 0 |
+| **Total** | **14** | **14** | **0** |
+
+Notes: per-story CR — E-265-01 SHOULD FIX (zero_bb distinguishability); E-265-03 2 MUST (flag-off gate, field-name corrections) + 2 SHOULD (throws drop, rate-formatting filters); E-265-02 1 MUST + 1 SHOULD; E-265-04 3 SHOULD (docs polish). Codex F1/F2/F3 (F1 refuted-as-code-defect by CR but **PM ruled FIX on AC intent → counted accepted**; F2/F3 straight accepts). Zero dismissals across the whole dispatch.
+
+### Documentation Assessment (closure)
+**FIRES.** (a) The coaching how-to `docs/coaching/pitcher-outings-breakdown.md` shipped as E-265-04 (in-scope story, not a separate dispatch). (b) docs-writer additionally dispatched at closure to add `FEATURE_PITCHER_OUTINGS` to the `docs/admin/operations.md` feature-flags table (parity with `FEATURE_PREDICTED_STARTER`). Both recorded; no other doc surface impacted.
+
+### Context-Layer Assessment (Step 3a) — 8-trigger verdicts
+1. **New convention/pattern/constraint? NO** — reused existing patterns (flag-gated section à la predicted-starter, read-and-derive `src/reports/` module, render-boundary Jinja rate filters).
+2. **Architectural decision w/ ongoing implications? NO** — reused the `era_basis_innings` + `get_pitching_history` seams; no new tech choice.
+3. **Footgun/failure mode discovered? YES** — two review-caught lessons, recorded here (NOT codified this epic — see triggers 7/8): (a) a new derived read-surface must MIRROR the existing surface's unknown-vs-zero (NULL) semantics, not coerce to 0 (Codex F2 — outings `games_started` returned 0 where `get_season_pitching` returns None for an all-NULL `appearance_order` scope); (b) a flag-gated report section's kill switch must gate its CSS too, not just body markup, for a truly byte-identical off state (Codex F1).
+4. **Agent behavior/routing/coordination change? NO.**
+5. **Domain knowledge for future epics? NO** — pitcher-outings stat defs / green thresholds are epic-specific (live in the epic + baseball-coach memory).
+6. **New CLI command/workflow/procedure? NO** — `FEATURE_PITCHER_OUTINGS` is a feature flag (now in operations.md), not a CLI command.
+7. **Net context-layer growth ratchet? YES — FAILS, disposed via OPERATOR-SIGNED EXCEPTION (operator approved 2026-07-16).** Ratchet is +304 over the 2026-07-13 baseline: **+275 is pre-existing drift on main** (agent-memory accumulation since the E-262 baseline snapshot, NOT E-265) and **+29 is E-265's own** (UXD's optional design memo `.claude/agent-memory/ux-designer/design_pitcher_outings_breakdown.md`, a legitimate design deliverable). Operator elected a signed exception; baseline cleanup deferred to a separate operator pass. No offset performed.
+8. **Reusable behavioral lesson (gated promote)? CANDIDATE but NOT promoted** — the F1/F2 lessons (trigger 3) are defect-cited, but promotion is gated on fitting the ratchet baseline (already over) and no prior-epic recurrence is on record. Recorded in History (zero-growth home) rather than codified. Revisit if it recurs.
+
+**Net disposition:** triggers 3 and 7 fire (8 candidate); all dispositioned by History record + the operator-signed trigger-7 exception. **No new context-layer codification this epic** (respects the E-262 meta-layer freeze + the over-baseline ratchet) → claude-architect NOT spawned. No deletions/renames → no eviction sweep.
+
+### Review Scorecard (planning phase)
 | Review pass | Findings | Accepted | Dismissed |
 |-------------|---------:|---------:|----------:|
 | code-reviewer (spec audit) | 6 | 6 | 0 |
