@@ -4,7 +4,7 @@
 [E-264: League-Aware ERA Basis Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report pipeline will fetch each team's `innings_per_game` from GameChanger, store it, and compute ERA on that game-length basis (fallback 7) so our ERA reconciles with the GC app. The two ERA computation sites use the fetched basis; K/9 and WHIP are untouched. The golden and value-regression guards are regenerated to reflect the corrected numbers.

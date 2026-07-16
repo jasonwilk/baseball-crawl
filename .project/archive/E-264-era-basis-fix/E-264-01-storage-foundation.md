@@ -4,7 +4,7 @@
 [E-264: League-Aware ERA Basis Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the schema will carry a per-team-season `teams.innings_per_game` column (nullable, NULL = never-fetched/assumed), the query-time season pitching reader will carry that raw value on every pitcher row, and `ensure_team_row` will accept and NULL-safely backfill the value. This is the storage foundation that E-264-02 (fetch + apply) and E-264-03 (display) consume. No behavior visible on a report changes yet.

@@ -43,6 +43,11 @@ _MIGRATION_008 = (
 _MIGRATION_010 = (
     _PROJECT_ROOT / "migrations" / "010_game_dedup_backstop.sql"
 )
+# E-264-01: migration 012 adds teams.innings_per_game, which ensure_team_row's
+# INSERT now references -- apply it so the teams schema matches the loader writes.
+_MIGRATION_012 = (
+    _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
+)
 
 
 @pytest.fixture()
@@ -54,6 +59,7 @@ def db() -> sqlite3.Connection:
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()

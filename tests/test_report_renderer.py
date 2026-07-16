@@ -7,11 +7,13 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.reports.renderer import (
+    ERA_ASSUMED_FOOTNOTE,
     render_no_games_page,
     render_report,
     _BATTING_HEAT_TIERS,
     _PITCHING_HEAT_TIERS,
     _build_trust_block,
+    _era_basis_disclosure,
     _compute_batting_enrichments,
     _compute_batting_heat,
     _compute_key_players,
@@ -243,8 +245,12 @@ class TestCompleteReport:
         data = _make_full_data()
         html = render_report(data)
 
-        for col in ["THR", "ERA", "K/9", "WHIP", "GP", "IP", "H", "ER", "BB", "SO", "#P", "Strike%"]:
+        # ERA now carries the E-264 basis label, so the bare ">ERA<" is gone;
+        # it is asserted separately below.
+        for col in ["THR", "K/9", "WHIP", "GP", "IP", "H", "ER", "BB", "SO", "#P", "Strike%"]:
             assert f">{col}<" in html or f">{col}</th>" in html
+        # _make_pitcher carries no innings_per_game -> assumed -> "ERA (7-inn)*".
+        assert "ERA (7-inn)*" in html
 
     def test_batting_columns_match_redesign(self):
         """Verify batting table has the expected column headers per TN-3."""
@@ -1689,3 +1695,95 @@ class TestFooterTrustBlock:
         assert "4 games with data" in html
         assert "Through Mar 25" in html
         assert "trust-quiet" in html  # unknown coverage -> neutral state
+
+
+class TestEraBasisDisclosure:
+    """E-264-03: every ERA discloses the game-length basis it was computed on."""
+
+    def test_disclosure_helper_known_basis(self):
+        d = _era_basis_disclosure([{"innings_per_game": 6}])
+        assert d == {"basis": 6, "assumed": False, "footnote": None}
+
+    def test_disclosure_helper_assumed_null(self):
+        d = _era_basis_disclosure([{"innings_per_game": None}])
+        assert d["basis"] == 7
+        assert d["assumed"] is True
+        assert d["footnote"] == ERA_ASSUMED_FOOTNOTE
+
+    def test_disclosure_helper_missing_key_is_assumed(self):
+        # A hand-built row with no innings_per_game key -> assumed/fallback 7.
+        d = _era_basis_disclosure([{"era": "2.50"}])
+        assert d == {"basis": 7, "assumed": True, "footnote": ERA_ASSUMED_FOOTNOTE}
+
+    def test_disclosure_helper_empty_pitching_is_assumed(self):
+        d = _era_basis_disclosure([])
+        assert d == {"basis": 7, "assumed": True, "footnote": ERA_ASSUMED_FOOTNOTE}
+
+    def test_known_basis_header_no_asterisk_no_footnote(self):
+        # AC-2/AC-3: fetched basis 6 (mirrors seed TEAM_VARSITY) -> "ERA (6-inn)".
+        data = _make_full_data(
+            pitching=[_make_pitcher(era="4.50", innings_per_game=6)]
+        )
+        html = render_report(data)
+        assert "ERA (6-inn)" in html
+        assert "ERA (6-inn)*" not in html  # known basis -> no asterisk
+        assert ERA_ASSUMED_FOOTNOTE not in html  # known -> no footnote
+
+    def test_known_basis_seven_header(self):
+        # AC-2: a stored known 7 (mirrors seed TEAM_JV) renders "ERA (7-inn)"
+        # with NO asterisk -- distinct from the assumed fallback.
+        data = _make_full_data(
+            pitching=[_make_pitcher(era="3.00", innings_per_game=7)]
+        )
+        html = render_report(data)
+        assert "ERA (7-inn)" in html
+        assert "ERA (7-inn)*" not in html
+        assert ERA_ASSUMED_FOOTNOTE not in html
+
+    def test_assumed_basis_header_and_footnote(self):
+        # AC-2/AC-3: NULL basis (mirrors seed opponents) -> "ERA (7-inn)*" + the
+        # one-time footnote printed once under the table.
+        data = _make_full_data(
+            pitching=[_make_pitcher(era="4.50", innings_per_game=None)]
+        )
+        html = render_report(data)
+        assert "ERA (7-inn)*" in html
+        assert ERA_ASSUMED_FOOTNOTE in html
+        assert html.count(ERA_ASSUMED_FOOTNOTE) == 1  # printed once
+
+    def test_key_player_card_inline_label_known(self):
+        # AC-4: standalone card ERA carries the inline basis label.
+        data = _make_full_data(
+            pitching=[_make_pitcher(era="4.50", innings_per_game=6)]
+        )
+        html = render_report(data)
+        assert "4.50 (6-inn) ERA" in html
+        assert "4.50 (6-inn)* ERA" not in html
+
+    def test_key_player_card_inline_label_assumed(self):
+        # AC-4: assumed card ERA carries the asterisk inline.
+        data = _make_full_data(
+            pitching=[_make_pitcher(era="4.50", innings_per_game=None)]
+        )
+        html = render_report(data)
+        assert "4.50 (7-inn)* ERA" in html
+
+    def test_no_raw_field_name_user_facing(self):
+        # AC-5: the raw field name never leaks into the rendered HTML.
+        for ipg in (6, 7, None):
+            data = _make_full_data(
+                pitching=[_make_pitcher(innings_per_game=ipg)]
+            )
+            html = render_report(data)
+            assert "innings_per_game" not in html
+
+    def test_wording_compact_vs_footnote(self):
+        # AC-5: the compact header/card form uses "-inn"; the footnote spells
+        # "inning" in full; no raw field name in the footnote.
+        html = render_report(
+            _make_full_data(pitching=[_make_pitcher(innings_per_game=None)])
+        )
+        assert "(7-inn)" in html  # compact form
+        assert "7-inning basis" in html  # footnote spells it out
+        assert "innings_per_game" not in ERA_ASSUMED_FOOTNOTE
+        assert "game length" in ERA_ASSUMED_FOOTNOTE.lower()  # not the field name

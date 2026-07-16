@@ -534,6 +534,15 @@ def get_season_pitching(
     games double the line) and reproduces the prior ``ip_outs DESC, last_name
     ASC`` ordering over the per-game SUM. ``games`` maps to the projection's
     ``games_tracked`` (``COUNT(*)``), reproducing the stored ``gp_pitcher``.
+
+    Every returned row also carries ``innings_per_game`` -- the team-season ERA
+    basis (E-264 TN-3) -- read RAW (possibly NULL) via an OUTER ``LEFT JOIN
+    teams`` on the already-filtered ``team_id``. It is added at the outer wrapper
+    level, NOT inside the shared ``pitching_recompute_select()`` projection
+    (which has other consumers), and is deliberately NOT COALESCEd in SQL: the
+    NULL-vs-integer distinction is load-bearing provenance (NULL = never fetched
+    -> the display layer flags "(assumed)"), and the fallback-to-7 constant
+    belongs at the compute site, not here.
     """
     rows = conn.execute(
         """
@@ -550,7 +559,8 @@ def get_season_pitching(
             COALESCE(sub.total_strikes, 0) AS total_strikes,
             p.throws,
             tr.jersey_number,
-            sub.gs
+            sub.gs,
+            t.innings_per_game AS innings_per_game
         FROM (
             """
         + pitching_recompute_select()
@@ -565,10 +575,11 @@ def get_season_pitching(
             ON tr.player_id = sub.player_id
             AND tr.team_id = ?
             AND tr.season_id = ?
+        LEFT JOIN teams t ON t.id = ?
         ORDER BY
             COALESCE(sub.ip_outs, 0) DESC,
             p.last_name ASC
         """,
-        (team_id, season_id, team_id, team_id, season_id),
+        (team_id, season_id, team_id, team_id, season_id, team_id),
     ).fetchall()
     return [dict(r) for r in rows]

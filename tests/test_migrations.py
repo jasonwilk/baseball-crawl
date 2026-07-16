@@ -2010,3 +2010,88 @@ class TestMigration011DropSeasonAggregates:
         finally:
             conn.close()
 
+
+class TestTeamsInningsPerGameMigration:
+    """Verify migration 012_teams_innings_per_game.sql (E-264-01, TN-2).
+
+    The migration adds one nullable INTEGER column to teams. NULL is
+    load-bearing provenance (never fetched -> ERA assumed on the 7-inning
+    fallback), so the column MUST stay nullable with no DEFAULT and no NOT NULL.
+    """
+
+    def test_innings_per_game_column_exists(self, fresh_db: Path) -> None:
+        """After migrations, teams has an innings_per_game column."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(teams);")}
+        conn.close()
+        assert "innings_per_game" in columns, (
+            "innings_per_game column not found on teams after migration 012"
+        )
+
+    def test_column_is_nullable_integer_no_default(self, fresh_db: Path) -> None:
+        """The column is INTEGER, nullable, with no DEFAULT (TN-2, AC-2).
+
+        A DEFAULT or NOT NULL here would collapse the fetched-vs-assumed
+        distinction the display layer depends on, so it is guarded explicitly.
+        """
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        # table_info: (cid, name, type, notnull, dflt_value, pk)
+        info = {
+            row[1]: row
+            for row in conn.execute("PRAGMA table_info(teams);").fetchall()
+        }
+        conn.close()
+        assert "innings_per_game" in info, "innings_per_game not found"
+        _cid, _name, col_type, notnull, dflt, _pk = info["innings_per_game"]
+        assert col_type == "INTEGER", (
+            f"innings_per_game type is {col_type!r}, want INTEGER"
+        )
+        assert notnull == 0, "innings_per_game is NOT NULL; should be nullable"
+        assert dflt is None, f"innings_per_game has a DEFAULT {dflt!r}; want none"
+
+    def test_existing_rows_read_back_null(self, fresh_db: Path) -> None:
+        """A team inserted without the column reads back NULL (every pre-existing
+        row is NULL after the ALTER)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            "INSERT INTO teams (name, membership_type, source, is_active) "
+            "VALUES ('No-Basis Team', 'tracked', 'manual', 1);"
+        )
+        conn.commit()
+        value = conn.execute(
+            "SELECT innings_per_game FROM teams WHERE name = 'No-Basis Team';"
+        ).fetchone()[0]
+        conn.close()
+        assert value is None, "an omitted innings_per_game must read back NULL"
+
+    def test_column_round_trips_integer(self, fresh_db: Path) -> None:
+        """The column accepts and reads back an explicit integer basis."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            "INSERT INTO teams (name, membership_type, source, is_active, "
+            "innings_per_game) VALUES ('Basis Team', 'tracked', 'manual', 1, 6);"
+        )
+        conn.commit()
+        value = conn.execute(
+            "SELECT innings_per_game FROM teams WHERE name = 'Basis Team';"
+        ).fetchone()[0]
+        conn.close()
+        assert value == 6, f"integer basis round-trip mismatch: {value}"
+
+    def test_migration_idempotent_second_run(self, fresh_db: Path) -> None:
+        """A second run does not error or duplicate the column."""
+        run_migrations(db_path=fresh_db)
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(teams);")]
+        conn.close()
+        assert cols.count("innings_per_game") == 1, (
+            f"innings_per_game not present exactly once: {cols}"
+        )
+

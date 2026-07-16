@@ -824,3 +824,45 @@ class TestGeneratedDateAgreesWithItself:
     def test_expires_at_is_still_a_utc_slice(self, html: str) -> None:
         """An expiry is a UTC instant, not a game-day anchor -- untouched."""
         assert "Expires 2026-07-24" in html
+
+
+def _pitcher(innings_per_game: int | None, era: str = "4.50") -> dict:
+    """A pitcher row carrying the E-264 basis provenance (innings_per_game)."""
+    return {
+        "name": "Ace Smith",
+        "jersey_number": "22",
+        "era": era,
+        "k9": "9.0",
+        "whip": "1.10",
+        "games": 8,
+        "gs": 2,
+        "ip_outs": 60,
+        "h": 20,
+        "er": 5,
+        "bb": 10,
+        "so": 30,
+        "pitches": 400,
+        "strike_pct": "62%",
+        "innings_per_game": innings_per_game,
+    }
+
+
+class TestEraBasisDisclosureRendering:
+    """E-264-03: the ERA-basis label reaches the rendered report HTML."""
+
+    def test_known_basis_header_and_card_no_footnote(self) -> None:
+        html = render_report(_base_data(pitching=[_pitcher(6, era="4.50")]))
+        assert "ERA (6-inn)" in html          # header, no asterisk
+        assert "ERA (6-inn)*" not in html
+        assert "4.50 (6-inn) ERA" in html      # key-player card inline label
+        assert "assumed on a 7-inning basis" not in html  # no footnote when known
+
+    def test_assumed_basis_header_footnote_and_card(self) -> None:
+        html = render_report(_base_data(pitching=[_pitcher(None, era="4.50")]))
+        assert "ERA (7-inn)*" in html          # header with asterisk
+        assert "4.50 (7-inn)* ERA" in html      # card inline label with asterisk
+        assert (
+            "* Game length not available from GameChanger for this team -- "
+            "ERA assumed on a 7-inning basis."
+        ) in html
+        assert "innings_per_game" not in html   # no raw field name user-facing

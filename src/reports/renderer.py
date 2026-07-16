@@ -24,7 +24,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.api.helpers import format_avg, format_date, ip_display
+from src.api.helpers import era_basis_innings, format_avg, format_date, ip_display
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "api" / "templates"
@@ -33,6 +33,14 @@ _TEMPLATE_NAME = "reports/scouting_report.html"
 # Thresholds per coaching consultation and E-187
 _MIN_PA_BATTING = 5
 _MIN_IP_OUTS_PITCHING = 18  # 6 IP = 18 outs
+
+# ERA-basis disclosure copy (E-264 TN-7). Verbatim -- do NOT paraphrase. Printed
+# once under the Pitching table ONLY when the basis is assumed (fallback 7). The
+# footnote deliberately says "game length", never the raw field innings_per_game.
+ERA_ASSUMED_FOOTNOTE = (
+    "* Game length not available from GameChanger for this team -- "
+    "ERA assumed on a 7-inning basis."
+)
 
 # Spray chart minimum BIP thresholds
 _MIN_BIP_SPRAY = 3
@@ -261,7 +269,10 @@ def _compute_pitching_heat(pitching: list[dict]) -> None:
         so = p.get("so") or 0
         bb = p.get("bb") or 0
         h = p.get("h") or 0
-        p["_era_raw"] = (er * 27) / ip_outs if ip_outs else 0.0
+        # ERA ranking uses the team's GC game-length basis in lockstep with the
+        # displayed ERA (E-264 TN-5); K/9 stays on 27 (9-inning basis).
+        basis = era_basis_innings(p.get("innings_per_game"))
+        p["_era_raw"] = (er * basis * 3) / ip_outs if ip_outs else 0.0
         p["_k9_raw"] = (so * 27) / ip_outs if ip_outs else 0.0
         p["_whip_raw"] = (bb + h) * 3 / ip_outs if ip_outs else 0.0
         era_vals.append(p["_era_raw"])
@@ -587,6 +598,32 @@ def _build_trust_block(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _era_basis_disclosure(pitching: list[dict]) -> dict[str, Any]:
+    """Derive the team-level ERA-basis label from the pitcher rows (E-264 TN-7).
+
+    ``innings_per_game`` is a team-season constant carried identically on every
+    ``get_season_pitching`` row (E-264-01), so the first row's value is the whole
+    team's basis. A NULL value -- or a missing key on hand-built rows -- means the
+    basis was never fetched, so it is ``assumed`` and the compute site fell back
+    to 7 (``era_basis_innings``). Returns the pieces the template composes into
+    ``ERA (N-inn)`` / ``ERA (N-inn)*`` plus the one-time footnote.
+
+    Args:
+        pitching: The report's pitcher rows (may be empty).
+
+    Returns:
+        ``{"basis": int, "assumed": bool, "footnote": str | None}``. ``footnote``
+        is populated ONLY when ``assumed`` (AC-3).
+    """
+    raw = pitching[0].get("innings_per_game") if pitching else None
+    assumed = raw is None
+    return {
+        "basis": era_basis_innings(raw),
+        "assumed": assumed,
+        "footnote": ERA_ASSUMED_FOOTNOTE if assumed else None,
+    }
+
+
 def render_report(data: dict[str, Any]) -> str:
     """Render a standalone scouting report HTML string.
 
@@ -737,6 +774,10 @@ def render_report(data: dict[str, Any]) -> str:
         "roster": data.get("roster") or [],
         "has_pitching": bool(pitching),
         "has_batting": bool(batting),
+        # ERA-basis disclosure (E-264 TN-7): team-level basis + assumed flag the
+        # template renders on the Pitching ERA header, the key-player card, and
+        # the conditional footnote.
+        "era_basis": _era_basis_disclosure(pitching),
         "has_spray": bool(spray_data),
         "has_recent_form": bool(recent_form_str),
         "has_plays_data": has_plays_data,

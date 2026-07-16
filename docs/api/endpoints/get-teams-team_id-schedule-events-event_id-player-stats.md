@@ -220,7 +220,7 @@ Approximately 149 keys total. Additional cumulative-only fields:
 | `FIP` | float | Fielding Independent Pitching |
 | `K/BF` | float | Strikeout rate per batter faced |
 | `K/BB` | float | Strikeout-to-walk ratio |
-| `K/G` | float | Strikeouts per game (9 innings) |
+| `K/G` | float | Strikeouts per game-length: `innings_per_game × SO / IP` (NOT fixed at 9 -- `innings_per_game` is the per-team-season basis from `GET /teams/{team_id}`) |
 | `BB/INN` | float | Walks per inning |
 | `#P` | int | Cumulative pitch count |
 | `TS` | int | Total strikes thrown |

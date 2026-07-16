@@ -136,6 +136,12 @@
       color: #6b7280;
       margin-bottom: 4px;
     }
+    /* ERA-basis assumed-fallback footnote (E-264 TN-7). */
+    .era-basis-footnote {
+      font-size: 8pt;
+      color: #6b7280;
+      margin: 2px 0 8px;
+    }
 
     /* ---- Tables ---- */
     table {
@@ -645,7 +651,8 @@
   <div class="key-player-col">
     <div class="key-player-label">Ace</div>
     <div class="key-player-name">{{ key_players.top_pitcher.name | e }}</div>
-    <div class="key-player-stats">{{ key_players.top_pitcher.era }} ERA &middot; {{ key_players.top_pitcher.k9 }} K/9 &middot; {{ key_players.top_pitcher.ip }} IP</div>
+    {# ERA-basis inline label (E-264 TN-7): "4.50 (N-inn)" known, "*" assumed #}
+    <div class="key-player-stats">{{ key_players.top_pitcher.era }} ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %} ERA &middot; {{ key_players.top_pitcher.k9 }} K/9 &middot; {{ key_players.top_pitcher.ip }} IP</div>
     {% if key_players.top_pitcher.workload_subline %}<div class="key-player-stats last-outing-cell" data-date="{{ key_players.top_pitcher.rest_date }}">{{ key_players.top_pitcher.workload_subline }}</div>{% endif %}
   </div>
   {% endif %}
@@ -670,7 +677,8 @@
       <th>#</th>
       <th class="col-player">Player</th>
       <th class="col-thr col-sep heat-header mob-hide-extra">THR</th>
-      <th class="heat-header">ERA</th>
+      {# ERA-basis disclosure header (E-264 TN-7): "ERA (N-inn)" known, "*" assumed #}
+      <th class="heat-header">ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}</th>
       <th class="heat-header">K/9</th>
       <th class="heat-header mob-hide-extra">WHIP</th>
       <th class="col-sep">GP</th>
@@ -714,6 +722,8 @@
     {% endfor %}
   </tbody>
 </table>
+{# ERA-basis footnote (E-264 TN-7): printed once, ONLY when the basis is assumed #}
+{% if era_basis.assumed %}<p class="era-basis-footnote">{{ era_basis.footnote }}</p>{% endif %}
 {% else %}
 <p class="no-data-msg">No data available</p>
 {% endif %}

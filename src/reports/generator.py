@@ -23,7 +23,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.api.db import (
     build_pitcher_profiles,
@@ -33,10 +33,11 @@ from src.api.db import (
     get_season_batting,
     get_season_pitching,
 )
-from src.api.helpers import get_app_url
+from src.api.helpers import era_basis_innings, get_app_url
 from src.db.teams import (
     MATCH_ANCHOR,
     MATCH_NAME_ONLY,
+    ensure_team_row,
     ensure_team_row_with_provenance,
 )
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
@@ -49,6 +50,7 @@ from src.gamechanger.loaders import (
 from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.opponent_ladder import TEAM_DETAIL_ACCEPT
 from src.gamechanger.search import resolve_gc_uuid_by_public_id
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
@@ -419,6 +421,27 @@ def _query_batting(
     return result
 
 
+def _extract_innings_per_game(team_detail: Any) -> int | None:
+    """Extract ``settings.scorekeeping.bats.innings_per_game`` (int) or None.
+
+    The ERA basis (E-264 TN-1). Tolerates absence or a mistyped value at ANY
+    hop of the nested path (AC-2): a non-dict at any level, a missing key, or a
+    non-int (or bool -- ``isinstance(True, int)`` is True) value all yield None,
+    so the compute site falls back to 7 rather than crash.
+    """
+    node: Any = team_detail
+    for key in ("settings", "scorekeeping", "bats"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    if not isinstance(node, dict):
+        return None
+    value = node.get("innings_per_game")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 def _query_pitching(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
@@ -450,7 +473,10 @@ def _compute_pitching_rates(pitchers: list[dict]) -> None:
             row["k9"] = "-"
             row["whip"] = "-"
         else:
-            row["era"] = f"{(er * 27) / ip_outs:.2f}"
+            # ERA uses the team's GC game-length basis (E-264 TN-5); K/9 stays
+            # on the 9-inning basis (27 = 9x3) and WHIP stays per-inning (TN-9).
+            basis = era_basis_innings(row.get("innings_per_game"))
+            row["era"] = f"{(er * basis * 3) / ip_outs:.2f}"
             row["k9"] = f"{(so * 27) / ip_outs:.1f}"
             row["whip"] = f"{(bb + h) * 3 / ip_outs:.2f}"
         row["strike_pct"] = (
@@ -2000,9 +2026,75 @@ class _ReportGeneration:
                     )
                     conn.commit()
 
+        # Fetch the ERA basis whenever a gc_uuid is available -- from EITHER
+        # resolution branch (member or search) -- and independently of spray
+        # (E-264 TN-6). Non-fatal: a failure leaves the stored basis unchanged.
+        if self.resolved_gc_uuid:
+            self._fetch_and_store_innings_per_game()
+
         _update_run_record(
             self.report_id,
             gc_uuid_status="resolved" if self.resolved_gc_uuid else "unavailable",
+        )
+
+    def _fetch_and_store_innings_per_game(self) -> None:
+        """Fetch the team's ERA basis (innings/game) and store it (E-264 TN-6).
+
+        The basis lives ONLY on the authenticated ``GET /teams/{gc_uuid}`` team
+        detail (``settings.scorekeeping.bats.innings_per_game``), not on the
+        public profile, so this runs after gc_uuid resolution. Non-fatal
+        (AC-2), mirroring the spray-chart resilience posture: a raised 403
+        (``ForbiddenError``, a subclass of ``CredentialExpiredError`` -- known
+        for some non-owned teams) or any other failure is caught and logged,
+        generation continues, and the stored basis is left UNCHANGED. The write
+        routes through :func:`ensure_team_row`, whose NULL-safe backfill fills an
+        existing NULL but never clobbers a stored integer (TN-4); it commits so
+        the value is visible to the later ``get_season_pitching`` read within
+        this same generation. The network fetch runs BEFORE any write connection
+        is opened, so no write transaction is held across the fetch.
+        """
+        try:
+            data = self.client.get(
+                f"/teams/{self.resolved_gc_uuid}",
+                accept=TEAM_DETAIL_ACCEPT,
+            )
+        except CredentialExpiredError as exc:
+            logger.warning(
+                "innings_per_game fetch: GET /teams/%s denied (%s); leaving "
+                "basis unchanged (ERA falls back to 7)",
+                self.resolved_gc_uuid, exc.__class__.__name__,
+            )
+            return
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "innings_per_game fetch failed for gc_uuid=%s; leaving basis "
+                "unchanged (ERA falls back to 7)",
+                self.resolved_gc_uuid, exc_info=True,
+            )
+            return
+
+        basis = _extract_innings_per_game(data)
+        if basis is None:
+            logger.info(
+                "innings_per_game absent from team detail for gc_uuid=%s; "
+                "leaving basis unchanged (ERA falls back to 7)",
+                self.resolved_gc_uuid,
+            )
+            return
+
+        with closing(get_connection()) as conn:
+            ensure_team_row(
+                conn,
+                name=self.team_info.get("name") if self.team_info else None,
+                gc_uuid=self.resolved_gc_uuid,
+                public_id=self.public_id,
+                innings_per_game=basis,
+                source="report-era-basis",
+            )
+            conn.commit()
+        logger.info(
+            "innings_per_game=%d stored for gc_uuid=%s (ERA basis)",
+            basis, self.resolved_gc_uuid,
         )
 
     def _spray_stage(self) -> None:

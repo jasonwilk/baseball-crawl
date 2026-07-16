@@ -32,7 +32,8 @@ def db() -> sqlite3.Connection:
 
 def _get_team(db: sqlite3.Connection, team_id: int) -> dict:
     row = db.execute(
-        "SELECT id, name, gc_uuid, public_id, season_year, membership_type, source "
+        "SELECT id, name, gc_uuid, public_id, season_year, innings_per_game, "
+        "membership_type, source "
         "FROM teams WHERE id = ?",
         (team_id,),
     ).fetchone()
@@ -44,8 +45,9 @@ def _get_team(db: sqlite3.Connection, team_id: int) -> dict:
         "gc_uuid": row[2],
         "public_id": row[3],
         "season_year": row[4],
-        "membership_type": row[5],
-        "source": row[6],
+        "innings_per_game": row[5],
+        "membership_type": row[6],
+        "source": row[7],
     }
 
 
@@ -57,12 +59,14 @@ def _insert_team(
     gc_uuid: str | None = None,
     public_id: str | None = None,
     season_year: int | None = None,
+    innings_per_game: int | None = None,
     source: str = "gamechanger",
 ) -> int:
     cursor = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, public_id, season_year, source) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (name, membership_type, gc_uuid, public_id, season_year, source),
+        "INSERT INTO teams (name, membership_type, gc_uuid, public_id, season_year, "
+        "innings_per_game, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, membership_type, gc_uuid, public_id, season_year, innings_per_game, source),
     )
     return cursor.lastrowid
 
@@ -294,6 +298,66 @@ class TestStep4Insert:
         result = ensure_team_row(db)
         team = _get_team(db, result)
         assert team["name"] == "Unknown"
+
+    def test_insert_carries_innings_per_game(self, db: sqlite3.Connection) -> None:
+        """A fresh INSERT persists a supplied innings_per_game (E-264-01 TN-4)."""
+        result = ensure_team_row(
+            db, name="New Team", gc_uuid="uuid-ipg", innings_per_game=6,
+        )
+        team = _get_team(db, result)
+        assert team["innings_per_game"] == 6
+
+    def test_insert_innings_per_game_defaults_null(self, db: sqlite3.Connection) -> None:
+        """An INSERT with no innings_per_game leaves it NULL (assumed-basis signal)."""
+        result = ensure_team_row(db, name="New Team", gc_uuid="uuid-noipg")
+        team = _get_team(db, result)
+        assert team["innings_per_game"] is None
+
+
+# ===========================================================================
+# innings_per_game back-fill (E-264-01 TN-4)
+# ===========================================================================
+
+
+class TestInningsPerGameBackfill:
+    """AC-4: NULL->value fills; a stored integer + later None does NOT clobber.
+
+    Mirrors the season_year back-fill direction: a failed re-fetch (None) must
+    keep the last known good basis, and NULL is load-bearing provenance for the
+    display layer's "(assumed)" flag.
+    """
+
+    def test_backfills_when_null_via_gc_uuid_match(self, db: sqlite3.Connection) -> None:
+        existing_id = _insert_team(db, name="Rival", gc_uuid="uuid-1")
+        ensure_team_row(db, gc_uuid="uuid-1", innings_per_game=6)
+        team = _get_team(db, existing_id)
+        assert team["innings_per_game"] == 6
+
+    def test_backfills_when_null_via_public_id_match(self, db: sqlite3.Connection) -> None:
+        existing_id = _insert_team(db, name="Rival", public_id="rival-slug")
+        ensure_team_row(db, public_id="rival-slug", innings_per_game=7)
+        team = _get_team(db, existing_id)
+        assert team["innings_per_game"] == 7
+
+    def test_backfills_when_null_via_name_match(self, db: sqlite3.Connection) -> None:
+        existing_id = _insert_team(db, name="Rival HS", season_year=2026)
+        ensure_team_row(db, name="Rival HS", season_year=2026, innings_per_game=6)
+        team = _get_team(db, existing_id)
+        assert team["innings_per_game"] == 6
+
+    def test_does_not_overwrite_existing_with_value(self, db: sqlite3.Connection) -> None:
+        """A stored integer is preserved when a new (different) value arrives."""
+        existing_id = _insert_team(db, name="Rival", gc_uuid="uuid-1", innings_per_game=6)
+        ensure_team_row(db, gc_uuid="uuid-1", innings_per_game=7)
+        team = _get_team(db, existing_id)
+        assert team["innings_per_game"] == 6
+
+    def test_none_does_not_clobber_stored_integer(self, db: sqlite3.Connection) -> None:
+        """A later None (failed re-fetch) keeps the last known good basis."""
+        existing_id = _insert_team(db, name="Rival", gc_uuid="uuid-1", innings_per_game=6)
+        ensure_team_row(db, gc_uuid="uuid-1", innings_per_game=None)
+        team = _get_team(db, existing_id)
+        assert team["innings_per_game"] == 6
 
 
 # ===========================================================================

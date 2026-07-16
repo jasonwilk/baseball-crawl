@@ -223,7 +223,11 @@ def test_generate_report_e2e_matches_committed_oracle(
     assert round(obp, 3) == 0.714
 
     # ---- Oracle: pitching season line, jersey #4 (exact) ----------------
-    # README: 18 outs, H8 R6 ER5 BB3 SO7 -> ERA 7.50, WHIP 1.83, K/9 10.50.
+    # README: 18 outs, H8 R6 ER5 BB3 SO7 -> WHIP 1.83, K/9 10.50.
+    # ERA (E-264): the manifest has no GET /teams/{gc_uuid} team-detail, so the
+    # innings_per_game fetch fails and the basis stays NULL -> ERA falls back to
+    # 7 (ER * 21 / ip_outs = 5 * 21 / 18 = 5.833 -> "5.83"). This exercises the
+    # AC-2 fallback path end-to-end. K/9 (9-inn basis) and WHIP are UNCHANGED.
     p4 = _row_by_jersey(data["pitching"], "4")
     assert p4["ip_outs"] == 18
     assert p4["h"] == 8
@@ -231,7 +235,7 @@ def test_generate_report_e2e_matches_committed_oracle(
     assert p4["bb"] == 3
     assert p4["so"] == 7
     # Generator formats: ERA/WHIP to 2dp, K/9 to 1dp ("10.5" == oracle 10.50).
-    assert p4["era"] == "7.50"
+    assert p4["era"] == "5.83"
     assert p4["whip"] == "1.83"
     assert p4["k9"] == "10.5"
 

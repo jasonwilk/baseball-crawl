@@ -4,7 +4,7 @@
 [E-264: League-Aware ERA Basis Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the API docs will correctly document `settings.scorekeeping.bats.innings_per_game` as the authoritative per-team-season ERA (and K-per-game) basis reflecting the live empirical findings, and the `K/G` field will no longer be mislabeled as a per-9-innings rate in EITHER doc where it appears. This keeps our maintained API spec truthful to what GameChanger actually returns.

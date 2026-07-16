@@ -75,6 +75,11 @@ _NORMALIZE_DROP_KEYS = frozenset(
         "narrative",
         "llm_analysis",
         "enriched_prediction",
+        # E-264-01: raw per-team-season ERA basis carried on every pitcher row
+        # by get_season_pitching. Provenance for E-264-03's "(assumed)" display
+        # decision; not yet rendered, so it stays out of the golden surface
+        # comparison (dropping it keeps this story report-invisible per its spec).
+        "innings_per_game",
     }
 )
 

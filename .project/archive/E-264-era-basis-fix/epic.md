@@ -1,7 +1,7 @@
 # E-264: League-Aware ERA Basis Fix
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- READY set 2026-07-15 (freshness clock starts here; re-confirm by 2026-09-13 if not yet dispatched). -->
@@ -50,10 +50,10 @@ This epic is FILE-DISJOINT from and sequenced AHEAD of E-263 (Deep Scout, READY,
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-264-01 | Storage foundation: migration 012 + reader JOIN + ensure_team_row plumbing | TODO | None | data-engineer |
-| E-264-02 | ERA basis correction: fetch, apply at the ERA sites, regenerate guards | TODO | E-264-01 | software-engineer |
-| E-264-03 | Visible ERA-basis disclosure on the report | TODO | E-264-02 | software-engineer |
-| E-264-04 | Endpoint-doc: authoritative ERA basis + K/G mislabel fix | TODO | None | api-scout |
+| E-264-01 | Storage foundation: migration 012 + reader JOIN + ensure_team_row plumbing | DONE | None | data-engineer |
+| E-264-02 | ERA basis correction: fetch, apply at the ERA sites, regenerate guards | DONE | E-264-01 | software-engineer |
+| E-264-03 | Visible ERA-basis disclosure on the report | DONE | E-264-02 | software-engineer |
+| E-264-04 | Endpoint-doc: authoritative ERA basis + K/G mislabel fix | DONE | None | api-scout |
 
 ## Dispatch Team
 - data-engineer
@@ -141,3 +141,36 @@ E-264 fixes ERA only. baseball-coach's reasoning: the must-fix argument for ERA 
 | **Total** | **21** | **21** | **0** |
 
 Notes: ~20 distinct findings — code-reviewer MUST-FIX 1 overlapped software-engineer Issue 1 (same TN-6 line-reference defect). The software-engineer count is its 2 BLOCKING issues + 4 incorporated advisory notes (a 5th note was a confirmation, not counted). A post-audit software-engineer self-correction (TN-6 rationale: the "member team" premise was false — no `member` teams exist) refined an already-fixed item and is not counted as a distinct finding. Highest-severity catches: a real crash bug (the `if not None` fallback that never falls back → `None * 3` TypeError on the assumed-basis report), two BLOCKING spec errors, a 403 crash-class, and a completeness miss (a third K/G-mislabel doc).
+
+- 2026-07-16: **Dispatched and all four stories DONE** (serial 01 → 02 → 03 → 04; each passed code-review + PM AC verification before the staging boundary advanced). Shipped: migration `012` (bare-nullable `teams.innings_per_game`, NULL = load-bearing "assumed" provenance); `get_season_pitching` carries the raw basis at the outer wrapper level (no SQL COALESCE); `ensure_team_row` `innings_per_game` param + NULL-safe `_backfill_innings_per_game` (mirrors `season_year`); the report pipeline fetches the basis from the authenticated `GET /teams/{gc_uuid}` at the gc_uuid-resolution seam (non-fatal on 403/absence, never clobbers a stored value); both ERA sites compute `ER × (basis × 3) / ip_outs` via the new shared `era_basis_innings()` helper (`src/api/helpers.py`, explicit `is not None else 7`) — K/9 and WHIP unchanged; a verbatim TN-7 basis label on the Pitching ERA header (`ERA (N-inn)` / `ERA (N-inn)*`) + conditional one-time footnote + inline key-player-card label; golden regenerated to the basis-6 values; the two endpoint-doc K/G "per-9" mislabels + the `innings_per_game` age-speculation corrected. Full worktree suite green (3853 passed / 0 failed at the last story).
+
+### Dispatch & Closure Review Scorecard
+| Review pass | Findings | Accepted | Dismissed |
+|-------------|---------:|---------:|----------:|
+| Per-story CR — E-264-01 | 0 | 0 | 0 |
+| Per-story CR — E-264-02 | 1 | 1 | 0 |
+| Per-story CR — E-264-03 | 0 | 0 | 0 |
+| Per-story CR — E-264-04 | 0 | 0 | 0 |
+| Closure CR Integration Review | 0 | 0 | 0 |
+| Codex (code review) | 1 | 1 | 0 |
+| **Total** | **2** | **2** | **0** |
+
+Notes: E-264-02's single per-story CR finding was a SHOULD-FIX, accepted and fixed in review round 2. Codex's one Priority-1 finding (migration 012 lacked a deploy-time-safety scope assertion) was **satisfied as a review artifact, 0 code changes**: migration 012 is the safest metadata-only shape (bare nullable `ADD COLUMN`, no DEFAULT/NOT NULL/FK/DML), already test-asserted (`notnull==0`, `dflt is None`, existing rows NULL, idempotent); CR produced the explicit migration-scope assertion (zero row writes, metadata-only) in the Step 1c Closure CR Integration Review, alongside the Step 1a invariant audit (the `ensure_team_row` additive-optional signature change per TN-4 holds repo-wide). Step 1b full-suite-green gate and Step 1d closure runtime smoke run post-merge at Step 8.
+
+- 2026-07-16: **COMPLETED.** All four stories DONE, all reviews passed (see scorecards above), full worktree suite green. Status authored in the epic worktree at Step 8 sub-step 3 to ride the closure patch; finalized only after the post-merge full-suite-green gate (a red gate reverts the patch and this flip with it).
+
+### Closure Assessments
+
+**Documentation assessment** (`.claude/rules/documentation.md`): The required-correction check PASSES — the coaching stat guide's K/9 and BB/9 sections (`docs/coaching/understanding-stats.md`, "scaled to a nine-inning game") remain accurate because E-264's deliberate ERA-ONLY scope kept K/9/BB/9 on the 9-inning basis; there is no ERA-formula section to correct. One optional coach-facing enhancement was flagged: the report's Pitching ERA column now carries a visible `ERA (N-inn)` / `ERA (N-inn)*` basis label + assumed footnote, and `docs/coaching/standalone-reports.md:35` (which documents that table) does not yet describe it. Disposition: **docs-writer authored** a light-touch note on `docs/coaching/standalone-reports.md:35` — the ERA column header now names the game length it's computed on (e.g. "ERA (7-inn)"), with the assumed-basis asterisk + footnote explained — plus a staleness header; the K/9/BB/9 sections were left untouched (still correct under the ERA-only scope).
+
+**Context-layer assessment** (`.claude/rules/context-layer-assessment.md`, eight triggers):
+1. New convention/pattern/constraint — **YES.** The new `teams.innings_per_game` column carries a load-bearing NULL-as-"assumed"-provenance semantic and a "never add DEFAULT/NOT NULL" invariant that the display-disclosure contract depends on. That invariant currently lives only in the frozen migration-012 comment; it belongs in `.claude/rules/data-model.md` alongside the parallel `teams.season_year` entry (`data-model.md:18`), so a future schema-touching agent is warned before adding a NULL→7 backfill. **Fires → claude-architect authored the data-model.md entry (`data-model.md:19`), rides the closure patch.**
+2. Architectural decision with ongoing implications — NO (localized data-model addition; the K-rate future interaction is captured in IDEA-141).
+3. Footgun/failure mode/boundary — NO as a standalone (the `is not None` crash guard + NULL-provenance are inline-documented and were caught in spec review, not a new runtime discovery); the no-DEFAULT/NOT-NULL footgun is folded into the trigger-1 data-model.md entry.
+4. Agent behavior/routing/coordination — NO.
+5. Domain knowledge for future agents — NO (the per-team-not-age-derived ERA/K-G basis finding is captured in `docs/api` via E-264-04 and in the trigger-1 data-model.md entry; an optional baseball-coach memory pointer on the deliberate K/9-not-rebased decision is left to that agent, not required).
+6. New CLI command/workflow/procedure — NO (Non-Goals: no new `bb` command, no backfill pass).
+7. Net context-layer growth ratchet — NO concern (the epic touched zero `.claude/` files; the trigger-1 line replaces reliance on a frozen migration comment for a durable invariant — net-positive, not bloat).
+8. Reusable behavioral lesson — NO (the `is not None` point is generic; no recurrence citation).
+
+Verdict: trigger 1 fired and is **discharged**. claude-architect authored the `data-model.md` `teams.innings_per_game` entry (`data-model.md:19`, parallel to `season_year`), capturing the load-bearing-NULL provenance + the hard "never add DEFAULT/NOT NULL, never blindly backfill NULL→value" invariant + the `era_basis_innings()`/`DEFAULT_ERA_BASIS_INNINGS` pointer. CA resolved both in-domain judgment calls **NO**: `era_basis_innings()` does not warrant a CLAUDE.md canonical-seam note (narrow two-site display helper, below the ensure_team_row/get_connection bar), and no baseball-coach memory pointer is needed. Both this codification and the docs-writer update above are authored in the worktree and ride the closure patch.

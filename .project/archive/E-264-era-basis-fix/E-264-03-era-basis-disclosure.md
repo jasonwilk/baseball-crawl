@@ -4,7 +4,7 @@
 [E-264: League-Aware ERA Basis Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every ERA on the report will disclose the game-length basis it was computed on. The Pitching table's ERA column header carries the basis (e.g. `ERA (7-inn)`), an assumed/fallback basis is marked with an asterisk and a one-time footnote, and the standalone key-player card ERA carries the inline basis label. A coach comparing ERAs across teams or reports always knows which game length produced each number, and an assumed basis is never presented silently.

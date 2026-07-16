@@ -37,6 +37,9 @@ _MIGRATIONS = [
     # E-250-02: drops seasons.season_type, team_opponents, and
     # players.gc_athlete_profile_id so the schema matches the season fixtures.
     _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql",
+    # E-264-01: teams.innings_per_game -- ensure_team_row's INSERT now references
+    # it, so the teams schema fixture must carry the new column.
+    _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql",
 ]
 
 

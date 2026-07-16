@@ -521,3 +521,75 @@ class TestConnectionFactoryPragmas:
         assert fk == 1, f"foreign_keys: expected 1 (ON), got {fk}"
         assert journal == "wal", f"journal_mode: expected 'wal', got {journal!r}"
         assert sync == 1, f"synchronous: expected 1 (NORMAL), got {sync}"
+
+
+# ---------------------------------------------------------------------------
+# E-264-01 AC-3: get_season_pitching carries teams.innings_per_game RAW
+# ---------------------------------------------------------------------------
+
+
+class TestSeasonPitchingInningsPerGame:
+    """AC-3: every pitcher row from get_season_pitching carries the team-season
+    ``innings_per_game`` RAW (possibly NULL) -- no SQL-level COALESCE.
+
+    The value is threaded at the OUTER wrapper level (LEFT JOIN teams on the
+    already-filtered team_id), so both a stored integer and a NULL surface
+    unchanged. The NULL-vs-integer distinction is the sole signal the display
+    layer (E-264-03) uses to decide whether to flag "(assumed)", so it must not
+    be coerced here.
+    """
+
+    _SEASON = "2026"
+    _PITCHER = "pp-ipg-1"
+
+    def _seed(
+        self, conn: sqlite3.Connection, innings_per_game: int | None
+    ) -> int:
+        """Seed one team (with the given innings_per_game), pitcher, game, and
+        one pitching row. Return the team_id."""
+        _insert_season(conn, self._SEASON)
+        team_id = _insert_team(conn, "LSB", membership_type="member")
+        conn.execute(
+            "UPDATE teams SET innings_per_game = ? WHERE id = ?",
+            (innings_per_game, team_id),
+        )
+        opp_id = _insert_team(conn, "Opp", membership_type="tracked")
+        _insert_player(conn, self._PITCHER, "Pat", "Pitcher")
+        _insert_game(conn, "g-ipg-1", self._SEASON, team_id, opp_id)
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, appearance_order) "
+            "VALUES ('g-ipg-1', ?, ?, ?, 1)",
+            (self._PITCHER, team_id, team_id),
+        )
+        conn.commit()
+        return team_id
+
+    def test_stored_integer_surfaces_raw(self) -> None:
+        """A stored integer (6) is carried on the pitcher row unchanged."""
+        from src.api.db import get_season_pitching
+
+        conn = _make_db()
+        conn.row_factory = sqlite3.Row
+        team_id = self._seed(conn, 6)
+        rows = {r["player_id"]: r for r in get_season_pitching(conn, team_id, self._SEASON)}
+        conn.close()
+        assert self._PITCHER in rows, "expected the seeded pitcher row"
+        assert "innings_per_game" in rows[self._PITCHER].keys()
+        assert rows[self._PITCHER]["innings_per_game"] == 6
+
+    def test_null_surfaces_raw_not_coalesced(self) -> None:
+        """A NULL innings_per_game is carried as None (NOT coerced to 7 in SQL)."""
+        from src.api.db import get_season_pitching
+
+        conn = _make_db()
+        conn.row_factory = sqlite3.Row
+        team_id = self._seed(conn, None)
+        rows = {r["player_id"]: r for r in get_season_pitching(conn, team_id, self._SEASON)}
+        conn.close()
+        assert self._PITCHER in rows, "expected the seeded pitcher row"
+        assert "innings_per_game" in rows[self._PITCHER].keys()
+        assert rows[self._PITCHER]["innings_per_game"] is None, (
+            "NULL basis must surface as None -- no SQL COALESCE; the fallback-to-7 "
+            "constant belongs at the compute site, not the reader"
+        )

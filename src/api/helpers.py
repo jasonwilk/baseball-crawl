@@ -99,6 +99,38 @@ def validate_app_env() -> None:
         )
 
 
+# ERA basis fallback (E-264 TN-1/TN-5).  GameChanger computes ERA on a
+# per-team-season regulation game length (``innings_per_game`` -- 7 for most HS,
+# 6 for some youth leagues), NOT a fixed 9.  When that basis is unknown (never
+# fetched, field absent, or a 403 on a non-owned team -> stored NULL) the ERA
+# math falls back to 7.  This constant + helper are the SINGLE shared basis
+# definition both ERA compute sites use (generator ``_compute_pitching_rates``
+# and renderer ``_era_raw``), so the ``x 3`` scaling and the 7 fallback cannot
+# drift between them (TN-5).
+DEFAULT_ERA_BASIS_INNINGS = 7
+
+
+def era_basis_innings(innings_per_game: int | None) -> int:
+    """Return the ERA basis (regulation innings/game), falling back to 7.
+
+    The explicit ``is not None`` check is load-bearing: a NULL basis (never
+    fetched) MUST resolve to the fallback 7 rather than crash the downstream
+    ``basis * 3`` arithmetic on ``None`` (E-264 TN-5, AC-3).
+
+    Args:
+        innings_per_game: GC's stored per-team-season basis, or None when it was
+            never successfully fetched.
+
+    Returns:
+        The stored integer when present, else :data:`DEFAULT_ERA_BASIS_INNINGS`.
+    """
+    return (
+        innings_per_game
+        if innings_per_game is not None
+        else DEFAULT_ERA_BASIS_INNINGS
+    )
+
+
 def ip_display(ip_outs: int | None) -> str:
     """Convert an ip_outs integer to standard innings-pitched display notation.
 

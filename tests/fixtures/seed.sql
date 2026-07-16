@@ -39,10 +39,23 @@
 --     Game 7: TEAM_VARSITY(home) 7 vs TEAM_OPP_C(away) 2  => W
 --     W-L = 5-2
 --
---   Varsity pitchers K/9 (so * 27.0 / ip_outs):
---     PLAYER_VARSITY_01: ip_outs=54, so=22  K/9 = 22*27/54 = 11.000
---     PLAYER_VARSITY_02: ip_outs=36, so=12  K/9 = 12*27/36 = 9.000
---     PLAYER_VARSITY_03: ip_outs=18, so=5   K/9 = 5*27/18  = 7.500
+--   Varsity pitcher season totals (summed from the per-game rows below):
+--     PLAYER_VARSITY_01 (Aaron Adams): ip_outs=69, er=10, so=26
+--     PLAYER_VARSITY_02 (Ben Baker):   ip_outs=48, er=8,  so=14
+--     PLAYER_VARSITY_03 (Carlos Cruz): ip_outs=18, er=2,  so=5
+--
+--   Varsity pitchers K/9 (so * 27 / ip_outs) -- basis UNCHANGED by E-264 (9-inn):
+--     PLAYER_VARSITY_01: 26*27/69 = 10.174 -> 10.2
+--     PLAYER_VARSITY_02: 14*27/48 =  7.875 ->  7.9
+--     PLAYER_VARSITY_03:  5*27/18 =  7.500 ->  7.5
+--
+--   Varsity pitchers ERA on the STORED basis 6 (er * 6*3 / ip_outs; E-264):
+--     TEAM_VARSITY.innings_per_game = 6, so ERA multiplies by 18 (not 27):
+--     PLAYER_VARSITY_01: 10*18/69 = 2.609 -> 2.61
+--     PLAYER_VARSITY_02:  8*18/48 = 3.000 -> 3.00
+--     PLAYER_VARSITY_03:  2*18/18 = 2.000 -> 2.00
+--     (JV uses stored basis 7 -> er*21/ip_outs; opponents NULL -> fallback 7.
+--      See the team->innings_per_game map in the Teams section below.)
 --
 --   vs_lhb/vs_rhb splits for PLAYER_VARSITY_01 (pitcher):
 --     vs_lhb: ab=24, h=5, hr=0, bb=3, so=11
@@ -59,13 +72,26 @@ INSERT INTO seasons (season_id, name, year, start_date, end_date) VALUES
 -- Teams
 -- gc_uuid is used as a stable symbolic name for FK subquery lookups.
 -- TEAM_VARSITY / TEAM_JV are member teams; TEAM_OPP_* are tracked opponents.
+--
+-- ERA basis provenance (E-264 TN-8 / AC-6) -- explicit team->innings_per_game map.
+-- These three named cases let E-264-03 assert the ERA (6-inn) / known / ERA
+-- (7-inn)* (assumed) label paths against identifiable teams:
+--   TEAM_VARSITY -> 6      : stored NON-7 basis. Golden ERA is computed on 6
+--                            (ER * 18 / ip_outs), exercising the non-7 path in
+--                            the value-regression guard + the ERA (6-inn) label.
+--   TEAM_JV      -> 7      : stored KNOWN basis 7 (ER * 21 / ip_outs). Distinct
+--                            from a NULL fallback-7: it is NOT "(assumed)".
+--   TEAM_OPP_A/B/C -> NULL : never-fetched. ERA falls back to 7 at the compute
+--                            site AND the display flags "(assumed)".
+-- A fixture that seeded only integers would pass the assumed branch vacuously,
+-- so the NULL opponents are load-bearing coverage (TN-8).
 -- ---------------------------------------------------------------------------
-INSERT INTO teams (name, membership_type, classification, gc_uuid, source, is_active, last_synced) VALUES
-    ('Lincoln Varsity',   'member',  'varsity', 'TEAM_VARSITY', 'gamechanger', 1, '2026-03-01 08:00:00'),
-    ('Lincoln JV',        'member',  'jv',      'TEAM_JV',      'gamechanger', 1, NULL),
-    ('Opponent A Eagles', 'tracked', NULL,      'TEAM_OPP_A',   'gamechanger', 1, NULL),
-    ('Opponent B Tigers', 'tracked', NULL,      'TEAM_OPP_B',   'gamechanger', 0, NULL),
-    ('Opponent C Rockets','tracked', NULL,      'TEAM_OPP_C',   'gamechanger', 1, NULL);
+INSERT INTO teams (name, membership_type, classification, gc_uuid, source, is_active, last_synced, innings_per_game) VALUES
+    ('Lincoln Varsity',   'member',  'varsity', 'TEAM_VARSITY', 'gamechanger', 1, '2026-03-01 08:00:00', 6),
+    ('Lincoln JV',        'member',  'jv',      'TEAM_JV',      'gamechanger', 1, NULL,                  7),
+    ('Opponent A Eagles', 'tracked', NULL,      'TEAM_OPP_A',   'gamechanger', 1, NULL,                  NULL),
+    ('Opponent B Tigers', 'tracked', NULL,      'TEAM_OPP_B',   'gamechanger', 0, NULL,                  NULL),
+    ('Opponent C Rockets','tracked', NULL,      'TEAM_OPP_C',   'gamechanger', 1, NULL,                  NULL);
 
 -- ---------------------------------------------------------------------------
 -- Players -- Varsity (15)

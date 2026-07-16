@@ -1,0 +1,37 @@
+-- ===========================================================================
+-- Migration 012: teams.innings_per_game (per-team-season ERA basis)
+-- ===========================================================================
+-- Epic E-264 (story E-264-01), Technical Notes TN-1/TN-2.
+--
+-- WHAT: Adds one nullable INTEGER column to teams:
+--       - innings_per_game -- GameChanger's per-team-season regulation
+--                             innings/game (observed 6 or 7), sourced from
+--                             settings.scorekeeping.bats.innings_per_game in the
+--                             authenticated GET /teams/{gc_uuid} response.
+--
+-- WHY:  GameChanger computes ERA on a per-team-season game-length basis:
+--       ERA = innings_per_game x ER / IP (TN-1). teams IS the team-season entity
+--       (one teams row = one team-season = one public_id; it already carries
+--       season_year, classification, gc_uuid), so this per-team-season constant
+--       is a column on teams. E-264-02 fetches and applies the value; E-264-03
+--       displays it. This story lays the storage foundation only -- nothing
+--       populates the column here, so every existing row reads back NULL.
+--
+-- DESIGN (TN-2): NULLABLE BY DESIGN: NULL = never successfully fetched -> ERA
+--   computed on the assumed 7-inning fallback and the report MUST flag
+--   "(assumed)". A stored integer = fetched from
+--   settings.scorekeeping.bats.innings_per_game (GET /teams/{gc_uuid}), shown
+--   without the assumed flag. DO NOT add a DEFAULT or NOT NULL here: it would
+--   collapse the fetched-vs-assumed distinction the display layer depends on.
+--   NULL is load-bearing provenance -- a future DEFAULT 7 or NOT NULL backfill
+--   would silently erase the assumed signal and must not happen.
+--
+-- IDEMPOTENCY: SQLite has no "ADD COLUMN IF NOT EXISTS", but the migration
+--   runner (apply_migrations.py) tracks applied migrations by filename in
+--   _migrations and applies each exactly once, so an ADD COLUMN never re-runs.
+--   The target table teams already exists (migration 001). All INSERT INTO teams
+--   callers use explicit column lists, so adding a trailing nullable column is
+--   backward-compatible (no positional inserts).
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE teams ADD COLUMN innings_per_game INTEGER;

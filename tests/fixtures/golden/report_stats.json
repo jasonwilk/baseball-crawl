@@ -1,9 +1,9 @@
 {
   "_meta": {
-    "basis": "per-game SUM of seed.sql player_game_* rows (E-259-01 cutover)",
-    "note": "E-259-01 query-time cutover: the batting/pitching SEASON arrays are regenerated to the perspective-filtered per-game SUM (get_season_batting/get_season_pitching now derive from player_game_*). This reconciles a latent seed.sql defect where the stored player_season_* rows were NOT the rollup of the per-game rows; the season line now agrees with the pitching_workload/history/profile sections (which already read per-game). Values hand-verified equal to the per-game SUM per player. Only the batting/pitching arrays moved; all other sections are byte-stable. Regeneration is observable in git diff; re-review before commit.",
-    "reviewed_by": "data-engineer (E-259-01)",
-    "reviewed_date": "2026-07-12"
+    "basis": "seed.sql header math",
+    "note": "Hand-reviewed against the seed.sql header math at creation. Regeneration is observable in git diff; re-review before commit.",
+    "reviewed_by": "vscode",
+    "reviewed_date": "2026-07-16"
   },
   "batting": [
     {
@@ -674,10 +674,11 @@
     {
       "bb": 7,
       "er": 10,
-      "era": "3.91",
+      "era": "2.61",
       "games": 4,
       "gs": null,
       "h": 19,
+      "innings_per_game": 6,
       "ip_outs": 69,
       "jersey_number": "1",
       "k9": "10.2",
@@ -693,10 +694,11 @@
     {
       "bb": 5,
       "er": 8,
-      "era": "4.50",
+      "era": "3.00",
       "games": 3,
       "gs": null,
       "h": 15,
+      "innings_per_game": 6,
       "ip_outs": 48,
       "jersey_number": "2",
       "k9": "7.9",
@@ -712,10 +714,11 @@
     {
       "bb": 2,
       "er": 2,
-      "era": "3.00",
+      "era": "2.00",
       "games": 2,
       "gs": null,
       "h": 5,
+      "innings_per_game": 6,
       "ip_outs": 18,
       "jersey_number": "3",
       "k9": "7.5",

@@ -37,6 +37,12 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 _MIGRATION_008 = (
     _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
 )
+# E-264-01: migration 012 adds teams.innings_per_game, which ensure_team_row's
+# INSERT now references. The partial-chain fixture must apply it so the teams
+# schema matches the loader's team-row writes.
+_MIGRATION_012 = (
+    _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
+)
 
 
 @pytest.fixture()
@@ -48,6 +54,7 @@ def db() -> sqlite3.Connection:
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -1927,6 +1934,7 @@ def _fresh_db() -> sqlite3.Connection:
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
     conn.commit()
     return conn
 

@@ -13,13 +13,19 @@ from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 from src.gamechanger.loaders.game_loader import GameLoader
 from src.gamechanger.types import TeamRef
 import src.reports.generator as _gen
+from src.api.helpers import era_basis_innings
+from src.gamechanger.exceptions import ForbiddenError
+from src.gamechanger.opponent_ladder import TEAM_DETAIL_ACCEPT
 from src.reports.generator import (
     GenerationResult,
+    _ReportGeneration,
     _SprayOutcome,
     _check_rate_plausibility,
-    _log_rate_plausibility_warnings,
+    _compute_pitching_rates,
     _crawl_and_load_spray,
     _create_report_row,
+    _extract_innings_per_game,
+    _log_rate_plausibility_warnings,
     _query_batting,
     _query_freshness,
     _query_pitching,
@@ -1516,8 +1522,9 @@ class TestQueryHelpers:
         assert "k9" in pitching[0]
         assert "whip" in pitching[0]
         assert "strike_pct" in pitching[0]
-        # ERA = (8 * 27) / 45 = 4.80
-        assert pitching[0]["era"] == "4.80"
+        # ERA (E-264): _seed_team leaves innings_per_game NULL, so the basis
+        # falls back to 7 -> ERA = (8 * 7 * 3) / 45 = (8 * 21) / 45 = 3.73.
+        assert pitching[0]["era"] == "3.73"
         # strike_pct = (total_strikes / pitches) * 100 = (180 / 300) * 100 = 60.0%
         # (preserves the value-level strike_pct coverage formerly in the deleted
         #  dashboard-side tests/test_strike_pct.py -- E-239-02 AC-6b)
@@ -5286,3 +5293,214 @@ class TestCheckRatePlausibility:
             _log_rate_plausibility_warnings(data, "in-range-slug")
 
         assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+
+# ---------------------------------------------------------------------------
+# E-264-02: ERA basis correction (compute site + post-resolution fetch)
+# ---------------------------------------------------------------------------
+class TestEraBasisComputeSite:
+    """AC-3/AC-4: ERA uses the team's innings_per_game basis (fallback 7); K/9
+    and WHIP are UNCHANGED."""
+
+    def test_era_basis_innings_helper(self):
+        assert era_basis_innings(6) == 6
+        assert era_basis_innings(7) == 7
+        # NULL (never fetched) -> fallback 7, NOT a crash on ``None * 3``.
+        assert era_basis_innings(None) == 7
+
+    def test_compute_rates_uses_stored_basis_six(self):
+        rows = [{
+            "ip_outs": 18, "er": 2, "so": 5, "bb": 1, "h": 2,
+            "pitches": 100, "total_strikes": 60, "innings_per_game": 6,
+        }]
+        _compute_pitching_rates(rows)
+        assert rows[0]["era"] == "2.00"   # 2 * 6*3 / 18
+        assert rows[0]["k9"] == "7.5"     # 5 * 27 / 18  (K/9 UNCHANGED)
+        assert rows[0]["whip"] == "0.50"  # (1+2)*3 / 18 (WHIP UNCHANGED)
+
+    def test_compute_rates_stored_basis_seven(self):
+        rows = [{
+            "ip_outs": 21, "er": 3, "so": 6, "bb": 2, "h": 4,
+            "pitches": 100, "total_strikes": 60, "innings_per_game": 7,
+        }]
+        _compute_pitching_rates(rows)
+        assert rows[0]["era"] == "3.00"   # 3 * 7*3 / 21
+
+    def test_compute_rates_null_basis_falls_back_to_seven(self):
+        rows = [{
+            "ip_outs": 18, "er": 2, "so": 5, "bb": 1, "h": 2,
+            "pitches": 100, "total_strikes": 60, "innings_per_game": None,
+        }]
+        _compute_pitching_rates(rows)
+        assert rows[0]["era"] == "2.33"   # 2 * 21 / 18 (fallback 7)
+        assert rows[0]["k9"] == "7.5"     # unchanged
+
+    def test_compute_rates_missing_key_falls_back_to_seven(self):
+        # A row with no innings_per_game key at all is defensively fallback-7.
+        rows = [{
+            "ip_outs": 21, "er": 3, "so": 6, "bb": 2, "h": 4,
+            "pitches": 100, "total_strikes": 60,
+        }]
+        _compute_pitching_rates(rows)
+        assert rows[0]["era"] == "3.00"   # 3 * 21 / 21 (fallback 7)
+
+
+class TestExtractInningsPerGame:
+    """AC-2: robust extraction of the ERA basis from the team-detail payload."""
+
+    def test_happy_path(self):
+        data = {"settings": {"scorekeeping": {"bats": {"innings_per_game": 6}}}}
+        assert _extract_innings_per_game(data) == 6
+
+    def test_missing_leaf_returns_none(self):
+        assert _extract_innings_per_game(
+            {"settings": {"scorekeeping": {"bats": {}}}}
+        ) is None
+
+    def test_missing_intermediate_returns_none(self):
+        assert _extract_innings_per_game({"settings": {}}) is None
+        assert _extract_innings_per_game({}) is None
+
+    def test_non_dict_at_any_hop_returns_none(self):
+        assert _extract_innings_per_game(None) is None
+        assert _extract_innings_per_game("nope") is None
+        assert _extract_innings_per_game(
+            {"settings": {"scorekeeping": {"bats": "x"}}}
+        ) is None
+
+    def test_bool_rejected(self):
+        # isinstance(True, int) is True in Python -- a bool must NOT be accepted.
+        assert _extract_innings_per_game(
+            {"settings": {"scorekeeping": {"bats": {"innings_per_game": True}}}}
+        ) is None
+
+    def test_non_int_value_returns_none(self):
+        assert _extract_innings_per_game(
+            {"settings": {"scorekeeping": {"bats": {"innings_per_game": "6"}}}}
+        ) is None
+
+
+class TestFetchAndStoreInningsPerGame:
+    """AC-1/AC-2: post-resolution basis fetch + NULL-safe no-clobber store."""
+
+    def _make_gen(self, team_id, gc_uuid, public_id, name, client):
+        gen = _ReportGeneration("https://web.gc.com/o/x/team/abc")
+        gen.team_id = team_id
+        gen.public_id = public_id
+        gen.resolved_gc_uuid = gc_uuid
+        gen.team_info = {"name": name}
+        gen.client = client
+        return gen
+
+    def _conn_factory(self, db_path):
+        def _fresh():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+        return _fresh
+
+    def _seed(self, db, gc_uuid="uuid-1", public_id="pub1", ipg=None):
+        cur = db.execute(
+            "INSERT INTO teams (name, gc_uuid, public_id, membership_type, "
+            "innings_per_game) VALUES ('Test', ?, ?, 'tracked', ?)",
+            (gc_uuid, public_id, ipg),
+        )
+        db.commit()
+        return cur.lastrowid
+
+    def _read_ipg(self, db, team_id):
+        return db.execute(
+            "SELECT innings_per_game FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()[0]
+
+    def test_stores_fetched_basis(self, db, tmp_path):
+        """AC-1: a resolvable team whose GC exposes the basis -> stored."""
+        team_id = self._seed(db, ipg=None)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.return_value = {
+            "settings": {"scorekeeping": {"bats": {"innings_per_game": 6}}}
+        }
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()
+        client.get.assert_called_once_with(
+            "/teams/uuid-1", accept=TEAM_DETAIL_ACCEPT
+        )
+        assert self._read_ipg(db, team_id) == 6
+
+    def test_forbidden_leaves_prior_basis_unchanged(self, db, tmp_path):
+        """AC-2: a raised 403 is caught; a prior stored basis is KEPT."""
+        team_id = self._seed(db, ipg=7)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.side_effect = ForbiddenError("403")
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()  # must not raise
+        assert self._read_ipg(db, team_id) == 7
+
+    def test_forbidden_never_fetched_stays_null(self, db, tmp_path):
+        """AC-2: a 403 on a never-fetched team leaves the basis NULL (ERA->7)."""
+        team_id = self._seed(db, ipg=None)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.side_effect = ForbiddenError("403")
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()
+        assert self._read_ipg(db, team_id) is None
+
+    def test_generic_exception_is_caught(self, db, tmp_path):
+        """AC-2: any unexpected fetch failure is non-fatal."""
+        team_id = self._seed(db, ipg=None)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.side_effect = RuntimeError("boom")
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()  # must not raise
+        assert self._read_ipg(db, team_id) is None
+
+    def test_absent_field_leaves_basis_null(self, db, tmp_path):
+        """AC-2: fetch succeeds but the field is absent -> no write."""
+        team_id = self._seed(db, ipg=None)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.return_value = {"settings": {}}
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()
+        assert self._read_ipg(db, team_id) is None
+
+    def test_no_clobber_of_stored_basis(self, db, tmp_path):
+        """AC-2/TN-4: a re-fetch returning a DIFFERENT basis does NOT overwrite
+        an already-stored integer (backfill is strictly NULL->value)."""
+        team_id = self._seed(db, ipg=6)
+        db_path = str(tmp_path / "test.db")
+        client = MagicMock()
+        client.get.return_value = {
+            "settings": {"scorekeeping": {"bats": {"innings_per_game": 9}}}
+        }
+        gen = self._make_gen(team_id, "uuid-1", "pub1", "Test", client)
+        with patch(
+            "src.reports.generator.get_connection",
+            side_effect=self._conn_factory(db_path),
+        ):
+            gen._fetch_and_store_innings_per_game()
+        assert self._read_ipg(db, team_id) == 6  # retained, not clobbered to 9

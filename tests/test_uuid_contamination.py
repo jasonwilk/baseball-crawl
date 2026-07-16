@@ -24,6 +24,11 @@ from src.gamechanger.types import TeamRef
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+# E-264-01: migration 012 adds teams.innings_per_game, which ensure_team_row's
+# INSERT now references -- apply it so the teams schema carries the new column.
+_MIGRATION_012 = (
+    _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
+)
 
 
 @pytest.fixture()
@@ -34,6 +39,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()

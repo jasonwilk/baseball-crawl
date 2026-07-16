@@ -32,12 +32,18 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 _MIGRATION_008 = (
     _PROJECT_ROOT / "migrations" / "008_drop_identity_opponent_season_type.sql"
 )
+# E-264-01: migration 012 adds teams.innings_per_game, which ensure_team_row's
+# INSERT now references -- apply it so the teams schema carries the new column.
+_MIGRATION_012 = (
+    _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
+)
 
 
 def _create_schema(db: sqlite3.Connection) -> None:
     """Create the full schema from the migration file and seed test data."""
     db.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     db.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
+    db.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
     db.executescript(
         """
         INSERT OR IGNORE INTO seasons (season_id, name, year) VALUES ('2025', 'Spring 2025', 2025);

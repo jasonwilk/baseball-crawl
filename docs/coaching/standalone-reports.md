@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-06-29 | Source: E-245 (pitch-charted coverage badge and zero-charted notes), E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative), E-239 (removed dashboard comparison table and references; standalone reports is now the primary coaching surface), E-243 (reframed Predicted Starter as Most Likely Arms ranked list)*
+*Last updated: 2026-07-16 | Source: E-245 (pitch-charted coverage badge and zero-charted notes), E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative), E-239 (removed dashboard comparison table and references; standalone reports is now the primary coaching surface), E-243 (reframed Predicted Starter as Most Likely Arms ranked list), E-264 (ERA game-length basis label on the Pitching table)*
 
 ---
 
@@ -32,7 +32,7 @@ The report shows pitching and batting stats in a self-contained format. You'll s
 
 **Pitching table** — Stats for each pitcher who has appeared this season (sorted starter-first by appearance order):
 - **GS / GR** — games started / games in relief: how this pitcher has been used this season
-- ERA, K/9, BB/9, K/BB — standard pitching numbers
+- **ERA**, K/9, BB/9, K/BB — standard pitching numbers. The ERA column header names the game length it's computed on (e.g., "ERA (7-inn)"), since GameChanger games aren't always 9 innings. An asterisk (e.g., "ERA (7-inn)*") with a footnote below the table means GameChanger didn't provide this team's game length and a 7-inning basis was assumed.
 - **FPS%** — first-pitch strike percentage: how often this pitcher is ahead in the count from pitch one. A **(N charted games)** count beside this stat shows how many of the team's games have pitch-by-pitch records.
 - **P/BF** — pitches per batter faced: a quick read on his efficiency and how long he'll last. Shows the same **(N charted games)** count as FPS%.
 - **Rest** — how many days since this pitcher last appeared (e.g., "2d"). In the web view, this shows as days elapsed. In a printed or saved PDF, it shows the actual date of the last outing (e.g., "Mar 28") so the report stays readable days after you generate it.

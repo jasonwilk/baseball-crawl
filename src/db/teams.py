@@ -56,6 +56,7 @@ def ensure_team_row(
     gc_uuid: str | None = None,
     public_id: str | None = None,
     season_year: int | None = None,
+    innings_per_game: int | None = None,
     source: str | None = None,
 ) -> int:
     """Find or create a team row using a deterministic dedup cascade.
@@ -71,6 +72,9 @@ def ensure_team_row(
         gc_uuid: GC UUID from authenticated API.
         public_id: GC public URL slug.
         season_year: Season year integer.
+        innings_per_game: GC's per-team-season regulation innings/game (the ERA
+            basis, E-264). NULL-safe backfill only -- fills an existing NULL,
+            never clobbers a stored integer.
         source: Pipeline source label (for logging/debugging).
 
     Returns:
@@ -82,6 +86,7 @@ def ensure_team_row(
         gc_uuid=gc_uuid,
         public_id=public_id,
         season_year=season_year,
+        innings_per_game=innings_per_game,
         source=source,
     ).team_id
 
@@ -93,6 +98,7 @@ def ensure_team_row_with_provenance(
     gc_uuid: str | None = None,
     public_id: str | None = None,
     season_year: int | None = None,
+    innings_per_game: int | None = None,
     source: str | None = None,
     _insert_retry: bool = False,
 ) -> EnsureTeamResult:
@@ -119,11 +125,12 @@ def ensure_team_row_with_provenance(
     # Step 1: gc_uuid match
     if gc_uuid is not None:
         row = db.execute(
-            "SELECT id, name, public_id, season_year FROM teams WHERE gc_uuid = ?",
+            "SELECT id, name, public_id, season_year, innings_per_game "
+            "FROM teams WHERE gc_uuid = ?",
             (gc_uuid,),
         ).fetchone()
         if row:
-            existing_id, existing_name, existing_public_id, existing_sy = row
+            existing_id, existing_name, existing_public_id, existing_sy, existing_ipg = row
             logger.debug(
                 "ensure_team_row: gc_uuid match id=%d gc_uuid=%r",
                 existing_id, gc_uuid,
@@ -133,16 +140,18 @@ def ensure_team_row_with_provenance(
             )
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
+            _backfill_innings_per_game(db, existing_id, existing_ipg, innings_per_game)
             return EnsureTeamResult(existing_id, MATCH_ANCHOR, False)
 
     # Step 2: public_id match (no gc_uuid IS NULL filter)
     if public_id is not None:
         row = db.execute(
-            "SELECT id, name, gc_uuid, season_year FROM teams WHERE public_id = ?",
+            "SELECT id, name, gc_uuid, season_year, innings_per_game "
+            "FROM teams WHERE public_id = ?",
             (public_id,),
         ).fetchone()
         if row:
-            existing_id, existing_name, existing_gc_uuid, existing_sy = row
+            existing_id, existing_name, existing_gc_uuid, existing_sy, existing_ipg = row
             logger.debug(
                 "ensure_team_row: public_id match id=%d public_id=%r",
                 existing_id, public_id,
@@ -152,12 +161,13 @@ def ensure_team_row_with_provenance(
             )
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
+            _backfill_innings_per_game(db, existing_id, existing_ipg, innings_per_game)
             return EnsureTeamResult(existing_id, MATCH_ANCHOR, False)
 
     # Step 3: name + season_year + tracked match
     if name is not None:
         row = db.execute(
-            "SELECT id, name, season_year FROM teams "
+            "SELECT id, name, season_year, innings_per_game FROM teams "
             "WHERE name = ? COLLATE NOCASE "
             "AND COALESCE(season_year, -1) = COALESCE(?, -1) "
             "AND membership_type = 'tracked' "
@@ -165,7 +175,7 @@ def ensure_team_row_with_provenance(
             (name, season_year),
         ).fetchone()
         if row:
-            existing_id, existing_name, existing_sy = row
+            existing_id, existing_name, existing_sy, existing_ipg = row
             logger.debug(
                 "ensure_team_row: name+season_year match id=%d name=%r",
                 existing_id, name,
@@ -173,6 +183,7 @@ def ensure_team_row_with_provenance(
             # Conservative back-fill: NO gc_uuid/public_id on name matches
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
+            _backfill_innings_per_game(db, existing_id, existing_ipg, innings_per_game)
             return EnsureTeamResult(existing_id, MATCH_NAME_ONLY, False)
 
     # Self-tracking guard: don't create a tracked duplicate of a member team
@@ -221,8 +232,9 @@ def ensure_team_row_with_provenance(
     try:
         cursor = db.execute(
             "INSERT INTO teams (name, gc_uuid, public_id, season_year, "
-            "membership_type, source, is_active) VALUES (?, ?, ?, ?, 'tracked', ?, 0)",
-            (insert_name, gc_uuid, public_id, season_year, insert_source),
+            "innings_per_game, membership_type, source, is_active) "
+            "VALUES (?, ?, ?, ?, ?, 'tracked', ?, 0)",
+            (insert_name, gc_uuid, public_id, season_year, innings_per_game, insert_source),
         )
     except sqlite3.IntegrityError:
         # Cross-process INSERT race (E-235-04): a concurrent process committed a
@@ -241,7 +253,8 @@ def ensure_team_row_with_provenance(
             )
             return ensure_team_row_with_provenance(
                 db, name=name, gc_uuid=gc_uuid, public_id=public_id,
-                season_year=season_year, source=source, _insert_retry=True,
+                season_year=season_year, innings_per_game=innings_per_game,
+                source=source, _insert_retry=True,
             )
         # Already retried once and STILL colliding without a match (the racing
         # row vanished then reappeared -- pathological). Re-raise rather than
@@ -338,4 +351,30 @@ def _backfill_season_year(
     logger.debug(
         "ensure_team_row: back-filled season_year=%d on team id=%d",
         new_sy, team_id,
+    )
+
+
+def _backfill_innings_per_game(
+    db: sqlite3.Connection,
+    team_id: int,
+    existing_ipg: int | None,
+    new_ipg: int | None,
+) -> None:
+    """Write innings_per_game only when the existing row has NULL (E-264 TN-4).
+
+    Mirrors :func:`_backfill_season_year`: a fetched non-NULL value fills an
+    existing NULL, but a later None (a failed re-fetch) MUST NOT clobber a
+    stored integer -- the last known good basis is kept. NULL is load-bearing
+    provenance for the display layer's "(assumed)" flag, so the fill is
+    strictly NULL->value.
+    """
+    if new_ipg is None or existing_ipg is not None:
+        return
+    db.execute(
+        "UPDATE teams SET innings_per_game = ? WHERE id = ?",
+        (new_ipg, team_id),
+    )
+    logger.debug(
+        "ensure_team_row: back-filled innings_per_game=%d on team id=%d",
+        new_ipg, team_id,
     )

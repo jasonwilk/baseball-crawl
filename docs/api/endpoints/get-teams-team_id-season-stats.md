@@ -209,7 +209,7 @@ These fields in `stats.defense` reflect pitching performance.
 | `WHIP` | float | Walks plus hits per inning pitched |
 | `FIP` | float | Fielding independent pitching |
 | `BAA` | float | Batting average against |
-| `K/G` | float | Strikeouts per 9 innings |
+| `K/G` | float | Strikeouts per game-length: `innings_per_game × SO / IP` (NOT fixed at 9 -- `innings_per_game` is the per-team-season basis from `GET /teams/{team_id}`) |
 | `K/BB` | float | Strikeout to walk ratio |
 | `K/BF` | float | Strikeouts per batter faced |
 | `BB/INN` | float | Walks per inning |

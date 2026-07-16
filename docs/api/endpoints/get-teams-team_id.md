@@ -88,7 +88,7 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 | `scorekeeping_access_level` | string | No | Who can keep score. |
 | `streaming_access_level` | string | No | Who can access video. |
 | `paid_access_level` | string or null | Yes | `"premium"` or null. |
-| `settings` | object | No | Scorekeeping settings. Contains `scorekeeping.bats.innings_per_game` (int: 7 for travel ball, likely 9 for HS varsity). |
+| `settings` | object | No | Scorekeeping settings. Contains `scorekeeping.bats.innings_per_game` (int) -- the authoritative per-team-season ERA and K-per-game basis (see Key Fields below). |
 | `organizations` | array | No | Organizations this team belongs to. May be empty for opponents. |
 | `ngb` | **JSON-encoded string** | No | NGB affiliation. **Requires double-parse.** `json.loads(team["ngb"])` |
 | `team_avatar_image` | null | Yes | Avatar URL. May be null. |
@@ -101,7 +101,7 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 
 ## Key Fields for Coaching Analytics
 
-- **`settings.scorekeeping.bats.innings_per_game`** (int) -- needed for stat normalization (K/9, BB/9). Travel ball: 7. High school varsity: likely 9.
+- **`settings.scorekeeping.bats.innings_per_game`** (int) -- the game-length GameChanger uses as the basis for ERA (`innings_per_game × ER / IP`) and K/G (`innings_per_game × SO / IP`). It is a **per-team-season configured integer** (observed 6 or 7), read directly from GC -- **NOT** an age/league mapping. Back-solved exactly across owned teams and every pitcher: two 12U teams differ (one 6, one 7) and a 10U is set to 7, so any hardcoded age×league table would be actively wrong -- always read the per-team field. Opponent-capable when you have the `gc_uuid` (this endpoint); it is NOT on the public team profile. Fallback when absent: 7 (the modal HS/Legion/13U+/most-youth value). Note that a per-9-innings rate such as K/9 or BB/9 is **our own derived stat**, not a GameChanger field -- GC's game-length rate is K/G (see the season-stats and player-stats endpoint docs).
 - **`competition_level`** (string) -- useful for tier filtering between travel/recreational/high school.
 - **`record`** object -- cumulative win/loss/tie record. Always present.
 - **`public_id`** -- use this with the `/public/teams/{public_id}` endpoints and as input to `GET /teams/{team_id}/public-team-profile-id`.
