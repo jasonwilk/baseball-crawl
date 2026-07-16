@@ -1,86 +1,86 @@
 {
   "metadata": {
-    "git_sha": "12b404b55e1988b4213b5f261c01710a795bb12d",
-    "db_game_count": 405,
-    "snapshot_date": "2026-07-13"
+    "git_sha": "ca5bd27dec9ffa9401ed889f71cd6a4e4c8168b7",
+    "db_game_count": 428,
+    "snapshot_date": "2026-07-16"
   },
   "pitching": {
     "BF": {
       "exact_pct": 98.3,
-      "abs_delta": 121,
-      "fidelity_units": 1903,
-      "exact_units": 1870,
+      "abs_delta": 101,
+      "fidelity_units": 2010,
+      "exact_units": 1975,
       "is_residual": false
     },
     "SO": {
-      "exact_pct": 99.5,
-      "abs_delta": 23,
-      "fidelity_units": 1903,
-      "exact_units": 1894,
+      "exact_pct": 99.6,
+      "abs_delta": 20,
+      "fidelity_units": 2010,
+      "exact_units": 2002,
       "is_residual": false
     },
     "BB": {
       "exact_pct": 98.7,
-      "abs_delta": 33,
-      "fidelity_units": 1903,
-      "exact_units": 1879,
+      "abs_delta": 32,
+      "fidelity_units": 2010,
+      "exact_units": 1983,
       "is_residual": false
     },
     "H": {
       "exact_pct": 99.2,
-      "abs_delta": 32,
-      "fidelity_units": 1903,
-      "exact_units": 1887,
+      "abs_delta": 27,
+      "fidelity_units": 2010,
+      "exact_units": 1993,
       "is_residual": false
     },
     "HBP": {
-      "exact_pct": 99.9,
-      "abs_delta": 3,
-      "fidelity_units": 1903,
-      "exact_units": 1902,
+      "exact_pct": 100.0,
+      "abs_delta": 0,
+      "fidelity_units": 2010,
+      "exact_units": 2010,
       "is_residual": false
     }
   },
   "batting": {
     "AB": {
       "exact_pct": 99.8,
-      "abs_delta": 51,
-      "fidelity_units": 8114,
-      "exact_units": 8096,
+      "abs_delta": 52,
+      "fidelity_units": 8563,
+      "exact_units": 8544,
       "is_residual": true
     },
     "H": {
       "exact_pct": 99.9,
       "abs_delta": 14,
-      "fidelity_units": 8114,
-      "exact_units": 8103,
+      "fidelity_units": 8563,
+      "exact_units": 8552,
       "is_residual": true
     },
     "BB": {
       "exact_pct": 100.0,
       "abs_delta": 6,
-      "fidelity_units": 8114,
-      "exact_units": 8111,
+      "fidelity_units": 8563,
+      "exact_units": 8560,
       "is_residual": false
     },
     "SO": {
       "exact_pct": 100.0,
       "abs_delta": 11,
-      "fidelity_units": 8114,
-      "exact_units": 8110,
+      "fidelity_units": 8563,
+      "exact_units": 8559,
       "is_residual": false
     },
     "HBP": {
       "exact_pct": 100.0,
       "abs_delta": 1,
-      "fidelity_units": 8114,
-      "exact_units": 8113,
+      "fidelity_units": 8563,
+      "exact_units": 8562,
       "is_residual": false
     }
   },
   "axis_counters": {
     "dropped_pitch_events": 0,
-    "no_plays_units": 355,
+    "no_plays_units": 381,
     "self_games": 0
   }
 }
