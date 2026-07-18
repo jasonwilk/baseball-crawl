@@ -31,11 +31,13 @@ After E-263 (Deep Scout v1) ships the opponent-only deterministic sections and t
 - Does the full trended freebie ledger (self-scout, design-doc §3 MUST #3) belong here or in a separate staff-review report surface?
 
 ## Notes
+- **Adversarial-review design input (2026-07-18):** two adversarial reviews of the Deep Scout design (Codex gpt-5.6-sol + a Fable model, persisted PII-free at `.project/research/2026-07-18-deep-scout-adversarial-reviews.md`) produced substantial eval-loop / self-scout-authorization / deterministic-params design material that is explicitly OUT of E-263 v1 (Thread B/C). Not built anywhere yet; captured here (self-scout paradigm) and to inform a future prediction-eval-loop epic when either promotes.
+- **Tier-3 live-validation evidence strengthening this idea (2026-07-18 Legion runs, logged from the E-263 scope-refinement pass):** two matchup-dependent moments proved DECISIVE in the live runs — (1) the first-inning-walk-vs-high-steal-team **self-scout callout** (our probable starter's first-inning control line against a running opponent) and (2) the **TOOTBLAN "don't-chase" rule-out** (declining to chase a runner who tends to run himself into outs). Both require the `--vs`/`--date` pairing (they are meaningless as pure-opponent facts), so they are concrete evidence that the pairing sections carry the highest live leverage. NOT built in E-263 v1 (opponent-only, operator-locked); captured here so the paradigm's case is grounded in real games when this promotes.
 - Companion: `.project/research/deep-scout-design-2026-07-12.md` §5 (matchup parameterization) + §8 (the self-scout first-inning callout was the literal live-validation secondary lesson).
 - E-263 deferred these WITH the `--vs` context: the scoped self-scout first-inning callout (TN-6) and the steal-light-vs-our-runners pairing overlay (TN-10).
 - Related: IDEA-131 (signal catalog — several catalog signals are marked `pairing` in the Matchup column and need this paradigm to light up).
 
 ---
 Created: 2026-07-13
-Last reviewed: 2026-07-13
+Last reviewed: 2026-07-18
 Review by: 2026-10-11

@@ -21,15 +21,15 @@ This file is the authoritative reference for pitching rest and availability rule
 
 ## Structural Note
 
-NSAA and Legion are both pitch-count-based (same data model: pitch count -> rest days). Adding Legion support to the engine is a **data change** -- different thresholds, same structure. USSSA and Perfect Game use fundamentally different units (innings, outs) that would require **structural engine extension** (a code change, not just new thresholds).
+NSAA (Varsity and Sub-Varsity) and Legion are all pitch-count-based (same data model: pitch count -> rest days) and are **implemented** in the engine as frozen `PitchCountRules` rule sets. USSSA and Perfect Game use fundamentally different units (innings, outs) that would require **structural engine extension** (a code change, not just new thresholds) and are **not yet implemented**.
 
 ---
 
 ## NSAA (Nebraska High School)
 
-**Applicability**: All Nebraska HS teams -- freshman, reserve, jv, varsity (`programs.program_type = 'hs'`).
+**Applicability**: Nebraska HS varsity teams (`programs.program_type = 'hs'`, `classification = 'varsity'` or unset). NSAA **Sub-Varsity** (freshman, reserve, jv) is a distinct, stricter rule set -- see the Sub-Varsity subsection below.
 
-**Status**: Implemented in engine (`src/reports/starter_prediction.py`).
+**Status**: Implemented in engine (`NSAA_PRE_APRIL` / `NSAA_POST_APRIL` in `src/reports/starter_prediction.py`, selected via `get_rules_for_league('nsaa_varsity')`).
 
 ### Rest Requirement Tables
 
@@ -64,11 +64,21 @@ NSAA and Legion are both pitch-count-based (same data model: pitch count -> rest
 
 ---
 
+## NSAA Sub-Varsity (Freshman, Reserve, JV)
+
+**Applicability**: Nebraska HS sub-varsity teams (`programs.program_type = 'hs'`, `classification` in `freshman` / `reserve` / `jv`). Stricter than Varsity.
+
+**Status**: Implemented in engine (`NSAA_SUBVARSITY` / `get_subvarsity_rules()` in `src/reports/starter_prediction.py`, selected via `get_rules_for_league('nsaa_subvarsity')`). It is a distinct 90-pitch, year-round rule set (no post-April 1 bump to 110). The authoritative per-tier rest curve is maintained in the baseball-coach model doc (`.claude/agent-memory/baseball-coach/league-pitch-rules.md`, sourced from the 2022 NSAA Baseball Rule Book) -- reference it for the exact breakpoints, and reconcile any engine change against it.
+
+The universal NSAA constraints above (consecutive-days rule, calendar-day counting, doubleheader pitch aggregation, null pitch count) apply identically to Sub-Varsity.
+
+---
+
 ## American Legion (Senior & Junior)
 
-**Applicability**: Legion teams (`programs.program_type = 'legion'`).
+**Applicability**: Legion teams (`programs.program_type = 'legion'`). Senior (18U) and Junior (17U) share this identical curve.
 
-**Status**: Reference data only -- not yet implemented in engine.
+**Status**: Implemented in engine (`LEGION` rule set in `src/reports/starter_prediction.py`, selected via `get_rules_for_league('legion')`).
 
 ### Rest Requirement Table
 
@@ -124,16 +134,18 @@ Max 105 pitches/day:
 
 ### Tier 1: Deterministic Lookup (Python Code)
 
-Currently NSAA only. The engine in `src/reports/starter_prediction.py` uses frozen dataclasses (`RestTier`, `PitchCountRules`) with `NSAA_PRE_APRIL` and `NSAA_POST_APRIL` constants. The `_is_nsaa_excluded()` function checks rest-tier compliance, consecutive-days violations, and null pitch counts, returning `(excluded, reason)` for each pitcher.
+The engine in `src/reports/starter_prediction.py` uses frozen dataclasses (`RestTier`, `PitchCountRules`) and ships **four** pitch-count rule sets: NSAA Varsity (`NSAA_PRE_APRIL` / `NSAA_POST_APRIL`), NSAA Sub-Varsity (`NSAA_SUBVARSITY`), Legion (`LEGION`), and the youth/travel Pitch Smart 15-18 estimate (`PITCH_SMART_15_18`). The table-parameterized `_is_excluded(profile, reference_date, rules)` function checks rest-tier compliance, consecutive-days violations, and null pitch counts against **any** rule set, returning `(excluded, reason)` for each pitcher. `get_rules_for_league(league, reference_date)` selects the rule set and `detect_league_level(...)` resolves the league. (`_is_nsaa_excluded()` survives only as a thin NSAA convenience wrapper delegating to `_is_excluded`.)
 
-Adding Legion would follow the same pattern (pitch-count-based, different threshold constants). USSSA and Perfect Game would need new dataclass types for innings-based and outs-based rules.
+NSAA Sub-Varsity and Legion are already implemented via this pattern (pitch-count-based, distinct threshold constants). USSSA and Perfect Game remain **unimplemented** -- they would need new dataclass types for innings-based and outs-based rules; `get_rules_for_league()` returns `None` for `usssa` / `perfect_game` / `unknown` and the card is suppressed with softened copy.
+
+**Forward direction (E-263)**: league/level selection is moving from INFERENCE (`detect_league_level`, which for NSAA disambiguates Varsity-vs-Sub-Varsity partly from team-name keywords) to an OPERATOR-PICKED level at report-submission time (E-263-02c). The rule tables above are unchanged by that work -- only how the engine chooses among them changes.
 
 **Youth/travel fallback (E-243-02)**: A team whose competition level resolves to `youth_travel` (e.g. a `\d+U` age-bracket name with no recognized NGB) has no binding league rule unit, so `get_rules_for_league()` routes it to the USA Baseball Pitch Smart 15-18 curve (the `PITCH_SMART_15_18` constant: max 105, tiers 30/45/60/80/105 -- a *distinct* constant from Legion on purpose, even though the tiers match today, so a future Legion-only change cannot silently move the estimate) instead of suppressing the card. The prediction is flagged `is_estimate=True` and the report banners it as a directional, non-binding read. This is consistent with the baseball-coach model doc's "soft prior for unknown leagues" guidance (`.claude/agent-memory/baseball-coach/league-pitch-rules.md`). Truly unsupported levels (`usssa`, `perfect_game`, `unknown`) still return `None` and suppress with softened copy -- so the `usssa` program_type and the age-pattern `youth_travel` classification are NOT the same path.
 
 ### Tier 2: LLM Prompt Injection (Agent Reference)
 
-The LLM Tier 2 prompt (`src/reports/llm_analysis.py`) injects the active NSAA rest table based on reference_date so the LLM can flag compliance concerns in its narrative. For non-NSAA teams, agents should inject the correct league's rest table based on team classification. This rule file is agent reference data -- it is not read at runtime by the application.
+The LLM Tier 2 prompt (`src/reports/llm_analysis.py`) injects the active league's rest table (selected by league + reference_date, as resolved in Tier 1) so the LLM can flag compliance concerns in its narrative. This rule file is agent reference data -- it is not read at runtime by the application.
 
 ### Display
 
-Show NSAA-required rest alongside actual rest in the bullpen/availability UI. The exclusion reason string (e.g., "0 days rest -- needs 2 (threw 55 pitches on Apr 5)") is passed through from the engine to the display layer.
+Show the league-required rest alongside actual rest in the bullpen/availability UI. The exclusion reason string (e.g., "0 days rest -- needs 2 (threw 55 pitches on Apr 5)") is passed through from the engine to the display layer.

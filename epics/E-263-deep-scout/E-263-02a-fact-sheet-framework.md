@@ -18,7 +18,7 @@ CR + SE found a blocking gap in the original single-foundation design: "the asse
 - [ ] **AC-3**: Four stub group modules exist under `src/reports/deep_scout/` (pitching, running/battery, hitters-defense, blueprint), each an empty builder function with the agreed signature, and a pre-wired assembler calls all four and composes their output into the fact sheet (per Technical Notes TN-9). A test asserts the assembler invokes all four group builders.
 - [ ] **AC-4**: The template include mechanism is introduced into `scouting_report.html` (the SOLE edit to that file, per Technical Notes TN-9) with the four section include-slots in the E-263-01 placement order, and four stub partials are created under `src/api/templates/reports/deep_scout/` (or `{% include ... ignore missing %}` is used). The four partial filenames are pinned here (matching the E-263-01 spec).
 - [ ] **AC-5**: The existing report renders UNCHANGED — generating a report with only the skeleton present (no section facts yet) does not raise `TemplateNotFound` and produces the same output as before plus empty section slots. A test covers this (the existing report-render path is green).
-- [ ] **AC-6**: The fact-sheet builder is invoked from the pipeline seam (`_query_render_save` in `generator.py`, per Technical Notes TN-9), its output placed into the report `data` dict. v1 adds NO new command flags (opponent-only per Technical Notes TN-10).
+- [ ] **AC-6**: The fact-sheet builder is invoked from the pipeline seam (`_query_render_save` in `generator.py`, per Technical Notes TN-9), its output placed into the report `data` dict. v1 adds NO `--vs`/`--date` matchup flag (opponent-only per Technical Notes TN-10); the one new command input v1 DOES add is the operator-selected `--level` eligibility-gate flag (+ admin dropdown), owned by E-263-02c per Technical Notes TN-11 — out of scope for this framework story.
 - [ ] **AC-7**: A shared twin-game test fixture/helper (conftest-level) is landed here supporting BOTH the dedup and role-filter tests per Technical Notes TN-3: it seeds ONE game under two `perspective_team_id`s (the double-count case) AND carries BOTH teams' rows across `plays`/`play_events` (both `batting_team_id` directions), `player_game_batting` (both `team_id` directions), `player_game_pitching`, and `spray_charts` with BOTH `chart_type='offensive'` and `'defensive'` rows — including an opponent error on the OFFENSIVE chart stored under the scouted team's `team_id` (the wrong-team fixture E-263-06 AC-3 needs). Every builder story's no-double-count + role-filter test reuses it rather than hand-rolling divergent fixtures.
 
 ## Technical Approach
@@ -45,7 +45,7 @@ software-engineer
 ## Handoff Context
 - **Produces for E-263-02b**: the fact-sheet schema + floor helper + assembler; 02b adds the SIG-001 fact.
 - **Produces for E-263-04/05/06/07**: the schema, floor helper, shared trust-surface partial, the four pre-created stub group modules + stub partials each builder fills, and the shared twin-game fixture.
-- **Produces for E-263-08**: the schema module path (for the code-canonical pointer) and the fact that v1 adds no new command flags.
+- **Produces for E-263-08**: the schema module path (for the code-canonical pointer). (v1's one new command input — the operator-selected `--level` eligibility-gate flag + admin dropdown — is owned by E-263-02c per Technical Notes TN-11, not this story; there is no `--vs`/`--date` matchup flag.)
 
 ## Definition of Done
 - [ ] All acceptance criteria pass

@@ -127,6 +127,22 @@ Even true committee teams are narrowed by:
 
 Minimum output: "X arms are unavailable by rest. Of Y eligible arms, [Name] has the longer rest gap and better K/BB [N IP]. Confidence: MEDIUM."
 
+## Live-Run Refinements — 2026-07-18 (least-recently-started mis-ranked in BOTH runs)
+
+The two 2026-07-18 Legion scouting runs (Norfolk, Columbus) each exposed a case where pure "least-recently-started" (Algorithm step 4) picked the wrong arm. Two distinct refinements:
+
+### (a) Layoff ambiguity — "hasn't STARTED in N days" ≠ "hasn't APPEARED in N days"
+The ranking signal must distinguish days-since-last-**start** from days-since-last-**appearance**. They diverge for swing arms and for rested aces:
+- **Norfolk failure:** demoted swing arms (only 2 starts all season, last start weeks ago) floated to #1 on the naive least-recently-started metric — their long start-gap looked like "next in the rotation" when they simply aren't starters anymore.
+- **Columbus failure:** an 11-day team schedule gap made the WHOLE rotation look equally stale, so days-since-start couldn't separate anyone. The naive metric would pick the longest-idle arm (23 days) over the actual answer — the *held ace* who was deliberately rested through an opener/bulk game the day before.
+- **Domain rule:** an arm that has been idle (NO appearance) for a long stretch is a **WILDCARD, not "due."** A long no-appearance gap is weak evidence of an imminent start (could be injury, could be buried on the depth chart, could be a held ace) — it should NOT auto-elevate to #1. Weight recent-appearance-but-not-recent-start (a held/managed ace) at least as highly as a total-layoff arm. Consider capping or discounting the least-recently-started boost once the idle gap exceeds normal rotation spacing.
+
+### (b) Opener/bulk usage — appearance_order=1 mislabels the "opener"
+Columbus opened one game with a 28-pitch, 0-out "opener" followed by a bulk arm. `appearance_order=1` tags the OPENER as "the starter," but the hitters mostly faced the bulk guy.
+- **Domain rule:** GS-by-`appearance_order=1` mislabels openers as starters. Detect the opener pattern — `appearance_order=1` with very low pitch count AND ~0 outs recorded (e.g., ≤ ~35 pitches / < 1 IP) followed immediately by a higher-workload arm — and treat the BULK arm as the effective starter for both role classification (GS share) and the scouting narrative. The coach cares who they'll actually face for the bulk of the game, not the ceremonial first-batter opener. Flag as a distinct usage pattern ("opener + bulk") in the report rather than silently naming the opener.
+
+Both refinements argue the same thing: raw `appearance_order=1` counting and raw least-recently-started are too naive for the real usage patterns Legion teams show. Keep the deterministic engine, but sharpen these two inputs.
+
 ## Report Output Shape
 
 **Validated shape: ranked top 2–3 most likely arms** (not a single predicted starter).
@@ -162,6 +178,8 @@ Design rules:
 - Sample size badge on all rate stats: "K/BB 2.8 (37.2 IP)"
 - Unavailability section always present
 - No narrative hedging, no conditional prose, 10-second scan target
+
+**Deep Scout Game-Plan rendering (E-263 v2, 2026-07-18):** The ~40% top-2 accuracy above is the reason the Deep Scout Game Plan does NOT render one bullet per committee arm (the coach would key on the wrong bullet ~60% of the time). Instead: robust-across-arms / the-one-fork+live-cue / unknown-arm-fallback, as ≤3 bullets. Full definition in [[deep-scout-signal-catalog]] §"E-263 v2 methodology corrections" (4).
 
 ## Backtesting Scoring
 
