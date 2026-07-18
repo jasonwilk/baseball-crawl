@@ -1,0 +1,50 @@
+# E-266-06: Derive the six new per-outing columns + remove the green highlight
+
+## Epic
+[E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
+
+## Status
+`TODO`
+
+## Description
+After this story is complete, `src/reports/pitcher_outings.py` produces six new per-outing fields — **XBH** (plays-derived), **Outcome** (team W/L/T), **Score**, **S/R**, **#P**, **S%** (all boxscore-derived) — on the `Outing` dataclass, and the green "strong-outing" derivation (`_is_strong_outing`, the `_GREEN_*` thresholds, and the `is_strong` field) is fully removed. This is the data-layer half of the expand-in-place pivot; the template (E-266-01) consumes the new `Outing` shape. No migration, no API re-fetch — every new column is query-time-derived from tables already loaded (`player_game_pitching`, `plays`, `games`).
+
+## Context
+The E-266 pivot moves the outing log into the Pitching table and enriches the per-outing row (epic Background, TN-1/TN-2). Five of the six new columns are boxscore-derived; XBH is plays-derived because `player_game_pitching` has no 2B/3B/HR-allowed columns (schema line 214 excludes HR — the same reason E-265 already derives HR from plays), so XBH is charted-games-only and carries the plays caveat. software-engineer confirmed the derivation feasibility for all six and the clean green-removal scope (epic TN-2/TN-3). This story owns the module + its tests + the one additive shared-query touch; the template-side consumption and the template-side green removal live in E-266-01.
+
+## Acceptance Criteria
+- [ ] **AC-1** (#P): each `Outing` carries a pitch-count field sourced from the boxscore (`player_game_pitching.pitches`, already returned by `get_pitching_history`). It renders the integer count, or **em-dash when `pitches` is FALSY (0 or NULL)** — the loader coerces an absent pitch count to **0, never NULL** (`game_loader.py` extras loop, `.get(key, 0)`), and a pitcher who recorded outs cannot legitimately have thrown 0 pitches, so a stored 0 is "not reported" and rendering "0" would be a lie. Collapse 0 and NULL with one falsy check (`if not pitches`) — honest for new data (0) and defensive against any stray legacy NULL. Per epic TN-2 (SE contract, supersedes SE-N1).
+- [ ] **AC-2** (S%): each `Outing` carries a per-outing strike-percentage field = `total_strikes / pitches`, sourced from the boxscore. Because `get_pitching_history` (`src/api/db.py`) does NOT currently select `total_strikes`, this story adds `pgp.total_strikes` to that SELECT — an ADDITIVE change (existing callers read by key, so `build_pitcher_profiles` / the Pitching table are unaffected). **The denominator governs availability:** render em-dash when `pitches` is FALSY (0 or NULL); otherwise the percentage — INCLUDING a legitimate **0%** when `total_strikes == 0` with `pitches > 0` (a real all-balls wildness signal — do NOT em-dash it). Reuse the module's `_rate(total_strikes, pitches)` helper AS-IS: it returns `None` (→ em-dash) on a falsy denominator and `0.0` (→ 0%) on a zero numerator — no numerator special-case. (SE contract supersedes last round's SE-N1 NULL-numerator guard: #P and `total_strikes` are a paired GC extras emission, so a reported `pitches > 0` implies real `total_strikes`; and em-dashing a true 0% would hide a wildness signal.) Per epic TN-2.
+- [ ] **AC-3** (S/R): each `Outing` carries a start/relief field derived from `appearance_order` — `1 → "S"`, `≥2 → "R"`, and **`None → "—"` (unknown)**. It MUST NOT default a NULL `appearance_order` to "R" (that fabricates a role the boxscore did not assert), mirroring the module's existing NULL-appearance_order-means-unknown treatment for GS. Per epic TN-2.
+- [ ] **AC-4** (Outcome + Score): each `Outing` carries a TEAM game-result field (values `"W"` / `"L"` / `"T"`, NOT the pitcher's `decision`) and a Score field (final score with the SCOUTED team's runs first, e.g. `"7-3"`), both derived from the `games` row (home/away side + `home_score`/`away_score`): scouted-home → win iff `home_score > away_score`, scouted-away → win iff `away_score > home_score`, equal scores → `"T"`, and NULL scores → `"—"` (never fabricated). Per epic TN-2. The existing per-game `games` read (`_opponent_name_by_game`) is extended (or a sibling added) to return the side + both scores keyed by `game_id`.
+- [ ] **AC-5** (XBH — plays-derived, dedup-safe): each `Outing` carries an extra-base-hits-allowed field (2B+3B+HR inclusive) derived from `plays.outcome`, computed by extending the EXISTING `_plays_by_pitcher_game` query with a second `SUM(CASE WHEN p.outcome IN (…) THEN 1 ELSE 0 END)` — so XBH inherits that query's load-bearing `perspective_team_id = scouted AND batting_team_id != scouted` dedup/role clause and cannot double-count a two-perspective game. The outcome set is 2B+3B+HR (`plays_parser._XBH_OUTCOMES = {"Double","Triple","Home Run"}`); import it rather than adding a second local mirror. Per-row consistency HR ⊆ XBH ⊆ H holds. Per epic TN-2.
+- [ ] **AC-6** (green removal — module side): `_is_strong_outing()`, the `_GREEN_*` constants, and the `is_strong` field on `Outing` (plus its compute + set sites) are DELETED from `pitcher_outings.py`. `.depth-badge-strong` / the zero-walk `0 BB` badge is a DIFFERENT concern in the template and is NOT touched by this story (epic TN-3 false-friend flag). No residual reference to `is_strong` remains in the module. Per epic TN-3.
+- [ ] **AC-7** (two-perspective dedup coverage): a test asserts the XBH derivation does not double-count when a game is loaded from two perspectives, mirroring the existing HR two-perspective dedup test (the `perspective_team_id`/`batting_team_id` clause is the guarantee). Per `.claude/rules/perspective-provenance.md` MC-3.
+- [ ] **AC-8**: `python -m pytest tests/` passes. `tests/test_pitcher_outings.py` is updated: the new fields' derivation + None-handling are asserted (Outcome tie + NULL-score, Score orientation, S/R NULL→"—", **#P falsy `pitches` (0 or NULL)→em-dash and non-zero→integer**, **S% falsy `pitches`→em-dash AND `total_strikes==0` with `pitches>0`→legitimate 0% [NOT em-dash]**, XBH count + dedup), and every `is_strong` / `_is_strong_outing` / `_GREEN_*` assertion is removed. Test-fixture helpers need additive params for the new fields (SE-N2): the pitching-line insert helper gains a `total_strikes` argument, and the games-insert helper gains `home_score`/`away_score` — the Outcome/Score/S% assertions depend on these.
+
+## Technical Approach
+Follow epic TN-2 (software-engineer feasibility findings) and TN-3 (green-removal scope). Add the six fields to the `Outing` dataclass and derive them: #P/S% from the boxscore row (S% needs the additive `total_strikes` SELECT in `src/api/db.py::get_pitching_history`), S/R from the existing `appearance_order`, Outcome/Score from the `games` read, and XBH from the extended `_plays_by_pitcher_game` plays aggregation (inheriting its perspective/role dedup clause). Remove the green derivation. The precise field names, helper reuse, and query shapes are the implementer's choice within these constraints; None-handling everywhere follows the module's established "never fabricate, never divide-by-zero" convention. This story does NOT touch the template — E-266-01 consumes the new `Outing` shape and removes the template-side green.
+
+## Dependencies
+- **Blocked by**: None
+- **Blocks**: E-266-01 (the template renders the new `Outing` fields and removes the template-side green)
+
+## Files to Create or Modify
+- `src/reports/pitcher_outings.py` (modify — six new `Outing` fields + their derivation; delete the green derivation)
+- `src/api/db.py` (modify — add `total_strikes` to the `get_pitching_history` SELECT; additive)
+- `tests/test_pitcher_outings.py` (modify — assert the new derivations + None-handling + XBH dedup; remove all green assertions)
+
+## Agent Hint
+software-engineer
+
+## Handoff Context
+- **Produces for E-266-01**: the enriched `Outing` dataclass (six new fields, `is_strong` removed) the template interleaves into the Pitching table.
+
+## Definition of Done
+- [ ] All acceptance criteria pass
+- [ ] Tests written and passing
+- [ ] Code follows project style (see CLAUDE.md)
+- [ ] No regressions in existing tests
+
+## Notes
+The `total_strikes` SELECT addition touches a protected-core shared query (`get_pitching_history`) — it is additive (read-by-key callers unaffected), but call it out at review. The XBH dedup guarantee is the `perspective_team_id = scouted AND batting_team_id != scouted` clause already on `_plays_by_pitcher_game`; extending that query (not writing a new one) is what preserves it. Green removal has one false friend: `.depth-badge-strong` is the `0 BB` command badge, unrelated to the green highlight — but it lives in the template, so it is out of this story's scope entirely (E-266-01 must also preserve it). **#P/S% honesty (SE contract):** `pitches` (the denominator/count) governs both — falsy `pitches` (0 or NULL) → em-dash; else integer #P and real % (incl. a legit 0%) for S%; no 0-vs-NULL branch, no numerator special-case (`_rate` already implements the S% half). Review check (SE): confirm the main Pitching-table Strike% uses the same denominator-only guard, so the per-outing S% and the table's Strike% never disagree on a 0-strike edge.
