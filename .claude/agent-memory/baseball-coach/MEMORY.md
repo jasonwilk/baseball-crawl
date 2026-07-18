@@ -18,6 +18,10 @@ Lincoln Standing Bear High School baseball program:
 - [E-240 morning reports discovery (2026-06-17)](e240_morning_reports_discovery.md) -- Expiry Option A recommended, three-way outcome surfacing, scheduled email UX requirements, hard gates vs soft flags, wrong-opponent mitigation
 - [E-257 reconciliation scoreboard review (2026-07-08)](e257_reconciliation_scoreboard_review.md) -- Equal-weight AB/H/BB/SO as headline fidelity metric (not BF/FPS), exempt-but-display abandoned-PA residual, FPS plausibility floor widened to 30%
 
+## Feedback
+
+- [Never invent a non-standard stat definition](feedback_standard_stat_definitions.md) -- Operator overrode my HR-excluding XBH ruling on principle (E-266, 2026-07-17); pick among standard stats freely, but don't redefine one's math for cleaner adjacency
+
 ## Key Reference Documents
 
 - **Stat glossary**: `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary mapping all GameChanger stat abbreviations to definitions (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for cases where API abbreviations differ from UI labels (e.g., K-L -> SOL, HHB -> HARD, SAC -> SHB). Use this when validating schemas or consulting on field mappings.
