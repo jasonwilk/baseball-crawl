@@ -83,7 +83,7 @@ Before writing stories for a new epic, assess whether expert consultation is nee
 | GameChanger API, data availability, auth | **api-scout** | "Does the API support this? What are the constraints?" |
 | Agent infrastructure, CLAUDE.md, rules, skills | **claude-architect** | "What is the right architecture?" |
 | Database schema, SQL migrations, ETL | **data-engineer** | "Does this schema support the queries we need?" |
-| Pure process/workflow, PM-domain work | None required | Note "No expert consultation required -- [reason]" in Background & Context. |
+| Pure process/workflow, PM-domain work | None triggered | Record the no-domain-triggered case AS the explicit per-domain verdict required by the Quality Checklist ("no expert domain triggered -- [reason]") in Technical Notes -- NOT as a soft blanket note. |
 
 Use the `Agent` tool to invoke each expert with a specific, scoped question. Incorporate answers into epic Technical Notes before writing stories. If the expert's answer changes the scope, revise before proceeding.
 
@@ -254,7 +254,8 @@ The multi-agent-patterns skill helps the PM preserve intent fidelity when packag
 ## Quality Checklist
 
 Before finalizing any epic or story:
-- [ ] Expert consultation completed (or "No consultation required" noted)
+- [ ] Consultation completeness recorded as an explicit per-domain verdict (see the consultation-completeness item below) -- not a soft blanket "no consultation required" note
+- [ ] **Consultation completeness (binding, per-domain).** For each domain the epic touches per the Consultation Triggers table above, record an explicit per-domain verdict: **CONSULTED** (the expert's input is captured in Technical Notes) or **WAIVED** (with a one-line reason). A silent omission is NOT a waiver -- a domain with no verdict FAILS this gate. In particular, GameChanger payload / data-availability ACs trigger **api-scout**. This mirrors the explicit per-trigger yes/no verdict discipline already required at epic closure (context-layer + documentation assessments). Honest ceiling (state, do not overclaim): this converts a *silent* skip into an *explicit, visible* per-domain verdict the user can see and challenge in the READY summary -- it does NOT guarantee a waiver is correct (a PM can still waive api-scout wrongly), and there is deliberately no hard "must consult" gate.
 - [ ] Every story delivers a vertical slice
 - [ ] Acceptance criteria are specific and testable
 - [ ] File dependencies listed, parallel conflicts eliminated
@@ -262,6 +263,7 @@ Before finalizing any epic or story:
 - [ ] Non-goals listed
 - [ ] Stories small enough for a single agent session
 - [ ] Numbering correct and sequential
+- [ ] **Story-file existence (binding, iterate the Stories TABLE).** Every story listed in the epic's Stories TABLE has a real story file on disk carrying acceptance criteria, a Files-to-Create-or-Modify list, and a Definition of Done. Iterate the Stories-TABLE rows -- not the stories you happen to have in context: a table row with no file, OR a stub with TBD/placeholder sections, FAILS this gate. No READY with a phantom story.
 - [ ] All template sections filled in (no TBD placeholders)
 - [ ] For evaluation epics: criteria in Technical Notes, gate story last with all research stories as deps
 - [ ] Story `Technical Approach` sections name all referenced context files by absolute path (e.g., `/.project/research/E-NNN-slug.md`, `docs/api/README.md`) rather than by vague description (e.g., "consult the design document"). Implementing agents must be able to load these as deferred context in one step.

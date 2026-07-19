@@ -4,7 +4,7 @@
 [E-269: Harden the PM READY Quality-Checklist Gate](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the PM Quality Checklist in `.claude/agents/product-manager.md` binds two new items — story-file existence per Stories-table row, and consultation completeness against the Consultation Triggers table — and the existing soft consultation line is tightened to point at the new per-domain verdict. This closes the READY-gate leak that let E-267 and E-268 reach READY malformed (a phantom story row, and a silently-skipped api-scout consult on GameChanger-payload ACs).
