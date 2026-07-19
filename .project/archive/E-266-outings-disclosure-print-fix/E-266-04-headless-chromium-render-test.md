@@ -4,7 +4,7 @@
 [E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a pytest headless-Chromium test renders the flag-ON report, loads it in Chromium via `file://`, and asserts the expand-in-place + print-collapsed behaviors that string-level gates cannot see: the outing detail row is hidden on screen until its pitcher row is activated, a click/keypress makes it visible on screen, and under print media the detail rows are `display:none`. This is the automated backstop for the browser-only rendering bug class that every string-level gate missed (epic Background smoking-gun).

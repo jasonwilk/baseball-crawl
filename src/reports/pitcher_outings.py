@@ -13,10 +13,13 @@ endpoint is 403, so nothing here re-fetches the API.
 Two data sources feed each outing:
 
 * **Boxscore-direct** (``get_pitching_history``): IP (``ip_outs``), BF, H, BB,
-  K (``so``), R, ER -- already perspective-filtered
-  (``team_id = perspective_team_id = scouted``) and scoped to completed games.
-* **Plays-derived** (this module): HR-allowed (``plays.outcome = 'Home Run'``)
-  and FPS% (``is_first_pitch_strike`` over the charted-PA denominator
+  K (``so``), R, ER, #P (``pitches``) and S% (``total_strikes / pitches``) --
+  already perspective-filtered (``team_id = perspective_team_id = scouted``)
+  and scoped to completed games.  Team Outcome (W/L/T) and Score derive from the
+  per-game ``games`` row (home/away side + scores).
+* **Plays-derived** (this module): HR-allowed (``plays.outcome = 'Home Run'``),
+  XBH-allowed (``plays.outcome IN`` :data:`plays_parser._XBH_OUTCOMES`, i.e.
+  2B+3B+HR) and FPS% (``is_first_pitch_strike`` over the charted-PA denominator
   ``pitch_count > 0``).  The plays aggregation is driven OFF the boxscore
   outings (TN-6, F12) and carries the load-bearing role clause
   ``batting_team_id != scouted`` so a game loaded from two perspectives yields
@@ -37,6 +40,7 @@ from dataclasses import dataclass
 
 from src.api.db import get_pitching_history
 from src.api.helpers import era_basis_innings
+from src.gamechanger.parsers.plays_parser import _XBH_OUTCOMES
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -47,18 +51,14 @@ from src.api.helpers import era_basis_innings
 # No grand-slam / inside-the-park variants exist in the plays vocabulary.
 _HR_OUTCOMES = frozenset({"Home Run"})
 
+# XBH-allowed outcome set (2B+3B+HR).  Imported from the parser rather than
+# mirrored locally so the two definitions cannot drift (TN-2, AC-5).  HR-inclusive
+# by construction, so ``_HR_OUTCOMES`` is a subset (HR <= XBH <= H holds per row).
+
 # Small-sample caveat: flag the four season rate stats below 15 IP (45 outs).
 _SMALL_SAMPLE_IP_OUTS = 45
 # K/BB additionally badges its underlying BB count below this walk total.
 _LOW_BB_THRESHOLD = 5
-
-# Green "strong-outing" thresholds (TN-4).  A row is GREEN iff it meets ANY ONE.
-_GREEN_COMMAND_IP_OUTS = 9        # (1) Command: BB=0 across IP >= 3 (9 outs)
-_GREEN_AGGRESSION_FPS = 0.65      # (2) Aggression: FPS% >= 65% ...
-_GREEN_AGGRESSION_CHARTED_PA = 10  #     ... across charted-PA count >= 10
-_GREEN_DOMINANCE_RATIO = 2 / 3    # (3) Dominance: per-outing K/BF >= 2/3 ...
-_GREEN_DOMINANCE_BF = 10          #     ... across BF >= 10
-_GREEN_SHUTDOWN_IP_OUTS = 12      # (4) Shutdown: R=0 across IP >= 4 (12 outs)
 
 
 def is_pitcher_outings_enabled() -> bool:
@@ -82,25 +82,50 @@ class Outing:
     """One pitching appearance (TN-2).
 
     Boxscore fields may be ``None`` when the boxscore omitted them.  Rate fields
-    (``fps_pct``, ``era``) are ``None`` when their denominator is absent/zero --
-    never 0, never a divide-by-zero (TN-6).
+    (``fps_pct``, ``strike_pct``, ``era``) are ``None`` when their denominator is
+    absent/zero -- never 0, never a divide-by-zero (TN-6).
+
+    The presentational "unknown" fields follow the module's established
+    never-fabricate convention: they store ``None`` when the underlying datum is
+    absent, and the renderer (E-266-01) displays ``None`` as an em-dash (exactly
+    as it already does for ``opponent`` and the rate fields).  Specifically:
+
+    * ``outcome`` / ``score`` -- ``None`` when either game score is NULL.
+    * ``start_relief`` -- ``None`` when ``appearance_order`` is NULL (never
+      defaulted to "R", which would fabricate a role the boxscore did not assert).
+    * ``pitches`` (#P) -- ``None`` when the boxscore pitch count is FALSY (0 or
+      NULL): the loader stores an absent count as 0, and a real outing never
+      throws 0 pitches, so a stored 0 means "not reported" and is collapsed to
+      ``None`` here rather than rendered as a false "0" (AC-1).
+
+    ``strike_pct`` (S%) is ``total_strikes / pitches``: ``None`` when ``pitches``
+    is FALSY, but a legitimate ``0.0`` when ``total_strikes == 0`` with
+    ``pitches > 0`` (a real all-balls wildness signal, NOT em-dashed).
+
+    ``xbh_allowed`` (2B+3B+HR) is plays-derived and charted-games-only, exactly
+    like ``hr_allowed`` and ``fps_pct`` (belongs under the plays-derived caveat).
     """
 
     game_id: str
     game_date: str | None
     opponent: str | None
+    outcome: str | None
+    score: str | None
+    start_relief: str | None
     ip_outs: int | None
     bf: int | None
     h: int | None
+    xbh_allowed: int
     hr_allowed: int
     bb: int | None
     so: int | None
     r: int | None
+    pitches: int | None
+    strike_pct: float | None
     fps_pct: float | None
     charted_pa: int
     era: float | None
     appearance_order: int | None
-    is_strong: bool
 
 
 @dataclass(frozen=True)
@@ -198,6 +223,53 @@ def _opponent_name_by_game(
     return {r[0]: r[1] for r in rows}
 
 
+def _game_result_by_game(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> dict[str, dict[str, str | None]]:
+    """Map each completed game_id to the SCOUTED team's Outcome and Score (AC-4).
+
+    Sibling of :func:`_opponent_name_by_game` over the same ``games`` scope.
+    Both derive from the per-game ``games`` row (home/away side + scores):
+
+    * ``outcome`` -- "W" / "L" / "T" from the SCOUTED team's perspective (NOT the
+      pitcher's ``decision``).  ``None`` when either score is NULL (never
+      fabricated).
+    * ``score`` -- final score with the scouted team's runs first (e.g. "7-3").
+      ``None`` when either score is NULL.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            g.game_id,
+            g.home_team_id,
+            g.home_score,
+            g.away_score
+        FROM games g
+        WHERE g.season_id = :season_id
+          AND g.status = 'completed'
+          AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
+        """,
+        {"team_id": team_id, "season_id": season_id},
+    ).fetchall()
+
+    result: dict[str, dict[str, str | None]] = {}
+    for game_id, home_team_id, home_score, away_score in rows:
+        if home_score is None or away_score is None:
+            result[game_id] = {"outcome": None, "score": None}
+            continue
+        scouted_is_home = home_team_id == team_id
+        scouted_runs = home_score if scouted_is_home else away_score
+        opp_runs = away_score if scouted_is_home else home_score
+        if scouted_runs > opp_runs:
+            outcome = "W"
+        elif scouted_runs < opp_runs:
+            outcome = "L"
+        else:
+            outcome = "T"
+        result[game_id] = {"outcome": outcome, "score": f"{scouted_runs}-{opp_runs}"}
+    return result
+
+
 def _plays_by_pitcher_game(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> dict[tuple[str, str], dict]:
@@ -214,10 +286,15 @@ def _plays_by_pitcher_game(
     ``pitch_count > 0`` denominator CONVENTION.
 
     Returns a dict keyed by ``(pitcher_id, game_id)`` with ``hr_allowed``,
-    ``fps_sum``, and ``charted_pa``.  The caller left-joins this onto the
-    boxscore outings.
+    ``xbh_allowed``, ``fps_sum``, and ``charted_pa``.  The caller left-joins this
+    onto the boxscore outings.
+
+    ``xbh_allowed`` (2B+3B+HR, HR-inclusive) is a second ``SUM(...)`` over the
+    same rows, so it inherits this query's perspective/role dedup clause and
+    cannot double-count a two-perspective game (AC-5, AC-7).
     """
     hr_placeholders = ",".join("?" for _ in _HR_OUTCOMES)
+    xbh_placeholders = ",".join("?" for _ in _XBH_OUTCOMES)
     rows = conn.execute(
         f"""
         SELECT
@@ -225,6 +302,8 @@ def _plays_by_pitcher_game(
             p.game_id,
             SUM(CASE WHEN p.outcome IN ({hr_placeholders}) THEN 1 ELSE 0 END)
                 AS hr_allowed,
+            SUM(CASE WHEN p.outcome IN ({xbh_placeholders}) THEN 1 ELSE 0 END)
+                AS xbh_allowed,
             SUM(p.is_first_pitch_strike) AS fps_sum,
             SUM(CASE WHEN p.pitch_count > 0 THEN 1 ELSE 0 END) AS charted_pa
         FROM plays p
@@ -236,13 +315,14 @@ def _plays_by_pitcher_game(
           AND p.pitcher_id IS NOT NULL
         GROUP BY p.pitcher_id, p.game_id
         """,
-        [*_HR_OUTCOMES, season_id, team_id, team_id],
+        [*_HR_OUTCOMES, *_XBH_OUTCOMES, season_id, team_id, team_id],
     ).fetchall()
     return {
         (r[0], r[1]): {
             "hr_allowed": r[2] or 0,
-            "fps_sum": r[3] or 0,
-            "charted_pa": r[4] or 0,
+            "xbh_allowed": r[3] or 0,
+            "fps_sum": r[4] or 0,
+            "charted_pa": r[5] or 0,
         }
         for r in rows
     }
@@ -271,48 +351,6 @@ def _per_outing_era(er: int | None, ip_outs: int | None, basis: int) -> float | 
     if not ip_outs:
         return None
     return (er or 0) * (basis * 3) / ip_outs
-
-
-def _is_strong_outing(
-    *,
-    bb: int | None,
-    ip_outs: int | None,
-    fps_pct: float | None,
-    charted_pa: int,
-    so: int | None,
-    bf: int | None,
-    r: int | None,
-) -> bool:
-    """Return True when an outing meets ANY ONE green criterion (TN-4).
-
-    Each criterion's own gate already clears the defensive sample floor
-    (``BF < 10 AND IP < 2``), so no separate floor suppression is applied -- a
-    post-floor check keyed on boxscore BF could contradict criterion (2), which
-    gates on the charted-PA count instead (AC-5, F2/F8).  A sub-floor outing
-    meets no criterion and is unflagged.
-    """
-    # (1) Command: BB = 0 across IP >= 3.
-    if bb == 0 and ip_outs is not None and ip_outs >= _GREEN_COMMAND_IP_OUTS:
-        return True
-    # (2) Aggression: FPS% >= 65% across a charted-PA count >= 10 (NOT raw BF).
-    if (
-        fps_pct is not None
-        and fps_pct >= _GREEN_AGGRESSION_FPS
-        and charted_pa >= _GREEN_AGGRESSION_CHARTED_PA
-    ):
-        return True
-    # (3) Dominance: per-outing K/BF >= 2/3 across BF >= 10.
-    if (
-        bf is not None
-        and bf >= _GREEN_DOMINANCE_BF
-        and so is not None
-        and so / bf >= _GREEN_DOMINANCE_RATIO
-    ):
-        return True
-    # (4) Shutdown: R = 0 (raw runs, NOT ER) across IP >= 4.
-    if r == 0 and ip_outs is not None and ip_outs >= _GREEN_SHUTDOWN_IP_OUTS:
-        return True
-    return False
 
 
 @dataclass
@@ -414,6 +452,7 @@ def build_pitcher_outings(
     history = get_pitching_history(team_id, season_id, db=conn)
     basis = _scouted_era_basis(conn, team_id)
     opponents = _opponent_name_by_game(conn, team_id, season_id)
+    game_results = _game_result_by_game(conn, team_id, season_id)
     plays = _plays_by_pitcher_game(conn, team_id, season_id)
 
     # Group appearances per pitcher, preserving chronological order and
@@ -446,39 +485,58 @@ def build_pitcher_outings(
             er = row["er"]
             appearance_order = row["appearance_order"]
 
+            # #P: the loader stores an absent pitch count as 0 (never NULL) and a
+            # real outing never throws 0 pitches, so a falsy value (0 or NULL) is
+            # "not reported" -- collapse it to None so the renderer em-dashes it
+            # rather than printing a false "0" (AC-1, one falsy check).
+            pitches_raw = row["pitches"]
+            pitches = pitches_raw if pitches_raw else None
+            # S%: denominator governs.  ``_rate`` returns None on a falsy
+            # denominator (falsy ``pitches`` -> em-dash) and 0.0 on a zero
+            # numerator (``total_strikes == 0`` with ``pitches > 0`` -> a
+            # legitimate 0%, NOT em-dashed) (AC-2).
+            strike_pct = _rate(row["total_strikes"], pitches_raw)
+
+            # S/R: 1 -> "S", >= 2 -> "R", NULL -> None (unknown; never defaulted
+            # to "R", mirroring the module's NULL-appearance_order treatment).
+            if appearance_order is None:
+                start_relief = None
+            elif appearance_order == 1:
+                start_relief = "S"
+            else:
+                start_relief = "R"
+
+            result_row = game_results.get(game_id, {})
+
             pkey = plays.get((pid, game_id), {})
             hr_allowed = pkey.get("hr_allowed", 0)
+            xbh_allowed = pkey.get("xbh_allowed", 0)
             fps_sum = pkey.get("fps_sum", 0)
             charted_pa = pkey.get("charted_pa", 0)
             fps_pct = _rate(fps_sum, charted_pa)
             era = _per_outing_era(er, ip_outs, basis)
 
-            is_strong = _is_strong_outing(
-                bb=bb,
-                ip_outs=ip_outs,
-                fps_pct=fps_pct,
-                charted_pa=charted_pa,
-                so=so,
-                bf=bf,
-                r=r,
-            )
-
             outings.append(Outing(
                 game_id=game_id,
                 game_date=row["game_date"],
                 opponent=opponents.get(game_id),
+                outcome=result_row.get("outcome"),
+                score=result_row.get("score"),
+                start_relief=start_relief,
                 ip_outs=ip_outs,
                 bf=bf,
                 h=h,
+                xbh_allowed=xbh_allowed,
                 hr_allowed=hr_allowed,
                 bb=bb,
                 so=so,
                 r=r,
+                pitches=pitches,
+                strike_pct=strike_pct,
                 fps_pct=fps_pct,
                 charted_pa=charted_pa,
                 era=era,
                 appearance_order=appearance_order,
-                is_strong=is_strong,
             ))
 
             # Accumulate season totals from the raw boxscore + plays values

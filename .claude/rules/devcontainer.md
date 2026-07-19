@@ -80,6 +80,51 @@ Do NOT install Claude Code via a devcontainer feature. The official installer is
 
 Use devcontainer features (from the official registry or rocker-org) for standard tooling like GitHub CLI, Python, Node, etc. Only fall back to manual install scripts when no feature exists.
 
+## Browser-Test Infrastructure (Headless Chromium)
+
+Some closure-gate tests render a report page in a real browser (Playwright + headless Chromium) to verify print/layout behavior a headless HTTP assertion cannot reach. Chromium is a browser binary, **not** a pip artifact, so the `playwright` Python package (in `requirements-dev.txt`) is necessary but not sufficient -- the binary is installed separately.
+
+### Install
+
+The post-create flow installs chromium **only** (not firefox/webkit, ~150MB one-time; worktrees share the container FS) immediately after the dev-lockfile install:
+
+```
+pip install -r requirements-dev.txt && playwright install --with-deps chromium
+```
+
+This lives inline in `.devcontainer/devcontainer.json`'s `postCreateCommand` chain (matching the existing inline post-create idiom), sequenced right after `pip install -r requirements-dev.txt`. A freshly built container therefore has the browser binary available. The post-create flow deliberately sets **no** run-enabling env marker (see fail-closed convention below).
+
+### Boundary: dev / main-checkout only, NOT a CI gate
+
+This browser test is a **dev / main-checkout** capability, not a CI gate. The boundary mirrors the Step 1d smoke fixture's live-only boundary: just as Step 1d exercises the dev-only host-mounted `./data/app.db` (absent from worktrees/CI), the browser test needs the chromium binary that only the devcontainer post-create flow installs.
+
+- It is **authoritative in the full-suite-green closure gate** -- the code-reviewer's full `pytest tests/` run at epic closure (in the main checkout, where the container's chromium is present) exercises it.
+- It is **NOT wired into any CI workflow.** Do not add a CI job that installs chromium to run it; the closure gate in the live devcontainer is the intended enforcement point.
+
+### Fail-closed test convention + `SKIP_BROWSER_TESTS` opt-out
+
+The browser test is **fail-closed**: on the scoped dev / main-checkout environment it always attempts to launch Chromium and hard-**FAILS** if the binary is absent. It never silently no-ops to green. This is deliberate -- a postCreate-set "browser available" marker would not reach the non-interactive closure pytest, so a marker-gated skip would pass vacuously (green-with-skipped-test) and defeat the test's purpose.
+
+The **only** skip path is an explicit operator opt-**out** environment variable, the exact literal:
+
+```
+SKIP_BROWSER_TESTS
+```
+
+Set it (to any non-empty value) in a legitimately chromium-less contributor environment to skip the browser test. Absent that opt-out, a missing chromium binary is a hard failure, not a skip. (`SKIP_BROWSER_TESTS` is a cross-story pinned literal -- the browser test reads this exact token; do not rename it.)
+
+### Install Footguns
+
+**Footgun 1 -- the currently-running container is NOT updated (one-time operator step).** `postCreateCommand` only fires on a *future* container build; it does **not** install chromium into the container that is already running. To make the browser test pass in the live devcontainer without a rebuild, run this one-time operator step:
+
+```
+pip install -r requirements-dev.txt && playwright install --with-deps chromium
+```
+
+**This doc is the single source of truth for that operator step.** Other artifacts (e.g. the browser-test module) point *here* rather than restating the command -- do not create a second copy elsewhere.
+
+**Footgun 2 -- closure Step 1d gets the package but not the binary.** A change to `requirements-dev.in`/`requirements-dev.txt` is a Step 1d build-input trigger path, so adding the `playwright` package trips Step 1d at epic closure. Step 1d's sub-step-4b dependency reinstall installs the playwright **package** but **not** the chromium **binary** -- the binary comes only from `playwright install --with-deps chromium` (the post-create flow, or the Footgun 1 operator step), never from a pip reinstall. If the browser test errors on a missing binary at closure, run the Footgun 1 step.
+
 ## Host Integration
 
 ### SSH / GitHub Access

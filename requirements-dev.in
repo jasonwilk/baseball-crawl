@@ -10,3 +10,4 @@ pytest-timeout==2.3.1  # Per-test timeout enforcement
 respx~=0.22            # HTTP mocking for httpx in tests
 pyyaml~=6.0            # YAML frontmatter parsing for API doc validation
 ruff==0.15.20          # Lint (F/pyflakes only -- see [tool.ruff] in pyproject.toml)
+playwright~=1.61       # Headless-Chromium render+print tests (E-266); chromium binary installed separately via `playwright install`

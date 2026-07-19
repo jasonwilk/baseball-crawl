@@ -4,7 +4,7 @@
 [E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the per-pitcher outing log lives INSIDE the existing Pitching table as an expand-in-place detail row: each pitcher row is keyboard-operable and toggles a hidden detail row immediately below it (accordion, one open at a time on screen); the collapsed table is structurally identical to today's shipped Pitching table; print shows only the collapsed table; and the flag-off byte-identical contract holds. The E-265 standalone "Outings Breakdown" section is removed. All work is in `src/api/templates/reports/scouting_report.html` (+ its string-level tests), consuming the enriched `Outing` shape E-266-06 produces.

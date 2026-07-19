@@ -4,7 +4,7 @@
 [E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the context layer carries the browser-render testing discipline: a new `paths:`-scoped rule `.claude/rules/browser-render-testing.md` that auto-loads for report-surface changes, and a code-reviewer discipline hook. Future template / print-CSS / disclosure changes will require a headless-Chromium render+print check, not just a generated-HTML string assertion — closing the exact gap that let the E-265 defects ship.

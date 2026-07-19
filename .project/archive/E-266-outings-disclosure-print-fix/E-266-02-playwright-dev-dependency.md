@@ -4,7 +4,7 @@
 [E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the Python `playwright` package is a declared dev dependency and present in the compiled dev lockfile, so the devcontainer's chromium install step (E-266-03) and the headless-Chromium test (E-266-04) have the `playwright` CLI and library available. This is the pip-tools dependency slice that unblocks the testing infrastructure.

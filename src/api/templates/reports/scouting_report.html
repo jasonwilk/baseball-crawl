@@ -481,33 +481,97 @@
     }
 
 {% if show_pitcher_outings %}
-    /* ---- Outings Breakdown (E-265) ---- */
-    /* Gated on the same flag as the body section so a flag-OFF report emits
-       ZERO outings CSS too -- the Success Criterion "adds and removes nothing"
-       makes flag-off byte-identical to a pre-feature render (stricter than the
-       always-on predicted-starter precedent; PM ruling). */
-    .outings-section { page-break-before: always; }
+    /* ---- Outings expand-in-place (E-266) ---- */
+    /* Gated on the same flag as the interleaved rows / a11y attrs / accordion
+       script so a flag-OFF report emits ZERO outings CSS -- flag-off is
+       byte-identical to a pre-feature render (E-266 TN-5, AC-9/AC-10). */
 
-    .outing-log { margin: 6px 0; }
-    .outing-log-summary {
-      min-height: 44px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      cursor: pointer;
-      font-weight: bold;
-      font-size: 9pt;
-      padding: 4px 2px;
+    /* Collapsed-identical contract (AC-2): the ONLY visible effect a pitcher-row
+       carries is a keyboard-focus outline -- invisible until tabbed to, so a
+       mouse user's collapsed table is pixel-identical to today's report. No
+       caret, no pointer cursor, no hover cue, no <td> background touch.
+       :focus-visible ONLY (NOT plain :focus) -- a mouse click focuses the
+       tabindex=0 row but does NOT match :focus-visible, so no outline paints on a
+       mouse-collapsed row (the AC-2 hard contract wins over TN-1's :focus clause);
+       keyboard focus still matches :focus-visible, so a11y is intact. */
+    tr.pitcher-row:focus-visible td:first-child {
+      outline: 2px solid #1e3a5f;
+      outline-offset: -2px;
     }
-    .outing-log-flag { color: #16a34a; margin-left: 2px; }
 
+    /* The interleaved detail row (hidden when collapsed; JS toggles `hidden`).
+       Print collapses it unconditionally (AC-8) regardless of screen state. */
+    tr.outing-detail-row > td {
+      padding: 8px 10px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .outing-detail-hint {
+      font-size: 8pt;
+      font-weight: bold;
+      color: #374151;
+      margin-bottom: 4px;
+    }
     .outing-season-line {
       font-size: 8pt;
       color: #374151;
-      margin: 2px 0 6px;
-      padding-left: 2px;
+      margin: 2px 0 4px;
     }
+    .outing-caveat {
+      font-size: 7.5pt;
+      color: #6b7280;
+      font-style: italic;
+      margin: 2px 0 6px;
+    }
+    /* PRESERVED (AC-7 false friend): the zero-walk "0 BB" strength badge. Despite
+       the -strong name it is UNRELATED to the removed green-outing highlight. */
+    .depth-badge-strong { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
 
+    table.outing-log-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8pt;
+    }
+    table.outing-log-table thead th {
+      text-align: center;
+      padding: 3px 5px;
+      border-bottom: 1px solid #d1d5db;
+      font-size: 7.5pt;
+      white-space: nowrap;
+    }
+    /* Base cell rule (specificity 0,1,3). The Game-cell left-justify below MUST
+       out-specify this or it silently re-centers (AC-5 / UXD-F1). */
+    table.outing-log-table tbody td {
+      text-align: center;
+      padding: 3px 5px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    /* Game cell left-justify -- qualified as `table.outing-log-table tbody
+       td.outing-game-bundle` (0,2,3) so it BEATS the base `... tbody td` (0,1,3).
+       A bare `td.outing-game-bundle` (0,1,1) would LOSE and re-center (the exact
+       bug the operator caught -- do not simplify this selector). */
+    table.outing-log-table tbody td.outing-game-bundle { text-align: left; }
+    .outing-game-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    /* Fixed min-width so single- and double-digit scores occupy the same width
+       and every opponent name starts at the SAME left edge (AC-5, load-bearing).
+       56px floors the widest realistic 2-by-2-digit score ("W 20-18") so the
+       opponent-name x is identical across score widths -- E-266-04's headless-
+       Chromium alignment backstop measures this at 0.0px (50px left a ~1px spill
+       on double-digit scores; 52px+ aligns, 56px keeps margin). */
+    .outing-result {
+      display: inline-block;
+      min-width: 56px;
+      text-align: center;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 7.5pt;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
     .outing-opp {
       overflow: hidden;
       text-overflow: ellipsis;
@@ -515,24 +579,21 @@
       max-width: 140px;
     }
 
-    tr.outing-strong td { background: #f0fdf4; }
-    tr.outing-strong td:first-child { border-left: 3px solid #16a34a; }
-
-    .depth-badge-strong { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-
+    /* AC-8: print = collapsed always. Every detail row is hidden in print
+       regardless of on-screen expanded state, so the P0 print-blank bug cannot
+       recur (nothing expands in print). The entire E-265 print-force-open
+       machinery and its pagination overrides are removed -- this one rule
+       replaces them. */
     @media print {
-      details.outing-log { display: block; }
-      details.outing-log > summary { display: none; }
-      details.outing-log > *:not(summary) { display: block !important; }
-      .outing-season-line { page-break-after: avoid; }
-      table.outing-log-table { page-break-inside: auto; }
-      table.outing-log-table tr { page-break-inside: avoid; }
+      tr.outing-detail-row { display: none !important; }
     }
 
-    /* Tighter Opp truncation on mobile. MUST trail the base .outing-opp rule
-       above: media queries add no specificity, so at <=640px this equal-
-       specificity override only wins by coming LATER in source order (F16). */
+    /* AC-12: mobile-padding polish -- match the outer table's ≤640px tightening.
+       AND tighter Opp truncation. MUST trail the base rules above (media queries
+       add no specificity; this wins only by later source order). */
     @media screen and (max-width: 640px) {
+      table.outing-log-table thead th,
+      table.outing-log-table tbody td { padding: 2px 2px; font-size: 7pt; }
       .outing-opp { max-width: 60px; }
     }
 {% endif %}
@@ -755,7 +816,11 @@
   </thead>
   <tbody>
     {% for pitcher in pitching %}
-    <tr>
+    {# E-266-01 (TN-5): O(1) join to the pitcher's outing log. A no-outings
+       pitcher (or any flag-off render) -> None -> no class/attrs, no detail row,
+       so the collapsed row stays byte-identical to today's markup. #}
+    {% set outing_detail = pitcher_outings_map.get(pitcher.player_id) if show_pitcher_outings else none %}
+    <tr{% if outing_detail %} class="pitcher-row" role="button" tabindex="0" aria-expanded="false" aria-controls="det-{{ loop.index }}"{% endif %}>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
       <td class="col-player">{{ pitcher.name | e }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %} <span class="depth-badge">{{ pitcher.ip_outs | ip_display }} IP</span></td>
       <td class="col-thr col-sep heat-{{ pitcher._heat.thr }} mob-hide-extra">&nbsp;</td>
@@ -776,6 +841,70 @@
       <td class="last-outing-cell mob-hide-extra" data-date="{{ pitcher._rest_date }}">{{ pitcher._rest_display }}</td>
       <td class="mob-hide-extra">{{ pitcher._p7d_display }}</td>
     </tr>
+    {% if outing_detail %}
+    {% set season = outing_detail.season %}
+    <tr class="outing-detail-row" id="det-{{ loop.index }}" hidden>
+      <td colspan="19">
+        <div class="outing-detail-hint">Game-by-game outing log &mdash; {{ outing_detail.outings | length }} appearances this season</div>
+        <div class="outing-season-line">
+          Season: {{ season.k_per_bf | pct }} K/BF
+          &middot; {{ season.bb_per_inn | rate }} BB/INN
+          &middot; {% if season.zero_bb %}<span class="depth-badge depth-badge-strong">0 BB</span> K/BB{% elif season.k_per_bb is not none %}{{ season.k_per_bb | rate }} K/BB{% if season.low_bb %} <span class="depth-badge">{{ season.bb }} BB</span>{% endif %}{% else %}&mdash; K/BB{% endif %}
+          &middot; {{ season.h_per_bf | pct }} H/BF
+        </div>
+        <div class="outing-caveat">FPS%, HR, and XBH below are computed from charted play data, not GameChanger's boxscore.</div>
+        <div style="overflow-x:auto;">
+        <table class="outing-log-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Game</th>
+              <th class="mob-hide-extra">S/R</th>
+              <th>IP</th>
+              <th class="mob-hide-extra">BF</th>
+              <th class="mob-hide">H</th>
+              <th class="mob-hide">XBH</th>
+              <th class="mob-hide-extra">HR</th>
+              <th class="mob-hide">BB</th>
+              <th>K</th>
+              <th>R</th>
+              <th class="mob-hide">#P</th>
+              <th class="mob-hide">S%</th>
+              <th class="mob-hide">FPS%</th>
+              <th>ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in outing_detail.outings %}
+            <tr>
+              <td>{{ o.game_date | format_date }}</td>
+              <td class="outing-game-bundle">
+                <div class="outing-game-cell">
+                  {% if o.outcome %}<span class="outing-result form-chip-{{ o.outcome | lower }}">{{ o.outcome }}{% if o.score %} {{ o.score }}{% endif %}</span>{% else %}<span class="outing-result">&mdash;</span>{% endif %}
+                  <span class="outing-opp" title="{{ o.opponent | e if o.opponent else '' }}">{{ o.opponent | e if o.opponent else "&mdash;" | safe }}</span>
+                </div>
+              </td>
+              <td class="mob-hide-extra">{{ o.start_relief if o.start_relief else "&mdash;" | safe }}</td>
+              <td>{{ o.ip_outs | ip_display }}</td>
+              <td class="mob-hide-extra">{{ o.bf if o.bf is not none else "&mdash;" | safe }}</td>
+              <td class="mob-hide">{{ o.h if o.h is not none else "&mdash;" | safe }}</td>
+              <td class="mob-hide">{{ o.xbh_allowed if o.xbh_allowed is not none else "&mdash;" | safe }}</td>
+              <td class="mob-hide-extra">{{ o.hr_allowed if o.hr_allowed is not none else "&mdash;" | safe }}</td>
+              <td class="mob-hide">{{ o.bb if o.bb is not none else "&mdash;" | safe }}</td>
+              <td>{{ o.so if o.so is not none else "&mdash;" | safe }}</td>
+              <td>{{ o.r if o.r is not none else "&mdash;" | safe }}</td>
+              <td class="mob-hide">{{ o.pitches if o.pitches else "&mdash;" | safe }}</td>
+              <td class="mob-hide">{{ o.strike_pct | pct }}</td>
+              <td class="mob-hide">{{ o.fps_pct | pct }}</td>
+              <td>{{ o.era | rate2 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </td>
+    </tr>
+    {% endif %}
     {% endfor %}
   </tbody>
 </table>
@@ -785,76 +914,9 @@
 <p class="no-data-msg">No data available</p>
 {% endif %}
 
-{# ===== OUTINGS BREAKDOWN (E-265) =====
-   Outer gate: byte-identical flag-off contract -- with the flag unset this
-   whole block renders NOTHING (no h2, no note, no empty-state). Inner
-   `pitcher_outings` check is the honest flag-on-but-no-data empty state. #}
-{% if show_pitcher_outings %}
-<div class="outings-section">
-<h2 class="section-header">Outings Breakdown</h2>
-<div class="sort-annotation">FPS% and HR-allowed below are computed from charted pitch-by-pitch play data, not GameChanger's boxscore totals &mdash; see pitch-charting coverage above.</div>
-{% if pitcher_outings %}
-  {% for pitcher in pitcher_outings %}
-  {% set season = pitcher.season %}
-  <details class="outing-log">
-    <summary class="outing-log-summary">
-      {{ pitcher.name | e }}
-      {% if pitcher.outings | selectattr("is_strong") | list %}<span class="outing-log-flag" title="Includes a standout outing">&#9679;</span>{% endif %}
-    </summary>
-    <div class="outing-season-line">
-      {% if season.small_sample %}<span class="depth-badge">{{ season.ip_outs | ip_display }} IP</span>{% else %}{{ season.ip_outs | ip_display }} IP{% endif %}
-      &middot; {{ season.games }} G ({% if season.games_started is none %}&mdash;{% else %}{{ season.games_started }}{% endif %} GS)
-      &middot; {{ season.era | rate2 }} ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}
-      &middot; {{ season.whip | rate2 }} WHIP
-      &middot; {{ season.fps_pct | pct }} FPS%
-      &middot; {{ season.k_per_bf | pct }} K/BF
-      &middot; {{ season.bb_per_inn | rate }} BB/INN
-      &middot; {% if season.zero_bb %}<span class="depth-badge depth-badge-strong">0 BB</span> K/BB{% elif season.k_per_bb is not none %}{{ season.k_per_bb | rate }} K/BB{% if season.low_bb %} <span class="depth-badge">{{ season.bb }} BB</span>{% endif %}{% else %}&mdash; K/BB{% endif %}
-      &middot; {{ season.h_per_bf | pct }} H/BF
-    </div>
-    <div style="overflow-x:auto;">
-    <table class="outing-log-table">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Opp</th>
-          <th>IP</th>
-          <th class="mob-hide-extra">BF</th>
-          <th class="mob-hide">H</th>
-          <th class="mob-hide-extra">HR</th>
-          <th class="mob-hide">BB</th>
-          <th>K</th>
-          <th>R</th>
-          <th class="mob-hide">FPS%</th>
-          <th>ERA ({{ era_basis.basis }}-inn){% if era_basis.assumed %}*{% endif %}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for o in pitcher.outings %}
-        <tr class="{{ 'outing-strong' if o.is_strong else '' }}">
-          <td>{{ o.game_date | format_date }}</td>
-          <td class="outing-opp" title="{{ o.opponent | e if o.opponent else '' }}">{{ o.opponent | e if o.opponent else "&mdash;" | safe }}</td>
-          <td>{{ o.ip_outs | ip_display }}</td>
-          <td class="mob-hide-extra">{{ o.bf if o.bf is not none else "&mdash;" | safe }}</td>
-          <td class="mob-hide">{{ o.h if o.h is not none else "&mdash;" | safe }}</td>
-          <td class="mob-hide-extra">{{ o.hr_allowed if o.hr_allowed is not none else "&mdash;" | safe }}</td>
-          <td class="mob-hide">{{ o.bb if o.bb is not none else "&mdash;" | safe }}</td>
-          <td>{{ o.so if o.so is not none else "&mdash;" | safe }}</td>
-          <td>{{ o.r if o.r is not none else "&mdash;" | safe }}</td>
-          <td class="mob-hide">{{ o.fps_pct | pct }}</td>
-          <td>{{ o.era | rate2 }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </details>
-  {% endfor %}
-{% else %}
-<p class="no-data-msg">No data available</p>
-{% endif %}
-</div>
-{% endif %}
+{# E-266-01: the E-265 standalone "Outings Breakdown" section is REMOVED. The
+   per-pitcher outing log now interleaves into the Pitching table above as a
+   hidden `tr.outing-detail-row` after each pitcher's row (expand-in-place). #}
 
 {# ===== BATTING (AC-6, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-3) ===== #}
 <h2 class="section-header batting-section">Batting</h2>
@@ -1043,5 +1105,50 @@
   }
 })();
 </script>
+{% if show_pitcher_outings %}
+<script>
+/* E-266-01 (TN-1/AC-3): expand-in-place accordion. Toggles a pitcher row's
+   interleaved detail row on click / Enter / Space, keeps aria-expanded in sync,
+   and enforces one-open-at-a-time on screen. Flag-gated (AC-9/AC-10) -- this
+   whole block is absent from a flag-off render. Mirrors the var/IIFE/
+   querySelectorAll idiom of the always-on relative-date script above; degrades
+   gracefully (no rows -> no-op). Uses a plain hidden attribute, not a native
+   disclosure element (the E-265 print P0 root cause); print collapses every
+   detail row via CSS regardless of on-screen state. */
+(function() {
+  var rows = document.querySelectorAll('tr.pitcher-row');
+  function detailFor(row) {
+    var id = row.getAttribute('aria-controls');
+    return id ? document.getElementById(id) : null;
+  }
+  function collapse(row) {
+    var detail = detailFor(row);
+    if (detail) detail.hidden = true;
+    row.setAttribute('aria-expanded', 'false');
+  }
+  function toggle(row) {
+    var detail = detailFor(row);
+    if (!detail) return;
+    var willOpen = detail.hidden;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] !== row) collapse(rows[i]);
+    }
+    detail.hidden = !willOpen;
+    row.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  }
+  for (var i = 0; i < rows.length; i++) {
+    (function(row) {
+      row.addEventListener('click', function() { toggle(row); });
+      row.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          toggle(row);
+        }
+      });
+    })(rows[i]);
+  }
+})();
+</script>
+{% endif %}
 </body>
 </html>

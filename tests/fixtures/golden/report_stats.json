@@ -3,7 +3,7 @@
     "basis": "seed.sql header math",
     "note": "Hand-reviewed against the seed.sql header math at creation. Regeneration is observable in git diff; re-review before commit.",
     "reviewed_by": "vscode",
-    "reviewed_date": "2026-07-16"
+    "reviewed_date": "2026-07-18"
   },
   "batting": [
     {
@@ -303,7 +303,8 @@
           "rest_days": null,
           "so": 7,
           "start_time": null,
-          "team_game_number": 1
+          "team_game_number": 1,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -324,7 +325,8 @@
           "rest_days": 14,
           "so": 8,
           "start_time": null,
-          "team_game_number": 3
+          "team_game_number": 3,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -345,7 +347,8 @@
           "rest_days": 14,
           "so": 4,
           "start_time": null,
-          "team_game_number": 5
+          "team_game_number": 5,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -366,7 +369,8 @@
           "rest_days": 14,
           "so": 7,
           "start_time": null,
-          "team_game_number": 7
+          "team_game_number": 7,
+          "total_strikes": null
         }
       ],
       "first_name": "Aaron",
@@ -400,7 +404,8 @@
           "rest_days": null,
           "so": 7,
           "start_time": null,
-          "team_game_number": 1
+          "team_game_number": 1,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -421,7 +426,8 @@
           "rest_days": 14,
           "so": 8,
           "start_time": null,
-          "team_game_number": 3
+          "team_game_number": 3,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -442,7 +448,8 @@
           "rest_days": 14,
           "so": 4,
           "start_time": null,
-          "team_game_number": 5
+          "team_game_number": 5,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -463,7 +470,8 @@
           "rest_days": 14,
           "so": 7,
           "start_time": null,
-          "team_game_number": 7
+          "team_game_number": 7,
+          "total_strikes": null
         }
       ],
       "total_games": 4,
@@ -490,7 +498,8 @@
           "rest_days": null,
           "so": 4,
           "start_time": null,
-          "team_game_number": 2
+          "team_game_number": 2,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -511,7 +520,8 @@
           "rest_days": 14,
           "so": 5,
           "start_time": null,
-          "team_game_number": 4
+          "team_game_number": 4,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -532,7 +542,8 @@
           "rest_days": 14,
           "so": 5,
           "start_time": null,
-          "team_game_number": 6
+          "team_game_number": 6,
+          "total_strikes": null
         }
       ],
       "first_name": "Ben",
@@ -565,7 +576,8 @@
           "rest_days": null,
           "so": 4,
           "start_time": null,
-          "team_game_number": 2
+          "team_game_number": 2,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -586,7 +598,8 @@
           "rest_days": 14,
           "so": 5,
           "start_time": null,
-          "team_game_number": 4
+          "team_game_number": 4,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -607,7 +620,8 @@
           "rest_days": 14,
           "so": 5,
           "start_time": null,
-          "team_game_number": 6
+          "team_game_number": 6,
+          "total_strikes": null
         }
       ],
       "total_games": 3,
@@ -634,7 +648,8 @@
           "rest_days": null,
           "so": 3,
           "start_time": null,
-          "team_game_number": 4
+          "team_game_number": 4,
+          "total_strikes": null
         },
         {
           "appearance_order": null,
@@ -655,7 +670,8 @@
           "rest_days": 21,
           "so": 2,
           "start_time": null,
-          "team_game_number": 7
+          "team_game_number": 7,
+          "total_strikes": null
         }
       ],
       "first_name": "Carlos",
@@ -752,7 +768,8 @@
       "rest_days": null,
       "so": 7,
       "start_time": null,
-      "team_game_number": 1
+      "team_game_number": 1,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -773,7 +790,8 @@
       "rest_days": null,
       "so": 4,
       "start_time": null,
-      "team_game_number": 2
+      "team_game_number": 2,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -794,7 +812,8 @@
       "rest_days": 14,
       "so": 8,
       "start_time": null,
-      "team_game_number": 3
+      "team_game_number": 3,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -815,7 +834,8 @@
       "rest_days": 14,
       "so": 5,
       "start_time": null,
-      "team_game_number": 4
+      "team_game_number": 4,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -836,7 +856,8 @@
       "rest_days": null,
       "so": 3,
       "start_time": null,
-      "team_game_number": 4
+      "team_game_number": 4,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -857,7 +878,8 @@
       "rest_days": 14,
       "so": 4,
       "start_time": null,
-      "team_game_number": 5
+      "team_game_number": 5,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -878,7 +900,8 @@
       "rest_days": 14,
       "so": 5,
       "start_time": null,
-      "team_game_number": 6
+      "team_game_number": 6,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -899,7 +922,8 @@
       "rest_days": 14,
       "so": 7,
       "start_time": null,
-      "team_game_number": 7
+      "team_game_number": 7,
+      "total_strikes": null
     },
     {
       "appearance_order": null,
@@ -920,7 +944,8 @@
       "rest_days": 21,
       "so": 2,
       "start_time": null,
-      "team_game_number": 7
+      "team_game_number": 7,
+      "total_strikes": null
     }
   ],
   "pitching_workload": {

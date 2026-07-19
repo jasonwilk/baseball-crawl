@@ -772,6 +772,10 @@ def render_report(data: dict[str, Any]) -> str:
     team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
     team_qab_pct = _format_pct(data.get("team_qab_pct"))
 
+    # Outings (E-265/E-266): the list feeds the interleave; the map is the
+    # per-Pitching-row join key (E-266-01 TN-5).
+    pitcher_outings = data.get("pitcher_outings") or []
+
     context = {
         "team": data.get("team") or {},
         "generated_at": data.get("generated_at", ""),
@@ -808,11 +812,17 @@ def render_report(data: dict[str, Any]) -> str:
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),
         "show_predicted_starter": data.get("show_predicted_starter", True),
-        # Outings Breakdown (E-265). Default False so a render_report call made
-        # WITHOUT the key (older callers, tests) leaves the section unrendered --
-        # the byte-identical-when-unset contract.
+        # Outings Breakdown (E-265 / E-266). Default False so a render_report
+        # call made WITHOUT the key (older callers, tests) leaves the section
+        # unrendered -- the byte-identical-when-unset contract.
         "show_pitcher_outings": data.get("show_pitcher_outings", False),
-        "pitcher_outings": data.get("pitcher_outings") or [],
+        "pitcher_outings": pitcher_outings,
+        # E-266-01 (TN-5): the interleave join map. The template does an O(1)
+        # `pitcher_outings_map.get(pitcher.player_id)` per Pitching row to place
+        # each pitcher's detail row immediately after its row -- a no-outings
+        # pitcher is an explicit `.get()->None` guard, not a silent Jinja
+        # Undefined. Built unconditionally (it is only emitted behind the flag).
+        "pitcher_outings_map": {p.player_id: p for p in pitcher_outings},
         # Footer trust block (E-235-07 / TN-7).
         "trust_block": _build_trust_block(data),
     }

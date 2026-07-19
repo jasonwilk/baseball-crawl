@@ -278,6 +278,7 @@ def get_pitching_history(
             g.start_time,
             pgp.ip_outs,
             pgp.pitches,
+            pgp.total_strikes,
             pgp.so,
             pgp.bb,
             pgp.h,

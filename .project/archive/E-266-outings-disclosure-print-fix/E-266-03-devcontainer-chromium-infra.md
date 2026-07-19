@@ -4,7 +4,7 @@
 [E-266: Pitcher Outings Breakdown — Expand-in-Place & Print](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the devcontainer installs headless Chromium on build (via `playwright install --with-deps chromium` in the postCreate flow), and `.claude/rules/devcontainer.md` documents the browser-test infrastructure and its dev/main-checkout-only, not-a-CI-gate boundary. This provides the browser binary the headless-Chromium test (E-266-04) runs against.
