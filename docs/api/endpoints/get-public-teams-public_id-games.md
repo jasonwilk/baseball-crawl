@@ -23,7 +23,7 @@ response_shape: array
 response_sample: data/raw/public-team-games-sample.json
 raw_sample_size: "32 game records, 25.7 KB"
 discovered: "2026-03-04"
-last_confirmed: "2026-06-12"
+last_confirmed: "2026-07-19"
 tags: [games, team, public]
 caveats:
   - >
@@ -105,9 +105,15 @@ Bare JSON array of game records (completed and upcoming). 34 records in a single
 | `score` | object or absent | Final score. **Present on completed games only**; absent on upcoming games. |
 | `score.team` | int | This team's final score. |
 | `score.opponent_team` | int | Opponent's final score. |
-| `game_status` | string or null | `"completed"` for completed games; **`null` for upcoming/scheduled games** (verified 2026-06-12). |
+| `game_status` | string, null, or **absent** | `"completed"` for finished/scored games. For a game that is NOT finished the field is either **`null`** (observed 2026-06-12) or **entirely absent** (the key is omitted — observed 2026-07-19); treat both identically (`.get("game_status") == "completed"`). A third value **`"new"`** was observed live (2026-07-19): a game-stream stub was created but not yet scored — it carries a `score` object of `{team: 0, opponent_team: 0}`. **Not-final games (absent/null/`"new"`) REMAIN in the schedule array indefinitely** — including past-dated games that were never played/scored (confirmed 2026-07-19: April- and June-dated games with no status and no score still present in July). GC does NOT drop a postponed/cancelled/unplayed game from the array. See the Not-Final vs Removed caveat below. |
 | `has_videos_available` | boolean or absent | Whether game video is available. Present on completed games; absent on upcoming games in observed records. |
 | `has_live_stream` | boolean | `false` for all observed records. |
+
+### Not-Final vs Removed (schedule reconciliation)
+
+**Confirmed live 2026-07-19 across 17 teams (633 game records):** a game that is not finished — whether upcoming, in a created-but-unscored `"new"` state, or a past-dated game that was never played/scored — **stays in the schedule array**. `game_status` for these is `"completed"`-absent (either the literal string `"new"`, or `null`, or the key omitted) and there is no `score` object (except `"new"`, which carries a 0-0 `score`). Observed status distribution: 615 `"completed"`, 17 with `game_status` absent, 1 `"new"`. No `"postponed"`/`"suspended"`/`"in_progress"`/`"live"` status string was ever observed — GC does not emit a distinct postponed status here; a postponed/cancelled/unplayed game simply lacks the `completed` status and score while remaining in the array (multiple April- and June-dated unplayed games were still present in the July snapshot).
+
+**Consequence for any schedule-diff / reconcile logic:** "present in the schedule array but not `completed`" is a TRANSIENT/not-yet-final state, NOT a removal. Only a game **fully absent from the full schedule array** indicates a genuine removal/void. Therefore a reconcile MUST diff prior-loaded games against the **full** `/games` array (all `game_status` values), NOT a `completed`-only filtered subset — a `completed`-only subset would misclassify every legitimately-present not-final game (and every past unplayed game) as "removed."
 
 ### Opponent Identity
 

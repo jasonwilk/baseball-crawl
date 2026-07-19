@@ -1,7 +1,12 @@
 # IDEA-140: Reconcile Loaded Games Against the Freshly-Fetched Schedule (retire/redirect removed or rescheduled games)
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+<!-- Promoted to E-267 (Reconcile-at-Load Against the Fresh Crawl) 2026-07-19. E-267 is FORWARD-ONLY
+     reconcile-at-load (operator decision) — the game grain (this idea + CC-1) plus H1 (player-line) and
+     H2 (roster) share one retire-absent-at-load machinery; NO retroactive `bb data` repair pass. The
+     Open Questions below are now owned by E-267's Technical Notes / Open Questions. -->
+<!-- Prior status: CANDIDATE. -->
 
 ## Summary
 The scouting/report load pipeline is ACCUMULATE-ONLY. When the operator re-scouts the same team over time (e.g. runs a report now, then again a week later), teams/games/players/stats dedup and upsert correctly for the common case, and new games are picked up. But there is NO reconciliation pass for a game that DISAPPEARED or MOVED on GameChanger between runs. Add a reconciliation pass that, for a given team+season, compares the currently-loaded game set against the freshly-fetched schedule and retires (removed games) or redirects/merges (rescheduled games) the affected rows.
@@ -33,7 +38,9 @@ Not urgent — low-frequency but real. Capture now; promote when the pain is fel
 - Natural home: the existing dedup/reconciliation family — `merge_duplicate_game` + `is_offline_same_game` (`src/db/game_merge.py`), `_find_duplicate_game` (`src/gamechanger/loaders/game_loader.py`), the `bb data` operator-maintenance passes. Related lineage: E-215/E-216 (player/game dedup), E-261 (cross-perspective game-dedup fidelity), and the query-time season-aggregate readers `get_season_batting` / `get_season_pitching` (E-259) that a duplicate game inflates.
 - Related ideas: [[IDEA-089]] (terminal co-occurrence fork disambiguation — sibling in the dedup family). Also note IDEA-134 (play-level cross-perspective dup) in the v2/data-integrity backlog.
 
+- Promoted 2026-07-19 to **E-267** as the game grain (with CC-1). Confirmed coach-facing by the 2026-07-19 accumulate-only re-run audit (master record: `.project/research/2026-07-19-rerun-accumulate-only-audit.md`). Note: E-267 is FORWARD-ONLY reconcile-at-load per operator decision — the "run inside `generate()` vs `bb data` pass" open question resolved to in-pipeline reconcile-at-load (no retroactive repair).
+
 ---
 Created: 2026-07-14
-Last reviewed: 2026-07-14
-Review by: 2026-10-12 (suggest 90 days from created)
+Last reviewed: 2026-07-19
+Review by: 2026-10-12 (promoted to E-267)
