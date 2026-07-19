@@ -1,11 +1,11 @@
 # E-268: Cross-Perspective Redirect Score-Misattribution Fix (CC-2)
 
 ## Status
-`READY`
-<!-- READY 2026-07-19: two-channel CONFIRMED/high origin + DE SOUND + baseball-coach WAIVED; Codex
-     spec review r1/r2 + round-2 P2 fixes + code-reviewer GAP-5 test-coverage add all incorporated and
-     verified clean (see Review Scorecard in History). Single targeted fix. NOT dispatched — awaits
-     explicit user dispatch authorization. -->
+`COMPLETED`
+<!-- COMPLETED 2026-07-19: E-268-01 DONE + AC-verified; code-reviewer per-story APPROVED + Closure
+     Integration CLEAN; Codex no code findings. Closure assessments recorded in History (documentation:
+     No impact; eight-trigger context-layer: no codification required, T7 operator-signed exception).
+     AC-5 reconcile-scoreboard ratchet = operator post-merge closure step (dev DB absent from worktree). -->
 
 ## Overview
 `_upsert_game` writes the game orientation tuple non-atomically: `home_team_id`/`away_team_id` are overwritten unconditionally from `excluded.*`, while `home_score`/`away_score` are gated on `preserve_scores`. On a cross-perspective redirect the team-ids and scores are therefore written from DIFFERENT orientations, silently re-crediting runs to the wrong team. This epic gates the two team-id assignments on `preserve_scores` exactly like the scores, so the whole `{home_team_id, home_score, away_team_id, away_score}` tuple is written atomically.
@@ -44,7 +44,7 @@ CORRUPTED SURFACES (BOTH teams' reports): `_query_record` (W-L), `_query_recent_
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-268-01 | Gate team-id assignments on preserve_scores (atomic orientation tuple) + regression test | TODO | None | - |
+| E-268-01 | Gate team-id assignments on preserve_scores (atomic orientation tuple) + regression test | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -63,6 +63,27 @@ CORRUPTED SURFACES (BOTH teams' reports): `_query_record` (W-L), `_query_recent_
 - None. H4 / IDEA-147 (`plays.batting_team_id` re-derive on the same orientation-change root) is OUT of this epic and tracked as IDEA-147 (see Non-Goals) — a READY spec does not reopen its own scope.
 
 ## History
+- 2026-07-19: **ACTIVE → COMPLETED.** E-268-01 implemented, AC-verified, and archived-ready.
+  - **Closure Review Scorecard:**
+    - Origin: CC-2 two-channel CONFIRMED/high (Codex `gpt-5.6-terra` xhigh + independent subagent, each an executable in-memory repro through the real `ScoutingLoader`).
+    - Consultation verdicts (both recorded pre-dispatch): data-engineer CONSULTED/SOUND (torn-write / four-field orientation-tuple analysis); baseball-coach WAIVED (CC-2 corrects run/win misattribution on existing report surfaces — no stat/coaching-logic change, no coach-facing surface, no coach input required).
+    - Implementation (software-engineer): `_upsert_game` extended the `preserve_scores` CASE gate to `home_team_id`/`away_team_id` so the four-field orientation tuple `{home_team_id, away_team_id, home_score, away_score}` writes atomically on ON CONFLICT update (14 placeholders / 14 binds, 4 trailing `preserve_flag` binds in SQL order — parity CR-confirmed). Plus the HARD regression test `test_cc2_redirect_preserves_orientation_tuple_and_reports` (real two-loader `load_payload` redirect path; asserts A-home 5-3 survives AND `_query_record`/`_query_runs_avg`/`_query_recent_games` credit correctly for BOTH teams), a supplementary SQL-level unit test, and the AC-4 over-gating guard `test_upsert_game_correction_path_takes_incoming_orientation`.
+    - Fail-pre/pass-post: SE demonstrated the pre-fix failure (`assert (2,1,5,3) == (1,2,5,3)` — B mis-credited with A's 5-run win); CR independently confirmed it is genuine.
+    - code-reviewer: per-story APPROVED (no findings) + Closure Integration Review CLEAN; independent 14/14 placeholder/bind parity confirmation.
+    - Codex: P1–P4 no code findings; lone P5 = the AC-5 operator-closure item flagged as a false positive (CR concurred — AC-5 is deferred to the operator by design, not a defect).
+    - Test evidence (verbatim): `python -m pytest tests/test_loaders/test_game_dedup.py tests/test_loaders/test_game_loader.py` → `112 passed`, exit 0; SE broader loaders-package sweep → 470 passed, no regressions.
+  - **Documentation assessment (`.claude/rules/documentation.md`): No documentation impact.** E-268 is an internal play-ingestion bug fix that corrects run/win ATTRIBUTION on existing report surfaces (W-L, recent form, runs-for/against). No new/changed command, no schema change, no user-facing workflow change, no new or materially-changed agent — no doc update trigger fires.
+  - **Context-layer assessment (`.claude/rules/context-layer-assessment.md`, eight triggers — main-session-evaluated verdicts):**
+    - T1 (convention): NO — extends the existing E-261 keep-existing orientation pattern; no new convention.
+    - T2 (architecture): NO — localized SQL fix, no structural/tech choice.
+    - T3 (footgun/boundary): NO — the torn-write root is already captured by the E-261 precedent and now embodied in code; the remaining sibling (`plays.batting_team_id` re-derive) is tracked as IDEA-147.
+    - T4 (agent behavior/routing): NO.
+    - T5 (domain knowledge): NO.
+    - T6 (CLI/workflow): NO.
+    - T7 (context-growth ratchet): FAIL at +564 over baseline, but E-268 touches ZERO context-layer files (staged diff = `game_loader.py`, `test_game_dedup.py`, `epic.md`, story `.md`) — the overage is entirely pre-existing drift. **OPERATOR-SIGNED EXCEPTION for E-268** (Jason approved 2026-07-19: +564 is pre-existing, E-268 adds none; recurring friction tracked as the E-262 re-snapshot item).
+    - T8 (reusable behavioral lesson): NO promotion — the atomic-orientation-tuple lesson is already embodied/documented via the E-261 precedent, and IDEA-147 tracks the sibling; promoting under an already-failing ratchet is marginal.
+    - Net: no trigger requires claude-architect codification.
+  - **AC-5 (E-257 reconcile-scoreboard ratchet):** the `bb report reconcile-scoreboard` run is the operator's post-merge closure step against the live dev DB (absent from the worktree/CI) — PENDING operator execution; no gated stat's abs-Δ may increase, neither ratcheted axis counter may increase, `self_games` stays 0.
 - 2026-07-19: **DRAFT → READY.** **Review Scorecard** (all findings accepted/incorporated; verified clean by a main-session grep of the baseball-coach waiver, the E-257 DoD reframe, the GAP-5 ACs, and the CC-2 fix + hard repro test):
   - Origin: CC-2 two-channel CONFIRMED/high (Codex `gpt-5.6-terra` xhigh + independent subagent, each an executable in-memory repro through the real `ScoutingLoader`).
   - Consultation verdicts: data-engineer CONSULTED/SOUND (torn-write / orientation-tuple analysis); baseball-coach WAIVED (recorded — CC-2 corrects run/win misattribution on existing surfaces, no stat/coaching-logic change, no coach input required).

@@ -4,7 +4,7 @@
 [E-268: Cross-Perspective Redirect Score-Misattribution Fix](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `_upsert_game` writes the game orientation tuple `{home_team_id, away_team_id, home_score, away_score}` ATOMICALLY: on a cross-perspective redirect (`preserve_scores=True`) all four fields keep-existing, and on a first-insert / same-perspective reload all four take the incoming values. This closes CC-2 — the torn write where the two team-ids were overwritten unconditionally while the scores were frozen, silently re-crediting runs to the wrong team on both reports.

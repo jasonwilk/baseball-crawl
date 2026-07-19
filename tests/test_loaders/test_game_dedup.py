@@ -26,6 +26,11 @@ from src.gamechanger.loaders import ensure_season_row
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.types import TeamRef
+from src.reports.generator import (
+    _query_recent_games,
+    _query_record,
+    _query_runs_avg,
+)
 
 # ---------------------------------------------------------------------------
 # Schema fixture
@@ -1391,3 +1396,188 @@ def test_twin_merge_unexpected_game_merge_error_fails_game_not_load(
     assert result.errors == 1
     # Source still present -> nothing merged/deleted; both rows remain.
     assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# E-268-01: orientation-tuple atomicity under a cross-perspective redirect (CC-2)
+# ---------------------------------------------------------------------------
+
+
+def test_cc2_redirect_preserves_orientation_tuple_and_reports(
+    db: sqlite3.Connection,
+) -> None:
+    """E-268-01 AC-3 (HARD regression, TN-2): the CROSS-perspective redirect
+    must write the four-field orientation tuple ``{home_team_id, away_team_id,
+    home_score, away_score}`` ATOMICALLY.
+
+    Repro (both validators' recipe): team A's scout loads the canonical row
+    A-home 5-3; then team B's scout re-loads the SAME real game with its own
+    ``home_away`` MISSING (None) -- so ``_resolve_home_away`` defaults B (own)
+    to home, producing the FLIPPED incoming orientation B-home 3-5. The tolerant
+    schedule-count signal (own count == 1, single candidate) fires the redirect
+    with ``preserve_scores=True``.
+
+    Pre-fix, ``_upsert_game`` froze the scores (keep-existing) but overwrote the
+    two team-ids UNCONDITIONALLY from ``excluded.*`` -- a TORN write: the canonical
+    5-3 scores were re-attributed to the now-swapped team-ids, so the surviving
+    row read B-home 5-3. That silently re-credited A's 5-run WIN to B on BOTH
+    perspectives' reports. Post-fix, the team-ids are gated on ``preserve_scores``
+    exactly as the scores are, so the whole tuple keeps-existing: the row stays
+    A-home 5-3.
+
+    Asserts the surviving orientation AND that none of the three affected report
+    reads -- ``_query_record`` (W-L), ``_query_runs_avg`` (runs for/against), and
+    ``_query_recent_games`` (recent form) -- is mis-credited, for BOTH team A and
+    team B (the epic states both reports are corrupted). Reverting the
+    ``_upsert_game`` team-id gating makes every post-fix assertion below fail.
+    """
+    # --- Team A's scout seeds the canonical row: A-home 5-3 (own perspective). ---
+    loader_a = _make_loader(db)
+    team_a_id = loader_a._team_ref.id
+    _load_first_game(db, loader_a, owning_score=5, opponent_score=3)
+
+    # The opponent (team B) was created by the first load; resolve its id.
+    team_b_id = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_TEAM_UUID,),
+    ).fetchone()[0]
+    season_id = loader_a._season_id
+
+    # Sanity: the canonical row is A-home 5-3, single perspective = team A.
+    assert db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone() == (team_a_id, team_b_id, 5, 3)
+
+    # --- Team B's scout re-loads the SAME game with home_away MISSING. ---
+    loader_b = GameLoader(
+        db,
+        owned_team_ref=TeamRef(
+            id=team_b_id, gc_uuid=_OPP_TEAM_UUID, public_id=None
+        ),
+    )
+    # B resolves its opponent (team A) BY NAME to team A's existing row -- the
+    # TN-2 resolution trap: a mismatch would silently skip the natural-key dedup.
+    assert (
+        loader_b._ensure_team_row(_OWN_TEAM_UUID, opponent_name=_OWN_TEAM_UUID)
+        == team_a_id
+    )
+    # Own crawl schedule: exactly ONE game vs this opponent (team A) on this date
+    # -- the tolerant same-game signal that fires the redirect across the flipped
+    # orientation (the positional exact-score branch does NOT match a flip).
+    loader_b._schedule_counts = {(_GAME_DATE, _OWN_TEAM_UUID): 1}
+
+    # B's summary: home_away=None -> own (B) defaults home; from B's perspective
+    # owning_score is B's runs (3) and opponent_score is A's runs (5).
+    summary_b = _make_summary(
+        event_id=_EVENT_ID_2,
+        game_stream_id=_STREAM_ID_2,
+        home_away=None,
+        owning_score=3,
+        opponent_score=5,
+    )
+    result = loader_b.load_payload(
+        _make_boxscore(), summary_b, opponent_name=_OWN_TEAM_UUID
+    )
+
+    assert result.errors == 0
+    # The redirect fired: B's event id -> A's canonical id, one surviving row.
+    assert loader_b.redirect_map.get(_EVENT_ID_2) == _EVENT_ID_1
+    assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
+
+    # AC-1/AC-3: the orientation tuple is preserved atomically -- A stays HOME
+    # with 5-3 (pre-fix this read (team_b_id, team_a_id, 5, 3) -> B-home 5-3).
+    assert db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone() == (team_a_id, team_b_id, 5, 3)
+
+    # --- Reports must credit the right team on BOTH perspectives (AC-3). ---
+    # Team A (won 5-3): record W, runs 5 for / 3 against, recent form W.
+    assert _query_record(db, team_a_id, season_id) == {"wins": 1, "losses": 0}
+    assert _query_runs_avg(db, team_a_id, season_id) == (5.0, 3.0)
+    recent_a = _query_recent_games(db, team_a_id, season_id)
+    assert len(recent_a) == 1
+    assert recent_a[0]["result"] == "W"
+    assert (recent_a[0]["our_score"], recent_a[0]["their_score"]) == (5, 3)
+    assert recent_a[0]["is_home"] is True
+
+    # Team B (lost 3-5): record L, runs 3 for / 5 against, recent form L.
+    assert _query_record(db, team_b_id, season_id) == {"wins": 0, "losses": 1}
+    assert _query_runs_avg(db, team_b_id, season_id) == (3.0, 5.0)
+    recent_b = _query_recent_games(db, team_b_id, season_id)
+    assert len(recent_b) == 1
+    assert recent_b[0]["result"] == "L"
+    assert (recent_b[0]["our_score"], recent_b[0]["their_score"]) == (3, 5)
+    assert recent_b[0]["is_home"] is False
+
+
+def test_upsert_game_preserve_scores_keeps_orientation_tuple(
+    db: sqlite3.Connection,
+) -> None:
+    """E-268-01 AC-1 (unit): with ``preserve_scores=True`` on an ON CONFLICT
+    update, ALL FOUR orientation fields keep-existing -- even when the incoming
+    row flips the team-ids AND changes both scores. Pins the team-id gating at
+    the SQL level (the integration test above proves the end-to-end path)."""
+    loader = _make_loader(db)
+    team_a_id = loader._team_ref.id
+    team_b_id = loader._ensure_team_row(_OPP_TEAM_UUID)
+    game_id = "g-preserve-unit"
+
+    # First insert: canonical A-home 5-3 (preserve_scores irrelevant on insert).
+    loader._upsert_game(
+        game_id, _GAME_DATE, team_a_id, team_b_id, 5, 3, game_id,
+        preserve_scores=False,
+    )
+    # Cross-perspective redirect reload: FLIPPED orientation + different scores.
+    loader._upsert_game(
+        game_id, _GAME_DATE, team_b_id, team_a_id, 9, 1, "g-preserve-unit-2",
+        preserve_scores=True,
+    )
+
+    # All four fields kept-existing: the flip and the 9-1 scores are ignored.
+    assert db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (game_id,),
+    ).fetchone() == (team_a_id, team_b_id, 5, 3)
+
+
+def test_upsert_game_correction_path_takes_incoming_orientation(
+    db: sqlite3.Connection,
+) -> None:
+    """E-268-01 AC-2 / AC-4 (GAP-5 over-gating guard): with
+    ``preserve_scores=False`` (a first insert OR a same-perspective reload) ALL
+    FOUR orientation fields TAKE the incoming values. Guards against over-gating
+    the fix to ALWAYS keep-existing, which would pass AC-3 while silently
+    breaking the same-perspective scorekeeper-correction path (AC-2)."""
+    loader = _make_loader(db)
+    team_a_id = loader._team_ref.id
+    team_b_id = loader._ensure_team_row(_OPP_TEAM_UUID)
+    game_id = "g-correction-unit"
+
+    # First insert (no conflict): takes incoming A-home 5-3.
+    loader._upsert_game(
+        game_id, _GAME_DATE, team_a_id, team_b_id, 5, 3, game_id,
+        preserve_scores=False,
+    )
+    assert db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (game_id,),
+    ).fetchone() == (team_a_id, team_b_id, 5, 3)
+
+    # Same-perspective reload (preserve_scores=False): a correction that flips
+    # the orientation AND rewrites the scores -- ALL FOUR take the incoming values
+    # (this would stay 5-3 / A-home if the fix over-gated to always keep-existing).
+    loader._upsert_game(
+        game_id, _GAME_DATE, team_b_id, team_a_id, 7, 2, "g-correction-unit-2",
+        preserve_scores=False,
+    )
+    assert db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (game_id,),
+    ).fetchone() == (team_b_id, team_a_id, 7, 2)

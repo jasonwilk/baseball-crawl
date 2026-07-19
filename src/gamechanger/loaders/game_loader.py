@@ -600,8 +600,10 @@ class GameLoader:
             opp_data: Boxscore data dict for the opponent team (or None).
             opp_team_id: INTEGER PK of the opponent team.
             preserve_scores: When True (a CROSS-perspective redirect), the game
-                upsert keeps the canonical row's existing scores instead of
-                overwriting them (E-261-03a / TN-1 first-loaded-perspective-wins).
+                upsert keeps the canonical row's existing orientation tuple
+                (home/away team-ids AND scores together) instead of overwriting
+                them (E-268-01 / TN-1, extending E-261-03a
+                first-loaded-perspective-wins).
 
         Returns:
             ``LoadResult`` for this game.
@@ -1330,14 +1332,18 @@ class GameLoader:
             start_time: ISO 8601 datetime string from schedule/public endpoint.
             timezone: IANA timezone identifier (e.g., ``America/Chicago``).
             preserve_scores: When True (a CROSS-perspective redirect), the
-                ``ON CONFLICT`` update keeps the canonical row's existing scores
-                (first-loaded perspective wins; fills only a NULL gap) instead of
-                overwriting them -- so the tolerant same-game signal firing on
-                DISAGREEING scores does not flap the canonical scores on every
-                regeneration (E-261-03a / TN-1). False (a first insert or a SAME-
-                perspective reload) writes the incoming scores, preserving the
+                ``ON CONFLICT`` update keeps the canonical row's existing
+                orientation tuple -- ``home_team_id``, ``away_team_id``,
+                ``home_score``, and ``away_score`` all keep-existing together
+                (first-loaded perspective wins; fills only a NULL gap) instead
+                of overwriting them -- so the tolerant same-game signal firing
+                on a FLIPPED orientation / DISAGREEING scores does not flap the
+                canonical row on every regeneration, and the frozen scores are
+                never re-attributed to a swapped team-id (E-268-01 / TN-1,
+                extending E-261-03a). False (a first insert or a SAME-
+                perspective reload) writes the incoming values, preserving the
                 scorekeeper-correction path. Scoped to the redirect site ONLY --
-                do NOT confuse with a blanket score COALESCE, which TN-1 forbids.
+                do NOT confuse with a blanket COALESCE, which TN-1 forbids.
 
         Raises:
             ValueError: If ``home_team_id == away_team_id`` -- the home != away
@@ -1351,14 +1357,21 @@ class GameLoader:
                 f"home_team_id == away_team_id == {home_team_id} "
                 f"(E-245-04 / TN-6 home != away invariant)."
             )
-        # Score ownership (E-261-03a / TN-1): on a CROSS-perspective redirect
-        # (preserve_scores=True) keep the canonical row's existing scores
-        # (COALESCE existing-first, filling only a NULL gap) so disagreeing
-        # perspectives do not flap the canonical value; a first insert or a
-        # SAME-perspective reload (preserve_scores=False) writes the incoming
-        # scores, preserving the correction path. Bound as a 0/1 flag so the SQL
-        # stays static -- the ON CONFLICT clause is not evaluated on a plain
-        # insert, so ``games.*`` in the CASE is safe.
+        # Orientation-tuple ownership (E-268-01 / TN-1, extending E-261-03a):
+        # the four fields {home_team_id, away_team_id, home_score, away_score}
+        # form ONE atomic orientation tuple and must move together. On a
+        # CROSS-perspective redirect (preserve_scores=True) keep the canonical
+        # row's existing values (COALESCE existing-first, filling only a NULL
+        # gap) so disagreeing perspectives do not flap the canonical value AND
+        # the frozen scores are never re-attributed to a flipped team-id; a
+        # first insert or a SAME-perspective reload (preserve_scores=False)
+        # writes the incoming values, preserving the scorekeeper-correction
+        # path. Bound as a 0/1 flag so the SQL stays static -- the ON CONFLICT
+        # clause is not evaluated on a plain insert, so ``games.*`` in the CASE
+        # is safe. Gating the team-ids alongside the scores (rather than the
+        # prior unconditional excluded.* overwrite) closes CC-2: the torn write
+        # that swapped home/away team-ids while freezing the scores, silently
+        # re-crediting runs to the wrong team on both perspectives' reports.
         preserve_flag = 1 if preserve_scores else 0
         self._db.execute(
             """
@@ -1370,8 +1383,10 @@ class GameLoader:
             ON CONFLICT(game_id) DO UPDATE SET
                 season_id      = excluded.season_id,
                 game_date      = excluded.game_date,
-                home_team_id   = excluded.home_team_id,
-                away_team_id   = excluded.away_team_id,
+                home_team_id   = CASE WHEN ? THEN COALESCE(games.home_team_id, excluded.home_team_id)
+                                      ELSE excluded.home_team_id END,
+                away_team_id   = CASE WHEN ? THEN COALESCE(games.away_team_id, excluded.away_team_id)
+                                      ELSE excluded.away_team_id END,
                 home_score     = CASE WHEN ? THEN COALESCE(games.home_score, excluded.home_score)
                                       ELSE excluded.home_score END,
                 away_score     = CASE WHEN ? THEN COALESCE(games.away_score, excluded.away_score)
@@ -1392,9 +1407,11 @@ class GameLoader:
                 start_time     = COALESCE(excluded.start_time, games.start_time),
                 timezone       = COALESCE(excluded.timezone, games.timezone)
             """,
+            # Four preserve_flag binds -- one per CASE in ON CONFLICT, in SQL
+            # order: home_team_id, away_team_id, home_score, away_score.
             (game_id, self._season_id, game_date, home_team_id, away_team_id,
              home_score, away_score, game_stream_id, start_time, timezone,
-             preserve_flag, preserve_flag),
+             preserve_flag, preserve_flag, preserve_flag, preserve_flag),
         )
         logger.debug(
             # %s (not %d): home/away score may be None for a score-less summary.
