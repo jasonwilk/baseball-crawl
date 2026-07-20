@@ -206,19 +206,21 @@ Triggers evaluated against `.claude/rules/documentation.md`:
 
    **NOT offset, and deliberately so.** Offsetting +564 of inherited drift would mean auditing three epics' worth of changes at this epic's closure — not E-267's work, and precisely the "manufactured trim" that is worse than a recorded exception. Recorded as an attributed exception instead.
 
-   **Re-measure obligation — DISCHARGED, then CORRECTED (2026-07-20). FINAL FIGURE: +236.** An earlier figure of +214 (and CA's self-reported +29) was measured by subtraction and by CA counting only its OWN files. Re-measured directly, E-267's total context-layer contribution is **+236**:
+   **Re-measure obligation — DISCHARGED, then CORRECTED. AUTHORITATIVE FIGURE: +263** (measured at patch time via `git diff --cached --numstat` against main).
 
    | subtree | net |
    |---|---|
    | `.claude/rules` | **+15** |
    | `.claude/agents` | **+2** |
    | `.claude/skills` | 0 |
-   | `.claude/agent-memory` | **+219** |
-   | **total** | **+236** |
+   | `.claude/agent-memory` | **+246** |
+   | **E-267 total** | **+263** |
 
-   Raw ratchet now +800 against a `main` baseline failing by +564 independently.
+   **OPERATOR-SIGNED EXCEPTION GRANTED for E-267 (operator, 2026-07-20):** the raw ratchet FAILS, but E-267's own +263 is a legitimate reviewed deliverable — 93% of it (`agent-memory` +246) is agents recording their own dispatch-time learning in the subtree the Learning-Loop Lifecycle explicitly expects to grow and prune, and the rules + agent definitions that actually BIND future work cost **+17 lines** (`rules` +15, `agents` +2). The pre-existing drift remains a separate operator re-snapshot follow-up, unresolved by this exception: the baseline is stale (`generated: 2026-07-13T22:01:18Z`) and `main` FAILS it by +564 independently of this epic.
 
-   **The COMPOSITION reframes the accounting and must be recorded with the number: 93% of this epic's context-layer growth is agents recording their own dispatch-time learning in `.claude/agent-memory/` — the subtree the Learning-Loop Lifecycle explicitly expects to grow and prune. The codified rules that actually BIND future work cost 17 lines** (`rules` +15, `agents` +2). A raw "+236" read without the split would misprice this epic's effect on the binding surface by more than an order of magnitude.
+   **The COMPOSITION must stay attached to the number.** A raw "+263" read without the split misprices this epic's effect on the binding surface by more than an order of magnitude.
+
+   **Superseded figures — a worked example of correct arithmetic on a stale base.** +214 / +217 / +221 / +236 / +237 all appeared during closure; every one was arithmetically correct and wrong, because each was derived by subtraction or from a partial file set (claude-architect's self-reported +29 counted only ITS own files, omitting api-scout's, code-reviewer's three topic files, docs-writer's, baseball-coach's and PM's memory writes). Only the direct `--numstat` measurement at patch time is authoritative. claude-architect codified this as its own standing rule.
 
    Read this together with the mechanism finding below: the ratchet cannot see CLAUDE.md at all, so the binding-surface growth is understated for a different reason than the memory growth is overstated. CA also scoped `data-model.md`'s plays "Never delete-and-reinsert" rule to LOAD strategy (+1/−1) — it read as absolute and could have been cited against the game-grain retire.
 
