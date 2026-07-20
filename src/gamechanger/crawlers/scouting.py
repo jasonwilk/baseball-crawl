@@ -83,6 +83,9 @@ class ScoutingCrawlResult:
         games_crawled: Count of boxscores successfully fetched.
         errors: Count of errors encountered during crawl.
         skipped: True if no completed games were found (nothing to do).
+        schedule_fetch_ok: Whether the schedule fetch itself succeeded. Feeds the
+            game-grain reconcile health gate (E-267-02): an empty ``games`` list
+            from a FAILED fetch must never be read as "the team has no games".
     """
 
     team_id: int
@@ -94,6 +97,7 @@ class ScoutingCrawlResult:
     games_crawled: int = 0
     errors: int = 0
     skipped: bool = False
+    schedule_fetch_ok: bool = True
 
 # ---------------------------------------------------------------------------
 # Accept headers
@@ -150,7 +154,10 @@ class ScoutingCrawler:
         if games_data is None:
             # Need a team_id for the result -- ensure row exists.
             team_id = self._ensure_team_row(public_id=public_id)
-            return ScoutingCrawlResult(team_id=team_id, season_id="", public_id=public_id, errors=1)
+            return ScoutingCrawlResult(
+                team_id=team_id, season_id="", public_id=public_id, errors=1,
+                schedule_fetch_ok=False,
+            )
 
         completed_games = [g for g in games_data if g.get("game_status") == "completed"]
         if not completed_games:

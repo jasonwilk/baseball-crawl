@@ -4,7 +4,7 @@
 [E-267: Reconcile-at-Load Against the Fresh Crawl](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the load pipeline has a shared reconcile-at-load primitive that, given a prior-loaded set and the fresh crawl for a team+season, computes the set-difference (what is loaded but absent from the fresh crawl) and classifies each absence as genuinely-removed (retire) or transient/postponed/not-yet-final (refuse, keep live data). This is the foundation the three grains (game, player-line, roster) build on. This story delivers the primitive and its corroboration decision WITHOUT applying any grain-specific retire yet.

@@ -1,0 +1,12 @@
+---
+name: report-dont-silently-resolve-ac-mismatch
+description: When a story AC contradicts the shipped code, document the code AND report the divergence to the spawner -- resolving it silently in your own completion report is a gap even when your resolution was correct.
+metadata:
+  type: feedback
+---
+
+When writing docs against a story whose ACs assert something about the codebase (especially a *negative* claim, "does NOT do X"), always verify the assertion against the actual code before writing prose from it. If the AC turns out to be wrong, write the doc to match the code (the code wins) -- but also explicitly flag the divergence in the completion report, even if you are confident your resolution was correct and even if you already silently worked around it while drafting.
+
+**Why:** On E-267-05, a story AC (inherited from a sibling story's technical note) asserted a roster-purge grant would NOT be auto-restored on team regeneration -- literally true in the specific narrow sense the sibling story meant, but read plainly it was a false claim about `user_team_access` semantics. I wrote the doc correctly (matching the code, not the AC's literal wording) but did not mention the discrepancy in my completion report, because I judged my own resolution sufficient. Code-reviewer caught the divergence independently by tracing every `user_team_access` write, and the team lead's read was: "your judgment was right; the reporting was the gap." The instruction to "report discrepancies rather than resolve them silently" exists specifically so the story owner (PM) can rule whether the AC is *wrong* (needs correcting for future readers) or merely *silent* (needs recording) -- a distinction that has come up repeatedly across this epic. A docs story quietly self-resolving a spec defect means the spec file itself stays wrong for the next reader, even though the shipped docs are accurate.
+
+**How to apply:** Treat "the AC and the code disagree" as always report-worthy, independent of whether you already know the right resolution. Silent correction is only half the job -- the other half is telling the spec's owner so the artifact of record gets fixed too. This applies most sharply to ACs making negative/absence claims ("NOT X", "never Y") -- those are the easiest to state loosely in a story and the easiest to walk past without checking, because they read plausibly even when false.

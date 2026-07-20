@@ -1,4 +1,4 @@
-"""bb db -- database management commands (backup, reset)."""
+"""bb db -- database management commands (backup, reset, purge-scouting)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from src.db.backup import backup_database
+from src.db.purge_scouting import check_purge_production_guard, purge_scouting_data
 from src.db.reset import check_production_guard, reset_database
 
 app = typer.Typer(
@@ -88,3 +89,59 @@ def reset(
     console.print(
         f"[green]Database reset to empty schema. {tables} tables created.[/green]"
     )
+
+
+@app.command("purge-scouting")
+def purge_scouting(
+    db_path: Optional[Path] = typer.Option(
+        None,
+        "--db-path",
+        metavar="PATH",
+        help="Override DATABASE_PATH env var.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Skip confirmation prompt and the production refusal.",
+    ),
+) -> None:
+    """Delete all scouting/report data, keeping user identity and logins.
+
+    The clean-slate command for a LIVE database: every game, report, team,
+    player, and season row is destroyed, while users, passkeys, magic links,
+    sessions, and the programs bootstrap row survive -- so coaches stay logged
+    in. Use ``bb db reset`` instead when destroying logins is acceptable.
+    """
+    # Guard BEFORE the confirmation prompt, so the operator is never asked to
+    # confirm a purge that would be refused anyway (the bb db reset ordering).
+    try:
+        check_purge_production_guard(force=force)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        err_console.print(
+            "[red]Refusing to purge a PRODUCTION database without --force.[/red]"
+        )
+        raise typer.Exit(code=code) from exc
+
+    if not force:
+        typer.confirm(
+            "This will delete ALL scouting and report data (logins are kept). "
+            "Confirm?",
+            abort=True,
+        )
+
+    # The library re-runs the production guard itself (defense in depth); this
+    # call site's own guard above exists only so the refusal precedes the
+    # prompt. ``force`` is forwarded because the library guard reads it.
+    result = purge_scouting_data(db_path=db_path, force=force)
+
+    console.print(
+        f"[green]Purged {result.total_rows} row(s) across "
+        f"{len(result.rows_deleted)} table(s); removed {result.files_removed} "
+        f"report file(s). User identity and auth preserved.[/green]"
+    )
+    if result.file_errors:
+        err_console.print(
+            f"[yellow]{result.file_errors} report file(s) could not be removed "
+            f"(see logs); database purge completed.[/yellow]"
+        )

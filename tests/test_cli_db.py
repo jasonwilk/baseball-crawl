@@ -167,3 +167,92 @@ class TestDbHelp:
         assert result.exit_code == 0
         assert "backup" in result.output
         assert "reset" in result.output
+        assert "purge-scouting" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb db purge-scouting (E-267-06)
+# ---------------------------------------------------------------------------
+
+
+class TestDbPurgeScouting:
+    """Argument mapping and guard sequencing for ``bb db purge-scouting``.
+
+    The purge itself is mocked here -- its behavior is covered end-to-end in
+    ``tests/test_purge_scouting.py``. What this class pins is the CLI contract:
+    the production guard runs BEFORE the confirmation prompt, a refusal exits
+    non-zero WITHOUT calling the purge, and failures surface as a non-zero exit.
+    """
+
+    def _result(self, rows=None, files_removed=0, file_errors=0):
+        from src.db.purge_scouting import PurgeResult
+
+        return PurgeResult(
+            rows_deleted=rows if rows is not None else {"games": 3},
+            files_removed=files_removed,
+            file_errors=file_errors,
+        )
+
+    def test_force_purge_exits_0_and_forwards_args(self, tmp_path: Path) -> None:
+        """--force skips the prompt; --db-path is forwarded."""
+        db_file = tmp_path / "custom.db"
+        with patch("src.cli.db.check_purge_production_guard"), patch(
+            "src.cli.db.purge_scouting_data", return_value=self._result()
+        ) as mock_fn:
+            result = runner.invoke(
+                app, ["db", "purge-scouting", "--db-path", str(db_file), "--force"]
+            )
+        assert result.exit_code == 0
+        mock_fn.assert_called_once_with(db_path=db_file, force=True)
+
+    def test_production_refusal_exits_nonzero_without_purging(self) -> None:
+        """The guard's SystemExit becomes a clean non-zero exit, purge NOT called.
+
+        The error path that matters on a destructive command: a refused purge
+        must not reach ``purge_scouting_data`` at all.
+        """
+        with patch(
+            "src.cli.db.check_purge_production_guard", side_effect=SystemExit(1)
+        ), patch("src.cli.db.purge_scouting_data") as mock_fn:
+            result = runner.invoke(app, ["db", "purge-scouting", "--force"])
+        assert result.exit_code == 1
+        mock_fn.assert_not_called()
+
+    def test_declining_the_prompt_aborts_without_purging(self) -> None:
+        """Answering 'n' at the confirmation aborts and purges nothing."""
+        with patch("src.cli.db.check_purge_production_guard"), patch(
+            "src.cli.db.purge_scouting_data"
+        ) as mock_fn:
+            result = runner.invoke(app, ["db", "purge-scouting"], input="n\n")
+        assert result.exit_code != 0
+        mock_fn.assert_not_called()
+
+    def test_confirming_the_prompt_purges(self) -> None:
+        """Answering 'y' proceeds."""
+        with patch("src.cli.db.check_purge_production_guard"), patch(
+            "src.cli.db.purge_scouting_data", return_value=self._result()
+        ) as mock_fn:
+            result = runner.invoke(app, ["db", "purge-scouting"], input="y\n")
+        assert result.exit_code == 0
+        mock_fn.assert_called_once()
+
+    def test_purge_failure_surfaces_as_nonzero_exit(self) -> None:
+        """A DB failure inside the purge is not swallowed into a success exit."""
+        import sqlite3
+
+        with patch("src.cli.db.check_purge_production_guard"), patch(
+            "src.cli.db.purge_scouting_data",
+            side_effect=sqlite3.OperationalError("disk I/O error"),
+        ):
+            result = runner.invoke(app, ["db", "purge-scouting", "--force"])
+        assert result.exit_code != 0
+
+    def test_file_errors_are_reported_but_do_not_fail_the_command(self) -> None:
+        """Unremovable report files warn; the DB purge still succeeded."""
+        with patch("src.cli.db.check_purge_production_guard"), patch(
+            "src.cli.db.purge_scouting_data",
+            return_value=self._result(files_removed=2, file_errors=1),
+        ):
+            result = runner.invoke(app, ["db", "purge-scouting", "--force"])
+        assert result.exit_code == 0
+        assert "could not be removed" in result.output

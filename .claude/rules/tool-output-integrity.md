@@ -17,6 +17,8 @@ Treat any of these as a tool-output FAILURE, not as truth:
 
 **Silent-empty from a tool quirk, not from absence:** the environment's `grep` is ugrep, which returns EMPTY (no error) for `grep -rn "a\|b" <path…>` -- recursive BRE alternation over multiple path args. Use `grep -rnE "a|b"` (ERE), or a single pattern / single path. Treat an unexpected empty grep as an **Empty** FAILURE to cross-check (re-run with `-E` or per-file), never as proof of absence -- in E-256-15 this exact quirk returned "no matches" for symbols that were present, and driving a deletion-eviction sweep off it would have shipped a false-clean no-op.
 
+**Concrete case — a garble that was coherent AND context-plausible (E-267).** A Read of `src/db/reconcile_at_load.py` returned nonempty, well-formed, topically-correct-looking Python that does not exist in the file — and what it rendered was precisely the defect the review round was hunting (a restored global OR'd flag, a `team_id` parameter accepted and dropped). The reading agent was one step from reporting that the implementer had shipped a cosmetic fix with its mutation left in. Careful reading could not have caught it; what caught it was a second Read disagreeing and a grep for the fabricated tokens returning NO matches. **The dangerous shape is a garble that is plausible for the current context** — it confirms the hypothesis you already hold. The abstract form ("nonempty can be wrong") is easy to read past, so treat a read that hands you exactly the defect you were looking for as a cross-check trigger, not as a finding.
+
 ## Response protocol (cross-check, retry, escalate)
 
 When a target known or expected to be non-empty returns empty, truncated, or garbled output:

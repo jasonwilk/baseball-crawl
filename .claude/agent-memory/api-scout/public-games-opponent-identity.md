@@ -19,6 +19,22 @@ Verified live against team `WThfCgtHecNF` (34 records) for the morning-of-game s
 
 Doc updated: `docs/api/endpoints/get-public-teams-public_id-games.md` (added Opponent Identity section, caveats, upcoming-game example, fixed Known Limitations). See [[exploration-findings]] for opponent ID hierarchy context.
 
+## `completed` is TERMINAL + no zero-completed shape (LONGITUDINAL, 2026-07-20, E-267)
+
+Two probes answering "can a completed game revert / can the array go zero-completed?" -- the transition question the 2026-07-19 TN-11 snapshot could NOT answer.
+
+**Method worth reusing:** our own `data/app.db` IS a persisted prior snapshot -- every `games` row was ingested from a boxscore, so GC reported it `completed` at load time. Re-fetch the same teams' public `/games` now and diff. That converts a snapshot endpoint into a longitudinal experiment with no waiting.
+
+**Probe 1 (17 teams, 636 live records vs 583 prior-completed, 6-20 day elapsed window):** 0 reversions, 0 genuine removals. 22 apparent "vanished" were ALL the perspective-specific-`id` artifact -- E-261 twin merges keep the OTHER perspective's `event_id`, so the stored `game_id` is absent from the queried team's array but present+completed in its twin's. **Any schedule-diff analysis MUST control for this or it will report ~4% phantom removals.**
+
+**Probe 2 (15 team-seasons, spring 2019 -> summer 2026, 602 records):** zero teams with zero completed. Finished seasons retain full history for YEARS (2019 season still complete in 2026). Season rollover mints a NEW public_id rather than draining the old one (same club's 8U/9U/.../14U each distinct public_id) -- so rollover cannot produce a zero-completed array. Unknown public_id -> **404**, malformed -> **400**; a removed team is an HTTP error, never an empty-array 200.
+
+**How to apply:** treat `completed` as terminal and zero-completed-with-prior-completed as a defensive edge case with no known mechanism. NOT proof of impossibility (scorekeeper un-finalize is an unexercised UI action; a negative can't be proven) -- "not observed at scale," not "ruled out."
+
+**Provenance correction:** E-267-02 AC-4's not-final guard traces to my own TN-11 snapshot (not-final games EXIST and persist), i.e. it guards NEVER-completed games. E-267-03 AC-4 is about dedup ordering, unrelated to status. Neither is evidence for reversion -- do not cite them as such.
+
+Doc updated: `docs/api/endpoints/get-public-teams-public_id-games.md` (Status Stability + Zero-Completed Arrays sections, 2 Known Limitations, last_confirmed 2026-07-20).
+
 ## Authenticated entry-mode signal + bridge (verified 2026-06-12, team qKrZuhgV6eke)
 
 Where the manual-vs-lookup signal actually lives: **authenticated `GET /teams/{gc_uuid}/opponents`**. `progenitor_team_id` present = team-lookup (search-linked, auto-resolvable); **absent (key omitted, not null)** = manual entry. Use `o.get("progenitor_team_id")`.

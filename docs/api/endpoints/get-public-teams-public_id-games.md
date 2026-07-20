@@ -23,7 +23,7 @@ response_shape: array
 response_sample: data/raw/public-team-games-sample.json
 raw_sample_size: "32 game records, 25.7 KB"
 discovered: "2026-03-04"
-last_confirmed: "2026-07-19"
+last_confirmed: "2026-07-20"
 tags: [games, team, public]
 caveats:
   - >
@@ -115,6 +115,26 @@ Bare JSON array of game records (completed and upcoming). 34 records in a single
 
 **Consequence for any schedule-diff / reconcile logic:** "present in the schedule array but not `completed`" is a TRANSIENT/not-yet-final state, NOT a removal. Only a game **fully absent from the full schedule array** indicates a genuine removal/void. Therefore a reconcile MUST diff prior-loaded games against the **full** `/games` array (all `game_status` values), NOT a `completed`-only filtered subset — a `completed`-only subset would misclassify every legitimately-present not-final game (and every past unplayed game) as "removed."
 
+### Status Stability: `completed` is Terminal (longitudinal, 2026-07-20)
+
+The 2026-07-19 probe recorded a **snapshot** of statuses. A follow-up **longitudinal** probe (2026-07-20) tested whether a status ever moves BACKWARD, using our own database as the prior snapshot: every stored game row was ingested from a boxscore, so GC reported it `"completed"` at load time (load timestamps spanning 2026-06-30 to 2026-07-14, i.e. a 6-to-20-day elapsed window). Re-fetching the same 17 teams' full schedules (636 live records) and diffing against **583 games GC had previously reported as `completed`**:
+
+- **0 reversions.** Not one prior-`completed` game came back with `game_status` absent, `null`, `"new"`, or any other non-`completed` value. `"completed"` behaved as a **terminal** state over the observed window.
+- **0 genuine removals.** 22 stored `game_id`s were absent from the queried team's array, but **all 22** are explained by the perspective-specific `id` (see the caveat above): each is a cross-perspective twin whose surviving `game_id` is the OTHER perspective team's `event_id`, and each was confirmed PRESENT and `completed` in that other team's live array. After controlling for perspective, the genuine-removal count is zero.
+- Live status distribution held steady at 621 `"completed"`, 14 key-ABSENT, 1 `"new"`.
+
+**Do not read this as proof that reversion is impossible** — a scorekeeper un-finalizing a game is a UI action we have not exercised, and no probe can prove a negative. It establishes that reversion is **not observed** across 583 games over a multi-week window, so it is rare at most, not routine.
+
+### Zero-Completed Arrays and Long-Lived Team-Seasons (2026-07-20)
+
+Probed 15 additional team-seasons whose `public_id`s were captured in earlier sessions, spanning seasons from **spring 2019 through summer 2026** (602 records):
+
+- **No team returned zero completed games.** Every team that had played returned its **full** completed history — including team-seasons finished up to **7 years** ago (a spring-2019 team still returns all 50 of its completed games in 2026).
+- **A season rollover does NOT empty an old array.** GC team-seasons are separate entities with separate `public_id`s (the same club's 8U/9U/10U/11U/12U/13U/14U squads each carry a distinct `public_id`). A rollover mints a NEW `public_id`; it does not drain the prior one. So "season rollover" is not a mechanism that can produce a zero-completed array for a team that has played.
+- **A team that does not exist returns 404, not an empty array.** `GET /public/teams/{unknown_slug}/games` → **404 `Not Found`**; a malformed (too-short) slug → **400 `Bad Request`**. A removed/re-registered team therefore surfaces as an HTTP error, not as a silently-empty success payload.
+
+**Consequence for schedule-diff / reconcile logic:** the "fresh schedule contains zero completed games while the team has prior completed games" shape has **no observed mechanism** — not season rollover, not team removal (404), not archival, not status reversion. Treat it as a defensive edge case, not an expected one. Its benign sibling — a genuinely new team early in a season with only scheduled games — is a real shape, but by construction has no prior-loaded games to reconcile against.
+
 ### Opponent Identity
 
 **The opponent in this payload is identified by a free-text `name` string only.** Verified 2026-06-12 across all 34 records for team `WThfCgtHecNF`: no record carries `public_id`, `root_team_id`, `progenitor_team_id`, or any slug under `opponent_team` (or anywhere else). This is true for both completed and upcoming games, and is independent of how the coach entered the opponent.
@@ -184,6 +204,8 @@ This matters for any feature that needs to **machine-resolve** the opponent (e.g
 - No pagination observed (32 games on team QTiLIb2Lui3b; 34 on WThfCgtHecNF). Behavior for teams with very large game histories unknown.
 - **Both completed AND upcoming games appear** (verified 2026-06-12). Upcoming games have `game_status: null`, a future `start_ts`, and omit `score`/`has_videos_available`. (Earlier observation of "completed only" was incomplete -- likely a team with no upcoming games at capture time.) For richer in-progress / live data, the authenticated `GET /teams/{team_id}/game-summaries` may still be preferred, but it returns completed games only.
 - `has_live_stream` is `false` for all observed records.
+- **`"completed"` is terminal (not observed to revert).** Longitudinal probe 2026-07-20: 583 prior-`completed` games re-fetched after a 6-to-20-day window produced 0 reversions and 0 genuine removals. See "Status Stability" above.
+- **Unknown `public_id` → 404, malformed → 400.** A missing team is an HTTP error, never an empty-array 200. No probed team ever returned zero completed games while having played; finished team-seasons retain their full history for years (2019 seasons still complete in 2026).
 - The `id` field is the `event_id` parameter for the boxscore endpoint (confirmed 2026-03-12, terminology corrected 2026-03-19). This is the public-endpoint equivalent of `event_id` in the authenticated flow (game-summaries). `/games/preview` uses `event_id` as the field name for the same value; `/games` uses `id`.
 - **Perspective-specific `id` (do not cross-team dedupe on it).** The `id` is specific to the queried team's public schedule: the same real-world game returns a DIFFERENT `id` when fetched from the opponent's schedule. This is unlike the authenticated `game-summaries`, which returns a stable `event_id`/`game_stream_id` per game. The `id` still works as the boxscore/plays `event_id` for the perspective it came from -- but two teams' schedules cannot be deduped to one game by matching `id`.
 

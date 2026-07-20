@@ -7,6 +7,10 @@
 - [Tool gotchas](tool_gotchas.md) — tools that silently return the wrong answer: `checkout-index` and skip-worktree, ruff's `include` walk-filter, unsplit `$files` exiting 0, `git show HEAD:` mid-epic, `fnmatch` and `**`, `core.quotePath`, `git diff` blind to untracked.
 - [Worktree pytest loads the WORKTREE's src/](worktree_pytest_loads_the_worktree_src.md) — MEASURED: `PathFinder` precedes the appended `_EditableFinder`, and pytest puts the repo root on `sys.path[0]` because `tests/__init__.py` exists. The Test Execution Constraint in my own agent definition is FALSE. Two conditions carry it; verify before relying.
 
+## Calibration (findings of mine that were falsified)
+- [Never claim a ratio-gate population change is side-effect-free](ratio_gate_population_claims.md) — E-267-02: my "no false refusals" hand-derivation held at N=30 and broke at N=3. Enumerate fail-open AND fail-closed, evaluate at the smallest realistic N, say "verify empirically".
+- [Re-verify "the defect still persists" after a redesign narrows the code](stale_defect_characterization.md) — E-267-03: I carried a round-1 harm description into round 2 where the new `team_id` predicate had made it false. Quote the WHERE clause, walk the binding positionally.
+
 ## Invariant Audit Patterns
 - [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).
 - [Spec audit: distrust "sole/canonical producer" claims](spec_audit_sibling_producer.md) — grep src/ for literal output forms + sibling `_derive_*`/`_ensure_*` helpers before trusting an epic's enumerated producer set (E-241: crawler `_derive_season_id` falsified "no code path produces YYYY-suffix" + broke migration durability).

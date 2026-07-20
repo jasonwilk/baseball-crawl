@@ -26,6 +26,10 @@
 - Coaching docs use plain prose and "what it means in practice" examples, not formulas
 - Audience: coaching docs assume zero technical knowledge; admin docs assume Python/Docker/SQL competence
 - **N vs M (report coverage)**: N = `completed_games_with_data` (games with stat rows loaded); M = `completed_games` (games with final score). N ≤ M. Always document as "N of M games with data", never conflate with score-only coverage.
+- Report-generation-triggers-destructive-reconcile and `bb db purge-scouting` (the clean-slate command) are documented in operations.md: `### Reconcile-at-Load: Generating a Report Can Now Delete Stale Data` (under Standalone Reports, right after "Generating a Report") and `### Purging Scouting and Report Data (bb db purge-scouting)` (under Database Backup and Restore, right after "Development Database Reset"). Source: E-267.
+
+## Feedback
+- [Report AC-vs-code mismatches, don't silently resolve them](feedback_report_dont_silently_resolve_ac_mismatch.md) -- even when your own doc correctly favors the code over a wrong AC, flag the divergence to the spawner so the story file itself gets corrected too. Negative-claim ACs ("NOT X") are the ones most worth double-checking.
 
 ## Topic File Index
-- No separate topic files yet -- Conventions above (this file) is the sole reference.
+- [feedback_report_dont_silently_resolve_ac_mismatch.md](feedback_report_dont_silently_resolve_ac_mismatch.md) -- report AC/code mismatches even when self-resolved correctly.

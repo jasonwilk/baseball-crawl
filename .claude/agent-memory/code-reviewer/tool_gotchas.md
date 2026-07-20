@@ -28,6 +28,18 @@ metadata:
   partial fix — preferring the measured half over the correct whole.)
 - **`git diff`/`git diff --stat` cannot see untracked files.** A new file is byte-identical to an
   unchanged one there. Use `git status --porcelain`; use a content hash to assert a file is unchanged.
+  **Per-story review corollary:** a story whose deliverable is a NEW module shows a `git diff` containing
+  only PM's status flips. Reviewing off that diff is a false-clean — always `git status --porcelain`
+  first, then Read every `??` path. (E-267-01: both changed files were untracked.)
+- **A garbled Read can be nonempty, coherent, AND topically plausible — it fabricates the defect you
+  are hunting.** In E-267-03 round 2 a Read of `src/db/reconcile_at_load.py` rendered a synthetic
+  preamble (`_pop = any(b.populated for b in blocks)`, a `frozenset().union(...)` of the id sets, and a
+  `_prior_line_player_ids` accepting a `team_id` it then dropped from the SQL) — i.e. exactly the
+  global-OR bug the round's MUST FIX had removed. Reporting it would have been "the implementer left a
+  mutation in and shipped a cosmetic fix." **When a read shows precisely the defect the review is
+  looking for, that is a corruption CANDIDATE, not a finding**: cross-check via grep for the suspect
+  symbols (expect exit 1) AND confirm the parameter is bound in the SQL tuple, not just present in the
+  signature. Verify-before-report is cheapest exactly when the finding would be most damning.
 - **`mapfile -d` requires bash ≥ 4.4; macOS `/bin/bash` is 3.2.** On older bash it errors and leaves
   the target array **unset**, so a following `[ ${#ARR[@]} -eq 0 ] && exit 0` empty-guard reads
   "populate failed" as "nothing staged" and **fails open**. Portable, no-floor equivalent:

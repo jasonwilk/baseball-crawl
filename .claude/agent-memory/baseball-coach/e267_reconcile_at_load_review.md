@@ -74,3 +74,92 @@ already established for this project.
   serve no coaching purpose.
 
 ## Full reply delivered to PM via SendMessage, 2026-07-19.
+
+## Verdict 4 -- Cross-perspective retire-refusal gap (mid-implementation consult, 2026-07-19)
+
+**Context**: implementer's safety guard correctly refuses to retire a game carrying more
+than one team's perspective row (whole-game hard delete would destroy the other team's
+data). Consequence: a genuinely removed/voided game loaded from BOTH perspectives can
+never be retired by this grain -- persists in W-L, season lines, recent form, freshness
+count. Team-lead asked for coaching-severity read (not a frequency estimate).
+
+**Split verdict, not a single call:**
+
+- Of the four persisting symptoms, two are real decision corruption (**recent-form
+  showing a voided game** -- worst, corrupts the single most game-day-immediate signal
+  the system produces; **season batting/pitching lines including a game that didn't
+  happen** -- corrupts the OBP/ERA a coach uses for pitch-around/matchup calls) and two
+  are cosmetic (W-L off by one, freshness N vs N-1). Don't let the cosmetic half make
+  the gap read as minor overall.
+- **Sharper edge than the PM's framing**: safety flags (pitch count/rest day/innings
+  limit) are about OUR OWN pitchers, not opponents. The real exposure question isn't
+  "how often is an opponent's game cross-perspective" -- it's how often one of OUR OWN
+  team's games is. My read: likely COMMON, not rare -- any LSB game against an opponent
+  we've also scouted (routine workflow: pull that opponent's own boxscores) creates a
+  second perspective row for that same game. If confirmed, this stops being a scouting
+  nicety and becomes a player-health compliance question -- a stale/duplicate game could
+  mask a real rest-day violation (pitcher's last outing looks further back than it is,
+  greenlighting a start that should be held). Per my framework, safety flags PUSH
+  (compliance) -- they don't get "document and defer" treatment the way scouting-
+  accuracy gaps do. **Flagged this as the swing question for DE to confirm technically**:
+  does an LSB game vs. a scouted opponent actually pick up both perspectives in practice?
+- **Real-world frequency (the actual baseball question, not the software one)**: voided/
+  re-entered GC games do happen -- duplicate-entry cleanup, protested/overturned results,
+  rainout re-scored as no-contest, wrong-opponent re-scoring. Roughly a small handful of
+  times per team per season, program-wide -- real enough that "document and move on"
+  needs to survive actually happening a few times a year, not a once-a-decade edge case.
+- **Recommendation given**: if own-team cross-perspective exposure is confirmed common
+  -> MUST HAVE to close inside the epic (or at minimum mitigate the safety-flag-feeding
+  calculations specifically). If confined to opponent-side scouting accuracy only ->
+  documentation + follow-on idea acceptable for W-L/freshness, but pushed back on
+  lumping recent-form corruption into that same "defer" bucket -- that symptom reaches
+  today's game-day decision even on the opponent side, so the follow-on idea should be
+  explicitly scoped to prioritize recent-form correctness, not filed as generic backlog.
+
+Full reply delivered to team-lead ("main") via SendMessage, 2026-07-19.
+
+## Verdict 5 -- Correction: masking scenario was wrong, direction is over-caution (2026-07-19)
+
+**DE traced the actual SQL and disproved my masking claim from Verdict 4.** A stale/
+duplicate game can only ADD an appearance (accumulate-only, no deletion of real rows) --
+it can never remove one. Since `last_outing_date = MAX(game_date)` and rest-day gaps are
+computed via `LAG(game_date)`, an extra row can only pull MAX later or shrink a gap,
+never the reverse; pitch/appearance totals over a trailing window can only inflate, never
+deflate. I tried to break this claim adversarially (stale row before earliest outing,
+after latest outing, between two outings) and could not find a counter-case under this
+architecture. **My Verdict-4 claim that a persisting stale game could mask a real rest
+violation and "greenlight a start that should have been held" is WRONG -- retracting it.**
+The actual failure mode is the opposite: over-flagging / false-positive caution.
+
+**Revised severity, safety angle only:**
+
+- Downgraded from MUST-CLOSE-for-health-risk to SHOULD HAVE. Nobody gets hurt from
+  over-caution; the cost is competitive (holding a pitcher who was actually fine) and a
+  secondary trust-erosion risk IF the discrepancy is visible enough for a coach to notice
+  the number is wrong (memory says "he pitched 9 days ago," system says "5 days rest").
+- **Important reframe**: the compliance GUARANTEE survives. A real rest/pitch-count
+  violation is never masked by this gap, because a true appearance can never be dropped
+  by an accumulate-only pipeline -- the bug can only manufacture extra caution, never
+  extra permission. "Safety flags push" still holds where it matters: the system will
+  never wave through a pitcher who actually needs rest because of this specific gap.
+- One remaining unknown flagged to DE/SE, not resolved by me: doubleheader dates (two
+  real same-date games are normal in HS ball) interacting with a same-date stale
+  duplicate -- confirmed the counting is per-game-row (safe) not per-date (which could
+  theoretically collapse/undercount); I could not verify this myself and don't assert a
+  break, just flagged it as worth a technical check.
+
+**Verdict 4's other findings are UNCHANGED and independent of this correction**: recent-
+form and season-line corruption are about hitting/offensive reads, not pitch-count
+math -- both still rated real decision corruption on their own, regardless of how the
+safety-flag direction resolved. DE also found dual-perspective creation depends on a
+case-insensitive team-name match (not routine when spellings diverge -- each becomes an
+independently-retirable single-perspective row and the guard never fires), which lowers
+my "likely common" assumption for own-team exposure and further softens urgency.
+
+**Net revised recommendation**: document-and-defer is now defensible for the safety
+angle specifically. Follow-on idea should still be explicitly scoped to prioritize
+recent-form/season-line correctness (the two decision-corrupting symptoms) ahead of
+W-L/freshness cosmetics and ahead of the safety angle, which is now the least urgent of
+the three threads in this consult.
+
+Full follow-up reply delivered to team-lead ("main") via SendMessage, 2026-07-19.

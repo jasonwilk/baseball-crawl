@@ -4,7 +4,7 @@
 [E-267: Reconcile-at-Load Against the Fresh Crawl](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the destructive operator CLI command `bb db purge-scouting` (in `src/cli/db.py`, alongside `reset`) wipes ALL scouting and report data for a true clean data slate while PRESERVING user identity and auth, so existing coaches stay logged in. This is the post-epic clean-slate mechanism for both dev and live (dev may alternatively use `bb db reset`; live uses this to preserve auth). It exists because mass report-deletion leaves residue (players/seasons/programs + orphan team rows) that the `teams.is_active` cascade guard does not reap.
@@ -17,7 +17,20 @@ The operator's plan after this epic lands is to start from a clean data slate (p
 - [ ] **AC-2**: Given the same run, when it completes, then an existing user's login capability is intact (passkey + magic-link + session auth still resolve the surviving `users` rows), and the `programs` `lsb-hs` bootstrap row is preserved (as `bb db reset` does).
 - [ ] **AC-3 (FK enforcement must be LIVE)**: The purge deletes in the FK-safe order in TN-8, and the module MUST explicitly set `PRAGMA foreign_keys = ON` (or route through `get_connection()` in `src/api/db.py`, which sets it) — `sqlite3.connect()` defaults it OFF and `reset.py` never enables it, so a naive mirror would silently orphan while appearing to pass. The regression test MUST deliberately reorder one delete and assert it RAISES, proving FK-ON is live, not merely intended (per TN-9).
 - [ ] **AC-4**: Given `APP_ENV=production`, when the command runs WITHOUT `--force`, then it refuses and logs loudly; with `--force` it proceeds. The guard is a FRESH check through the canonical `is_production()` seam (`src/api/helpers.py`, returns bool) — do NOT reuse `reset.py`'s `check_production_guard`, which routes through the inline `.lower()==` compare (the IDEA-101 bypass class); mirror reset.py's STRUCTURE only, not its guard body (per TN-9).
-- [ ] **AC-5**: The command unlinks the on-disk `report_path` HTML files for ALL purged reports — enumerate `SELECT id, report_path FROM reports WHERE report_path IS NOT NULL` (NO expiry filter — do NOT call `cleanup_expired_reports()`, which filters to expired-only), resolve each against the module's `_REPO_ROOT / "data"`, `unlink()` with per-row error isolation, and do it BEFORE the `reports` DELETE removes the rows (once gone, `report_path` can't be enumerated), per TN-9.
+- [ ] **AC-5**: The command unlinks the on-disk `report_path` HTML files for ALL purged reports — enumerate `SELECT id, report_path FROM reports WHERE report_path IS NOT NULL` (NO expiry filter — do NOT call `cleanup_expired_reports()`, which filters to expired-only), resolve each against the module's `_REPO_ROOT / "data"`, `unlink()` with per-row error isolation. **ENUMERATION must happen BEFORE the `reports` DELETE** (once the rows are gone, `report_path` cannot be enumerated) — that ordering is the load-bearing part and is mandatory. The UNLINK itself happens AFTER the transaction commits.
+
+  <!-- AC-5 ORDERING CORRECTED 2026-07-19 (PM ruling during E-267-06 AC verification). The original
+       wording said to unlink "BEFORE the `reports` DELETE", which placed an unrecoverable filesystem
+       operation INSIDE the rollback-able transaction and therefore contradicted AC-6/AC-10(a): a
+       rolled-back purge would leave surviving `reports` rows pointing at files already deleted — the
+       exact corrupt half-state the single-transaction contract exists to prevent. The two ACs could
+       not both be satisfied as literally worded. Resolution: enumerate before (mandatory, unchanged),
+       unlink after commit. This inverts the residual failure into a harmless one — a crash between
+       commit and unlink orphans HTML on disk with no rows referring to it. The original wording
+       conflated enumeration ordering with unlink ordering; only the former was ever load-bearing.
+       Pinned by the AC-10(a) test's assertion that the report file SURVIVES a rolled-back purge,
+       which holds ONLY under post-commit unlink. -->
+
 - [ ] **AC-6 (single transaction)**: All ordered deletes (and any report-path handling) run inside ONE transaction — commit at end, rollback on error — so a mid-purge failure never leaves a corrupt half-state (per TN-9).
 - [ ] **AC-7 (partition drift-proofing)**: A test enumerates the live `sqlite_master` tables and asserts each is classified as exactly KEEP or PURGE — INCLUDING `_migrations` (which is KEEP per AC-1/TN-8), excluding only sqlite internals (e.g. `sqlite_sequence`) — so a future migration that adds a table cannot silently fall through the partition.
 - [ ] **AC-8**: Regression test per TN-7: seeds identity + scouting rows (and at least one on-disk report HTML, resolving the module `_REPO_ROOT` to a patchable seam pointed at `tmp_path` — NOT the real `data/reports/`), runs the purge, and asserts (a) all PURGE tables empty — INCLUDING `user_team_access`, which is PURGE and must NOT be asserted to survive, (b) all KEEP tables survive, (c) existing-login capability intact, (d) the on-disk HTML is unlinked. Hard AC.

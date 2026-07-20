@@ -40,6 +40,7 @@ from dataclasses import dataclass, replace
 
 from src.db.game_merge import GameMergeError, merge_duplicate_game
 from src.db.players import ensure_player_row
+from src.db.reconcile_at_load import PlayerLineBlock, retire_absent_player_lines
 from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 from src.gamechanger.types import TeamRef
@@ -291,6 +292,16 @@ class GameLoader:
         # Exposed to the report generator via LoadResult.redirect_map so the
         # plays/spray stages file rows under the canonical id.
         self.redirect_map: dict[str, str] = {}
+        # Source event ids whose payload PARSED far enough to reach the
+        # dedup/redirect + upsert stage this run. Distinct from "the fetch
+        # succeeded": a boxscore can 200 with an unexpected shape, take an early
+        # return in ``_load_boxscore_data``, and never record its redirect entry.
+        # The game-grain reconcile's ``boxscores_complete`` must be computed from
+        # THIS set -- keying it on the fetched set instead lets an unparseable
+        # payload silently withdraw a canonical row's vouching while the health
+        # guard still reads "complete", and the canonical game is then hard-
+        # deleted (Fable review, E-267 closure).
+        self.processed_event_ids: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -365,6 +376,12 @@ class GameLoader:
                 summary.event_id,
             )
             return LoadResult(errors=1)
+
+        # Past both parse guards: this payload will reach the dedup/redirect and
+        # upsert stage, so whatever vouching it owes (its own id, or a redirect
+        # entry onto a canonical row) is about to be recorded. Keyed on the
+        # SOURCE id, before the redirect rewrites ``summary.event_id`` below.
+        self.processed_event_ids.add(summary.event_id)
 
         own_data = raw.get(own_key) if own_key else None
         opp_data = raw.get(opp_key) if opp_key else None
@@ -651,8 +668,133 @@ class GameLoader:
             result.loaded += r.loaded
             result.skipped += r.skipped
             result.errors += r.errors
+
+        # Player-line reconcile (E-267-03): retire stat rows for players the
+        # fresh boxscore no longer lists. Runs HERE -- inside the per-game load,
+        # on RAW payload ids -- which is what puts it before ScoutingLoader's
+        # dedup_team_players sweep (TN-10 risk 2). That ordering is structural,
+        # not incidental: dedup MERGES player_ids, so a reconcile running after
+        # it would diff canonical prior ids against raw payload ids, mark the
+        # freshly-merged canonical "absent", and delete a live line.
+        result.errors += self._retire_absent_player_lines(
+            summary.event_id, perspective_team_id,
+            own_data, own_team_id, opp_data, opp_team_id,
+        )
+
         result.loaded += 1  # count the game itself
         return result
+
+    # ------------------------------------------------------------------
+    # Player-line reconcile (E-267-03)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _payload_block(
+        team_data: dict | None, team_id: int
+    ) -> PlayerLineBlock | None:
+        """Build the reconcile's view of ONE team block, or None if absent.
+
+        Per-block, deliberately: ``_load_team_stats`` writes own AND opponent
+        rows under the SAME ``perspective_team_id``, distinguished only by
+        ``team_id``. Unioning the two blocks behind a single "populated" flag
+        would let a half-populated payload (own with stats, opponent with
+        ``stats: []``) authorize retiring the empty side's live rows -- see the
+        worked example in :func:`retire_absent_player_lines`.
+
+        ``populated`` is True only when a lineup/pitching group in THIS block
+        carried at least one per-player stat row -- the TN-11 "POPULATED 200"
+        test. The MODAL scored-but-empty block has both categories present with
+        ``stats: []``, yielding False and therefore retiring nothing.
+        """
+        if not team_data:
+            return None
+        batting: set[str] = set()
+        pitching: set[str] = set()
+        populated = False
+        for group in team_data.get("groups") or []:
+            category = group.get("category")
+            if category == "lineup":
+                target = batting
+            elif category == "pitching":
+                target = pitching
+            else:
+                continue
+            rows = group.get("stats") or []
+            if rows:
+                populated = True
+            for stat_row in rows:
+                player_id = stat_row.get("player_id")
+                if player_id:
+                    target.add(player_id)
+        return PlayerLineBlock(
+            team_id=team_id,
+            batting_player_ids=frozenset(batting),
+            pitching_player_ids=frozenset(pitching),
+            populated=populated,
+        )
+
+    def _retire_absent_player_lines(
+        self,
+        game_id: str,
+        perspective_team_id: int,
+        own_data: dict | None,
+        own_team_id: int,
+        opp_data: dict | None,
+        opp_team_id: int,
+    ) -> int:
+        """Retire stale per-player stat rows for this game + perspective.
+
+        Returns the ``LoadResult.errors`` increment (1 if the reconcile itself
+        failed, else 0). A reconcile failure must not abort the game's load --
+        the stat rows are already written and correct; only the cleanup pass
+        failed -- so ANY exception is counted and logged rather than raised
+        (matching the breadth of E-267-02's reconcile hook: a ``TypeError`` in
+        id collection would otherwise propagate and discard the good load, the
+        opposite of this method's whole intent).
+
+        No rollback here, deliberately -- and the asymmetry with E-267-02's
+        game-grain hook is intentional, not an omission. There, a partial retire
+        left ORPHANED CHILD ROWS behind a surviving ``games`` row (an
+        inconsistent shape), so the partial work had to be undone. Here every
+        DELETE is an independent leaf row: a mid-loop failure leaves some stale
+        lines retired and some not, which is simply less-complete cleanup of the
+        same kind, and the next re-scout retries the remainder. Rolling back
+        would additionally discard the freshly-loaded stat rows sharing this
+        uncommitted transaction -- strictly worse than a partial cleanup.
+        """
+        blocks = [
+            block
+            for block in (
+                self._payload_block(own_data, own_team_id),
+                self._payload_block(opp_data, opp_team_id),
+            )
+            if block is not None
+        ]
+        try:
+            retired = retire_absent_player_lines(
+                self._db,
+                game_id=game_id,
+                perspective_team_id=perspective_team_id,
+                blocks=blocks,
+            )
+            if retired.retired or retired.refusals or retired.uncovered_team_ids:
+                logger.info(
+                    "Player-line reconcile for game %s (perspective %s): "
+                    "retired=%d across %d block-table(s), refused=%d, "
+                    "uncovered team(s)=%s",
+                    game_id, perspective_team_id,
+                    retired.total_retired, len(retired.retired),
+                    len(retired.refusals),
+                    retired.uncovered_team_ids or "none",
+                )
+        except Exception:  # noqa: BLE001 -- cleanup must never lose a good load
+            logger.error(
+                "Player-line reconcile failed for game %s (perspective %s); "
+                "the loaded stats are unaffected.",
+                game_id, perspective_team_id, exc_info=True,
+            )
+            return 1
+        return 0
 
     def _detect_team_keys(self, raw: dict) -> tuple[str | None, str | None]:
         """Identify the own-team key and opponent key in a boxscore response.

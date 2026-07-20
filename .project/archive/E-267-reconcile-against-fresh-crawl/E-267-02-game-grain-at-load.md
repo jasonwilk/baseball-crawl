@@ -4,7 +4,7 @@
 [E-267: Reconcile-at-Load Against the Fresh Crawl](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a re-scout that finds a prior-loaded game ABSENT from the fresh crawl either retires it (corroborated removed/voided) or redirects it (corroborated reschedule to a new date) — as part of the normal load, forward-only. This closes IDEA-140 (rescheduled game double-count) and CC-1 (removed game persists in W-L/season lines/recent form/freshness N).
