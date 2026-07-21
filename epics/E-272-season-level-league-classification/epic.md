@@ -124,6 +124,14 @@ The documented seam for E-263-02c to layer cleanly: **operator pick is authorita
 ### TN-9: Display-label deferral (Senior vs Junior Legion)
 The engine collapses 18U Senior and 17U Junior to a single `legion` id (identical rules). Coach's ruling: preserve the "18U Senior" / "17U Junior" distinction as a DISPLAY label wherever opponent level is shown, but the report card does not surface that label today. The raw age bracket stays on the generator context (`self.age_group_from_api`), so any future display can reconstruct it — no display regression, and no distinction-without-a-difference is baked into the rules engine. Actual Senior/Junior display labeling is a deferred display-layer concern, out of scope here.
 
+### TN-10: Primary-source pitch-rule citations + season-phase scoping (operator-verified 2026-07-21)
+The operator verified both seasons' pitch tables against authoritative primary sources; all match the engine, the coach model doc, and the E-272-01 sub-varsity correction EXACTLY. Canonical citations (single source of truth — the E-272-01/03/04 ACs draw from HERE so the NSAA URL and source attributions do not drift across files):
+- **NSAA (spring HS — Varsity + Sub-Varsity):** NSAA 2022 Pitch Count Regulations — `https://nsaahome.org/wp-content/uploads/2022/02/2022-Pitch-Counts.pdf` (ONE source covers both levels).
+- **American Legion (summer — Senior + Junior):** ALB official Senior/Junior pitch-count regulations (no stable public PDF — cite the body, not a dead link).
+- **NRBL (summer reserve):** follows ALB regulations (`nrbl.net`); rule-identical to Legion today — NRBL keeps its OWN `nrbl.net` source line rather than silently inheriting ALB's (coach).
+
+**AXIS vs PHASE — two orthogonal "season" concepts, do NOT conflate (CA):** the season **AXIS** (spring/summer → which league FAMILY) is E-272's new classification axis; the season **PHASE** (the pre/post-April-1 date split, 90→110 cap) is a pre-existing pitch-CAP concept that applies ONLY within NSAA Varsity. Verified scoping: the April-1 phase split applies ONLY to NSAA Varsity; NSAA Sub-Varsity is flat year-round (max 90, no split); all summer leagues (Legion Senior/Junior + NRBL) are flat 105 year-round, no date split; Junior ≡ Senior ≡ NRBL numerically. Ratchet note: the pitch-rules.md additions are ~4 lines (3 cite lines + 1 disambiguation sentence) — negligible, no trimming needed on this account (CA).
+
 ## Open Questions
 - **OQ-1 — RESOLVED (api-scout, 2026-07-21):** `team_season.season` carries lowercase `"summer"` as the only observed token (28× in the proxy corpus, bare string); no `"spring"`/`"fall"` sample exists. The design matches on `"summer"` (normalized) and treats everything else as the conservative NSAA default (TN-4). No blocker; no residual verification.
 
