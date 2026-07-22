@@ -57,6 +57,16 @@ jobs:
           # re-resolving pinned deps (mirrors the Dockerfile's editable install).
           pip install -e . --no-deps
 
+      # Download the Chromium binary the headless render/print tests need
+      # (tests/test_outings_browser.py, E-266). The `playwright` PACKAGE comes
+      # from requirements-dev.txt, but the browser binary is installed
+      # separately -- see the note in requirements-dev.in. That test is a HARD
+      # failure (never a skip) when the binary is absent, so this step is
+      # load-bearing for a green suite on the runner. `--with-deps` also pulls
+      # the OS libraries Chromium needs to launch.
+      - name: Install Playwright browser (chromium)
+        run: python -m playwright install --with-deps chromium
+
       - name: Run tests
         run: python -m pytest tests/
 
