@@ -62,10 +62,16 @@ jobs:
       # from requirements-dev.txt, but the browser binary is installed
       # separately -- see the note in requirements-dev.in. That test is a HARD
       # failure (never a skip) when the binary is absent, so this step is
-      # load-bearing for a green suite on the runner. `--with-deps` also pulls
-      # the OS libraries Chromium needs to launch.
+      # load-bearing for a green suite on the runner.
+      #
+      # Intentionally NO `--with-deps`: that flag runs `sudo apt-get install`
+      # for Chromium's OS libraries, which HANGS on ubuntu-latest (24.04) -- the
+      # apt step blocks on an interactive needrestart/service-restart prompt
+      # that never gets answered, stalling the job until timeout. The runner
+      # image already ships Chromium's runtime libs, and the original failure
+      # was only the missing browser BINARY, so a plain install is sufficient.
       - name: Install Playwright browser (chromium)
-        run: python -m playwright install --with-deps chromium
+        run: python -m playwright install chromium
 
       - name: Run tests
         run: python -m pytest tests/
