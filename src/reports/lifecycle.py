@@ -195,13 +195,26 @@ def reap_stale_generating_reports(
 def cleanup_expired_reports(
     conn: sqlite3.Connection | None = None,
 ) -> CleanupResult:
-    """Remove on-disk HTML files for expired reports; KEEP the DB rows.
+    """Remove on-disk HTML files for expired reports (KEEP the reports rows),
+    then run the terminal orphan-reference-data reclamation sweep.
 
     Selects ``reports`` rows whose ``expires_at`` is strictly in the past
     (``expires_at < now``) and that still have a non-NULL ``report_path``,
-    unlinks each HTML file, and NULLs ``report_path`` -- but KEEPS the row so
-    the report still appears as expired in ``bb report list`` / ``/admin/reports``
-    and serving it keeps the existing 404 behavior.
+    unlinks each HTML file, and NULLs ``report_path`` -- but KEEPS the ``reports``
+    row so the report still appears as expired in ``bb report list`` /
+    ``/admin/reports`` and serving it keeps the existing 404 behavior.
+
+    **DESTRUCTIVE side effect (E-273-02, TN-14).** After the expiry sweep this
+    function calls :func:`reclaim_orphan_reference_data`, which HARD-DELETEs
+    ``teams`` / ``players`` / ``team_rosters`` rows no longer reachable from any
+    surviving report. So while the *expired-report* rows are kept, this call is
+    NOT non-destructive overall: it self-heals the ownership invariant by
+    reclaiming orphaned reference data. Because it also fires at ``generate_report``
+    start and via ``bb report cleanup``, orphan reference data is swept
+    opportunistically, not only on delete. The reclamation is best-effort
+    (isolated, never fails this sweep) and DEFERS when a live ``generating``
+    report is in flight (reap-then-gate guard), so an in-flight generation's data
+    is never deleted.
 
     File removal mirrors the ``_delete_report`` admin path: canonical
     ``_REPO_ROOT`` resolution plus an ``.is_file()`` guard. Each row's cleanup
@@ -269,6 +282,27 @@ def cleanup_expired_reports(
                 result.errors += 1
                 continue
         conn.commit()
+
+        # E-273-02 / TN-4: terminal ownership-invariant self-heal. Run the
+        # reachability reclamation pass so any teams/players/rosters orphaned by
+        # a prior deletion (or that never entered a cascade's scope -- RC#2)
+        # become unreachable and are swept. This is the opportunistic trigger
+        # that ALSO fires at the start of every generate_report (generator.py):
+        # that invocation is safe by construction (the run's scouted team is not
+        # committed yet -- _ensure_team_row is a later run() step -- and the
+        # reap-then-gate covers concurrent generations). The call-site reap above
+        # and the pass's OWN internal reap are both intentional and idempotent
+        # (SE MINOR-2): leave both. The pass owns its BEGIN IMMEDIATE..COMMIT
+        # transaction and the reap-then-gate guard, so a live generation's data
+        # is never deleted (it defers). Best-effort isolation so a sweep failure
+        # never breaks the expired-file cleanup's own contract.
+        try:
+            reclaim_orphan_reference_data(conn)
+        except Exception:  # noqa: BLE001 -- reclamation is best-effort housekeeping
+            logger.warning(
+                "Orphan reclamation failed during cleanup_expired_reports; continuing",
+                exc_info=True,
+            )
 
     return result
 
@@ -730,4 +764,438 @@ def list_reports(conn: sqlite3.Connection | None = None) -> list[dict]:
     for r in result:
         r["url"] = f"{base_url}/reports/{r['slug']}"
         r["is_expired"] = r["expires_at"] < now
+    return result
+
+
+# ===========================================================================
+# Orphan reference-data reclamation (E-273-01)
+# ===========================================================================
+#
+# Report deletion is cascade-correct locally but leaves ORPHANED reference
+# data -- ``teams`` / ``players`` / ``team_rosters`` rows no longer reachable
+# from any surviving ``reports`` row and that no per-report cascade will ever
+# reclaim (three root causes: order-dependent retention leak, opponent stubs
+# never in a cascade's scope, players never deleted).  ``cascade_delete_team``
+# answers a LOCAL question ("what does this team own?"); "is this team still
+# reachable?" is a GLOBAL question only a reachability sweep can answer.
+#
+# The ownership graph is a strict DAG -- ``reports -> games -> teams ->
+# team_rosters -> players`` -- so the sweep is two ordered phases, not an
+# iterative fixed point (E-273 TN-1): the orphan-TEAM set is fully determined
+# up front; the orphan-PLAYER set is determined AFTER the team pass removes
+# orphan rosters (the only transitive edge).
+#
+# SINGLE-SOURCE (TN-8): the pass's DELETE targeting AND the invariant COUNT
+# both derive from the SAME id-set producers below, so the delete-set and the
+# count cannot drift.  The orphan-team predicate is defined ONCE (as the SQL
+# fragments composed by :func:`_team_orphan_pred`) and reused by the team
+# producer, the player producer's "surviving roster" test, and the orphan-held
+# roster count -- never re-inlined.
+
+_RECLAIM_CHUNK = 900
+"""Max bound-variable count per ``... IN (?, ...)`` delete chunk.
+
+The orphan set can be large (681 teams / 14,326 players in the live backlog),
+so materialized-``IN`` deletes are chunked below SQLite's 999-variable limit
+(TN-8).  The producers themselves use correlated ``NOT EXISTS`` (never a
+materialized ``NOT IN``) for the same reason.
+"""
+
+# --- Orphan-team predicate (composed from two reusable SQL fragments) --------
+#
+# ``{t}`` is the outer ``teams`` alias.  Kept as two fragments so the BASE
+# predicate can be evaluated WITH and WITHOUT the belt-and-suspenders stat
+# clause (the WARN path needs "base AND has-stat-row"; the orphan set needs
+# "base AND NOT has-stat-row").
+
+_TEAM_BASE_PRED = (
+    "{t}.membership_type = 'tracked' "
+    # The root: no reports row references this team.
+    "AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.team_id = {t}.id) "
+    # No games row references this team (home or away).
+    "AND NOT EXISTS (SELECT 1 FROM games g "
+    "                WHERE g.home_team_id = {t}.id OR g.away_team_id = {t}.id) "
+    # TN-7 root exclusions -- opponent_links (both columns) and user_team_access
+    # are reachability ROOTS (operator/user decisions), not pins to clear.  A
+    # team referenced by ANY of these is EXCLUDED from the orphan set, never
+    # deleted and never NULLed.  All three are provable no-ops on real data
+    # (a member/resolved/granted team is either not 'tracked' or otherwise out
+    # of the base set) and fire only in a bent-invariant case.
+    "AND NOT EXISTS (SELECT 1 FROM opponent_links ol_r WHERE ol_r.resolved_team_id = {t}.id) "
+    "AND NOT EXISTS (SELECT 1 FROM opponent_links ol_o WHERE ol_o.our_team_id = {t}.id) "
+    "AND NOT EXISTS (SELECT 1 FROM user_team_access uta WHERE uta.team_id = {t}.id)"
+)
+# NOTE: ``is_active`` is a DEAD guard (TN-2) -- ``ensure_team_row_with_provenance``
+# hardcodes ``is_active=0`` on every INSERT, so a guard predicated on it protects
+# zero rows.  It is intentionally NOT consulted here.
+
+# Belt-and-suspenders GAME-CHILD reference clause (TN-2): a team referenced by a
+# surviving game's child row via ``team_id``/``perspective_team_id`` (or
+# ``batting_team_id``/``perspective_team_id`` on ``plays``, or
+# ``perspective_team_id`` on ``game_perspectives``).  VACUOUSLY TRUE on real data
+# -- a gameless team cannot carry such a row (the row belongs to a game the team
+# participates in -> the team would have a ``games`` row -> contradiction).  It
+# fires only in a synthetic corrupt state and converts a reclamation-halting
+# ``IntegrityError`` (a surviving game-child FK at DELETE FROM teams -- which
+# would ROLLBACK the ENTIRE sweep) into a graceful correct exclusion, with a WARN
+# (see :func:`_warn_stat_referenced_gameless_teams`).
+#
+# This clause must cover EVERY ``teams(id)`` FK child that (a) is a GAME child
+# (so it is not pin-deleted -- deleting its rows for a SURVIVING game would
+# corrupt that game) and (b) is not otherwise absent by the base predicate /
+# roots.  The full ``teams(id)`` FK-child audit (E-273 Codex-F1 remediation)
+# classifies all live children as base-absent (games/reports), root-excluded
+# (opponent_links x2, user_team_access), pin-deleted (team_rosters,
+# scouting_runs, crawl_jobs, coaching_assignments, scheduled_report_runs), or
+# game-child-excluded HERE (player_game_batting x2, player_game_pitching x2,
+# spray_charts x2, reconciliation_discrepancies x2, plays x2, and
+# ``game_perspectives`` -- the child the original grep-based sweep filtered out).
+_TEAM_STAT_EXISTS = (
+    "("
+    "EXISTS (SELECT 1 FROM player_game_batting s "
+    "        WHERE s.team_id = {t}.id OR s.perspective_team_id = {t}.id) "
+    "OR EXISTS (SELECT 1 FROM player_game_pitching s "
+    "           WHERE s.team_id = {t}.id OR s.perspective_team_id = {t}.id) "
+    "OR EXISTS (SELECT 1 FROM spray_charts s "
+    "           WHERE s.team_id = {t}.id OR s.perspective_team_id = {t}.id) "
+    "OR EXISTS (SELECT 1 FROM reconciliation_discrepancies s "
+    "           WHERE s.team_id = {t}.id OR s.perspective_team_id = {t}.id) "
+    "OR EXISTS (SELECT 1 FROM plays s "
+    "           WHERE s.batting_team_id = {t}.id OR s.perspective_team_id = {t}.id) "
+    "OR EXISTS (SELECT 1 FROM game_perspectives s "
+    "           WHERE s.perspective_team_id = {t}.id)"
+    ")"
+)
+
+# Tables (and their team-scoped columns) probed to NAME the referencing table in
+# the WARN.  Order fixes which table is reported first.  Each probe is called
+# with a 2-tuple (team_id, team_id) by :func:`_first_stat_reference_table`, so
+# every WHERE clause uses exactly TWO placeholders -- a single-column child
+# (``game_perspectives``) repeats its column to consume both.
+_STAT_REFERENCE_PROBES: tuple[tuple[str, str], ...] = (
+    ("player_game_batting", "team_id = ? OR perspective_team_id = ?"),
+    ("player_game_pitching", "team_id = ? OR perspective_team_id = ?"),
+    ("spray_charts", "team_id = ? OR perspective_team_id = ?"),
+    ("reconciliation_discrepancies", "team_id = ? OR perspective_team_id = ?"),
+    ("plays", "batting_team_id = ? OR perspective_team_id = ?"),
+    ("game_perspectives", "perspective_team_id = ? OR perspective_team_id = ?"),
+)
+
+# Innocuous team-scoped pins deleted BEFORE the ``teams`` row (FK-safe order).
+# Deliberately EXCLUDES ``opponent_links`` and ``user_team_access`` (TN-7 roots)
+# -- this is the TAILORED cleanup (TN-4 mild preference over reusing the
+# monolithic ``_delete_team_scoped_data``): it never issues a no-op DELETE
+# against an operator/user-decision table.  Each pin's team column is listed so
+# the delete is a plain ``WHERE <col> IN (...)``.  ``teams`` is deleted LAST.
+_TEAM_PIN_TABLES: tuple[tuple[str, str], ...] = (
+    ("team_rosters", "team_id"),
+    ("scouting_runs", "team_id"),
+    ("crawl_jobs", "team_id"),
+    ("coaching_assignments", "team_id"),
+    ("scheduled_report_runs", "own_team_id"),
+    ("teams", "id"),
+)
+
+
+def _team_orphan_pred(alias: str) -> str:
+    """Return the ONE orphan-team predicate for the given ``teams`` alias.
+
+    ``base AND NOT stat_exists`` -- the single definition reused by
+    :func:`_orphan_team_ids`, the "surviving roster" test in
+    :func:`_orphan_player_ids`, and :func:`_orphan_roster_row_count`.  Because
+    every consumer composes THIS string, the DELETE and the COUNT cannot drift
+    (TN-8).
+    """
+    return f"({_TEAM_BASE_PRED.format(t=alias)}) AND NOT {_TEAM_STAT_EXISTS.format(t=alias)}"
+
+
+@dataclass
+class OrphanCounts:
+    """Snapshot of the ownership-invariant orphan counts (E-273-01, TN-8).
+
+    All three derive from the SAME producers the reclamation pass deletes
+    through, so a zero here is exactly "the pass would delete nothing more".
+
+    ``teams``       -- ``len(_orphan_team_ids)``.
+    ``players``     -- ``len(_orphan_player_ids)``.
+    ``roster_rows`` -- ``team_rosters`` rows held by an orphan team.
+    """
+
+    teams: int = 0
+    players: int = 0
+    roster_rows: int = 0
+
+
+@dataclass
+class ReclaimResult:
+    """Outcome of one :func:`reclaim_orphan_reference_data` sweep (E-273-01).
+
+    ``teams_deleted`` / ``players_deleted`` / ``roster_rows_deleted`` count the
+    rows removed.  ``deferred`` is the explicit missing-safety-signal (TN-5): it
+    is ``True`` when the concurrency gate refused (a live ``generating`` report
+    remained after the reap) and NOTHING was deleted.  Consumers (the one-shot's
+    exit-code semantics, E-273-05) MUST key on ``deferred`` -- "0 deletions, no
+    error" is otherwise indistinguishable from a genuine no-orphan success.
+    """
+
+    teams_deleted: int = 0
+    players_deleted: int = 0
+    roster_rows_deleted: int = 0
+    deferred: bool = False
+
+
+def _first_stat_reference_table(conn: sqlite3.Connection, team_id: int) -> str:
+    """Return the first stat table that references ``team_id`` (for the WARN).
+
+    Probes each stat table in :data:`_STAT_REFERENCE_PROBES` order and returns
+    the first table name that carries a row for ``team_id`` (via its team or
+    perspective column).  Returns ``"unknown"`` if none match (should not happen
+    -- the caller only invokes this for a team the stat clause already flagged).
+    """
+    for table, where in _STAT_REFERENCE_PROBES:
+        row = conn.execute(
+            f"SELECT 1 FROM {table} WHERE {where} LIMIT 1", (team_id, team_id)
+        ).fetchone()
+        if row is not None:
+            return table
+    return "unknown"
+
+
+def _warn_stat_referenced_gameless_teams(conn: sqlite3.Connection) -> None:
+    """WARN for each gameless team the belt-and-suspenders clause excluded.
+
+    A team matching the BASE predicate (tracked, no reports, no games, not a
+    root) but carrying a surviving stat row is EXCLUDED from the orphan set
+    (graceful skip instead of a reclamation-halting ``IntegrityError``).  That
+    exclusion silently swallows exactly the corruption signal the loud abort
+    would have surfaced, so we log it -- mirroring the FK-safe-orphan stub+WARN
+    convention (``.claude/rules/data-model.md``).  Vacuously a no-op on real
+    data (TN-2).
+    """
+    sql = (
+        f"SELECT id FROM teams t "
+        f"WHERE {_TEAM_BASE_PRED.format(t='t')} AND {_TEAM_STAT_EXISTS.format(t='t')}"
+    )
+    for (team_id,) in conn.execute(sql).fetchall():
+        table = _first_stat_reference_table(conn, team_id)
+        logger.warning(
+            "Team id=%s excluded from reclamation despite no games -- possible "
+            "orphaned game-child row in %s (operator backfill).",
+            team_id,
+            table,
+        )
+
+
+def _orphan_team_ids(conn: sqlite3.Connection, *, warn: bool = False) -> set[int]:
+    """Return the ids of all orphan ``teams`` rows (TN-2, TN-8).
+
+    The ONE team predicate: ``tracked`` AND no ``reports`` AND no ``games`` AND
+    none of the three TN-7 roots (``opponent_links.resolved_team_id`` /
+    ``opponent_links.our_team_id`` / ``user_team_access.team_id``) AND the
+    belt-and-suspenders stat clause.  Built as correlated ``NOT EXISTS`` (never a
+    materialized ``NOT IN``) so a large orphan set never hits the 999-variable
+    limit.
+
+    Args:
+        conn: Open connection (the pass's in-transaction connection, or any
+            read connection for the count).
+        warn: When ``True`` (the pass's pre-delete read only), also emit a
+            WARNING per gameless team the stat clause excluded.  Left ``False``
+            for the count / self-assert recompute so a single pass logs each
+            offender at most once.
+    """
+    sql = f"SELECT id FROM teams t WHERE {_team_orphan_pred('t')}"
+    orphan_ids = {row[0] for row in conn.execute(sql).fetchall()}
+    if warn:
+        _warn_stat_referenced_gameless_teams(conn)
+    return orphan_ids
+
+
+def _orphan_player_ids(conn: sqlite3.Connection) -> set[str]:
+    """Return the ids of all orphan ``players`` rows (TN-3, TN-8).
+
+    A player is an orphan iff it has NO surviving reference in ANY of: a
+    ``team_rosters`` row on a SURVIVING (non-orphan) team, ``player_game_batting``,
+    ``player_game_pitching``, ``plays`` (batter OR pitcher -- the load-bearing
+    ``plays`` inclusion; a plays-only stub would be falsely deleted without it),
+    or ``spray_charts`` (player OR pitcher).  ``player_id`` is TEXT.
+
+    The "surviving roster" test embeds the SAME orphan-team predicate
+    (:func:`_team_orphan_pred`) as a correlated ``NOT EXISTS`` rather than a
+    materialized orphan-id list, so the answer is state-independent: whether read
+    before or after the team tier deletes, a player whose only roster is on an
+    orphan team is correctly an orphan.  ``reconciliation_discrepancies.player_id``
+    is a bare TEXT column with NO FK to ``players``, so it is intentionally NOT a
+    reachability edge (TN-3 knowingly-accepted residual).
+    """
+    orphan_pred = _team_orphan_pred("ot")
+    sql = f"""
+        SELECT p.player_id FROM players p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM team_rosters tr
+            WHERE tr.player_id = p.player_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM teams ot
+                  WHERE ot.id = tr.team_id AND {orphan_pred}
+              )
+        )
+        AND NOT EXISTS (SELECT 1 FROM player_game_batting b WHERE b.player_id = p.player_id)
+        AND NOT EXISTS (SELECT 1 FROM player_game_pitching pp WHERE pp.player_id = p.player_id)
+        AND NOT EXISTS (SELECT 1 FROM plays pl
+                        WHERE pl.batter_id = p.player_id OR pl.pitcher_id = p.player_id)
+        AND NOT EXISTS (SELECT 1 FROM spray_charts sc
+                        WHERE sc.player_id = p.player_id OR sc.pitcher_id = p.player_id)
+    """
+    return {row[0] for row in conn.execute(sql).fetchall()}
+
+
+def _orphan_roster_row_count(conn: sqlite3.Connection) -> int:
+    """Return the number of ``team_rosters`` rows held by an orphan team (TN-8)."""
+    sql = (
+        "SELECT COUNT(*) FROM team_rosters tr WHERE EXISTS ("
+        f"SELECT 1 FROM teams ot WHERE ot.id = tr.team_id AND {_team_orphan_pred('ot')}"
+        ")"
+    )
+    return conn.execute(sql).fetchone()[0]
+
+
+def count_orphan_reference_data(conn: sqlite3.Connection) -> OrphanCounts:
+    """Return the ownership-invariant orphan counts (TN-8).
+
+    The single-source assertion helper: teams and players are ``len()`` of the
+    SAME sets the pass deletes, plus the orphan-held roster-row count.  Because
+    the count derives from :func:`_orphan_team_ids` (which excludes the TN-7
+    roots), a legitimate ``opponent_links`` / ``user_team_access`` survivor is
+    NEVER flagged as a leak (TN-7 F5).  Consumers (E-273-04 batch test, E-273-05
+    one-shot) MUST call this rather than re-inlining the query.
+    """
+    return OrphanCounts(
+        teams=len(_orphan_team_ids(conn)),
+        players=len(_orphan_player_ids(conn)),
+        roster_rows=_orphan_roster_row_count(conn),
+    )
+
+
+def _delete_where_in(
+    conn: sqlite3.Connection, table: str, column: str, ids: list
+) -> None:
+    """Chunked ``DELETE FROM {table} WHERE {column} IN (...)`` (999-safe)."""
+    for start in range(0, len(ids), _RECLAIM_CHUNK):
+        chunk = ids[start : start + _RECLAIM_CHUNK]
+        placeholders = ",".join("?" for _ in chunk)
+        conn.execute(
+            f"DELETE FROM {table} WHERE {column} IN ({placeholders})", chunk
+        )
+
+
+def reclaim_orphan_reference_data(
+    conn: sqlite3.Connection,
+) -> ReclaimResult:
+    """Reachability-based terminal sweep of orphaned reference data (E-273-01).
+
+    Removes unreachable ``teams`` / ``team_rosters`` / ``players`` in DAG order
+    (team tier then player tier), reclaiming all three orphan root causes, and
+    holds the ownership invariant.  ADDITIVE -- it does NOT modify
+    ``cascade_delete_team`` (the two behavior-pinning cascade tests stay green).
+
+    Concurrency guard (TN-5), reap-then-gate on ``status='generating'``:
+      1. :func:`reap_stale_generating_reports` FIRST (its own committed
+         transaction) so a crashed generation is reaped, not treated as an
+         hour-long block.
+      2. The gate check, the orphan-set compute, and the DELETEs then run in ONE
+         transaction on ONE connection (``BEGIN IMMEDIATE`` ... ``COMMIT``).  The
+         pass OWNS the full transaction internally -- the NAMED EXCEPTION to the
+         codebase's caller-owns-the-transaction convention -- because the
+         check -> compute -> delete must be atomic.  Split across connections it
+         is a TOCTOU hole: a generation committing an opponent stub AFTER a
+         gate-read on a different connection would be seen (and deleted) by a
+         fresh orphan-read snapshot.  The single write-locked transaction closes
+         it: a stub committed after this snapshot is not in the orphan set.
+      3. If a live ``generating`` report remains after the reap, the pass
+         REFUSES (deletes nothing) and returns ``deferred=True`` -- a liveness
+         delay by design (fail toward "don't sweep").
+
+    Ordering within the one transaction (TN-1 -- single transaction, NOT a
+    single up-front snapshot): the orphan-TEAM set is read PRE-delete (the same
+    point the gate decided); the team tier is deleted; THEN the orphan-PLAYER set
+    is read POST-team-delete, so the just-removed orphan rosters are absent and
+    the roster-only players correctly fall out.  A final zero-delta self-assert
+    confirms the fixed point (no third pass deletes anything).
+
+    Args:
+        conn: An open connection the pass OWNS the transaction on.  The wiring
+            sites (E-273-02) pass a fresh ``get_connection()``; tests / the
+            one-shot inject their DB.
+
+    Returns:
+        A :class:`ReclaimResult` with the per-tier deletion counts, or
+        ``deferred=True`` (and zero counts) when the gate refused.
+    """
+    result = ReclaimResult()
+
+    # Step 1: reap FIRST, in its own committed transaction (TN-5.2).
+    reap_stale_generating_reports(conn)
+
+    # Steps 2-7: gate + compute + delete in ONE write-locked transaction.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Step 2: gate (TN-5.1/5.3) -- refuse while any live generating report
+        # remains.  BEGIN IMMEDIATE holds the write lock, so a generation
+        # committing its generating row concurrently is serialized behind us.
+        generating = conn.execute(
+            "SELECT COUNT(*) FROM reports WHERE status = 'generating'"
+        ).fetchone()[0]
+        if generating:
+            conn.execute("ROLLBACK")
+            result.deferred = True
+            logger.info(
+                "Orphan reclamation deferred: %d live 'generating' report(s) "
+                "remain after reap.",
+                generating,
+            )
+            return result
+
+        # Step 3: orphan-TEAM set, PRE-delete read (same point as the gate).
+        team_ids = _orphan_team_ids(conn, warn=True)
+        # Count orphan-held roster rows BEFORE the team tier deletes them.
+        result.roster_rows_deleted = _orphan_roster_row_count(conn)
+
+        # Step 4: delete the team tier (innocuous pins + team rows), FK-safe,
+        # ``teams`` last.  Never touches opponent_links / user_team_access
+        # (TN-7 roots, excluded from the orphan set by construction).
+        if team_ids:
+            id_list = list(team_ids)
+            for table, column in _TEAM_PIN_TABLES:
+                _delete_where_in(conn, table, column, id_list)
+        result.teams_deleted = len(team_ids)
+
+        # Step 5: orphan-PLAYER set, POST-team-delete read (TN-1) -- the freed
+        # rosters are absent, so roster-only players correctly fall out.
+        player_ids = _orphan_player_ids(conn)
+
+        # Step 6: delete players (leaf tier; player_id is TEXT, set can be large).
+        _delete_where_in(conn, "players", "player_id", list(player_ids))
+        result.players_deleted = len(player_ids)
+
+        # Step 7: zero-delta self-assert (TN-1) -- the DAG guarantees a fixed
+        # point after two phases; a non-zero recompute means a logic bug, so
+        # fail loudly and roll back rather than commit a half-correct state.
+        remaining = count_orphan_reference_data(conn)
+        if remaining.teams or remaining.players or remaining.roster_rows:
+            raise RuntimeError(
+                "orphan reclamation did not reach a fixed point: "
+                f"{remaining!r} remain after the two-phase sweep"
+            )
+
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+    logger.info(
+        "Orphan reclamation: deleted %d team(s), %d roster row(s), %d player(s).",
+        result.teams_deleted,
+        result.roster_rows_deleted,
+        result.players_deleted,
+    )
     return result

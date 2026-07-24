@@ -54,9 +54,18 @@ def db(tmp_path):
 
 
 def _seed_team(db, name="Test Tigers", public_id="abc123"):
+    # E-273: seeded as a MEMBER team. These negative-path tests pin
+    # ensure_team_row_with_provenance to team id=1, so team 1 must survive the
+    # orphan-reclamation pass that now runs at generate_report START (E-273-02
+    # wired it into cleanup_expired_reports). A bare 'tracked' report team with
+    # no game/report is orphan-shaped and would be swept before the mocked
+    # ensure returns id=1, FK-failing the reports insert. A member team is never
+    # reclaimed -- and in production the report target is created FRESH after
+    # cleanup, so it is never swept either; the pin is the only reason a
+    # non-orphan seed is needed here.
     cursor = db.execute(
         "INSERT INTO teams (name, public_id, season_year, membership_type) "
-        "VALUES (?, ?, 2026, 'tracked')",
+        "VALUES (?, ?, 2026, 'member')",
         (name, public_id),
     )
     db.commit()

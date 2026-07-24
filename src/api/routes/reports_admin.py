@@ -578,6 +578,7 @@ def _delete_report(report_id: int) -> None:
     from src.reports.lifecycle import (
         cascade_delete_team,
         is_team_eligible_for_cleanup,
+        reclaim_orphan_reference_data,
     )
 
     with closing(get_connection()) as conn:
@@ -630,6 +631,25 @@ def _delete_report(report_id: int) -> None:
                 team_id, report_id,
                 exc_info=True,
             )
+
+    # E-273-02 / TN-4: terminal ownership-invariant self-heal. Runs
+    # UNCONDITIONALLY (regardless of `eligible`) on a FRESH connection after
+    # conn1 (report row) and the optional conn2 (cascade). A DIFFERENT report's
+    # deletion may have freed teams even when THIS report's own team is not
+    # eligible -- opponent stubs are never in any single cascade's scope (RC#2),
+    # so a per-report `eligible` gate would leave them orphaned forever. The pass
+    # owns its reap-then-gate concurrency guard + single BEGIN IMMEDIATE
+    # transaction (E-273-01), so a live generation's data is never deleted (it
+    # defers). Best-effort: a sweep failure must not fail the report deletion.
+    try:
+        with closing(get_connection()) as conn:
+            reclaim_orphan_reference_data(conn)
+    except Exception:  # noqa: BLE001 -- reclamation is best-effort housekeeping
+        logger.warning(
+            "Orphan reclamation failed after report %d deletion; continuing",
+            report_id,
+            exc_info=True,
+        )
 
 
 @router.get("/reports", response_model=None)

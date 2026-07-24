@@ -4,7 +4,7 @@
 [E-273: Reclaim Orphaned Reference Data After Report Deletion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `reclaim_orphan_reference_data` runs automatically at the end of every deletion path — `_delete_report` (unconditionally, after the cascade) and `cleanup_expired_reports` — so the ownership invariant self-heals after any delete, and it never deletes an in-flight generation's data. This is what makes the fix a structural invariant rather than a one-time cleanup.

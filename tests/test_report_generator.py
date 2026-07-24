@@ -1018,6 +1018,14 @@ class TestGenerateReportFailures:
         from src.gamechanger.client import CredentialExpiredError
 
         _seed_team(db)
+        # E-273-02: generate_report's opportunistic cleanup_expired_reports now
+        # runs the orphan-reclamation pass at generation START. This fixture pins
+        # ensure_team_row to id=1 (below), so team 1 must survive that sweep;
+        # mark it a member team (reclamation never reclaims members). In
+        # production the target team is created fresh AFTER cleanup, so it is
+        # never swept -- the pin is a test artifact this compensates for.
+        db.execute("UPDATE teams SET membership_type = 'member' WHERE id = 1")
+        db.commit()
 
         # Return a fresh (unclosed) connection for each get_connection() call
         # since closing() will close it at block exit.
@@ -1376,6 +1384,117 @@ class TestEnsureTeamRowIdentityDowngrade:
 
         assert ctx.team_id == team_id
         assert ctx.identity_match_method == "anchor"
+
+
+# ---------------------------------------------------------------------------
+# E-273-03: team+report creation atomicity (TN-5/TN-6)
+# ---------------------------------------------------------------------------
+
+
+class TestTeamReportAtomicity:
+    """The scouted team row and its 'generating' reports row are created in ONE
+    transaction, so a team is never visible without its protecting report.
+    """
+
+    def test_team_invisible_until_report_committed_then_both_land(self, tmp_path):
+        """AC-1: with run()'s shared connection, the teams row and reports/run
+        rows are NOT visible to a separate connection until the single commit --
+        then all three land together, FK-linked in order teams -> reports -> run.
+        """
+        db_path = tmp_path / "atomic.db"
+        seed = sqlite3.connect(str(db_path))
+        load_real_schema(seed)
+        seed.close()
+
+        ctx = _gen._ReportGeneration("newpub123")
+        ctx.public_id = "newpub123"
+        ctx.team_name_from_api = "New Team"
+        ctx.season_year_from_api = 2026
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON")
+        observer = sqlite3.connect(str(db_path))
+
+        # Mirror run()'s atomic block: both writes on ONE connection, no commit
+        # until both have run.
+        ctx._ensure_team_row(conn)
+        ctx._create_report_and_run_record(conn)
+
+        # Nothing is visible on a separate connection yet -- a single uncommitted
+        # transaction, so the team cannot be seen without its report.
+        assert observer.execute(
+            "SELECT COUNT(*) FROM teams WHERE public_id='newpub123'"
+        ).fetchone()[0] == 0
+        assert observer.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
+        assert observer.execute(
+            "SELECT COUNT(*) FROM report_generation_runs"
+        ).fetchone()[0] == 0
+
+        conn.commit()
+
+        # All three now land together, FK-linked.
+        team_row = observer.execute(
+            "SELECT id FROM teams WHERE public_id='newpub123'"
+        ).fetchone()
+        assert team_row is not None
+        report_row = observer.execute(
+            "SELECT id, team_id, status FROM reports"
+        ).fetchone()
+        assert report_row is not None
+        assert report_row[1] == team_row[0]  # reports.team_id -> teams.id
+        assert report_row[2] == "generating"
+        run_row = observer.execute(
+            "SELECT report_id FROM report_generation_runs"
+        ).fetchone()
+        assert run_row is not None
+        assert run_row[0] == report_row[0]  # run.report_id -> reports.id
+
+        conn.close()
+        observer.close()
+
+    def test_run_rolls_back_team_when_report_creation_fails(self, tmp_path):
+        """AC-2 (error path -- the airtight-gate AC): a failure injected between
+        the team write and the reports write leaves NEITHER row committed, so a
+        scouted team is never orphaned without its 'generating' reports row.
+        """
+        db_path = tmp_path / "rollback.db"
+        seed = sqlite3.connect(str(db_path))
+        load_real_schema(seed)
+        seed.close()
+
+        def _factory(*_a, **_k):
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON")
+            return c
+
+        ctx = _gen._ReportGeneration("newpub123")
+
+        with (
+            patch("src.reports.generator.get_connection", side_effect=_factory),
+            patch.object(
+                _gen._ReportGeneration,
+                "_fetch_public_team_info",
+                lambda self: setattr(self, "team_name_from_api", "New Team"),
+            ),
+            patch(
+                "src.reports.generator._create_report_row",
+                side_effect=RuntimeError("injected report-creation failure"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            ctx.run()
+
+        # The team INSERT rode the same uncommitted transaction as the failed
+        # report write, so it rolled back -- no orphaned team, no report, no run.
+        check = sqlite3.connect(str(db_path))
+        assert check.execute(
+            "SELECT COUNT(*) FROM teams WHERE public_id='newpub123'"
+        ).fetchone()[0] == 0
+        assert check.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
+        assert check.execute(
+            "SELECT COUNT(*) FROM report_generation_runs"
+        ).fetchone()[0] == 0
+        check.close()
 
 
 # ---------------------------------------------------------------------------
@@ -3765,8 +3884,17 @@ class TestQueryBeforeCleanup:
         from src.gamechanger.loaders import LoadResult
 
         _seed_team(db)
+        # E-273-02: the opportunistic cleanup at generate_report START now runs
+        # the orphan-reclamation pass. This test pins ensure_team_row to id=1, so
+        # team 1 must survive that sweep (its game is only created later, during
+        # load); mark it a member team (reclamation never reclaims members).
+        db.execute("UPDATE teams SET membership_type = 'member' WHERE id = 1")
         _seed_season(db)
         _seed_player(db, "p1", "Test", "Player")
+        # E-273-02: root p1 on the surviving member team so the generate-START
+        # reclamation does not sweep it as a bare orphan player before the loader
+        # writes its game stat row (the loader only creates players in reality).
+        _seed_roster(db, 1, "p1")
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -4191,10 +4319,14 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, season_year, membership_type) "
             "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
         )
-        # Team 2: already owns the public_id we'd try to backfill
+        # Team 2: already owns the public_id we'd try to backfill.
+        # E-273-02: seeded as a member team so the orphan-reclamation pass that
+        # now runs at generate_report START does not sweep this gameless
+        # duplicate before the backfill runs -- preserving the UNIQUE collision
+        # this test exercises (reclamation never reclaims member teams).
         db.execute(
             "INSERT INTO teams (name, public_id, season_year, membership_type) "
-            "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'tracked')"
+            "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'member')"
         )
         _seed_season(db)
         db.execute(

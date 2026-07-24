@@ -4,7 +4,7 @@
 [E-273: Reclaim Orphaned Reference Data After Report Deletion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report generator commits the scouted-team row and its generating-`reports` row in ONE transaction, so a `teams` row is never visible without its protecting `generating` reports row. This closes the pre-`reports`-row concurrency window that would otherwise let the reclamation sweep see an in-flight generation's scouted team as an orphan — making the reap-then-gate guard airtight rather than merely good.

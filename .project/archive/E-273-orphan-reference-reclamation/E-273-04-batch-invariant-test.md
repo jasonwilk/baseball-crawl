@@ -4,7 +4,7 @@
 [E-273: Reclaim Orphaned Reference Data After Report Deletion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the test suite contains the batch deletion test that would have caught this class of orphan — the highest-value AC in the epic. It generates ≥3 reports sharing an opponent stub where at least one team is retained by a cross-perspective `games` FK, deletes all reports through the real wired `_delete_report` path, and asserts the single-source invariant-count helper returns zero — proving the fix works on the order-dependent, cross-perspective conditions that no single-report delete reproduces.

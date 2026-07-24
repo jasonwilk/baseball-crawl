@@ -590,11 +590,17 @@ class TestRunRecordCleanupMirror:
     """
 
     def test_ac1_delete_report_cascades_run_record(self, setup):
-        """AC-1: deleting a report removes its run record. The team is kept
-        INELIGIBLE for cleanup (is_active=1), so the run-row removal is
-        attributable to the report->run cascade, not the team cascade."""
+        """AC-1: deleting a report removes its run record. The team is a MEMBER
+        team (is_active=1), so it survives BOTH the eligibility cascade (guard 1:
+        is_active != 0) AND the E-273 terminal reclamation (member teams are
+        never orphans) -- making the run-row removal attributable purely to the
+        report->run FK cascade, not any team-delete path. (Pre-E-273 this relied
+        on is_active=1 alone; the reclamation pass ignores is_active as a dead
+        guard, so the team is pinned via its real persistent signal: membership.)"""
         db_path, client = setup
-        team_id = _insert_team_for_cascade(db_path, is_active=1)  # ineligible
+        team_id = _insert_team_for_cascade(
+            db_path, is_active=1, membership_type="member"
+        )  # ineligible AND non-orphan
         report_id = _insert_report(
             db_path, team_id, slug="run-cascade-1", report_path=None
         )
@@ -723,14 +729,21 @@ class TestScheduledRunAuditSurvival:
     """AC-6: a scheduled_report_runs row SURVIVES report deletion with its
     report_id NULLed (ON DELETE SET NULL) -- it is NOT cascade-deleted.
 
-    The deliberate mirror-image of TestRunRecordCleanupMirror. The team is kept
-    INELIGIBLE for cleanup (is_active=1) so the row's survival is attributable
-    to the report->run FK behavior, not a (missing) team cascade.
+    The deliberate mirror-image of TestRunRecordCleanupMirror. The team is a
+    MEMBER team (is_active=1) so it survives BOTH the eligibility cascade AND the
+    E-273 terminal reclamation -- the row's survival is attributable to the
+    report->audit SET NULL behavior, not a (missing) team cascade. This also
+    reflects reality: ``scheduled_report_runs.own_team_id`` is the operator's
+    LSB (member) team, which reclamation never reclaims, so the audit trail is
+    never destroyed by the sweep. (Pre-E-273 this relied on is_active=1 alone;
+    the reclamation pass ignores is_active as a dead guard.)
     """
 
     def test_audit_row_survives_report_delete_with_report_id_nulled(self, setup):
         db_path, client = setup
-        team_id = _insert_team_for_cascade(db_path, is_active=1)  # ineligible
+        team_id = _insert_team_for_cascade(
+            db_path, is_active=1, membership_type="member"
+        )  # ineligible AND non-orphan
         report_id = _insert_report(
             db_path, team_id, slug="sched-survive-1", report_path=None
         )
@@ -977,3 +990,459 @@ class TestRunRecordSurfacing:
 
         html = client.get("/admin/reports").text
         assert "/reports/fail-link" not in html
+
+
+# ===========================================================================
+# E-273-02: reclamation wired into the delete path (_delete_report).
+#   The pass runs UNCONDITIONALLY at the end of every _delete_report, on a
+#   fresh connection after conn1/conn2, so the ownership invariant self-heals
+#   after any delete -- and it never deletes an in-flight generation's data.
+# ===========================================================================
+
+
+def _insert_orphan_team(db_path: Path, name: str) -> int:
+    """A tracked team with no reports and no games -- a reclamation target."""
+    return _insert_team_for_cascade(db_path, name=name, is_active=0)
+
+
+class TestReclamationWiredIntoDeletePath:
+    """AC-1, AC-2, AC-4, AC-6: the E-273-01 pass runs at the end of every
+    _delete_report and honors its reap-then-gate guard at the real wiring site.
+    """
+
+    def test_ac1_delete_frees_orphan_reclaimed_invariant_zero(self, setup):
+        """AC-1: a report deletion that frees an orphan team leaves the
+        ownership-invariant count at ZERO -- and a PRE-EXISTING opponent stub
+        the per-report cascade never targets (RC#2) is reclaimed too."""
+        from src.reports.lifecycle import count_orphan_reference_data
+
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)  # eligible
+        report_id = _insert_report(db_path, team_id, slug="reclaim-1")
+        # An opponent-stub orphan NOT owned by this report's team -- outside any
+        # single cascade's scope; only the terminal reclamation reaches it.
+        stub = _insert_orphan_team(db_path, name="OpponentStub")
+
+        assert _count_rows(db_path, "teams", "id = ?", (stub,)) == 1
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (stub,)) == 0, (
+            "the terminal reclamation must reclaim the stub the cascade never targeted"
+        )
+        conn = _get_conn(db_path)
+        counts = count_orphan_reference_data(conn)
+        conn.close()
+        assert (counts.teams, counts.players, counts.roster_rows) == (0, 0, 0)
+
+    def test_ac2_reclaims_prior_orphan_when_own_team_ineligible(self, setup):
+        """AC-2: even when THIS report's team is not cascade-eligible (conn2
+        never opens), the unconditional terminal reclamation still runs and
+        reclaims an orphan left by a PRIOR deletion."""
+        from src.reports.lifecycle import count_orphan_reference_data
+
+        db_path, client = setup
+        # Report team is a MEMBER team with is_active=1 -> not cascade-eligible
+        # (conn2 skipped) AND never an orphan (survives reclamation), isolating
+        # the assertion to "the OTHER orphan was reclaimed".
+        own_team = _insert_team_for_cascade(
+            db_path, name="OwnMember", is_active=1, membership_type="member"
+        )
+        report_id = _insert_report(db_path, own_team, slug="ineligible-del")
+        prior_orphan = _insert_orphan_team(db_path, name="PriorOrphan")
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        # The ineligible report team survived (conn2 never ran, reclamation skips
+        # member teams); the prior orphan was reclaimed by the terminal pass.
+        assert _count_rows(db_path, "teams", "id = ?", (own_team,)) == 1
+        assert _count_rows(db_path, "teams", "id = ?", (prior_orphan,)) == 0
+        conn = _get_conn(db_path)
+        assert count_orphan_reference_data(conn).teams == 0
+        conn.close()
+
+    def test_ac4_deferred_when_live_generating_report_exists(self, setup):
+        """AC-4: a genuinely-live 'generating' report defers the sweep at the
+        wiring site -- no reference rows are deleted (liveness delay)."""
+        db_path, client = setup
+        own_team = _insert_team_for_cascade(
+            db_path, name="OwnMember", is_active=1, membership_type="member"
+        )
+        report_id = _insert_report(db_path, own_team, slug="trigger-del")
+        # A FRESH (non-stale) generating report blocks the gate.
+        gen_team = _insert_team_for_cascade(db_path, name="GenTeam", is_active=0)
+        _insert_report(db_path, gen_team, slug="live-gen", status="generating")
+        # An orphan that WOULD be reclaimed if the pass were not deferred.
+        orphan = _insert_orphan_team(db_path, name="WouldBeReclaimed")
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        # Deferred: nothing reference-side deleted; the orphan survives.
+        assert _count_rows(db_path, "teams", "id = ?", (orphan,)) == 1
+
+    def test_ac4_proceeds_after_stale_generating_reaped(self, setup):
+        """AC-4: a STALE 'generating' report is reaped, then the sweep proceeds
+        -- the orphan is reclaimed and the stale report is marked failed."""
+        db_path, client = setup
+        own_team = _insert_team_for_cascade(
+            db_path, name="OwnMember", is_active=1, membership_type="member"
+        )
+        report_id = _insert_report(db_path, own_team, slug="trigger-del-2")
+        stale_team = _insert_team_for_cascade(db_path, name="StaleGen", is_active=0)
+        stale_ts = (
+            datetime.now(timezone.utc) - timedelta(seconds=7200)
+        ).strftime(UTC_ISO_FORMAT)
+        # Insert a stale generating report (old generated_at).
+        conn = _get_conn(db_path)
+        conn.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at) "
+            "VALUES ('stale-gen', ?, 'Stale', 'generating', ?, ?)",
+            (stale_team, stale_ts, _future_iso()),
+        )
+        conn.commit()
+        conn.close()
+        orphan = _insert_orphan_team(db_path, name="ReclaimedAfterReap")
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "teams", "id = ?", (orphan,)) == 0
+        assert (
+            _count_rows(db_path, "reports", "slug = ? AND status = 'failed'", ("stale-gen",))
+            == 1
+        ), "the stale generating report should have been reaped to failed"
+
+    def test_ac6_opponent_links_and_grants_survive_deletion_path(self, setup):
+        """AC-6 / TN-7: the wiring did not reintroduce §6.1 destruction -- an
+        opponent_links operator decision and a user_team_access grant survive a
+        deletion-path invocation of the pass, while a genuine orphan is swept."""
+        db_path, client = setup
+        own_team = _insert_team_for_cascade(
+            db_path, name="OwnMember", is_active=1, membership_type="member"
+        )
+        report_id = _insert_report(db_path, own_team, slug="roots-del")
+
+        conn = _get_conn(db_path)
+        member = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('MemberOwner', 'member')"
+        ).lastrowid
+        resolved = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('ResolvedTarget', 'tracked')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, "
+            "resolved_team_id, resolution_method, resolved_at) "
+            "VALUES (?, 'root-x', 'Opp', ?, 'operator', '2026-03-20')",
+            (member, resolved),
+        )
+        granted = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('GrantedTeam', 'tracked')"
+        ).lastrowid
+        user = conn.execute(
+            "INSERT INTO users (email) VALUES ('grantee@example.com')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user, granted),
+        )
+        conn.commit()
+        conn.close()
+        orphan = _insert_orphan_team(db_path, name="GenuineOrphan6")
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        # The genuine orphan is reclaimed; every root survivor is untouched.
+        assert _count_rows(db_path, "teams", "id = ?", (orphan,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (resolved,)) == 1
+        assert _count_rows(db_path, "teams", "id = ?", (granted,)) == 1
+        assert _count_rows(db_path, "opponent_links", "our_team_id = ?", (member,)) == 1
+        conn = _get_conn(db_path)
+        ol = conn.execute(
+            "SELECT resolved_team_id FROM opponent_links WHERE our_team_id = ?",
+            (member,),
+        ).fetchone()
+        grant = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE team_id = ?", (granted,)
+        ).fetchone()[0]
+        conn.close()
+        assert ol[0] == resolved, "resolved_team_id must NOT be NULLed by the pass"
+        assert grant == 1, "user_team_access grant must survive the pass"
+
+
+# ===========================================================================
+# E-273-04: batch invariant integration test (the epic's flagship AC).
+#
+#   The order-dependent, cross-perspective batch deletion that would have
+#   caught this class of orphan. It reproduces BOTH root causes in ONE fixture:
+#     * RC#1 -- a report team (T1) retained across the sequence by a shared,
+#       cross-perspective `games` row (G12) whose OTHER perspective (T2) keeps
+#       it alive after T1's own report is deleted; when T2's report is later
+#       deleted the shared game dies and T1 becomes a gameless orphan that only
+#       the terminal reclamation reclaims.
+#     * RC#2 -- a shared opponent stub (S) referenced by all three reports'
+#       games, never in any single cascade's scope, reclaimed only by the pass.
+#   No single-report delete reproduces the RC#1 retention -- the ordering is
+#   load-bearing, which is why the MID-SEQUENCE anti-vacuity assertion (AC-1a)
+#   proves the retention was actually REALIZED before the final zero assertion.
+# ===========================================================================
+
+
+def _seed_batch_invariant_fixture(db_path: Path) -> dict:
+    """Seed the order-dependent cross-perspective batch fixture directly (the
+    orphan conditions are a DB-STATE property, not a pipeline property).
+
+    Returns a dict of the seeded ids the test asserts against.
+    """
+    conn = _get_conn(db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, year) "
+        "VALUES ('2026', 'Spring 2026 HS', 2026)"
+    )
+
+    def _team(name, membership="tracked"):
+        return conn.execute(
+            "INSERT INTO teams (name, membership_type, is_active) VALUES (?, ?, 0)",
+            (name, membership),
+        ).lastrowid
+
+    # Three report teams + the shared opponent stub (no report of its own).
+    t1 = _team("Report Team 1")
+    t2 = _team("Report Team 2")
+    t3 = _team("Report Team 3")
+    s = _team("Shared Opponent Stub")
+
+    # Intentional survivors (TN-7) -- MANDATORY per AC-3.
+    resolved = _team("Resolved Opp Survivor")          # opponent_links root
+    granted = _team("Granted Team Survivor")           # user_team_access root
+    member = _team("Our Member Team", membership="member")
+
+    # Reports (quiescent -- all 'ready', no 'generating', per AC-4). Inserted on
+    # THIS connection (not via _insert_report, which opens its own connection and
+    # would deadlock against this open write transaction).
+    def _report(slug, team_id):
+        return conn.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at) "
+            "VALUES (?, ?, 'Batch Report', 'ready', ?, ?)",
+            (slug, team_id, utcnow_iso(), _future_iso()),
+        ).lastrowid
+
+    r1 = _report("batch-r1", t1)
+    r2 = _report("batch-r2", t2)
+    r3 = _report("batch-r3", t3)
+
+    def _game(game_id, home, away):
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+            "VALUES (?, '2026', '2026-04-01', ?, ?)",
+            (game_id, home, away),
+        )
+
+    def _perspective(game_id, team_id):
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            (game_id, team_id),
+        )
+
+    # G12: the SHARED cross-perspective game between T1 and T2 -- the RC#1
+    # retention mechanism. Two perspective rows: deleting T1's report retains
+    # G12 (T2's perspective keeps it alive) so T1's teams row is retained;
+    # deleting T2's report removes the last perspective, G12 dies, and T1 is
+    # freed as a gameless orphan.
+    _game("g12", t1, t2)
+    _perspective("g12", t1)
+    _perspective("g12", t2)
+
+    # Each report team also played the shared opponent stub S (single
+    # perspective each -- S is a stub with no perspective of its own).
+    for gid, rt in (("g1s", t1), ("g2s", t2), ("g3s", t3)):
+        _game(gid, rt, s)
+        _perspective(gid, rt)
+
+    # Players: roster-only players on each team (transitively orphaned when the
+    # team goes) + a plays-only player reachable ONLY via plays in the LAST game
+    # deleted (G3S), so it survives the earlier reclamations and is reclaimed
+    # only once its plays die (TN-3 `plays` inclusion, exercised across the
+    # sequence).
+    def _player(pid, first="First", last="Last"):
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            (pid, first, last),
+        )
+
+    def _roster(team_id, pid):
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, '2026')",
+            (team_id, pid),
+        )
+
+    for pid, team_id in (
+        ("p-t1", t1), ("p-t2", t2), ("p-t3", t3), ("p-s", s),
+    ):
+        _player(pid)
+        _roster(team_id, pid)
+
+    _player("p-plays")
+    conn.execute(
+        "INSERT INTO plays "
+        "(game_id, play_order, inning, half, season_id, batting_team_id, "
+        "perspective_team_id, batter_id) "
+        "VALUES ('g3s', 1, 1, 'top', '2026', ?, ?, 'p-plays')",
+        (t3, t3),
+    )
+
+    # Intentional survivor wiring: RESOLVED as an opponent_links.resolved_team_id
+    # target (our_team_id = member), GRANTED carrying a user_team_access grant.
+    conn.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, "
+        "resolved_team_id, resolution_method, resolved_at) "
+        "VALUES (?, 'root-r', 'Resolved Opp', ?, 'operator', '2026-03-20')",
+        (member, resolved),
+    )
+    user_id = conn.execute(
+        "INSERT INTO users (email) VALUES ('grantee-batch@example.com')"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+        (user_id, granted),
+    )
+
+    conn.commit()
+    conn.close()
+    return {
+        "t1": t1, "t2": t2, "t3": t3, "s": s,
+        "resolved": resolved, "granted": granted, "member": member,
+        "r1": r1, "r2": r2, "r3": r3,
+    }
+
+
+class TestBatchInvariantReclamation:
+    """AC-1..AC-5 (flagship): the order-dependent, cross-perspective batch delete
+    holds the ownership invariant at zero -- the test that would have caught this
+    class of orphan.
+    """
+
+    def _delete(self, client, report_id):
+        resp = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        return resp
+
+    def test_batch_delete_holds_ownership_invariant_at_zero(self, setup):
+        """AC-1..AC-5. ORDER-DEPENDENT: R1 must be deleted BEFORE R2 so the shared
+        cross-perspective game (G12) retains T1 as an orphan-in-waiting; the
+        single-delete path never reproduces this, which is why the mid-sequence
+        anti-vacuity assertion (AC-1a) is load-bearing."""
+        from src.reports.lifecycle import count_orphan_reference_data
+
+        db_path, client = setup
+        ids = _seed_batch_invariant_fixture(db_path)
+
+        # --- Delete #1 (T1's report) -------------------------------------------
+        # cascade_delete_team(T1) removes T1's G12 perspective, but G12 survives
+        # on T2's perspective and still FK-references T1 (home_team_id) -> T1's
+        # teams row is RETAINED even though its own report is gone.
+        self._delete(client, ids["r1"])
+
+        # AC-1a MID-SEQUENCE anti-vacuity gate: prove the RC#1 retention was
+        # REALIZED -- the shared team still EXISTS, now has ZERO of its own
+        # reports rows, and is retained specifically because the shared
+        # cross-perspective game survived. Without this the whole test could pass
+        # vacuously (no orphan ever created -> invariant trivially zero).
+        assert _count_rows(db_path, "teams", "id = ?", (ids["t1"],)) == 1, (
+            "RC#1: T1 must be RETAINED after the first delete (cross-perspective "
+            "games FK still references it) -- the order-dependent orphan-in-waiting"
+        )
+        assert _count_rows(db_path, "reports", "team_id = ?", (ids["t1"],)) == 0, (
+            "T1 now holds ZERO of its own reports -- a retained orphan-in-waiting"
+        )
+        assert _count_rows(db_path, "games", "game_id = 'g12'") == 1, (
+            "the shared cross-perspective game must survive on T2's perspective "
+            "(this is WHY T1 was retained)"
+        )
+        # The plays-only player is still reachable via its (not-yet-deleted)
+        # plays row -- not falsely reclaimed early (TN-3).
+        assert _count_rows(db_path, "players", "player_id = 'p-plays'") == 1
+
+        # --- Delete #2 (T2's report) -------------------------------------------
+        # Removes G12's last perspective -> G12 dies -> T1 is now a gameless
+        # orphan that the terminal reclamation reclaims in THIS delete.
+        self._delete(client, ids["r2"])
+        assert _count_rows(db_path, "teams", "id = ?", (ids["t1"],)) == 0, (
+            "RC#1 reclaimed: once the shared game died, the retained team is swept"
+        )
+
+        # --- Delete #3 (T3's report) -------------------------------------------
+        # Frees the last game touching the shared opponent stub S (RC#2) and the
+        # plays-only player.
+        self._delete(client, ids["r3"])
+
+        # AC-1b / AC-2 / AC-5: the SINGLE-SOURCE invariant helper returns zero for
+        # all three orphan classes (NOT "the delete succeeded").
+        conn = _get_conn(db_path)
+        counts = count_orphan_reference_data(conn)
+        conn.close()
+        assert (counts.teams, counts.players, counts.roster_rows) == (0, 0, 0), (
+            f"ownership invariant must be zero after the batch delete, got {counts!r}"
+        )
+
+        # AC-2 (players leak, explicit): every transitively-orphaned player --
+        # roster-only AND the plays-only one -- is gone.
+        for pid in ("p-t1", "p-t2", "p-t3", "p-s", "p-plays"):
+            assert _count_rows(db_path, "players", "player_id = ?", (pid,)) == 0, (
+                f"transitively-dead player {pid} must be reclaimed"
+            )
+        assert _count_rows(db_path, "teams", "id = ?", (ids["s"],)) == 0, (
+            "RC#2: the shared opponent stub is reclaimed by the batch"
+        )
+
+        # AC-3: the MANDATORY intentional survivors are NOT reclaimed and the
+        # invariant did NOT flag them as leaks (the zero above already proves the
+        # non-flagging, since count derives from the roots-excluding predicate).
+        assert _count_rows(db_path, "teams", "id = ?", (ids["resolved"],)) == 1, (
+            "opponent_links.resolved_team_id target must survive"
+        )
+        assert _count_rows(db_path, "teams", "id = ?", (ids["granted"],)) == 1, (
+            "user_team_access-granted team must survive"
+        )
+        conn = _get_conn(db_path)
+        ol_resolved = conn.execute(
+            "SELECT resolved_team_id FROM opponent_links WHERE our_team_id = ?",
+            (ids["member"],),
+        ).fetchone()
+        grant_count = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE team_id = ?",
+            (ids["granted"],),
+        ).fetchone()[0]
+        conn.close()
+        assert ol_resolved is not None and ol_resolved[0] == ids["resolved"], (
+            "the opponent_links operator decision must be intact (not NULLed)"
+        )
+        assert grant_count == 1, "the user_team_access grant must be intact"

@@ -147,12 +147,22 @@ def list_cmd() -> None:
 
 @app.command(name="cleanup")
 def cleanup_cmd() -> None:
-    """Remove on-disk HTML files for expired reports (keeps the report rows).
+    """Remove on-disk HTML files for expired reports (keeps the report rows),
+    then reclaim orphaned reference data.
 
     Expired reports already 404 on serving; their HTML files, however, are
     never unlinked and accumulate on disk. This sweep deletes those files and
     NULLs ``report_path`` while KEEPING the ``reports`` row, so each report
     still shows as expired in ``bb report list`` / ``/admin/reports``.
+
+    DESTRUCTIVE side effect (E-273-02, TN-14): ``cleanup_expired_reports`` also
+    runs the terminal orphan-reclamation sweep, which HARD-DELETEs ``teams`` /
+    ``players`` / ``team_rosters`` rows no longer reachable from any surviving
+    report. So this command is not merely a file-cleanup: while the expired
+    *report* rows are kept, unreachable reference data is reclaimed (best-effort;
+    it DEFERS when a report generation is in flight). The reclamation counts are
+    logged, not printed here; the ``scripts/reclaim_orphan_reference_data.py``
+    one-shot is the authoritative reclaim-reporting surface.
     """
     result = cleanup_expired_reports()
     console.print(

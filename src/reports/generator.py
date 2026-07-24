@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import secrets
 import sqlite3
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal
@@ -243,8 +243,17 @@ def _create_report_row(
     title: str,
     generated_at: str,
     expires_at: str,
+    *,
+    commit: bool = True,
 ) -> int:
-    """Insert a new reports row with status='generating'. Returns the row id."""
+    """Insert a new reports row with status='generating'. Returns the row id.
+
+    ``commit`` defaults to ``True`` (the standalone/backward-compatible path).
+    Pass ``commit=False`` when the caller owns a shared transaction that also
+    holds the team write (E-273-03 / TN-6): the teams row and this reports row
+    must land in ONE commit so a team is never visible without its protecting
+    'generating' reports row.
+    """
     cursor = conn.execute(
         """
         INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at)
@@ -252,7 +261,8 @@ def _create_report_row(
         """,
         (slug, team_id, title, generated_at, expires_at),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cursor.lastrowid
 
 
@@ -302,6 +312,7 @@ def _create_run_record(
     started_at: str,
     *,
     identity_match_method: str | None = None,
+    commit: bool = True,
 ) -> int:
     """Insert the ``report_generation_runs`` row for ``report_id`` (TN-2).
 
@@ -309,6 +320,10 @@ def _create_run_record(
     ``overall_status='running'``. Signals determined before this point (e.g.
     ``identity_match_method`` stashed at the ``ensure_team_row`` site) are
     written here. Returns the new run row id.
+
+    ``commit`` defaults to ``True`` (backward-compatible). Pass ``commit=False``
+    when part of the shared team+report transaction (E-273-03 / TN-6); the owning
+    ``run()`` issues the single commit for teams → reports → run-record.
     """
     cursor = conn.execute(
         """
@@ -318,7 +333,8 @@ def _create_run_record(
         """,
         (report_id, started_at, identity_match_method),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cursor.lastrowid
 
 
@@ -1575,11 +1591,19 @@ class _ReportGeneration:
         # Step 1b: public team info (no auth)
         self._fetch_public_team_info()
 
-        # Step 2: ensure team row
-        self._ensure_team_row()
-
-        # Step 3: create the reports row + run record
-        self._create_report_and_run_record()
+        # Steps 2+3: ensure the team row and create the 'generating' reports row
+        # (plus its run record) in ONE transaction on ONE connection, committed
+        # once in FK order teams -> reports -> run-record (E-273-03 / TN-5/TN-6).
+        # This closes the pre-reports-row concurrency window: a scouted teams row
+        # is never visible without its protecting 'generating' reports row, so the
+        # reclamation sweep's reap-then-gate guard can never see an in-flight
+        # generation's team as an orphan. A failure between the two writes rolls
+        # back BOTH (the connection closes without a commit), never leaving a
+        # committed team without its report.
+        with closing(get_connection()) as conn:
+            self._ensure_team_row(conn)
+            self._create_report_and_run_record(conn)
+            conn.commit()
 
         # Step 4: scouting crawl/load/spray/plays pipeline. The scouting load
         # records every opponent stub it INSERTs into self.created_team_ids
@@ -1636,15 +1660,24 @@ class _ReportGeneration:
         except Exception:  # noqa: BLE001
             logger.warning("Could not fetch public team info for %s", self.public_id)
 
-    def _ensure_team_row(self) -> None:
+    def _ensure_team_row(self, conn: sqlite3.Connection | None = None) -> None:
         """Step 2: ensure the team row exists; backfill name/season/public_id.
 
         Captures the identity ``match_method`` (gate (c), TN-3) from the
         provenance-returning variant and stashes it on the context; it is
         written to the run record when that row is created (the run row does
         not exist yet here -- deferred write, SE-F3).
+
+        Connection-injection (E-273-03 / TN-6): with ``conn=None`` (the default,
+        preserving the standalone IDEA-127 test callers) this opens and COMMITS
+        its own connection -- byte-identical to the pre-refactor behavior. When
+        ``run()`` passes its shared ``conn``, this uses it and does NOT commit;
+        the caller commits the teams row together with the reports row so the two
+        are atomic.
         """
-        with closing(get_connection()) as conn:
+        owns_conn = conn is None
+        cm = closing(get_connection()) if owns_conn else nullcontext(conn)
+        with cm as conn:
             ensure_result = ensure_team_row_with_provenance(
                 conn,
                 public_id=self.public_id,
@@ -1705,29 +1738,43 @@ class _ReportGeneration:
                         "another team already has this public_id",
                         self.public_id, self.team_id,
                     )
-            conn.commit()
+            if owns_conn:
+                conn.commit()
 
-    def _create_report_and_run_record(self) -> None:
-        """Step 3: create the reports row, then its run record (FK order)."""
+    def _create_report_and_run_record(
+        self, conn: sqlite3.Connection | None = None
+    ) -> None:
+        """Step 3: create the reports row, then its run record (FK order).
+
+        Connection-injection (E-273-03 / TN-6): with ``conn=None`` (default) this
+        opens its own connection and the row-insert helpers commit internally --
+        backward-compatible. When ``run()`` passes its shared ``conn``, the
+        helpers are told NOT to commit (``commit=owns_conn``); the caller issues
+        the single teams -> reports -> run-record commit so the team is never
+        committed without its 'generating' reports row.
+        """
         self.slug = secrets.token_urlsafe(12)
         self.generated_at = utcnow_iso()
         expires_dt = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
         self.expires_at = expires_dt.strftime(UTC_ISO_FORMAT)
 
-        with closing(get_connection()) as conn:
+        owns_conn = conn is None
+        cm = closing(get_connection()) if owns_conn else nullcontext(conn)
+        with cm as conn:
             initial_title = (
                 f"Scouting Report — {self.team_name_from_api or self.public_id}"
             )
             self.report_id = _create_report_row(
                 conn, self.slug, self.team_id, initial_title,
                 self.generated_at, self.expires_at,
+                commit=owns_conn,
             )
-            # The run row FK-references the reports row, which now exists +
-            # is committed. Stashed pre-run signals (identity_match_method)
-            # are written here (TN-2).
+            # The run row FK-references the reports row. Stashed pre-run signals
+            # (identity_match_method) are written here (TN-2).
             _create_run_record(
                 conn, self.report_id, self.generated_at,
                 identity_match_method=self.identity_match_method,
+                commit=owns_conn,
             )
 
     def _run_pipeline(self) -> GenerationResult | None:

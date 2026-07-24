@@ -4,7 +4,7 @@
 [E-273: Reclaim Orphaned Reference Data After Report Deletion](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator can reclaim the existing 681 orphan teams / 14,326 orphan players in one controlled, quiescent-DB run via a throwaway `scripts/` one-shot that IMPORTS and calls `reclaim_orphan_reference_data` — no migration, no permanent CLI surface, zero duplicated predicates. The one-shot documents and prints the operator sequence (baseline re-snapshot → run → assert), and its post-run assertion uses the single-source invariant-count helper.
