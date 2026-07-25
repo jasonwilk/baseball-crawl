@@ -34,13 +34,15 @@ and one of those 3 resolves **forward** (DB says 2025, search found 2026), makin
 - It explains why the population is small **without any credit to a year check we have not written**.
 - The bound is therefore **GameChanger's naming convention, not our code.** If GC ever stops embedding the year in team names, active teams collapse to single hits and this population grows. That is the durable reason to fix it rather than close it.
 
-**Severity, stated to match the measurement.** The realistic harm is scouting **last season's roster for one opponent**. The path is still unattended — `resolve_opponent` is called from `src/reports/morning_run.py:463`, the cron-invoked scheduled-report driver, with no operator at the keyboard — so the failure is silent and confident rather than loud. But "silent and confident" at n=2 with one year of drift is a **data-quality cleanup**, not a risk to a coach's decisions.
+**Severity, stated to match the measurement.** The realistic harm is scouting **last season's roster for one opponent** — not a years-old roster. The path is still unattended: `resolve_opponent` is called from `src/reports/morning_run.py:463`, the cron-invoked scheduled-report driver, with no operator at the keyboard, so the failure is silent and confident rather than loud.
+
+**But do not dismiss it on the count, either.** What earns the capture is the **unattended + confident + silent** combination, not the count — that was true before the measurement and is more true after it, because n=2 is exactly the kind of number that looks dismissible in isolation. The correct reading is **low-severity correctness cleanup**: real, worth fixing when convenient, not a risk to a coach's decisions and not a reason to schedule work on its own.
 
 **The fix needs no extra HTTP call**, which is what keeps it worth doing at this severity: `hits[].result.season.year` is **already on every hit** — documented in `docs/api/endpoints/post-search.md` and re-verified there 2026-07-25 as part of the `result` key set that file calls COMPLETE and closed. The year is sitting in the payload rung (c) already holds and discards. (That same doc shows a response carrying both 2026 and 2025 hits, so cross-season results are normal output.) The change is a comparison on a field already in hand.
 
 ## Rough Timing
 
-Low priority; correctness cleanup. **Not a reason to schedule work on its own.** Natural triggers:
+Not urgent. Natural triggers:
 - Someone next touching the ladder or `morning-run`'s resolution path — the marginal cost there is near zero.
 - Any sign GameChanger has changed its team-naming convention, which is the one thing that would grow this population.
 
