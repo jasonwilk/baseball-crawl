@@ -1,6 +1,6 @@
 ---
 name: e275-classifier-hardening-rulings
-description: Four E-275 rulings -- unhandled age_group shapes (full vocabulary), little_league ngb recognition, USSSA/Perfect Game rules-exist correction, IDEA-172 Legion-vs-Varsity name precedence
+description: E-275 rulings -- URGENT correction that 8U-14U travel-bracket teams currently bind to a 15-18 pitch curve and must suppress instead; plus unhandled age_group shapes (full vocabulary), little_league ngb recognition, USSSA/Perfect Game rules-exist correction, IDEA-172 Legion-vs-Varsity name precedence
 metadata:
   type: project
 ---
@@ -19,6 +19,115 @@ this file's contribution is (a) confirmation the ruling survived independent re-
 (b) the NEW travel-family and little_league/USSSA/Perfect-Game/IDEA-172 rulings requested
 this round, and (c) falsifiers, which the prior capture did not state explicitly.
 
+## URGENT CORRECTION (2026-07-25, same day) -- 8U-14U travel bracket must SUPPRESS, not bind
+
+**This supersedes the "implemented, correct" status I gave the 8U-14U rows in Ruling 1
+below when I first wrote this file, hours earlier the same day. That was wrong -- not
+because the mechanism was mischaracterized, but because I had not yet weighed it against
+the suppression standard I was simultaneously setting for `Under 13` and `middle_13O`.
+Treat this section as authoritative over Ruling 1's original table; Ruling 1's table
+below has been edited in place to match.**
+
+**Verified directly against the code** (`src/reports/starter_prediction.py`), not taken
+on trust: `_league_from_age_bracket` (lines 334-353) maps any `\d+U` bracket below 15
+-- the entire `8U`-`14U` range -- to `"youth_travel"`. `get_rules_for_league` (line 547)
+routes `"youth_travel"` to `PITCH_SMART_15_18` -- a 105-pitch-max curve whose own
+constant name says `15_18`. The report renders this with `is_estimate=True`, producing a
+small amber "Estimated rest" badge and a banner reading "This level doesn't publish
+pitch-count rules, so rest and availability use a standard youth pitch-count guide. Treat
+as a directional read, not a hard rule" (`scouting_report.html:664`). **I did not verify
+the specific "43 teams, 42 youth_travel + 1 legion" population count myself** -- I have
+no DB/query tool in this consultation, so that number is relayed, not independently
+re-run. The MECHANISM is confirmed directly from source and does not depend on the exact
+count: every team whose `age_group` bracket parses below 15U hits this path, whatever the
+current population size turns out to be. (The one `legion`-resolving case in the relayed
+count is unrelated to this defect -- Priority 1 of `detect_league_level` lets a tracked
+team's own DB `program_type="legion"` override `age_group` entirely, a different,
+DB-classification signal outside this ruling's scope. Don't fold it into the same fix.)
+
+**Ruling: reclassify the ENTIRE below-15U travel bracket (`8U` through `14U`) from
+BINDING GUIDELINE ESTIMATE to SUPPRESS, terminal -- identical treatment to `Under 13`
+and `middle_12U`/`middle_13O`/`elementary`/`college`.** This is a **live, shipped defect
+requiring a code fix**, not a gap needing a first-time ruling -- it directly contradicts
+a ruling I made in this same consult session (`Under 13` suppresses because "every table
+we have is calibrated for 15+ and would under-rest a younger arm at matched pitch
+counts"). `13U`/`14U` is the identical hazard under a different family label, and
+`middle_13O` -- the SCHOOL family's name for the same 13-14 age population -- already
+suppresses. Today the same real child gets a hard "no rest data" wall if their coach
+picked `middle_13O`, but a confident 105-pitch number if their coach picked `14U` on
+GameChanger's team-creation picker. That is not a defensible distinction; it is a coding
+accident of which family happened to get built first (E-243-02 chose the estimate path
+before the suppression standard existed), and it must resolve to ONE answer per age, not
+per input family.
+
+**Is the labeled estimate sufficient mitigation? No, and this is a different kind of
+caveat than the ones "Never suppress, always contextualize" is built to handle.**
+`.claude/rules/display-philosophy.md`'s core principle governs STAT ROWS and sample-size
+uncertainty -- "the coach decides what matters, not the code," with badges replacing
+hiding. That reasoning does not transfer here, and the same file says so explicitly: the
+starter card's suppress state is "an honest absence of a projection, not the hiding of
+present data" and is carved out from the "never suppress" principle for exactly this
+reason. The estimate badge/banner as WRITTEN reads as generic imprecision ("directional
+read, not a hard rule") -- appropriate for genuine uncertainty about which league applies.
+It is NOT appropriate here, because there is no uncertainty about the team's age: the
+bracket is a clean, confident numeric match. This isn't "we don't know this team's level,
+here's our best generic guess" -- it's "we know exactly what level this is, and we are
+knowingly applying a curve we ourselves have already ruled doesn't fit it." A softened
+label doesn't change that the underlying number is wrong-band, not merely imprecise, and
+a coach under game-day pressure reading "0 rest days needed after 30 pitches" can anchor
+on the number regardless of the badge next to it -- the same anchoring risk my `college`/
+`middle` ruling already weighed and rejected in favor of hard suppression rather than any
+softened estimate.
+
+**The rec free-text range form ("Between 13-18") is UNCHANGED by this correction** and
+stays on the youth-estimate path as previously ruled -- it is a genuinely different
+situation: that population spans INTO the 15-18 band the curve is calibrated for (a mix
+of 13-14 and 15-18 kids), so borrowing the curve is an imperfect-but-real approximation.
+An `8U`-`14U` travel bracket is a CONFIDENT, 100%-below-15 population; there is no
+mixture to hide behind.
+
+**Why this outranks the rest of this file's rulings, per the operator's reframe conveyed
+by team-lead:** this project now serves real USSSA 8U-14U youth coaches as a CORE
+audience, not an HS-program edge case (`docs/VISION.md`, named explicitly since
+2026-07-05). A miscalibrated pitch cap silently under-resting a real 9-year-old's arm
+under a real coach's care, presented with a routine-looking amber badge, is exactly the
+shape of harm this project's under-rest-hazard standard exists to prevent -- and unlike
+most of today's other findings, this one is a LIVE, SHIPPED, actively-serving-wrong-
+numbers defect, not a gap in unimplemented coverage.
+
+**Answering the four questions directly:**
+1. **13U/14U and below in the travel family: SUPPRESS, terminal.** Applies to the whole
+   `8U`-`14U` range, not just 13-14 -- the younger the band, the WORSE the mismatch
+   against a 15-18 curve, so there is no principled place to draw a narrower line.
+2. **The rec/travel asymmetry is NOT defensible.** Age must govern regardless of which
+   family the value came from. Governing principle going forward: any recognized age
+   signal below 15, from any family (rec `Under 13`, travel `8U`-`14U`, school
+   `middle_12U`/`middle_13O`/`elementary`), suppresses terminal with a level-specific
+   note. Which picker the coach happened to use when creating the team in GameChanger
+   must never change the safety verdict for the same actual age.
+3. **A correct youth table is legitimate future work, but NOT the blocker for this
+   ruling.** I am not asserting real Pitch Smart 7-8/9-10/11-12/13-14 breakpoints here --
+   same discipline as OQ-3 and my `little_league` ruling, no number without a sourced
+   citation pass. But suppression is right INDEPENDENT of whether or when that table gets
+   built: we should not keep showing a wrong number while a right one is unbuilt. Given
+   the newly-elevated USSSA-youth audience, building real age-tiered youth tables (7-8
+   through 13-14 bands, each with materially lower daily maxes and earlier rest triggers
+   than 15-18) is a legitimate epic-level investment to recommend separately -- distinct
+   from this suppression fix, and not a prerequisite for it.
+4. **Falsifier: this is wrong if my understanding of the age direction is backwards** --
+   i.e., if the true 13-14 (or younger) Pitch Smart curve turns out to require LESS rest
+   per pitch count than the 15-18 curve, applying `PITCH_SMART_15_18` to a younger arm
+   would OVER-rest rather than under-rest, and the harm direction this ruling is built to
+   prevent would not exist. I have moderate-not-citation-grade confidence younger bands
+   need MORE rest per pitch (adolescent growth-plate vulnerability, echoing the same
+   direction argument in TN-3's middle/elementary rationale) but have not sourced this
+   specific comparison in this consult. It is also wrong if the operator/PM judges that a
+   MUCH MORE STRONGLY WORDED estimate banner (not today's mild "directional read" copy,
+   but explicit "this age is below our supported tables -- no safe number available, use
+   extreme caution") is an acceptable middle path instead of outright suppression for
+   product-engagement reasons -- that is a legitimate alternative I did not choose, and a
+   PM/product call to weigh against my domain recommendation, not a pure domain question.
+
 ## RULING 1 -- unhandled `age_group` shapes, full vocabulary
 
 Three families, each ruled independently -- **do not flatten to one answer per family,
@@ -29,7 +138,7 @@ in one table for E-275 planning convenience.
 
 | Value | Family | Binds / Suppresses / Guideline | Status |
 |---|---|---|---|
-| `8U`-`14U` | travel | BINDS to `youth_travel` (Pitch Smart guideline estimate, `is_estimate=True`) | implemented (bracket ladder) |
+| `8U`-`14U` | travel | **SUPPRESS, terminal** (was: BINDS to `youth_travel` guideline estimate) | **LIVE DEFECT -- see "URGENT CORRECTION" above.** Currently implemented as a wrong bind; ruling reverses it. |
 | `15U`-`16U` | travel | BINDS to `nrbl` | implemented |
 | `17U`-`18U` | travel | BINDS to `legion` | implemented |
 | `18O` | travel | **BINDS**, folded into the 17U+ rule (not a new case) | **RULED, not yet implemented** (regex needs an `NNO` form) |
