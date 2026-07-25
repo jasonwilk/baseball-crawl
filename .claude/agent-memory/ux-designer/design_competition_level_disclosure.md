@@ -76,6 +76,21 @@ to PM is good design coherence, but bundling the two into one implementation
 decision blurs two separate rulings (mirrors IDEA-178's own note about not
 folding into E-274).
 
+## Update 2026-07-25c: "narrower scope" is not "still accurate" — check the copy against its own cited source
+
+I first wrote off a banner-copy question ("its existing copy is still accurate
+for the narrower surviving case") without checking the claim the copy itself
+makes against the rule file it's describing. It was wrong: the banner said
+"this level doesn't publish pitch-count rules," and `pitch-rules.md` names the
+fallback curve `PITCH_SMART_15_18` — a curve named for a BAND only makes sense
+if other bands exist, which they do, so the banner's premise was false even in
+the narrowed case, just for a weaker reason (declining to pick a band within an
+ambiguous range, not lacking a guide entirely). Lesson: when a scope-narrowing
+event (a suppression fix, a population shrink) makes a copy claim's AUDIENCE
+smaller, that says nothing about whether the copy's PREMISE is still true for
+the survivors — re-derive the claim against its cited source, don't infer
+accuracy from "there's less of it now."
+
 ## Related
 
 [[design_principles]] (Consequence-Oriented Labels -- this pattern is an

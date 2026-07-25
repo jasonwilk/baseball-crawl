@@ -3,7 +3,46 @@
 ## Status
 `CANDIDATE` — **live defect in shipped code (E-272, 2026-07-25). The gating baseball-coach ruling is now IN (below), so this is PROMOTABLE — the design is settled and only prioritisation remains.**
 
+## PM TRIAGE 2026-07-25 — build the detection as DISPLAY-ONLY; the precedence change becomes CONTINGENT
+
+**Accepted, with the contingency preserved rather than dropped.** ux-designer's Revision 2026-07-25b (`/workspaces/baseball-crawl/.project/research/2026-07-25-uxd-competition-level-disclosure-design.md`) recommends reusing this idea's reserve-age detection as a **display-only overlay** that never touches resolution, rendering two lines when they diverge:
+
+```
+Rest rules: American Legion
+Level: NRBL (Summer Reserve)
+```
+
+`rules_label` names the table that computed the numbers; `level_label` names the scouting tier, computed independently of which table won.
+
+**Verified premise, first-hand:** `LEGION` (`src/reports/starter_prediction.py:188-197`) and `NRBL` (`:208-217`) are byte-identical — `max_pitches=105` and the same five tiers (1-30/0, 31-45/1, 46-60/2, 61-80/3, 81-105/4). So the precedence change buys **zero difference in any pitch count or rest day** for the affected teams. They already get the correct numbers.
+
+**Why this is the right call now.** A display computation structurally cannot regress which rules get applied; a precedence change to a rest-rule resolution chain can. Same detection logic, materially smaller blast radius, and it delivers the whole of this idea's stated "Why It Matters" (the mislabel), which was never about the numbers.
+
+**What the triage does NOT do — and this is the load-bearing half.** It does **not** retire the precedence change. This idea's original argument was that the distinct-`NRBL`-constant design exists so a future divergence cannot silently corrupt NRBL teams, and that protection is **dead on arrival** while `ngb` always wins. Going display-only leaves that DOA state in place *permanently*.
+
+**The contingency is not a hedge added by this triage — it is the codebase's stated design intent, and it is a recurring convention rather than a one-off.** `.claude/rules/pitch-rules.md` records the identical rationale for **two different pairs**:
+
+- **`:134`** — `NRBL` is distinct from `LEGION` *on purpose*, "even though the two curves are identical today: NRBL and American Legion are separately governed bodies that merely agree right now, so a future Legion-only change must not silently move NRBL, nor an NRBL-only change move Legion."
+- **`:180`** — `PITCH_SMART_15_18` is likewise "a *distinct* constant from Legion on purpose, even though the tiers match today, so a future Legion-only change cannot silently move the estimate."
+
+So the file already states the principle this triage applies: **same numbers today, keep them separately addressable.** That is precisely "display-only now, precedence contingent on divergence." A reader should treat the contingent half as the design's own requirement, not as PM caution layered on top.
+
+So:
+
+- **Build now:** the display overlay. baseball-coach's detection ladder below is preserved **intact and unmodified** — what changes is only where its output is consumed (a label, not a table selection).
+- **Contingent on divergence:** the precedence refinement in the ruling below activates **as written** the moment `LEGION` and `NRBL` stop being identical. Do not delete it.
+- **The mechanism the contingency depends on — build this WITH the overlay, not later.** "Activates if they diverge" is **not self-executing**, and nothing today would tell anyone the divergence happened: nobody monitors nrbl.net against ALB, and the display-only build removes the last incentive to. If the curves diverge unnoticed, the affected teams silently take the wrong table with nothing in the suite to catch it — the exact failure this idea was filed for, and the risk `pitch-rules.md:134` names in its own words. **A test asserting `LEGION == NRBL` — a few lines — fails loudly on divergence and converts an unmonitored external dependency into a build-time signal. Treat it as part of the story, not an optional extra:** without it the contingency has no trigger and this idea quietly becomes unreachable a second time.
+
+**Boundary note.** This is a scoping/risk call (PM), not a re-ruling of rest safety (baseball-coach). The operator's "just classify NRBL as legion for the case of pitching rules" makes the resolution-layer half unnecessary *while the tables are provably identical*; it should **not** be read as retiring the distinct constant, which `pitch-rules.md:134` keeps for exactly this reason.
+
+**Scope discipline to preserve (ux-designer held this deliberately).** Do **not** extend the two-field `rules_label`/`level_label` split to [[IDEA-177]]'s HS Freshman/Reserve case in the same pass. Different mechanism: GameChanger's `age_group` enum genuinely has no Reserve value, so there is **no discarded structured signal to recover** there — only a name signal, and recovering it would mean overriding a higher-precedence `age_group` read with a lower-precedence name keyword, a real precedence question **E-274 TN-2/TN-4 already settled the other way** (`age_group` wins, no Reserve carve-out, on 0-of-17 observed disagreement). The pattern fits; the ruling does not. Bundling them would blur two separate decisions — the same warning this idea's own notes give about not folding into E-274.
+
+**Sizing — UNRECONCILED (2026-07-25 audit): cite the mechanism, not a count.** The "40 of 752" figure did not survive independent verification: no saved script or output reproduces it, and an audit full-corpus recompute produced different figures (54 nrbl-resolvers, 26+6 rung split) under a possibly-different predicate/scoping. What IS verified, by 5,049-combination brute force: zero inputs tagged `american_legion` reach `nrbl` — the mechanism is exact. The affected-team count must be re-measured (with the predicate written down) in whatever story fixes or displays this; until then cite "dozens of the 752-team probe corpus, count unverified."
+
 ## RULING (baseball-coach, 2026-07-25) — refine `american_legion`, and ONLY `american_legion`
+
+> **Status after the 2026-07-25 PM triage above: the DETECTION ladder below is preserved and is what gets built (as a display input). The PRECEDENCE half is CONTINGENT — it activates as written if `LEGION` and `NRBL` ever diverge. Nothing in this ruling is retracted.**
+
 
 **Refine; do not leave fully dispositive.** TN-2's protective purpose is "do not apply the wrong rule SYSTEM," and that is real and **must stay intact for `usssa` / `perfect_game`** — those genuinely are different systems (innings/outs) and remain **fully dispositive, no refinement**. Legion and NRBL are not different systems today, so `american_legion` winning outright over a strong NRBL signal produces a **mislabel, not a wrong number** — which is exactly why it went unnoticed. The distinct-`NRBL`-constant design exists so a future divergence cannot silently corrupt NRBL teams, and that protection is **dead on arrival** while `ngb` always wins first.
 
@@ -50,14 +89,17 @@ Observed on real teams the operator identified by tier:
 
 **2. Fixing the ngb precedence alone would NOT fix `Example Athletics Reserve`.** Its `age_group` is the free-text range `Between 13 - 18`, and the ngb-empty path checks the range form at `:477` **before** the team name, returning `youth_travel` — a labeled *estimate*, not binding NRBL. So team 1 (bracket `16U`) would resolve `nrbl` after an ngb fix; team 2 needs the summer + "Reserve" level-word path, which the range form short-circuits. **A fix scoped only to ngb precedence would look successful on one team and silently miss the other** — and the miss lands on the estimate path, which is quieter than a wrong table.
 
-## Sizing — 14 affected, and the feature serves 9 (relayed 2026-07-25; NOT verified by PM)
+## Sizing — count UNRECONCILED (relayed "40 of 752" failed independent verification 2026-07-25)
 
-**Provenance and status first, because this figure supersedes the n=2 above and PM could not check it.** Relayed by the main session from a measurement over the **198 already-probed teams**; verifying it requires executing `detect_league_level` over that population, which PM structurally does not do. Recorded as attributed and **unverified** rather than left out, because it changes the priority materially. Whoever promotes this should re-run it, not cite it.
+**Do not cite 40 of 752 as settled.** The figure was relayed and never PM-verified, and the 2026-07-25 independent audit could not reproduce it: no saved script computes it, and a full-corpus recompute got different numbers (54 teams resolving `nrbl`, all blank-`ngb`; rung split 26+6) under a possibly-different predicate. The MECHANISM is verified exactly — an exhaustive 5,049-combination sweep of `ngb=american_legion` inputs reached `nrbl` zero times (`legion` 5,049 times), so a counterexample is structurally impossible: `ngb` returns at Priority 2 before the bracket ladder is reachable. Re-measure the affected-team count with an explicit, saved predicate as part of the fixing/display story.
 
-- **14 teams affected**, not the 2 observed above: **7** via the 15U–16U bracket rung, **7** via the summer sub-varsity name rung. The name rung carries half the population, which is a second independent reason a bracket-only fix is insufficient (correction 2 below argues the same from mechanism).
-- **All 9 teams that correctly reach `nrbl` today carry a blank `ngb`.** **Zero** teams tagged `american_legion` ever reach it.
+**An earlier figure of 14 is the same defect measured on a quarter of the data** — 198 teams (the 156-name resolution plus a 51-team profile sweep) — and split 7 via the 15U–16U bracket rung, 7 via the summer sub-varsity name rung. **It is not a competing measurement and there is no conflict to re-derive.** Recorded here only so a future reader who meets "14" in an older artifact can identify it rather than re-litigate it. Cite **40 of 752**, always with its denominator.
 
-That second line is the sharper statement of this defect than anything in the sections above: **the feature is fully inert wherever the tagging is accurate, and the defect touches more teams (14) than the feature correctly serves (9).** It also inverts the usual reading of "not urgent" — the population reaching `nrbl` correctly is doing so by *accident of a missing tag*, not by design.
+Two things NOT re-measured at 752, so do not scale them:
+- **The per-rung split.** 7+7 was the 198-team breakdown. The 40 was reported as a total; how it divides between the bracket rung and the name rung is unknown. The 198 split is still the only evidence that the name rung carries a large share — which is the independent reason a bracket-only fix is insufficient (correction 2 below argues the same from mechanism, so the conclusion does not depend on the split).
+- **"9 teams correctly reach `nrbl`, all with blank `ngb`; zero tagged `american_legion` ever reach it."** That was measured on the 198 and has not been re-run at 752.
+
+That last line is still the sharpest statement of this defect: **the feature is inert wherever the tagging is accurate, and the population reaching `nrbl` correctly is doing so by accident of a missing tag rather than by design.** The 40-of-752 measurement does not disturb that mechanism — it only sizes the affected side.
 
 ## Rough Timing
 Promote when baseball-coach rules the design question below. This is not blocked on engineering — the fix is small either way; it is blocked on a rest-safety decision nobody has made.

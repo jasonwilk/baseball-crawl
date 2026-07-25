@@ -469,6 +469,55 @@ resolution-path change means no regression surface on the rules themselves) and
 worth relaying to PM, since it may change how IDEA-178 gets triaged (its
 detection logic is still wanted; its precedence-change proposal likely is not).
 
+## Revision 2026-07-25c: the `is_estimate` banner needed a copy change after all
+
+**I was wrong in the original design and IDEA-184 is right.** Verified against
+both artifacts directly (not relayed): the banner's literal text
+(`scouting_report.html`, `.starter-estimate-banner`) is *"This level doesn't
+publish pitch-count rules, so rest and availability use a standard youth
+pitch-count guide. Treat as a directional read, not a hard rule."*
+`.claude/rules/pitch-rules.md:180` states `youth_travel` (the sole surviving
+`is_estimate` route post-E-275, the free-text age-range form like "Between
+13-18") is routed to *"the USA Baseball Pitch Smart 15-18 curve (the
+`PITCH_SMART_15_18` constant... a distinct constant from Legion on purpose..."*
+— a curve named for a specific age BAND only makes sense if other bands exist,
+and they do (Pitch Smart publishes younger bands too; the 13-14 half of a
+"13-18" range has its own published guidance we are not using). So "this level
+doesn't publish pitch-count rules" is false even for the narrower surviving
+case, for a weaker but real reason than the 8U-14U case IDEA-184 leads with:
+we are not lacking a guide, we are declining to pick a band within a range and
+defaulting to the top one.
+
+**New copy for the surviving `is_estimate` banner** (replaces the first
+sentence; keeps the second, per IDEA-184's own OQ-3 — the hedge is honest where
+the premise was not):
+
+> This team's age is listed as a range spanning several pitch-count bands, so
+> we can't confirm which one applies — rest and availability default to the
+> broadest (15-18) band. Treat as a directional read, not a hard rule.
+
+No band-specific figures are printed (E-274 OQ-3(b) bar on citing unsourced
+breakpoints — unaffected, since this copy never states a number, only that
+bands exist and we picked the widest). No CSS change — same
+`.starter-estimate-banner` box, text only.
+
+**level_label/rules_label for this case** (per Revision 2026-07-25b's split):
+both stay equal — "Youth 15-18 estimate" — one line, no second `Level:` line.
+There's no finer signal to recover here the way there was for Legion/NRBL: the
+range itself, not a discarded structured/name signal, IS the ambiguity, so a
+second line would have nothing more specific to say.
+
+**Relaying to PM/team-lead**: this answers IDEA-184's first Open Question
+("What is the copy for the surviving `is_estimate` case?") with a concrete
+recommendation. I have not edited `.project/ideas/IDEA-184-*.md` — routing the
+update through you per the instruction not to touch `.project/ideas/**`.
+IDEA-184's second OQ ("Does the suppressed 8U-14U case need its own copy?")
+is already answered by this design's Boundary-state copy spec above (the
+8U-14U bracket lands in the Boundary state, bolded with its specific age band,
+e.g. "**12U** — pitch-count guidance for this age isn't built into our system
+yet…" — not the generic Unknown copy), so that OQ is also closed by this
+document, not left open.
+
 ## Explicitly Out of Scope (flag to PM, do not fold into this design)
 
 - The optional footer echo mentioned above (Phase-2, only if the operator wants
@@ -480,7 +529,7 @@ detection logic is still wanted; its precedence-change proposal likely is not).
   I've specified the PATTERN (bolded specific name, never a generic placeholder)
   and given representative examples; the full label map is an implementation
   table SE builds alongside `_LEAGUE_WARNINGS`.
-- Any change to the existing `is_estimate` amber banner's own wording — it is
-  narrower in scope after E-275's urgent correction (ambiguous free-text age
-  range only) but its existing copy is still accurate for that narrower case, so
-  I left it unchanged.
+- ~~Any change to the existing `is_estimate` amber banner's own wording... its
+  existing copy is still accurate for that narrower case, so I left it
+  unchanged.~~ **RETRACTED — see "Revision 2026-07-25c" below.** This was
+  wrong; the banner needed a copy change and I've now specified one.
