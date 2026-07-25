@@ -1,7 +1,7 @@
 # IDEA-165: Exercise the relative-`--db-path` divergence in the purge backup test
 
 ## Status
-`CANDIDATE`
+`DISCARDED` — premise refuted by execution (2026-07-25 independent audit). The claimed divergence cannot occur: `backup_database`'s as-is argument and `resolve_db_path()` both resolve a relative path against the same CWD (`Path.resolve()` and `sqlite3.connect()` agree; symlinked cwd lands on the same inode; `db_path=None` also converges since both sides call `resolve_db_path()`). A test written for this scenario would pass for the wrong reason — there is no reachable two-file state to pin. The audit harness that proved it: session scratchpad `audit-purge/h4_claims.py`. The passing-the-resolved-path convention in `src/cli/db.py` remains good hygiene and stays. CLAUDE.md's rationale sentence for it was corrected the same day.
 
 ## Summary
 `test_backup_runs_before_the_purge_on_the_resolved_path` (`tests/test_cli_db.py`) pins that `bb db purge-scouting` passes the RESOLVED path to `backup_database`, via `assert_called_once_with(db_path=preview.resolved_path)`. It discriminates — the weaker `db_path=db_path` form fails it, mutation-confirmed — but it does so because the raw value in that invocation is `None`. It never exercises the scenario the requirement actually exists for: a RELATIVE `--db-path`, where `backup_database` (which uses its argument as-is) and `purge_scouting_data` (which routes through `resolve_db_path`) genuinely resolve to two different files. Add a variant that passes a relative `--db-path` from a non-repo-root cwd and asserts the backup received the absolute resolved path.

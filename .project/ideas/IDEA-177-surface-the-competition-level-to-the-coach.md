@@ -11,7 +11,7 @@ Verified by read-only trace (2026-07-25):
 - `src/reports/generator.py:2432-2447` computes it, passes it, drops it.
 - `src/reports/renderer.py:812-813` puts only `starter_prediction` and `enriched_prediction` on the context.
 - `src/reports/llm_analysis.py:63` **bans** the vocabulary in the system prompt ("Never use these words… 'Pitch Smart,' 'Legion'…").
-- The only coach-visible "level" text is static template prose with nothing interpolated (`src/api/templates/scouting_report.html:660`, `:664`) — a deictic phrase, not a rendered value.
+- The only coach-visible "level" text is static template prose with nothing interpolated (`src/api/templates/reports/scouting_report.html:660`, `:664`) — a deictic phrase, not a rendered value.
 
 So an internal id can never reach the coach by accident: `_LEAGUE_WARNINGS` prose goes to `data_note`, which the template comment at `:658-659` explicitly bars from rendering, consistent with `.claude/rules/display-philosophy.md`.
 
