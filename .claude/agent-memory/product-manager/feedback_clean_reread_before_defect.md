@@ -1,6 +1,6 @@
 ---
 name: feedback-clean-reread-before-defect
-description: Before reporting an AC defect, do one clean re-read of the exact lines; never assert from a garbled or transient read
+description: Before reporting an AC defect, do one clean re-read of the exact lines; and when two reads disagree, discriminate a garble from a file that moved under a live writer
 metadata:
   type: feedback
 ---
@@ -11,4 +11,4 @@ Before reporting any AC failure or code defect during verification, do ONE clean
 
 **The grep-match trap (case 3, the sharpest lesson):** I built grep patterns that OR'd the OLD text and the NEW text, saw `[Omitted long matching line]`, and read the *match* as confirming the STALE branch — without reading the literal line. A match on an OR-pattern proves the line matched SOMETHING; it says NOTHING about which branch. `[Omitted long matching line]` is not evidence of stale content — it just means the line was long. NEVER rule on a grep match; always Read the literal line and quote the current text.
 
-**How to apply:** When something looks wrong during AC verification, re-Read the specific line range cleanly and quote the actual literal text before writing any FAIL. Never report a defect from a grep match alone — grep finds candidates, Read confirms content. If two of my own reads disagree, the problem is my read, not the file — re-read, don't escalate. Only report a defect I can quote verbatim from a current, clean Read. A verified implementer report (with RC-checked test output) is strong prior evidence — contradicting it requires first-hand confirmation of the literal text, not a hunch and not a grep hit. See [[feedback_fix_real_findings]].
+**How to apply:** When something looks wrong during AC verification, re-Read the specific line range cleanly and quote the actual literal text before writing any FAIL. Never report a defect from a grep match alone — grep finds candidates, Read confirms content. If two of my own reads disagree, do NOT assume the problem is my read: during dispatch the implementer is a live writer of the file I am reviewing, so the file may have moved between the reads. Run the differential in `.claude/rules/tool-output-integrity.md` (harness "modified on disk" note, `stat` mtime vs. read time, grep the writer's transcript payload) before blaming the channel — in E-267-03 round 2 I called an accurate read of a mid-mutation file a garble, and the two causes need opposite responses. Only report a defect I can quote verbatim from a current, clean Read. A verified implementer report (with RC-checked test output) is strong prior evidence — contradicting it requires first-hand confirmation of the literal text, not a hunch and not a grep hit. See [[feedback_fix_real_findings]].

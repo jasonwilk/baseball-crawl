@@ -31,15 +31,21 @@ metadata:
   **Per-story review corollary:** a story whose deliverable is a NEW module shows a `git diff` containing
   only PM's status flips. Reviewing off that diff is a false-clean — always `git status --porcelain`
   first, then Read every `??` path. (E-267-01: both changed files were untracked.)
-- **A garbled Read can be nonempty, coherent, AND topically plausible — it fabricates the defect you
-  are hunting.** In E-267-03 round 2 a Read of `src/db/reconcile_at_load.py` rendered a synthetic
-  preamble (`_pop = any(b.populated for b in blocks)`, a `frozenset().union(...)` of the id sets, and a
-  `_prior_line_player_ids` accepting a `team_id` it then dropped from the SQL) — i.e. exactly the
-  global-OR bug the round's MUST FIX had removed. Reporting it would have been "the implementer left a
-  mutation in and shipped a cosmetic fix." **When a read shows precisely the defect the review is
-  looking for, that is a corruption CANDIDATE, not a finding**: cross-check via grep for the suspect
-  symbols (expect exit 1) AND confirm the parameter is bound in the SQL tuple, not just present in the
-  signature. Verify-before-report is cheapest exactly when the finding would be most damning.
+- **A read showing exactly the defect you are hunting is a CANDIDATE, not a finding — but "the tool
+  garbled it" is only one of the two explanations, and here it was the wrong one.** In E-267-03 round 2
+  a Read of `src/db/reconcile_at_load.py` rendered `_pop = any(b.populated for b in blocks)`, a
+  `frozenset().union(...)` of the id sets, and a `_prior_line_player_ids` accepting a `team_id` it then
+  dropped from the SQL — i.e. exactly the global-OR bug the round's MUST FIX had removed. A second Read
+  disagreed and a grep for those symbols returned exit 1, and this entry recorded it as a garble.
+  **Re-adjudicated 2026-07-25 from transcripts: the read was ACCURATE.** SE wrote those exact lines into
+  the worktree file at 21:35:44Z as a mutation-testing mutant; the Read landed at 21:36:02Z; SE restored
+  from a scratchpad backup at 21:36:12Z, before the second Read (21:36:20Z) and the grep (21:36:28Z).
+  The file was oscillating under a concurrent writer. So the disagreement + empty grep signature does
+  NOT prove corruption — it is produced identically by a file that moved. Discriminate first (harness
+  "modified on disk" note, `stat` mtime vs. read time, grep the writer's `subagents/*.jsonl` payload)
+  per `.claude/rules/tool-output-integrity.md`. **During dispatch, the implementer is a live writer of
+  the file you are reviewing**: had SE not restored, calling it a garble would have cleared a real
+  mutation. Still confirm a parameter is bound in the SQL tuple and not merely present in the signature.
 - **`mapfile -d` requires bash ≥ 4.4; macOS `/bin/bash` is 3.2.** On older bash it errors and leaves
   the target array **unset**, so a following `[ ${#ARR[@]} -eq 0 ] && exit 0` empty-guard reads
   "populate failed" as "nothing staged" and **fails open**. Portable, no-floor equivalent:
