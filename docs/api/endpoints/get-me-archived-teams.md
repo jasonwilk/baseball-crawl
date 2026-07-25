@@ -54,7 +54,7 @@ Bare JSON array of archived team objects. Same schema as active teams in `GET /m
 | `city` | string | City |
 | `state` | string | State/province |
 | `country` | string | Country |
-| `age_group` | string | Age group (e.g., `"13U"`) |
+| `age_group` | string | **A polymorphic LEVEL field, not merely an age bracket** -- travel teams carry an `NNU` bracket (e.g. `"13U"`), school teams carry a tier token (`high_varsity`, `high_junior_varsity`, `high_freshman`, ...), recreational teams carry a free-text range. Same field as on `GET /me/teams`; full three-family table in `get-public-teams-public_id.md` ("The `age_group` level field"). |
 | `competition_level` | string | `"club_travel"`, `"school"`, `"recreational"` |
 | `sport` | string | Sport |
 | `season_year` | integer | Season year |

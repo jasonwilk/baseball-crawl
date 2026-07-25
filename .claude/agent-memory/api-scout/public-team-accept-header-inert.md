@@ -58,5 +58,13 @@ Two habits this encodes:
    out request-to-request churn.** Signed URLs, `etag`, and timestamps all churn.
 
 This turned a plausible P1 review finding into a settled non-issue on evidence rather than
-argument. Related: [[public-team-age-group-level-field]],
-[[public-team-profile-season-shape]].
+argument.
+
+**Now recorded in the endpoint doc (2026-07-25)** — `get-public-teams-public_id.md` carries
+this negative observation in its Headers section, including the `Vary` corroboration and an
+explicit "do not re-probe." It also contrasts it with the `GET /me/teams` **false-403** trap
+(a stale `Accept` version there returns 403 despite valid credentials, per
+`.claude/rules/auth-module.md`) so the two are not conflated: `Accept` is load-bearing on some
+GC endpoints and wholly inert on this one.
+
+Related: [[public-team-age-group-level-field]], [[public-team-profile-season-shape]].

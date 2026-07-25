@@ -241,7 +241,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/search/history](endpoints/get-search-history.md) | CONFIRMED | req | Recent team search history with UUID and public_id values |
-| GET | [/search/opponent-import](endpoints/get-search-opponent-import.md) | CONFIRMED | req | GC UI opponent import search (search-as-you-type). Superseded by POST /search for programmatic opponent resolution (E-168). |
+| GET | [/search/opponent-import](endpoints/get-search-opponent-import.md) | OBSERVED | req | GC UI opponent import search (search-as-you-type). Superseded by POST /search for programmatic opponent resolution (E-168). **Returns HTTP 400 on direct curl as of 2026-07-25** -- see endpoint doc. |
 | POST | [/search](endpoints/post-search.md) | CONFIRMED | req | General-purpose team search (web + mobile). Full request/response schema documented. Used for opponent resolution (admin + automated fallback). |
 | POST | [/search/history](endpoints/post-search-history.md) | CONFIRMED | req | Record a search history entry (called when user selects a search result). Mobile only, schema unknown. |
 

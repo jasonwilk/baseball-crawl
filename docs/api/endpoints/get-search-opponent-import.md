@@ -1,16 +1,20 @@
 ---
 method: GET
 path: /search/opponent-import
-status: CONFIRMED
+status: OBSERVED
 auth: required
 profiles:
   web:
-    status: confirmed
+    status: observed
     notes: >
       21 hits returning HTTP 200 observed in proxy session 2026-03-09_062059 while
-      user browsed the Nighthawks Navy AAA 14U opponent team page and GC performed
+      user browsed an opponent team page and GC performed
       live search to resolve/import teams as opponents. Full query parameter set
       documented from OPTIONS preflight. Response content-type: application/json.
+      NEVER independently verified via direct curl -- the response body was never
+      captured, and a direct-curl attempt on 2026-07-25 returned HTTP 400 for every
+      variant tried (see the Regression section in the body). Downgraded
+      confirmed -> observed on 2026-07-25 to reflect that.
   mobile:
     status: observed
     notes: >
@@ -110,6 +114,11 @@ caveats:
     AUTH REQUIRED: Despite not being under /me/ or /teams/{uuid}/, this endpoint
     requires gc-token authentication. The response content-type is plain
     application/json (not a vendor content-type), which is unusual.
+  - >
+    RETURNS HTTP 400 AS OF 2026-07-25 for all four direct-curl variants tried,
+    including this doc's own documented example, under valid credentials. Not
+    confirmed broken -- confirmed not-200 under four guesses. See the Regression
+    section in the body before relying on anything here.
 see_also:
   - path: /search/history
     reason: User's recent search history -- contains team IDs from prior searches
@@ -123,9 +132,24 @@ see_also:
 
 # GET /search/opponent-import
 
-**Status:** CONFIRMED LIVE -- 200 OK. **Response body schema not yet captured.** Last verified: 2026-03-09.
+**Status:** OBSERVED -- 200 OK seen in proxy traffic 2026-03-09, but **never independently verified via direct curl** and the **response body was never captured**. A direct-curl attempt on **2026-07-25 returned HTTP 400** for every variant tried. See Regression below.
 
-> **Note (E-168):** This endpoint is no longer the primary search mechanism for opponent resolution in our pipeline. As of E-168, both the admin resolve workflow and the automated opponent resolver use [`POST /search`](post-search.md) instead, which has a fully documented request/response schema. This endpoint remains available in the GC UI for the "add opponent" import flow.
+> **Note (E-168):** This endpoint is no longer the primary search mechanism for opponent resolution in our pipeline. As of E-168, both the admin resolve workflow and the automated opponent resolver use [`POST /search`](post-search.md) instead, which has a fully documented request/response schema. This endpoint remains available in the GC UI for the "add opponent" import flow. **Nothing in our pipeline depends on this endpoint**, so the regression below is a spec-accuracy problem, not an outage.
+
+## Regression -- HTTP 400 observed 2026-07-25
+
+This file previously read "CONFIRMED LIVE -- 200 OK, last verified 2026-03-09." That overstated the evidence: the 200s were proxy observations of the GC UI, not direct calls by us, and no response body was ever captured. On **2026-07-25**, with valid credentials (`GET /me/user` returned 200 OK in the same session), direct calls returned:
+
+| Variant | Result |
+|---|---|
+| This doc's own documented example -- `name` + `sport` + `age_group` + `include_avatar` | **400** |
+| `name` + `sport` | **400** |
+| `name` alone | **400** |
+| `name` + `sport` + a **guessed** vendor `Accept` (`...search_opponent_import+json; version=0.0.0`) | **415** |
+
+The **415** on the guessed `Accept` is the informative one: the endpoint *does* react to content negotiation, so the 400 is plausibly a missing or changed required `Accept` version rather than a malformed query string. Note also that our client sets a `Content-Type` on GETs, which could itself provoke the 415.
+
+**Do not mark this endpoint dead on this evidence.** Per the never-rewrite-on-a-single-anomaly rule, this is a flag, not a teardown. The correct next step is to **capture a browser curl of the real GC "add opponent" import flow** to recover the exact `Accept` version and parameter set, then re-test. The `accept:` value in this file's frontmatter (`version=undefined`) is itself suspect and is the most likely culprit.
 
 The team search endpoint used by the GC UI when a coach searches for opponent teams to import. This is a search-as-you-type endpoint -- the UI fires requests on each keystroke (debounced).
 
@@ -172,6 +196,10 @@ GET https://api.team-manager.gc.com/search/opponent-import
 
 **This schema must be verified by capturing the actual response body.**
 
+**The `age_group` / `competition_level` rows above are the weakest inferences in this table, and there is now counter-evidence.** Both were inferred solely from the existence of same-named *query parameters* -- a filter you can pass is not proof of a field the response returns. The sibling [`POST /search`](post-search.md) endpoint definitively does **not** carry either field: 59 hits across 6 queries on 2026-07-25 contained zero occurrences of either key, with the `result` object's full key set being `avatar_url, id, location, name, number_of_players, public_id, season, sport, staff` -- which matches every *other* row in this inferred table and omits exactly these two. So the most likely reading is that this endpoint's response also omits them and the inference is wrong.
+
+This matters beyond spec tidiness: if these two fields *were* present, this endpoint would be a second source for the team level signal documented in `get-public-teams-public_id.md` ("The `age_group` level field"). **Do not plan around that possibility** -- treat the public team profile as the only confirmed cheap source until someone captures a real body here.
+
 ## Secondary Evidence: Post-Search Behavior
 
 After the 21 search calls completed, the GC UI immediately fetched:
@@ -188,11 +216,13 @@ This pattern confirms:
 The GC UI fires this endpoint as a search-as-you-type query:
 
 ```
-# Example: Searching for "Nighthawks Navy" baseball 14U teams
-GET /search/opponent-import?name=Night&sport=baseball&age_group=14U&include_avatar=true
-GET /search/opponent-import?name=Nighthawks&sport=baseball&age_group=14U&include_avatar=true
-GET /search/opponent-import?name=Nighthawks+N&sport=baseball&age_group=14U&include_avatar=true
+# Example: Searching for "Anytown Eagles" baseball 14U teams
+GET /search/opponent-import?name=Anyt&sport=baseball&age_group=14U&include_avatar=true
+GET /search/opponent-import?name=Anytown&sport=baseball&age_group=14U&include_avatar=true
+GET /search/opponent-import?name=Anytown+E&sport=baseball&age_group=14U&include_avatar=true
 ```
+
+As of 2026-07-25 these exact calls return **HTTP 400** -- see Regression above. They are retained as a record of the parameter shape the GC UI was observed using, not as a working example.
 
 ## Coaching Use Cases
 
@@ -200,6 +230,6 @@ GET /search/opponent-import?name=Nighthawks+N&sport=baseball&age_group=14U&inclu
 2. **Roster pre-population**: After getting team UUID, use `/teams/{team_id}/players` to get their player list before a game.
 3. **Multi-season opponent tracking**: Search with `year` parameter to find the same team across multiple seasons.
 
-**Discovered:** 2026-03-09 (proxy session 2026-03-09_062059). **Confirmed:** 2026-03-09.
+**Discovered:** 2026-03-09 (proxy session 2026-03-09_062059). **Observed 200 in proxy:** 2026-03-09. **Direct-curl 400 observed:** 2026-07-25.
 
-**PRIORITY: Capture actual response body** -- execute a GET with a known team name and inspect the JSON shape. This endpoint may be the most strategically important discovery for the opponent scouting pipeline.
+**Open action: capture the actual response body from a browser curl of the GC "add opponent" flow**, which would simultaneously recover the working `Accept` version (resolving the 400) and settle the inferred schema above. Low urgency -- E-168 moved our pipeline onto `POST /search`, so nothing depends on this endpoint. The earlier characterization of it as "the most strategically important discovery for the opponent scouting pipeline" was written before E-168 and no longer holds.

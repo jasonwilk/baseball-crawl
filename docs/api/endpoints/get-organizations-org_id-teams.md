@@ -92,7 +92,7 @@ Bare JSON array of team objects. 7 teams observed for Example Organization.
 | `country` | string | Country |
 | `staff_ids` | array | Array of user UUIDs for team staff (populated for `org_invite` teams) |
 | `proxy_team_id` | UUID or null | Internal proxy team ID (null for `"org_invite"` status teams) |
-| `age_group` | string | Age group (e.g., `"14U"`, `"9U"`) |
+| `age_group` | string | **A polymorphic LEVEL field, not merely an age bracket** -- travel teams carry an `NNU` bracket (e.g. `"14U"`, `"9U"`), school teams carry a tier token (`high_varsity`, `high_junior_varsity`, `high_freshman`, ...), recreational teams carry a free-text range. Same field as on `GET /teams/{team_id}`; full three-family table in `get-public-teams-public_id.md` ("The `age_group` level field"). |
 | `team_public_id` | string | Public ID slug -- enables public endpoint access without additional bridge calls |
 
 ## Example Record

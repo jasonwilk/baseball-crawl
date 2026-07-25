@@ -23,7 +23,7 @@ response_shape: array
 response_sample: data/raw/me-teams-sample.json
 raw_sample_size: "15 teams, 18 KB"
 discovered: "2026-02-28"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-07-25"
 tags: [team, user]
 related_schemas: []
 see_also:
@@ -37,7 +37,7 @@ see_also:
 
 # GET /me/teams
 
-**Status:** CONFIRMED LIVE -- 200 OK. 15 teams returned. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK. Last verified: 2026-07-25 (20 teams returned; 15 at the original 2026-03-04 capture).
 
 Returns all teams the authenticated user has any association with (manager, player, family member, or fan). This is the recommended first call for bootstrapping -- it provides all team UUIDs needed for downstream endpoints.
 
@@ -71,7 +71,11 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 - 15 total teams (8 archived, 7 active)
 - Ages: 8U through 14U, plus "Between 13-18" for Legion
 - Seasons: 2019-2025
-- LSB high school teams NOT present (separate coaching account required)
+
+**Re-observed 2026-07-25 (same account):**
+- **20 total teams** -- up from 15
+- Seasons 2019-2026; all three `competition_level` families present in one response
+- **The high school teams ARE now present** on this account. The 2026-03-04 note that they were absent and required a separate coaching account is **no longer true** -- four school-family teams (one `high_varsity`, one `high_junior_varsity`, two `high_freshman`) are returned. Either the account gained access or the teams were created after the original capture; the endpoint behavior is unchanged. Do not rely on the older "travel ball only" characterization when reasoning about what this account can reach.
 
 ### Team Object Fields
 
@@ -83,8 +87,8 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 | `city` | string | No | City of the team. |
 | `state` | string | No | State abbreviation (e.g., `"NE"`). |
 | `country` | string | No | Country name (e.g., `"United States"` or `"USA"` -- both observed). |
-| `age_group` | string | No | Age bracket string. Observed: `"8U"`, `"9U"`, `"10U"`, `"11U"`, `"12U"`, `"13U"`, `"14U"`, `"Between 13 - 18"`. |
-| `competition_level` | string | No | Observed: `"club_travel"`, `"recreational"`. |
+| `age_group` | string | No | **A polymorphic LEVEL field, not merely an age bracket** -- its vocabulary is selected by `competition_level`. Observed on this endpoint 2026-07-25 across 20 teams: travel `"8U"`, `"9U"`, `"10U"`, `"11U"`, `"12U"`, `"13U"`, `"14U"`, `"18U"`; recreational `"Between 13 - 18"`; **school `"high_varsity"`, `"high_junior_varsity"`, `"high_freshman"`**. Full three-family table, enum provenance, and caveats: `get-public-teams-public_id.md` ("The `age_group` level field"). |
+| `competition_level` | string | No | Selects which `age_group` vocabulary applies. Observed 2026-07-25: `"club_travel"`, `"recreational"`, `"school"`. Authenticated-only -- absent from the public team profile. |
 | `sport` | string | No | Always `"baseball"` in this dataset. |
 | `season_year` | int | No | Four-digit year of the season. |
 | `season_name` | string | No | Season identifier: `"spring"`, `"summer"`, `"fall"`. |
@@ -124,7 +128,7 @@ Bare JSON array of team objects. No pagination observed (15 teams returned in on
 ```json
 [
   {
-    "id": "72bb77d8-REDACTED",
+    "id": "00000000-REDACTED",
     "name": "Example Team 14U",
     "team_type": "admin",
     "city": "Anytown",

@@ -14,7 +14,7 @@ profiles:
   mobile:
     status: confirmed
     notes: >
-      6 hits, all HTTP 200. Triggered by typing in the main GC app search bar ("nighthawks").
+      6 hits, all HTTP 200. Triggered by typing a team name in the main GC app search bar.
       Multiple sequential calls observed as user types (search-as-you-type pattern).
       Confirmed 2026-03-09.
 accept: "application/vnd.gc.com.search_results+json; version=0.0.0"
@@ -35,7 +35,7 @@ response_shape: object
 response_sample: data/raw/search-sample.json
 raw_sample_size: "25 records, ~25 KB"
 discovered: "2026-03-09"
-last_confirmed: "2026-03-29"
+last_confirmed: "2026-07-25"
 tags: [search, team]
 caveats:
   - >
@@ -48,8 +48,8 @@ caveats:
     Our programmatic code was not setting a specific Accept header and still received valid JSON responses.
     Both approaches work but `search_results` is the correct vendor media type. Confirmed 2026-03-29.
   - >
-    SEARCH-AS-YOU-TYPE: On mobile, 6 calls were observed in ~10 seconds of user typing
-    "nighthawks". The mobile app fires this endpoint repeatedly as the user types.
+    SEARCH-AS-YOU-TYPE: On mobile, 6 calls were observed in ~10 seconds of the user typing
+    a team name. The mobile app fires this endpoint repeatedly as the user types.
   - >
     AVATAR_URL OPTIONAL: The `avatar_url` field is only present on teams that have uploaded
     a team logo/avatar. It is a signed CloudFront URL with time-limited validity. Not all
@@ -63,7 +63,7 @@ see_also:
 
 # POST /search
 
-**Status:** CONFIRMED -- live curl returned 200 OK (2026-03-29). Full request/response schema documented.
+**Status:** CONFIRMED -- live curl returned 200 OK (2026-03-29; re-verified 2026-07-25, 59 hits across 6 queries, schema unchanged). Full request/response schema documented.
 
 Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type), confirmed working from web profile, and used programmatically for opponent resolution (both admin resolve and automated fallback -- see [opponent-resolution.md](../flows/opponent-resolution.md)). Also used as the **public_id-to-gc_uuid bridge**: search by team name, filter hits by `result.public_id`, and extract `result.id` as the `gc_uuid`. See `.claude/rules/gc-uuid-bridge.md` for the full pattern.
 
@@ -165,6 +165,12 @@ Response Content-Type: `application/json; charset=utf-8`
 | `hits[].result.number_of_players` | int | Number of players on the roster. Can be `0` for teams with no roster. |
 | `hits[].result.staff` | array of strings | Coach/staff names. Can be empty array `[]`. |
 | `next_page` | int or null | Next page number for pagination, or null if no more pages. |
+
+**The `result` key set above is COMPLETE and closed -- notably, there is NO level information.** Re-verified 2026-07-25: across 59 hits from 6 team-name queries, the union of all `result` keys was exactly `avatar_url, id, location, name, number_of_players, public_id, season, sport, staff`. In particular, **`age_group` and `competition_level` are absent from every hit** (zero occurrences of either key).
+
+This is a hard constraint on the `public_id`-to-`gc_uuid` bridge path: **search cannot tell you a team's level.** A caller needing the varsity / junior varsity / freshman tier -- or the travel age bracket -- must fetch the team profile, either the unauthenticated `GET /public/teams/{public_id}` (cheapest; carries `age_group`) or the authenticated `GET /teams/{team_id}` (also carries `competition_level`). See `get-public-teams-public_id.md` ("The `age_group` level field").
+
+Note also that this endpoint's `season` is an **object** `{name, year}`, which differs from the public team profile's flat `team_season` shape where `season` is a bare string and `year` is a sibling integer. Do not carry a parser between the two.
 
 ### Example Response
 

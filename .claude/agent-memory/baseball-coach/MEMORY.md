@@ -18,6 +18,8 @@ Lincoln Standing Bear High School baseball program:
 - [E-240 morning reports discovery (2026-06-17)](e240_morning_reports_discovery.md) -- Expiry Option A recommended, three-way outcome surfacing, scheduled email UX requirements, hard gates vs soft flags, wrong-opponent mitigation
 - [E-257 reconciliation scoreboard review (2026-07-08)](e257_reconciliation_scoreboard_review.md) -- Equal-weight AB/H/BB/SO as headline fidelity metric (not BF/FPS), exempt-but-display abandoned-PA residual, FPS plausibility floor widened to 30%
 - [E-267 reconcile-at-load review (2026-07-19)](e267_reconcile_at_load_review.md) -- Departed-player roster semantics endorsed (retire grid, keep stats), W-L/season-line auto-correction endorsed, roster drop-cap tryout-cut nuance flagged for DE
+- [E-274 age_group level-signal consultation (2026-07-25)](e274-age-group-level-signal-consultation.md) -- Freshman/Reserve collapse safe for rest gate only (not scouting value), GC field trusted over name-keyword inference, season axis confirmed orthogonal
+- [E-275 classifier hardening rulings (2026-07-25)](e275-classifier-hardening-rulings.md) -- Full age_group vocabulary table (rec/travel/school), little_league recognition, USSSA/Perfect-Game "rules exist, just unbuilt" correction, IDEA-172 Legion-outranks-Varsity precedence, each with a stated falsifier
 
 ## Feedback
 

@@ -1,7 +1,13 @@
 # IDEA-171: `age_group` forms matching no pattern are read as no signal at all
 
 ## Status
-`CANDIDATE`
+`PROMOTED` — to **E-274** (`/workspaces/baseball-crawl/epics/E-274-age-group-level-signal/epic.md`), 2026-07-25.
+
+**Two things this file got wrong that the epic corrects — read these before citing it:**
+1. **The recommended fix is rejected.** This file says "any fix must normalize separators BEFORE matching." Normalizing `_`→space turns `middle_12U` into `middle 12U`, which DOES match `\b(\d+)U\b` and would route a middle-school team to the Pitch Smart 15-18 curve — a curve calibrated for the oldest band, which UNDER-rests a middle-school arm. The epic uses a known-value allowlist instead (E-274 TN-5).
+2. **"Closed enum" is not supported.** api-scout attempted to certify the 7-value school family and could not — what exists is GC's display-mapper `switch` plus the creation picker, GC's own mapper carries a `default:` branch, and the picker offers only 3 of the 7. Treat the set as OPEN.
+
+The "Evidence gap to close cheaply first" below is **CLOSED, POSITIVE** (25 non-managed opponent public profiles, unauthenticated; `high_junior_varsity` ×19, `high_varsity` ×6, plus `high_freshman` confirmed separately; zero auth-vs-public mismatches). The field is populated on 91/91 teams swept, and for LSB's HS schedule the school family is the only family that appears.
 
 ## Summary
 `detect_league_level` recognizes exactly two `age_group` shapes — a single `\d+U` bracket and the free-text range form (`"13-18"`). Any third shape is not merely unmapped, it is **unread**: it falls through to name-keyword matching, and a team whose name carries no level word reaches `unknown` and gets its Most Likely Arms card suppressed. api-scout observed a live third form, `"high_freshman"`, which matches neither pattern.

@@ -11,7 +11,7 @@ profiles:
     status: observed
     notes: >
       9 hits (7x 200, 2x 304). Observed 2026-03-09 (session 063531). Called repeatedly
-      with opponent progenitor_team_id (14fd6cb6) -- confirming endpoint works for
+      with an opponent progenitor_team_id -- confirming endpoint works for
       opponent teams. High hit count suggests polling/refresh behavior in mobile app.
 accept: "application/vnd.gc.com.team+json; version=0.10.0"
 gc_user_action: "data_loading:team"
@@ -21,7 +21,7 @@ response_shape: object
 response_sample: data/raw/team-detail-sample.json
 raw_sample_size: "own team, 910 bytes; opponent: data/raw/team-detail-opponent-sample.json"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-07-25"
 tags: [team, user]
 related_schemas: []
 see_also:
@@ -37,7 +37,7 @@ see_also:
 
 # GET /teams/{team_id}
 
-**Status:** CONFIRMED LIVE -- 200 OK. Own team and opponent teams confirmed. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK. Own team and opponent teams confirmed. Last verified: 2026-07-25 (7 non-managed opponent teams, all 200 with the full schema).
 
 Returns the full detail object for a single team by UUID. The response is a 25-field JSON object -- identical to a team object in `GET /me/teams` but for a single team identified by UUID.
 
@@ -79,8 +79,8 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 | `city` | string | No | City. |
 | `state` | string | No | State abbreviation. |
 | `country` | string | No | Country name. |
-| `age_group` | string | No | Age bracket (e.g., `"14U"`). |
-| `competition_level` | string | No | `"club_travel"`, `"recreational"`, etc. |
+| `age_group` | string | No | **A polymorphic LEVEL field, not merely an age bracket.** Its vocabulary is selected by `competition_level`: school teams carry an explicit tier token (`high_varsity`, `high_junior_varsity`, `high_freshman`, `middle_12U`, `middle_13O`, `elementary`, `college`), travel teams carry an `NNU` bracket (e.g. `"14U"`), recreational teams carry a free-text range (e.g. `"Between 13 - 18"`). Full three-family table, enum provenance, and caveats: `get-public-teams-public_id.md` ("The `age_group` level field"). |
+| `competition_level` | string | No | Selects which `age_group` vocabulary applies. Observed: `"school"`, `"club_travel"`, `"recreational"`. **This field is authenticated-only** -- it is absent from the public team profile, where `age_group`'s shape must be used to infer the family instead. |
 | `sport` | string | No | Always `"baseball"` in this dataset. |
 | `season_year` | int | No | Four-digit season year. |
 | `season_name` | string | No | `"spring"`, `"summer"`, `"fall"`. |
@@ -102,7 +102,8 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 ## Key Fields for Coaching Analytics
 
 - **`settings.scorekeeping.bats.innings_per_game`** (int) -- the game-length GameChanger uses as the basis for ERA (`innings_per_game × ER / IP`) and K/G (`innings_per_game × SO / IP`). It is a **per-team-season configured integer** (observed 6 or 7), read directly from GC -- **NOT** an age/league mapping. Back-solved exactly across owned teams and every pitcher: two 12U teams differ (one 6, one 7) and a 10U is set to 7, so any hardcoded age×league table would be actively wrong -- always read the per-team field. Opponent-capable when you have the `gc_uuid` (this endpoint); it is NOT on the public team profile. Fallback when absent: 7 (the modal HS/Legion/13U+/most-youth value). Note that a per-9-innings rate such as K/9 or BB/9 is **our own derived stat**, not a GameChanger field -- GC's game-length rate is K/G (see the season-stats and player-stats endpoint docs).
-- **`competition_level`** (string) -- useful for tier filtering between travel/recreational/high school.
+- **`competition_level`** (string) -- selects which `age_group` vocabulary applies (`school` / `club_travel` / `recreational`), and is useful for tier filtering. **Authenticated-only.** It is NOT on the public team profile, but you rarely need it there: `age_group`'s shape identifies the family unambiguously. Do not spend an authenticated call on this endpoint purely to obtain `competition_level` when you already hold the public profile.
+- **`age_group`** (string) -- for school teams this is the varsity / junior varsity / freshman tier, not an age bracket. It is the only GameChanger-native level signal, it is available unauthenticated on the public team profile for teams you do not manage, and it is **operator-entered** by that team's own coach. See `get-public-teams-public_id.md` ("The `age_group` level field").
 - **`record`** object -- cumulative win/loss/tie record. Always present.
 - **`public_id`** -- use this with the `/public/teams/{public_id}` endpoints and as input to `GET /teams/{team_id}/public-team-profile-id`.
 
@@ -110,7 +111,7 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 
 ```json
 {
-  "id": "72bb77d8-REDACTED",
+  "id": "00000000-REDACTED",
   "name": "Example Team 14U",
   "team_type": "admin",
   "city": "Anytown",
