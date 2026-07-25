@@ -93,6 +93,12 @@ fresh against that surface — do not resurrect these.
 
 ## Topic Files
 
+- [Competition-level disclosure design](design_competition_level_disclosure.md) --
+  three-state honest-absence model (bound / recognized-no-table / unknown),
+  point-of-use placement over footer/masthead, provenance-as-soft-qualifier
+  ("from team name") rather than raw internals. Full spec in
+  `.project/research/2026-07-25-uxd-competition-level-disclosure-design.md`.
+
 - [Design Principles](design_principles.md) — consequence-oriented labels,
   question-as-heading, unified-verbs discipline, coach modes. All are
   surface-agnostic; the unified-verbs principle no longer carries the removed
