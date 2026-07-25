@@ -50,6 +50,15 @@ Observed on real teams the operator identified by tier:
 
 **2. Fixing the ngb precedence alone would NOT fix `Example Athletics Reserve`.** Its `age_group` is the free-text range `Between 13 - 18`, and the ngb-empty path checks the range form at `:477` **before** the team name, returning `youth_travel` — a labeled *estimate*, not binding NRBL. So team 1 (bracket `16U`) would resolve `nrbl` after an ngb fix; team 2 needs the summer + "Reserve" level-word path, which the range form short-circuits. **A fix scoped only to ngb precedence would look successful on one team and silently miss the other** — and the miss lands on the estimate path, which is quieter than a wrong table.
 
+## Sizing — 14 affected, and the feature serves 9 (relayed 2026-07-25; NOT verified by PM)
+
+**Provenance and status first, because this figure supersedes the n=2 above and PM could not check it.** Relayed by the main session from a measurement over the **198 already-probed teams**; verifying it requires executing `detect_league_level` over that population, which PM structurally does not do. Recorded as attributed and **unverified** rather than left out, because it changes the priority materially. Whoever promotes this should re-run it, not cite it.
+
+- **14 teams affected**, not the 2 observed above: **7** via the 15U–16U bracket rung, **7** via the summer sub-varsity name rung. The name rung carries half the population, which is a second independent reason a bracket-only fix is insufficient (correction 2 below argues the same from mechanism).
+- **All 9 teams that correctly reach `nrbl` today carry a blank `ngb`.** **Zero** teams tagged `american_legion` ever reach it.
+
+That second line is the sharper statement of this defect than anything in the sections above: **the feature is fully inert wherever the tagging is accurate, and the defect touches more teams (14) than the feature correctly serves (9).** It also inverts the usual reading of "not urgent" — the population reaching `nrbl` correctly is doing so by *accident of a missing tag*, not by design.
+
 ## Rough Timing
 Promote when baseball-coach rules the design question below. This is not blocked on engineering — the fix is small either way; it is blocked on a rest-safety decision nobody has made.
 

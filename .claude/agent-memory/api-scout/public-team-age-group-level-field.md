@@ -245,5 +245,91 @@ conclusions:
   word in the name at all (sponsor-only names like "Superior Bingo", "Mings Restaurant").
   The spring sample's "73/73 also carry a level word" is a school-schedule artifact.
 
+## THIRD population — n=160 live profiles, 2026-07-25 (E-274 partition-3 probe)
+
+184 name-only DB teams resolved via `POST /search` → public profile (160 reached a profile;
+22 AMBIGUOUS, 2 NO_HITS). This is a MIXED, mostly out-of-state population (MN/SD/KS/MO/CO/TX,
+one Canadian), not one program's schedule. Confirms and extends the above:
+
+- **`age_group` enum STILL CLOSED — zero off-vocabulary values at n=160.** Thirteen distinct
+  values, every one inside the known three-family vocabulary: `14U` ×46, `18U` ×25, `17U` ×22,
+  `Between 13 - 18` ×18, `15U` ×17, `16U` ×10, `high_varsity` ×7, `high_freshman` ×5, `18O` ×3,
+  `Over 18` ×2, `high_junior_varsity` ×2, `13U` ×2, `Under 13` ×1. Running corpus is now
+  **~300 teams with no off-picker value.**
+- **`18O` is no longer a single observation** (×3 here), and the rec family gained TWO NEW
+  LITERALS beyond `"Between 13 - 18"`: **`"Over 18"`** ×2 and **`"Under 13"`** ×1. So the rec
+  vocabulary is a fixed 3-literal set (`Under 13` / `Between 13 - 18` / `Over 18`), NOT a
+  free-text `"Between N - M"` template — the template reading is now positively disconfirmed
+  for the two open-ended ends.
+- **`ngb` empty-string form reconfirmed at scale**: `["american_legion"]` ×57, `"[]"` ×54,
+  `["usssa"]` ×30, **`""` ×12**, `["perfect_game"]` ×7. The `""` form is ~7.5% of profiles —
+  common enough that a naive `json.loads` will hit it in normal operation.
+- **`age_group` is freely WRONG on this population, unlike the spring school sample.** A
+  Legion senior team tagged `Under 13`; a spring HS Reserve team tagged `14U`; a summer
+  `high_freshman` team named `Marshall VFW Orange 15U`. Operator entry is unconstrained by the
+  team's actual level (CAVEAT A, now with teeth).
+- **The school-family parser gap (line ~75) is MEASURED here: 14 school-family profiles, and
+  `detect_league_level` reads the field on ZERO of them.** All 14 outcomes came from the NAME
+  word or an `ngb`; 3 landed on a non-NSAA league (`legion` ×2, `nrbl` ×1) with the correct
+  tier sitting unread in the same response.
+- **New adjacent hazard — the `\d+U` bracket outranks a sub-varsity NAME word AND the season,
+  so an operator-entered `18U` on a spring/winter HS team yields `legion`/105 instead of
+  `nsaa_subvarsity`/90** (`Lincoln Southeast Reserves` 18U/spring, `Westside JV` 18U/winter).
+  This does NOT contradict the "zero under-resting" line in the spring sample — that measured
+  READING `age_group` on school-family values; this is the bracket branch, a different path.
+
+Method notes for a re-run: 349 requests at a 2.5 s floor ≈ 15 min for 184 teams; exact-name +
+`season.year` narrowing resolves 87 uniquely and 73 by year, leaving 22 genuinely ambiguous
+(common club names return up to 19 exact same-name hits across seasons). Search hits carry
+`season` as a **dict** `{name, year}` — the public profile carries `season` as a bare string
+with `year` FLAT (see [[public-team-profile-season-shape]]); do not copy one shape onto the
+other. Search returns 0 hits for some plainly-named real teams (`Hastings Reserves`,
+`Hastings Reserve` — both 0), so NO_HITS means "not in the index", never "does not exist".
+
+## FOURTH population — n=163 live profiles, 2026-07-25 (E-274 partition-2 probe)
+
+185 name-only DB teams (a different slice than partition 3; NE/MN/SD/ND/KS/MO/CO/TX/WY/AR/OK,
+one Canadian) resolved via `POST /search` → public profile. 163 reached a profile; 20
+AMBIGUOUS, 2 NO_HITS, **0 NON_TEAM** (this slice had no TBD/bracket placeholder rows at all).
+Independently reconfirms partition 3 and adds three things:
+
+- **`age_group` enum STILL CLOSED — zero off-vocabulary at n=163.** Eleven distinct values,
+  all in-vocabulary: `14U` ×47, `18U` ×24, `Between 13 - 18` ×22, `16U` ×18, `17U` ×16,
+  `15U` ×10, `high_varsity` ×9, `high_freshman` ×8, `high_junior_varsity` ×5, `18O` ×2,
+  `13U` ×2. Combined running corpus **~460 teams, no off-picker value ever.**
+- **`season` has a FOURTH literal: `"fall"`** (×2, both live, both travel-family). Observed
+  distribution here: `summer` ×115, `spring` ×46, `fall` ×2 — and `winter` was seen in
+  partition 3. So the vocabulary is at least {summer, spring, fall, winter}. **The comment in
+  `src/reports/starter_prediction.py` above `_SUMMER_SEASON` ("Lowercase `summer` is the ONLY
+  season token observed anywhere in the proxy corpus (api-scout, E-272 OQ-1)") is STALE** —
+  behaviour is unaffected (all four route through the non-summer NSAA default, and
+  `_KNOWN_NON_SUMMER_SEASONS` already lists spring/fall/winter), but the claim is no longer
+  true and should not be cited as evidence of a closed season vocabulary.
+- **`ngb` empty-string reconfirmed a third time**: `["american_legion"]` ×63, `"[]"` ×45,
+  `["usssa"]` ×34, **`""` ×14 (8.6%)**, `["perfect_game"]` ×7.
+
+Classifier-behaviour measurements from the same 163 (all label-only unless stated):
+
+- **A recognized `ngb` outranking the `\d+U` bracket fires on 55 of 163 (34%).** 15U/16U +
+  `["american_legion"]` → `legion` where the bracket alone gives `nrbl`; 13U/14U +
+  `["usssa"]`/`["perfect_game"]` → `usssa`/`perfect_game` where the bracket gives
+  `youth_travel`. The legion-vs-nrbl half is **numerically inert** (`LEGION`, `NRBL` and
+  `PITCH_SMART_15_18` are byte-identical tables today), so this is a LABEL divergence, not a
+  rest-day one. Do not report it as a safety finding.
+- **The `usssa`/`perfect_game` half is NOT inert — it is a COVERAGE INVERSION.** Those two
+  leagues map to `None` in `get_rules_for_league`, so a 14U team **with** an `ngb` gets NO
+  pitch guidance while an identical 14U team with `ngb=[]` gets the `PITCH_SMART_15_18`
+  labeled estimate. Having the affiliation signal makes the system strictly less helpful:
+  **41 of 185 (22%) suppressed, and every one is `usssa` (×34) or `perfect_game` (×7).**
+- **School-family + `season="summer"` → 105 instead of 90 (2 of 163).** A `high_freshman`
+  team → `nrbl`/105 and a `high_junior_varsity` team → `legion`/105, both via the name word
+  plus the summer season, with the school tier unread. This is the ONE direction that moves
+  toward UNDER-resting a 9th-grade/JV roster. It may well be correct (a summer HS-age team is
+  playing NRBL/Legion ball, not NSAA), but it is the case to put in front of the coach.
+- Method caveat for the operator table: **4 of 163 resolved to a profile whose `year` is not
+  the DB `season_year`** (2022, 2025, 2018, and one 2026-vs-2025) — all `exact_unique`, so
+  year narrowing never ran. An `exact_unique` hit is NOT season-verified; treat those four
+  rows' `age_group`/`ngb`/`season` as belonging to an older season of that name.
+
 Related: [[public-team-profile-season-shape]], [[public-team-accept-header-inert]],
 [[search-endpoint-notes]], [[search-opponent-import-regression]].

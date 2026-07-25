@@ -7,9 +7,9 @@
 In `_LEVEL_WORD_PATTERNS` (`src/reports/starter_prediction.py:313`) the sophomore entry is `\bsophomore\b` — no `s?`. Its neighbour two lines up is `\breserves?\b`, which does carry one. Software-engineer verified the divergence live:
 
 ```
-"Anytown East Sophomore"    -> nsaa_subvarsity   (matches)
-"Anytown East Sophomores"   -> unknown           (does NOT match; card suppressed)
-"Anytown East Reserves"     -> nsaa_subvarsity   (matches, via reserves?)
+"Anytown High Sophomore"    -> nsaa_subvarsity   (matches)
+"Anytown High Sophomores"   -> unknown           (does NOT match; card suppressed)
+"Anytown High Reserves"     -> nsaa_subvarsity   (matches, via reserves?)
 ```
 
 ## Why It Matters
