@@ -130,6 +130,28 @@ FLOOR_RATIO = 0.5
 # retire for that run. Only DELETEs are capped; the ADD path is never gated.
 MAX_ROSTER_DEPARTURES = 2
 
+# Game-grain absolute retirement cap (E-270-01, TN-3). The flat 0.5 floor lets an
+# alarming ABSOLUTE mass-delete through from underneath: 8 of 30 games is 27% and
+# sails past the ratio, yet each of those eight retires destroys a whole game's
+# child surface (batting/pitching lines, plays, play_events, spray points,
+# reconciliation rows). So the milder-failure roster grain had the stronger guard
+# and the harshest-failure grain had none. This cap closes that, composed WITH
+# the existing ``boxscores_complete`` signal (both must permit).
+#
+# Value 2 (operator decision 2026-07-21). api-scout's 1200+-record envelope found
+# no mechanism by which ``GET /public/teams/{public_id}/games`` silently drops
+# prior-loaded COMPLETED games: it is un-paginated, a truncated body is a JSON
+# PARSE error rather than a short valid array, and the only observed
+# genuine-removal vector is a scorekeeper voiding ONE game at a time. The cap is
+# therefore a backstop against an UNOBSERVED mode, which is exactly why it is set
+# tight and matches the :data:`MAX_ROSTER_DEPARTURES` precedent -- a refused
+# retire is loud and self-heals on the next clean crawl, a wrong delete is
+# irreversible.
+#
+# It counts RETIRE-ELIGIBLE absences only (``absent - exempt``) -- see the
+# deadlock note at the ``exempt`` precompute in :func:`retire_absent_games`.
+MAX_GAME_RETIREMENTS = 2
+
 
 class AbsenceClass(str, Enum):
     """How one prior-loaded id compares against the fresh crawl.
@@ -359,6 +381,94 @@ def _other_perspectives(
     )
 
 
+def _foreign_perspective_child_rows_exist(
+    conn: sqlite3.Connection, game_id: str, team_id: int
+) -> bool:
+    """Does another perspective still hold CHILD stat rows on ``game_id``?
+
+    The IDEA-159 guard (E-270-01). :func:`_other_perspectives` reads
+    ``game_perspectives`` and nothing else, so a game whose FOREIGN junction row
+    was stripped -- a partial cleanup, an interrupted merge -- reads as
+    single-perspective while the other team's batting lines, pitching lines,
+    plays, spray points and reconciliation rows are all still attached to it. A
+    whole-game retire would then hard-delete data this grain has no business
+    touching, silently, because the only guard looked at the one table that was
+    already gone.
+
+    **Guard surface == delete surface (TN-2, binding).** The tables are read from
+    the SAME :data:`~src.db.game_merge._PERSPECTIVE_CHILD_TABLES` constant that
+    :func:`_delete_game_and_children` loops -- never a hand-written list. A
+    hand-list that omitted ``reconciliation_discrepancies`` would wave through
+    precisely the game whose only foreign footprint is a reconciliation row: the
+    same hole, one table narrower. Reading the constant makes the guard cover
+    EXACTLY what the delete removes, so a future sixth child table extends both
+    at once with zero drift.
+
+    Existence semantics (``LIMIT 1``, early return): one foreign row anywhere in
+    the five tables is the whole answer, and this runs once per prior-loaded game
+    in the cap's ``exempt`` precompute.
+
+    Note the ``!= ?`` predicate also excludes a NULL ``perspective_team_id``
+    (SQL three-valued logic), which is correct -- a row that names no perspective
+    is not evidence of a FOREIGN one. All five tables declare the column
+    ``NOT NULL`` anyway.
+    """
+    for table in _PERSPECTIVE_CHILD_TABLES:
+        row = conn.execute(
+            f"SELECT 1 FROM {table} "  # noqa: S608
+            "WHERE game_id = ? AND perspective_team_id != ? LIMIT 1",
+            (game_id, team_id),
+        ).fetchone()
+        if row is not None:
+            return True
+    return False
+
+
+def _game_is_cross_perspective_protected(
+    conn: sqlite3.Connection, game_id: str, team_id: int
+) -> bool:
+    """Would a whole-game retire of ``game_id`` destroy ANOTHER team's data?
+
+    ONE predicate, TWO branches, and there are exactly TWO call sites, both in
+    :func:`retire_absent_games` (TN-2): the cap's ``exempt`` precompute, and the
+    retire loop's refusal GATE. That sharing is the point: if the cap counted a
+    game the loop then refuses, the refused game would recur in ``absent`` on
+    every run forever and eventually push the count over
+    :data:`MAX_GAME_RETIREMENTS` permanently -- false-refusing every genuine
+    removal after it. Exempt and refusal must be the SAME decision, and routing
+    both through this one function makes that structural rather than
+    test-caught.
+
+    **Adding a third protection branch here is therefore SAFE, and that is the
+    whole reason this function exists**: both the exemption and the refusal pick
+    it up in the same commit, so the cap can never drop a game from its count
+    that the loop still deletes. The only thing a new branch does NOT get for
+    free is its own WARN reason string -- see the ``else`` fallback at the loop's
+    refusal gate, which names the gap explicitly rather than letting the game
+    through.
+
+    The branches:
+
+    * :func:`_other_perspectives` non-empty -- a foreign ``game_perspectives``
+      row exists (the E-267 guard). Catches a scored-but-EMPTY foreign
+      perspective that carries zero child rows.
+    * :func:`_foreign_perspective_child_rows_exist` -- foreign CHILD rows
+      survive even though the junction row does not.
+
+    :func:`_other_perspectives` is deliberately NOT widened to fold these
+    together (IDEA-159 scope note): a game with ONE legitimate perspective
+    must stay retirable, or removed single-perspective games -- the ordinary
+    case this grain exists for -- become permanently unretirable.
+
+    The WARN reason strings stay separate at the call site: this returns a bare
+    bool, and the loop re-checks the branches individually BELOW its gate --
+    purely to name which one fired, never to make the decision.
+    """
+    if _other_perspectives(conn, game_id, team_id):
+        return True
+    return _foreign_perspective_child_rows_exist(conn, game_id, team_id)
+
+
 def _delete_game_and_children(
     conn: sqlite3.Connection, game_id: str
 ) -> dict[str, int]:
@@ -424,12 +534,19 @@ def retire_absent_games(
 
     * The health gate failed (fetch error, empty payload, catastrophic shrink) --
       every absence this pass is refused.
+    * More than :data:`MAX_GAME_RETIREMENTS` RETIRE-ELIGIBLE games are absent
+      (E-270-01) -- the absolute cap on top of the floor ratio, since 8 of 30
+      games is only a 27% shrink and would otherwise sail through. Refuses the
+      whole pass. See the TN-1 note at the ``exempt`` precompute for why the
+      count excludes cross-perspective-protected games.
     * The prior-loaded game is present in the fresh array but NOT final
       (``not_final_game_ids``) -- postponed, in progress, or an unscored stub.
-    * The game also carries ANOTHER perspective's data. Hard-deleting the
-      ``games`` row would destroy a second team's load, and this grain deletes
-      whole games; the narrower per-perspective cleanup is the player-line
-      grain's job (E-267-03).
+    * The game also carries ANOTHER perspective's data -- either a foreign
+      ``game_perspectives`` row, or (E-270-01) foreign CHILD stat rows that
+      outlived a stripped junction row. Hard-deleting the ``games`` row would
+      destroy a second team's load, and this grain deletes whole games; the
+      narrower per-perspective cleanup is the player-line grain's job
+      (E-267-03).
 
     Does NOT commit -- the caller owns the transaction boundary.
 
@@ -450,7 +567,8 @@ def retire_absent_games(
             ``game_status`` is not ``"completed"`` (absent key, ``null``, or
             ``"new"``).
         boxscores_complete: Whether EVERY completed game in the fresh array was
-            actually loaded this run. False refuses every absence (passed as the
+            actually loaded this run. False refuses every absence (composed with
+            the :data:`MAX_GAME_RETIREMENTS` cap into the single
             ``extra_guard``). This is not a nicety: ``fresh_game_ids`` gets its
             redirect-canonical entries from the load pass, so a game whose
             boxscore fetch failed contributes no redirect entry, and its
@@ -490,10 +608,97 @@ def retire_absent_games(
     authoritative = crawl_is_authoritative(
         fetch_ok=fetch_ok, fresh_count=len(comparable), prior_count=len(prior_ids)
     )
+
+    # CAP POPULATION (E-270-01, TN-1). The cap counts RETIRE-ELIGIBLE absences
+    # -- ``absent - exempt`` -- never raw ``len(absent)``, and that distinction is
+    # the difference between a backstop and a permanent deadlock.
+    #
+    # A cross-perspective-owned game is in THIS team's prior set, can go missing
+    # from THIS perspective's fresh schedule (a redirect this run did not
+    # record), classifies REMOVED, and is then refused-and-KEPT by the loop
+    # below. It never leaves ``prior``, so it recurs in ``absent`` on EVERY
+    # subsequent run. Count those toward the cap and a team that accumulates
+    # MAX_GAME_RETIREMENTS of them can never retire anything again: the next run
+    # carrying one genuine removal has ``len(absent) > cap`` and the WHOLE pass
+    # is refused, forever -- restoring the stale-game bug this grain exists to
+    # close. That is the roster grain's backfill-churn deadlock reproduced (see
+    # ``_cap_on_genuine_departures``), and it is not hypothetical: api-scout's
+    # 636-record probe found ~4% of stored game_ids absent from the queried
+    # team's own array, and ALL of them were cross-perspective twins -- ~22 false
+    # removals on a 583-game corpus, which would trip a cap of 2 constantly.
+    #
+    # Excluding them does not weaken the mass-delete protection: they are not
+    # deletable by this grain in the first place, a genuine truncation still
+    # leaves plenty of DELETABLE games absent to trip the cap, and FLOOR_RATIO is
+    # untouched as the gross-truncation backstop.
+    #
+    # Precomputed ONCE here and closed over, so the guard itself stays a pure
+    # function of the frozen absent set with no connection -- the same shape as
+    # the roster grain's ``previously`` closure. ``absent`` is derived first
+    # because it is a pure set difference over two already-materialized sets:
+    # computing it here needs no connection and does not touch
+    # ``classify_absences``, which recomputes the identical set from the identical
+    # inputs.
+    #
+    # The comprehension is scoped to ``absent`` rather than to all of
+    # ``prior_ids``: only ``absent - exempt`` and ``exempt & absent`` are ever
+    # consumed, so a PRESENT game's protection status is unobservable, and every
+    # entry of it costs up to six single-row queries. On the ordinary run -- a
+    # re-scout with nothing missing -- that is ZERO queries instead of ~180 for a
+    # 30-game season, on a path morning-run walks once per team. The guard still
+    # SUBTRACTS rather than assuming ``exempt`` and its own ``absent_ids`` agree,
+    # so this stays correct if the scoping is ever widened back.
+    absent = frozenset(prior_ids) - fresh
+    exempt = frozenset(
+        game_id
+        for game_id in absent
+        if _game_is_cross_perspective_protected(conn, game_id, team_id)
+    )
+    retire_eligible_absent = absent - exempt
+
+    def _guard(absent_ids: frozenset[Hashable]) -> bool:
+        # Short-circuiting ``and``: BOTH conditions narrow, either alone refuses
+        # (TN-3). ``classify_absences`` consults this only AFTER the health gate
+        # already permitted removal, so it can only ever tighten.
+        return (
+            boxscores_complete
+            and len(absent_ids - exempt) <= MAX_GAME_RETIREMENTS
+        )
+
     classification = classify_absences(
         prior_ids, fresh, crawl_authoritative=authoritative,
-        extra_guard=lambda _absent: boxscores_complete,
+        extra_guard=_guard,
     )
+
+    # WHICH gate refused (TN-4). All three are WHOLE-SET decisions, so the reason
+    # is settled once here rather than per game, and the three causes are named
+    # apart: an operator seeing "8 games vanished" needs to know whether that was
+    # a suspected partial crawl (the floor), an incomplete boxscore load (the
+    # redirect map is unreliable), or a legitimate-looking mass removal above the
+    # cap -- the remedies differ. Only the cap case names MAX_GAME_RETIREMENTS.
+    if not authoritative:
+        transient_reason = (
+            "absent from the fresh schedule, but the fresh crawl is not "
+            f"authoritative (fetch_ok={fetch_ok}, "
+            f"fresh_comparable_count={len(comparable)}, "
+            f"prior_count={len(prior_ids)}, floor_ratio={FLOOR_RATIO}, "
+            f"boxscores_complete={boxscores_complete})"
+        )
+    elif not boxscores_complete:
+        transient_reason = (
+            "absent from the fresh schedule, but boxscores_complete=False -- a "
+            "completed game in the fresh array was not loaded this run, so the "
+            "redirect map is incomplete and a canonical row can look absent "
+            "when it is not"
+        )
+    else:
+        transient_reason = (
+            f"retire-eligible absent count {len(retire_eligible_absent)} exceeds "
+            f"MAX_GAME_RETIREMENTS={MAX_GAME_RETIREMENTS} (raw absent "
+            f"{len(absent)}, of which {len(exempt & absent)} are "
+            "cross-perspective protected) -- a mass removal this large is far "
+            "more likely a truncated schedule than that many genuine voids"
+        )
 
     for game_id in sorted(prior_ids):
         absence = classification[game_id]
@@ -513,28 +718,85 @@ def retire_absent_games(
             continue
 
         if absence is AbsenceClass.TRANSIENT_ABSENT:
-            reason = (
-                "absent from the fresh schedule, but the fresh crawl is not "
-                f"authoritative (fetch_ok={fetch_ok}, "
-                f"fresh_comparable_count={len(comparable)}, "
-                f"prior_count={len(prior_ids)}, floor_ratio={FLOOR_RATIO}, "
-                f"boxscores_complete={boxscores_complete})"
-            )
-            result.refusals[game_id] = reason
+            result.refusals[game_id] = transient_reason
             logger.warning(
                 "Game-grain retire REFUSED for game %s (team %s, season %s): "
                 "%s; keeping the prior-loaded data.",
-                game_id, team_id, season_id, reason,
+                game_id, team_id, season_id, transient_reason,
             )
             continue
 
-        # REMOVED -- but never delete a games row another perspective owns.
-        others = _other_perspectives(conn, game_id, team_id)
-        if others:
-            reason = (
-                f"also loaded by perspective(s) {others}; a whole-game delete "
-                "would destroy another team's data"
-            )
+        # REMOVED -- but never delete a games row another perspective owns. The
+        # DECISION is the shared predicate, and it is the SAME call the cap's
+        # ``exempt`` set is built from (TN-2), so a game refused here cannot have
+        # been counted against MAX_GAME_RETIREMENTS and a protection branch added
+        # to the predicate later widens the refusal and the exemption TOGETHER.
+        #
+        # The individual helpers are re-checked strictly BELOW this gate, and
+        # only to name which branch fired in the WARN. Do NOT lift them back into
+        # the decision (``others = ...; if others:`` / ``elif foreign...``). That
+        # form is behaviourally identical TODAY and no test can tell the two
+        # apart -- which is exactly the hazard: it re-opens the drift in the
+        # DELETE direction on a destructive path. A third branch would then widen
+        # ``exempt`` (dropping the game from the cap count) while the loop still
+        # refused on the old two, and the game would be hard-deleted -- losing
+        # precisely the data the new branch was added to protect. The ``else``
+        # below is what keeps such a branch safe from the moment it is added,
+        # before anyone gets round to writing its reason string.
+        #
+        # The ``else`` is NOT dead code and NOT belt-and-braces, so do not prune
+        # it or mark it no-cover. What it protects against is specific to this
+        # loop's shape: ``reason`` is a FUNCTION-scope local reused across
+        # iterations (the not-final branch above binds it too). Drop the ``else``
+        # and a protected game matching no named branch either raises
+        # ``UnboundLocalError`` on the first such game, or -- once ``reason`` is
+        # already bound from an EARLIER game -- silently records that earlier
+        # game's message against this one. The retire is still refused either
+        # way (the ``continue`` below is unconditional, so no delete is
+        # reachable from inside this gate); the damage is a MISLABELLED WARN on
+        # a destructive path, naming the wrong cause in the one record TN-4
+        # makes the operator's sole signal for why a retire was refused.
+        #
+        # It is reachable today, too, but only in a bounded window -- do not
+        # over-read it. In the ordinary case this pass is entered with NO open
+        # transaction (``load_payload`` commits per boxscore, and
+        # ``_load_team_core`` early-returns when there are none), and Python's
+        # ``sqlite3`` opens an implicit transaction only before DML -- so the
+        # gate and the two re-checks are separate bare SELECTs sharing no
+        # snapshot of the WAL file, and a concurrent writer removing the foreign
+        # row in between leaves the gate saying protected and both re-checks
+        # saying no. That window CLOSES at this pass's first hard delete: the
+        # implicit BEGIN before that DELETE is never committed here (no-commit
+        # convention -- the caller commits), so every later read runs inside a
+        # write transaction that is snapshot-isolated and excludes other WAL
+        # writers. Not a vanishing window, though -- a pass whose absent games
+        # are ALL protected never deletes, so every gate read stays inside it.
+        #
+        # Pinned by test_protection_with_no_matching_reason_still_refuses (the
+        # first-refusal / UnboundLocalError case) and
+        # test_unmatched_protection_does_not_inherit_a_previous_games_reason
+        # (the stale-carryover case).
+        if _game_is_cross_perspective_protected(conn, game_id, team_id):
+            others = _other_perspectives(conn, game_id, team_id)
+            if others:
+                reason = (
+                    f"also loaded by perspective(s) {others}; a whole-game "
+                    "delete would destroy another team's data"
+                )
+            elif _foreign_perspective_child_rows_exist(conn, game_id, team_id):
+                reason = (
+                    "no foreign game_perspectives row survives, but child stat "
+                    "row(s) under another perspective_team_id do; a whole-game "
+                    "delete would destroy another team's data"
+                )
+            else:
+                reason = (
+                    "cross-perspective protected by a branch this message does "
+                    "not name -- a protection branch was added to "
+                    "_game_is_cross_perspective_protected without a matching "
+                    "reason string; a whole-game delete would destroy another "
+                    "team's data"
+                )
             result.refusals[game_id] = reason
             logger.warning(
                 "Game-grain retire REFUSED for game %s (team %s, season %s): "

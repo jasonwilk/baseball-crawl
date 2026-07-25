@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.api.db import get_connection
-from src.api.helpers import is_production
+from src.api.helpers import is_production, validate_app_env
 from src.db.paths import resolve_db_path
 
 logger = logging.getLogger(__name__)
@@ -145,6 +145,122 @@ class PurgeResult:
         return sum(self.rows_deleted.values())
 
 
+@dataclass(frozen=True)
+class PurgePreview:
+    """What a purge WOULD destroy, read before the confirmation prompt.
+
+    Attributes:
+        resolved_path: The database the purge will actually open --
+            :func:`resolve_db_path`'s answer, not the raw ``--db-path`` value.
+        row_counts: ``{table: count}`` for EVERY table in
+            :data:`PURGE_DELETE_ORDER`, including the zeros. The complete
+            mapping is returned rather than a filtered one so the caller owns
+            the display decision and a test can assert the full surface was
+            counted.
+    """
+
+    resolved_path: Path
+    row_counts: dict[str, int]
+
+    @property
+    def total_rows(self) -> int:
+        return sum(self.row_counts.values())
+
+    @property
+    def nonempty_counts(self) -> dict[str, int]:
+        """Just the tables holding rows, in :data:`PURGE_DELETE_ORDER` order."""
+        return {t: n for t, n in self.row_counts.items() if n}
+
+
+def preview_purge(db_path: Path | None = None) -> PurgePreview:
+    """Count what a purge would destroy, WITHOUT touching a row (AC-2, TN-5(b)).
+
+    Exists because the guard keys on ``APP_ENV`` while the destruction keys on
+    :func:`resolve_db_path` -- so an operator could confirm a purge believing one
+    thing about which database was in the firing line, and the resolved path was
+    only ever LOGGED after the confirmation. This is the read that lets the
+    prompt state the target and the stakes before the irreversible answer.
+
+    Table knowledge stays here rather than in the CLI: the CLI renders whatever
+    this returns and never enumerates tables itself, so :data:`PURGE_DELETE_ORDER`
+    has exactly one consumer surface.
+
+    **Genuinely read-only, and that is why it does NOT use
+    :func:`src.api.db.get_connection`.** The canonical factory unconditionally
+    executes ``PRAGMA journal_mode=WAL``, which is PERSISTENT: previewing a
+    target that is not already in WAL mode REWRITES the database's journal mode
+    on disk, before the operator has confirmed anything, and that change
+    survives every abort path below it -- declining the prompt, a failed backup,
+    a refused purge. Production ``data/app.db`` is already WAL so the pragma is
+    a no-op there, but a restored backup, a copied database under inspection, or
+    a mistyped ``--db-path`` that lands on some UNRELATED SQLite file is not --
+    and the last of those is the very mistake the missing-file check below
+    exists to help an operator catch. Verified by reproduction (E-270,
+    Codex P1): via the factory an unrelated non-WAL database went
+    ``delete`` -> ``wal`` and was left that way after the preview aborted on
+    "no such table".
+
+    So this opens a ``mode=ro`` URI connection instead, which SQLite refuses to
+    write to at all. Do not "simplify" it back to the shared factory: the
+    factory's pragmas (``busy_timeout`` / ``synchronous`` / WAL) are load-bearing
+    for the cross-process WRITERS it exists to serve, and are simply the wrong
+    tool for a pre-confirmation read.
+
+    One honest caveat: on a WAL target SQLite may still create a ``-shm``
+    sidecar to read the write-ahead log. That is a shared-memory index, not
+    database content -- the ``.db`` bytes and the journal mode are untouched,
+    which is what "read-only preview" has to mean here.
+
+    **The counts are ADVISORY DISPLAY ONLY.** They are a point-in-time snapshot
+    read OUTSIDE the purge transaction, and three processes share this WAL file,
+    so they can be stale by the time the operator answers the prompt. The
+    AUTHORITATIVE figures are the in-transaction DELETE rowcounts on
+    :class:`PurgeResult`. No control flow may key off these numbers -- in
+    particular, do NOT add a "nothing to purge, skipping" short-circuit here: it
+    would make a concurrent insert between preview and confirm silently survive
+    a purge the operator believes ran.
+
+    A missing database raises rather than reporting zeros, and the explicit
+    check earns its place by the ERROR it produces, not by preventing a write:
+    the ``mode=ro`` connection below would refuse to create the file anyway, but
+    it fails with SQLite's opaque "unable to open database file". Checking first
+    lets a typo'd ``--db-path`` be reported as the resolved path that was not
+    found -- which is the whole point, since the operator's mistake is usually
+    about WHICH database, not whether one exists.
+
+    Args:
+        db_path: Database path. Defaults to the canonical resolution.
+
+    Returns:
+        A :class:`PurgePreview`.
+
+    Raises:
+        FileNotFoundError: If the resolved database file does not exist.
+        sqlite3.Error: If a purge table cannot be counted (e.g. a schema
+            predating it, or a path that is not a SQLite database at all) --
+            fail closed; that purge would fail anyway.
+    """
+    resolved = resolve_db_path(db_path)
+    if not resolved.exists():
+        raise FileNotFoundError(f"Database not found: {resolved}")
+
+    counts: dict[str, int] = {}
+    # ``as_uri()`` rather than an f-string: it percent-encodes, so a path
+    # containing a space, ``?`` or ``#`` cannot corrupt the query part and
+    # silently drop ``mode=ro``. ``mode=ro`` also refuses to CREATE the file,
+    # which makes the existence check above a clear error message rather than
+    # the only thing standing between a typo and a new empty database.
+    conn = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True)
+    try:
+        for table in PURGE_DELETE_ORDER:
+            counts[table] = conn.execute(
+                f"SELECT COUNT(*) FROM {table}"  # noqa: S608
+            ).fetchone()[0]
+    finally:
+        conn.close()
+    return PurgePreview(resolved_path=resolved, row_counts=counts)
+
+
 # ---------------------------------------------------------------------------
 # Production guard (AC-4 / TN-9)
 # ---------------------------------------------------------------------------
@@ -163,12 +279,40 @@ def check_purge_production_guard(force: bool) -> None:
     ``.strip().lower()`` normalizer makes casing AND whitespace variants all
     select the production posture.
 
+    **The typo guard runs FIRST and is not overridable** (E-270-02 AC-1/AC-8).
+    ``is_production()`` answers only "does APP_ENV normalize to ``production``",
+    so an abbreviation typo like ``APP_ENV=prod`` normalizes to something
+    UNRECOGNIZED, answers False, and this function returns early -- the purge
+    proceeds on a machine the operator believes is protected. That is the
+    fail-OPEN this epic exists to close, so :func:`validate_app_env` is called
+    before anything else, ABOVE the non-production early return and ABOVE any
+    read of ``force``.
+
+    Its position is load-bearing in both directions and neither may be relaxed:
+
+    * Above the early return -- a typo is precisely the case that early return
+      would wave through.
+    * Above every use of ``force`` -- ``--force`` overrides the production
+      REFUSAL, never the typo guard. An unrecognized ``APP_ENV`` means the
+      environment posture is AMBIGUOUS, and an override cannot resolve an
+      ambiguity: the operator asking to force a production purge has not told
+      us this machine is production. Fail closed
+      (``.claude/rules/python-style.md``, "missing safety signal defaults to
+      REFUSE"). Pinned at both layers: ``test_typo_app_env_is_not_overridable_by_force``
+      (``tests/test_purge_scouting.py``, this function under ``force=True``) and
+      ``test_typo_guard_is_not_overridable_by_force_and_yes``
+      (``tests/test_cli_db.py``, the CLI under ``--force --yes``).
+
     Args:
         force: True when ``--force`` was passed on the CLI.
 
     Raises:
+        RuntimeError: If ``APP_ENV`` is set to an unrecognized value. NOT a
+            ``SystemExit`` -- callers converting the refusal to an exit code
+            must handle both (the CLI does).
         SystemExit: If running in production and ``force`` is False.
     """
+    validate_app_env()
     if not is_production():
         return
     if not force:
@@ -325,6 +469,16 @@ def purge_scouting_data(
     crash between commit and unlink orphans some HTML on disk with no rows
     referring to it.
 
+    **No automatic backup is taken here** (E-270-02, TN-5(d) -- the accepted
+    residual, documented rather than closed). ``bb db purge-scouting`` takes a
+    fail-closed :func:`src.db.backup.backup_database` snapshot immediately
+    before calling this function, so an operator running the CLI always has a
+    recovery point. A DIRECT caller of this function gets none. That split is
+    deliberate -- it keeps this entry point pure and testable, and the CLI is
+    the only production invocation today -- but it means any NEW direct caller
+    (an admin route, a scheduled job) is responsible for its own recovery point.
+    The purge is irreversible and preserves nothing it deletes.
+
     Args:
         db_path: Database path. Defaults to the canonical resolution.
         force: Proceed even in production (the operator's explicit confirmation).
@@ -334,7 +488,13 @@ def purge_scouting_data(
 
     Raises:
         SystemExit: Production without ``force``.
-        RuntimeError: If FK enforcement is not live on the connection.
+        RuntimeError: TWO distinct causes, so a caller writing
+            ``except RuntimeError`` must not assume either one: an unrecognized
+            ``APP_ENV`` (raised through :func:`check_purge_production_guard`
+            before anything is opened -- E-270-02), or FK enforcement not being
+            live on the connection (:func:`_assert_foreign_keys_on`, after the
+            connection is open but before any row is touched). Both leave the
+            database untouched; they differ only in what the operator must fix.
         sqlite3.Error: On a DB failure -- the transaction is rolled back first,
             so no partial purge is committed.
     """

@@ -36,6 +36,7 @@ from src.db.purge_scouting import (
     PURGE_DELETE_ORDER,
     PURGE_TABLES,
     check_purge_production_guard,
+    preview_purge,
     purge_scouting_data,
 )
 
@@ -477,6 +478,253 @@ def test_production_guard_catches_whitespace_and_case_variants(
         purge_scouting_data(db_path=db_path)
 
     assert _nonempty_tables(db_path, PURGE_TABLES) == PURGE_TABLES
+
+
+# ---------------------------------------------------------------------------
+# E-270-02 AC-1 / AC-8: the unrecognized-APP_ENV typo guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("app_env", ["prod", "prd", "produciton", "PROD", " prod "])
+def test_unrecognized_app_env_refuses_and_deletes_nothing(
+    db_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch, app_env: str
+) -> None:
+    """AC-1: a typo-class APP_ENV aborts loudly instead of failing open.
+
+    The audit's finding: ``is_production()`` answers only "does APP_ENV normalize
+    to ``production``", so ``APP_ENV=prod`` answers False, the guard returns
+    early, and the purge proceeds on a machine the operator believes is
+    protected. ``validate_app_env`` converts that silent downgrade into a
+    ``RuntimeError`` -- note the exception TYPE differs from the production
+    refusal's ``SystemExit``, which is why the CLI needs both excepts.
+    """
+    _seed(db_path, repo_root)
+    monkeypatch.setenv("APP_ENV", app_env)
+
+    with pytest.raises(RuntimeError):
+        purge_scouting_data(db_path=db_path)
+
+    assert _nonempty_tables(db_path, PURGE_TABLES) == PURGE_TABLES
+    assert (repo_root / "data" / _REPORT_REL_PATH).is_file()
+
+
+def test_typo_app_env_is_not_overridable_by_force(
+    db_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-8: ``--force`` overrides the production REFUSAL, never the typo guard.
+
+    The epic's own fail-open lesson applied to its own spec. An unrecognized
+    ``APP_ENV`` means the environment posture is AMBIGUOUS, and ``--force`` says
+    "I know this is production" -- which cannot resolve an ambiguity, because the
+    operator has not actually told us what this machine is. Fail closed.
+
+    Structurally this holds because ``validate_app_env()`` is the first statement
+    of the guard, above every read of ``force``; this test fails the moment that
+    ordering is relaxed.
+    """
+    _seed(db_path, repo_root)
+    monkeypatch.setenv("APP_ENV", "prod")
+
+    with pytest.raises(RuntimeError):
+        purge_scouting_data(db_path=db_path, force=True)
+
+    assert _nonempty_tables(db_path, PURGE_TABLES) == PURGE_TABLES
+
+
+def test_typo_guard_runs_before_the_production_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-1: the typo guard sits ABOVE the non-production early return.
+
+    Ordering, isolated from any DB. ``prod`` is non-production by
+    ``is_production()``, so a guard that checked the typo AFTER the early return
+    would return cleanly here and this would raise nothing.
+    """
+    monkeypatch.setenv("APP_ENV", "prod")
+    with pytest.raises(RuntimeError):
+        check_purge_production_guard(force=False)
+    with pytest.raises(RuntimeError):
+        check_purge_production_guard(force=True)
+
+
+# ---------------------------------------------------------------------------
+# E-270-02 AC-2: preview_purge
+# ---------------------------------------------------------------------------
+
+
+def test_preview_counts_rows_without_deleting_any(
+    db_path: Path, repo_root: Path
+) -> None:
+    """AC-2: the preview reports what a purge WOULD destroy and destroys nothing."""
+    _seed(db_path, repo_root)
+    before = _nonempty_tables(db_path, PURGE_TABLES)
+
+    preview = preview_purge(db_path=db_path)
+
+    assert preview.resolved_path == db_path.resolve()
+    # Every purge table is counted, zeros included -- the caller owns display.
+    assert set(preview.row_counts) == set(PURGE_DELETE_ORDER)
+    assert preview.total_rows > 0
+    assert set(preview.nonempty_counts) == before
+    assert all(n > 0 for n in preview.nonempty_counts.values())
+    # Read-only: nothing moved.
+    assert _nonempty_tables(db_path, PURGE_TABLES) == before
+
+
+def test_preview_counts_match_the_purge_rowcounts(
+    db_path: Path, repo_root: Path
+) -> None:
+    """AC-2: the advisory counts agree with the authoritative DELETE rowcounts.
+
+    They are read from different places (a pre-transaction SELECT vs the
+    in-transaction DELETE rowcount), so a quiet miscount -- a wrong table list,
+    a filtered query -- would show up as a mismatch here on a quiescent DB.
+    """
+    _seed(db_path, repo_root)
+    preview = preview_purge(db_path=db_path)
+
+    result = purge_scouting_data(db_path=db_path, force=True)
+
+    assert preview.nonempty_counts == result.rows_deleted
+    assert preview.total_rows == result.total_rows
+
+
+def test_preview_on_an_empty_database_reports_zeros(db_path: Path) -> None:
+    """AC-2: an unseeded DB previews all-zero rather than raising."""
+    preview = preview_purge(db_path=db_path)
+
+    assert preview.total_rows == 0
+    assert preview.nonempty_counts == {}
+    assert set(preview.row_counts) == set(PURGE_DELETE_ORDER)
+
+
+def test_preview_does_not_mutate_a_non_wal_database(
+    db_path: Path, repo_root: Path
+) -> None:
+    """The preview must not touch the FILE, not merely not touch a row.
+
+    Regression (Codex P1). ``preview_purge`` used the canonical
+    ``get_connection`` factory, which unconditionally runs
+    ``PRAGMA journal_mode=WAL`` -- and that pragma is PERSISTENT. Previewing a
+    non-WAL target therefore rewrote its journal mode on disk BEFORE the
+    operator confirmed anything, and the change survived every abort path
+    (declining the prompt, a failed backup, a refused purge). Production is
+    already WAL so it was invisible there; a restored backup, a copied database,
+    or a mistyped ``--db-path`` landing on an unrelated SQLite file was not.
+
+    The fixture is deliberately forced OUT of WAL, because on an already-WAL
+    database the buggy version is a no-op and this test would pass against it.
+
+    The two POSITIVE assertions are not decoration: "the file is unchanged" is
+    also true of a preview that raised, no-op'd, or read nothing at all, so the
+    absence claim is paired with evidence the preview really ran and really
+    counted (E-270-04's entered-vs-completed lesson, one grain over).
+    """
+    import hashlib
+
+    _seed(db_path, repo_root)
+    conn = _conn(db_path)
+    conn.execute("PRAGMA journal_mode=delete")
+    conn.commit()
+    conn.close()
+
+    def _journal_mode() -> str:
+        c = sqlite3.connect(str(db_path))
+        try:
+            return c.execute("PRAGMA journal_mode").fetchone()[0]
+        finally:
+            c.close()
+
+    before_mode = _journal_mode()
+    assert before_mode == "delete", (
+        "the fixture must NOT be in WAL, or the defect is a no-op here and this "
+        f"test cannot see it (got {before_mode!r})"
+    )
+    before_bytes = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+    preview = preview_purge(db_path=db_path)
+
+    # POSITIVE: the preview genuinely ran and read the real database.
+    assert preview.total_rows > 0, "the preview counted nothing -- it did not run"
+    assert set(preview.row_counts) == set(PURGE_DELETE_ORDER)
+    # NEGATIVE: and it left the file exactly as it found it.
+    assert _journal_mode() == "delete", (
+        "preview_purge rewrote the database's journal mode -- a persistent "
+        "on-disk mutation, before any confirmation"
+    )
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before_bytes, (
+        "preview_purge changed the database file's bytes"
+    )
+
+
+def test_preview_opens_a_readonly_connection(
+    db_path: Path, repo_root: Path
+) -> None:
+    """``preview_purge`` opens a read-only connection -- observed, not re-created.
+
+    Pins the MECHANISM, where its sibling pins the consequence. The sibling
+    catches a revert to ``get_connection`` only via the journal-mode side effect,
+    so it is blind to a writable connection that happens not to mutate anything
+    on the happy path (a factory whose WAL pragma was dropped, say).
+
+    The observation has to be of the connection ``preview_purge`` ACTUALLY opens.
+    An earlier version of this test built its own ``mode=ro`` connection and
+    asserted that IT rejected a write -- which proves SQLite honours ``mode=ro``,
+    a fact about SQLite, not about this function. It passed unchanged with
+    ``preview_purge`` reverted to ``get_connection()``, because it never called
+    ``preview_purge`` at all. Hence the patch below: intercept the real call.
+    """
+    _seed(db_path, repo_root)
+    real_connect = sqlite3.connect
+    calls: list[tuple[tuple, dict]] = []
+
+    def _recording_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    with patch.object(purge_mod.sqlite3, "connect", _recording_connect):
+        preview = preview_purge(db_path=db_path)
+
+    # POSITIVE: the preview ran and read real data, so the assertions below are
+    # about a connection that was actually used, not one that was never opened.
+    assert preview.total_rows > 0
+    assert len(calls) == 1, f"expected exactly one connection, got {len(calls)}"
+
+    args, kwargs = calls[0]
+    assert kwargs.get("uri") is True, (
+        "the connection was not opened in URI mode, so any ``mode=ro`` in the "
+        f"string is inert text: {args!r} {kwargs!r}"
+    )
+    assert "mode=ro" in args[0], f"connection is not read-only: {args[0]!r}"
+
+    # And the resulting connection genuinely refuses writes -- the URI could be
+    # well-formed and still point somewhere writable.
+    conn = real_connect(args[0], uri=True)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            conn.execute("DELETE FROM seasons")
+    finally:
+        conn.close()
+
+
+def test_preview_on_a_missing_database_raises_and_creates_no_file(
+    tmp_path: Path,
+) -> None:
+    """AC-2: a typo'd path fails closed instead of previewing a phantom DB.
+
+    The behaviour is now guarded twice over, and the assertion below covers
+    both: the ``mode=ro`` connection cannot create the file, and the explicit
+    existence check turns SQLite's opaque "unable to open database file" into an
+    error naming the resolved path -- which is what an operator who mistyped
+    ``--db-path`` actually needs to see. (Before the read-only fix the check was
+    the ONLY thing standing between a typo and a stray empty database.)
+    """
+    missing = tmp_path / "nope.db"
+
+    with pytest.raises(FileNotFoundError):
+        preview_purge(db_path=missing)
+
+    assert not missing.exists(), "the preview must not create the database"
 
 
 def test_guard_is_a_noop_outside_production(monkeypatch: pytest.MonkeyPatch) -> None:

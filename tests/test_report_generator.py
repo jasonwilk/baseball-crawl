@@ -5636,3 +5636,517 @@ class TestFetchAndStoreInningsPerGame:
         ):
             gen._fetch_and_store_innings_per_game()
         assert self._read_ipg(db, team_id) == 6  # retained, not clobbered to 9
+
+
+# ---------------------------------------------------------------------------
+# E-270-03: the destructive path, driven through the REAL generate_report()
+# ---------------------------------------------------------------------------
+# Report generation became DESTRUCTIVE in E-267 (reconcile-at-load hard-deletes
+# across three grains) and again in E-273 (orphan reclamation), yet every other
+# test in this file stubs the crawler or the loader and therefore cannot see it.
+# This class drives ``generate_report()`` itself, twice, with only the HTTP
+# TRANSPORT faked -- so ``GameChangerClient``, ``ScoutingCrawler``,
+# ``ScoutingLoader``, ``ensure_team_row_with_provenance`` and all three retire
+# helpers are the real thing.
+#
+# The seam is respx (transport-level), NOT a fake ``GameChangerClient``. See the
+# class docstring for why that deviates from the story's TN-6 in the
+# strictly-more-real direction, and what it cost.
+
+
+class _RecordingSpy:
+    """Call-through wrapper that records each RETURN value.
+
+    ``unittest.mock`` records arguments but not per-call return values, and the
+    attribution this story needs (E-270-03 AC-6) is entirely about what each
+    retire helper REPORTED it removed. Behavior is unchanged -- the real callable
+    runs and its result is passed straight back.
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self.results: list = []
+
+    def __call__(self, *args, **kwargs):
+        result = self._real(*args, **kwargs)
+        self.results.append(result)
+        return result
+
+    def reset(self) -> None:
+        self.results.clear()
+
+
+class TestGenerateReportDestructiveReconcile:
+    """AC-1..AC-6: two real generations, the second one shrunk, over a real DB.
+
+    **Seam (deviation from TN-6, deliberate).** TN-6 prescribes patching
+    ``src.reports.generator.GameChangerClient`` with a hand-built fake and
+    sourcing payloads from ``data/raw/``. Neither is used here:
+
+    * ``data/raw/`` is gitignored and does NOT exist in an epic worktree, so it
+      cannot be a payload source. ``tests/fixtures/e2e/`` holds the same
+      payloads, committed and anonymized, and is already the source of truth for
+      ``tests/test_report_e2e.py``.
+    * Given committed real-shape payloads, faking the HTTP transport (respx)
+      keeps strictly MORE of the pipeline real than faking the client --
+      ``GameChangerClient`` itself, its URL construction, and its response
+      parsing all stay live. TN-6's keep-real set is a subset of this one, so
+      the deviation cannot weaken the test; it only removes the hand-built fake
+      that TN-6 itself calls "the single largest effort item in the epic".
+
+    **Why the payloads are extended, not used as-is.** The committed fixture has
+    2 completed games; AC-4's sizing needs >= 4 so that dropping one clears
+    ``FLOOR_RATIO``. The two extra games REUSE a real fixture boxscore verbatim
+    under a new game id and date, so every payload the crawler parses keeps a
+    real GameChanger shape -- the property TN-6 actually cares about, since a
+    parse failure aborts before the reconcile and leaves a green, worthless
+    test. The roster gains ONE synthetic entry (same shape) that appears in no
+    boxscore; see ``_roster``.
+
+    **Attribution (AC-6) is positive AND negative.** ``generate_report`` now runs
+    two independent hard-deleting passes, so "the rows are gone" identifies no
+    culprit. Both directions are asserted: each retire helper is spied and must
+    REPORT the specific id it retired, and the E-273 reclamation is spied and
+    must have run (``deferred is False``) while deleting nothing.
+    """
+
+    _E2E_DIR = Path(__file__).resolve().parent / "fixtures" / "e2e"
+    _PUBLIC_ID = "ExampleTm001"
+    _OWN_KEY = "ExampleTm001"
+    _BASE = "https://api.team-manager.gc.com"
+
+    # The two committed games, then two clones of the second. Distinct dates and
+    # opponents keep GameLoader's date+team-pair dedup from collapsing them.
+    #
+    # The synthetic ids below keep the committed fixture's ALL-NUMERIC final
+    # segment, and that is not cosmetic. An earlier draft ended that segment
+    # with two hex letters after ten zeros, which isolates a run of exactly ten
+    # digits bounded by non-digits -- precisely the ``us_phone`` shape
+    # ``src/safety/pii_scanner.py`` blocks, and it blocked this file's commit.
+    # Twelve digits is safe because every ten-digit window inside it is bounded
+    # by another digit. Keep that segment all-numeric when adding ids here (and
+    # note that writing an offending id in a COMMENT trips the scanner too --
+    # describe the shape rather than quoting one).
+    _GAME_A = "00000000-0000-4000-8000-000000000002"
+    _GAME_B = "00000000-0000-4000-8000-000000000004"
+    _GAME_C = "00000000-0000-4000-8000-000000000901"
+    _GAME_D = "00000000-0000-4000-8000-000000000902"
+
+    #: Dropped from the schedule on run 2 -> game-grain retire.
+    _DROPPED_GAME = _GAME_D
+    #: Roster-only player (in no boxscore), dropped on run 2 -> roster retire.
+    _ROSTER_ONLY_PLAYER = "00000000-0000-4000-8000-000000000903"
+
+    def _load(self, name: str):
+        import json
+
+        return json.loads((self._E2E_DIR / name).read_text(encoding="utf-8"))
+
+    # -- payload builders -------------------------------------------------
+
+    def _schedule(self, *, drop_game: str | None = None) -> list[dict]:
+        """The FULL schedule array: 4 completed games (AC-4 sizing)."""
+        base = self._load("public_team_games.json")
+        clone_src = base[1]
+        extra = []
+        for gid, day, opp in (
+            (self._GAME_C, "2026-04-02", "Example Opponent Three"),
+            (self._GAME_D, "2026-04-09", "Example Opponent Four"),
+        ):
+            g = dict(clone_src)
+            g["id"] = gid
+            g["start_ts"] = f"{day}T21:30:00.000Z"
+            g["end_ts"] = f"{day}T22:30:00.000Z"
+            g["opponent_team"] = {"name": opp, "avatar_url": ""}
+            extra.append(g)
+        games = [*base, *extra]
+        if drop_game is not None:
+            games = [g for g in games if g["id"] != drop_game]
+        return games
+
+    def _boxscore(self, game_id: str, *, drop_player: str | None = None) -> dict:
+        """One game's boxscore; ``drop_player`` removes that player's stat rows.
+
+        Only the ``stats`` entries are removed, not the ``players`` roster of the
+        block -- that is exactly the shape GameChanger produces when a player
+        stops appearing in a game's line, and it is what the player-line grain
+        diffs against.
+        """
+        src = self._GAME_A if game_id == self._GAME_A else self._GAME_B
+        payload = self._load(f"boxscore_{src}.json")
+        if drop_player is None:
+            return payload
+        block = payload[self._OWN_KEY]
+        for group in block.get("groups", []):
+            group["stats"] = [
+                s for s in group.get("stats", []) if s.get("player_id") != drop_player
+            ]
+            group["extra"] = [
+                s for s in group.get("extra", []) if s.get("player_id") != drop_player
+            ]
+        return payload
+
+    def _roster(self, *, drop_player: str | None = None) -> list[dict]:
+        """Committed roster (17) PLUS one synthetic roster-only player.
+
+        The synthetic entry is the one dropped on run 2. It deliberately appears
+        in NO boxscore: every committed roster player does appear in one, so
+        dropping any of them would be re-created by the jersey backfill and
+        retired again as CHURN on every run. A player who was only ever on the
+        roster is an unambiguous DEPARTURE, which is the case this grain exists
+        for and the one an operator would recognise.
+        """
+        roster = list(self._load("roster_players.json"))
+        roster.append(
+            {
+                "id": self._ROSTER_ONLY_PLAYER,
+                "first_name": "Roster",
+                "last_name": "Only",
+                "number": "99",
+                "avatar_url": "",
+            }
+        )
+        if drop_player is not None:
+            roster = [p for p in roster if p["id"] != drop_player]
+        return roster
+
+    def _first_player_with_stats(self, game_id: str) -> str:
+        """A player id carrying real stat rows in ``game_id``'s own-team block."""
+        block = self._boxscore(game_id)[self._OWN_KEY]
+        for group in block.get("groups", []):
+            if group.get("category") == "lineup":
+                ids = [s["player_id"] for s in group.get("stats", [])]
+                assert len(ids) >= 3, (
+                    "AC-4 requires the still-present game's block to carry >= 3 "
+                    f"player lines; fixture has {len(ids)}"
+                )
+                return ids[0]
+        raise AssertionError("no lineup group in the fixture boxscore")
+
+    # -- transport --------------------------------------------------------
+
+    def _register(self, router, state: dict) -> None:
+        """Serve every endpoint the live pipeline touches, per crawl phase.
+
+        Routes read ``state['shrunk']`` at REQUEST time, which is what makes the
+        two successive ``generate_report()`` calls see different payloads through
+        one router.
+        """
+        import httpx
+
+        def _json(builder):
+            def _responder(request):  # noqa: ARG001
+                return httpx.Response(200, json=builder())
+
+            return _responder
+
+        router.get(f"{self._BASE}/public/teams/{self._PUBLIC_ID}").mock(
+            side_effect=_json(lambda: self._load("public_team_profile.json"))
+        )
+        router.get(f"{self._BASE}/public/teams/{self._PUBLIC_ID}/games").mock(
+            side_effect=_json(
+                lambda: self._schedule(
+                    drop_game=self._DROPPED_GAME if state["shrunk"] else None
+                )
+            )
+        )
+        router.get(f"{self._BASE}/teams/public/{self._PUBLIC_ID}/players").mock(
+            side_effect=_json(
+                lambda: self._roster(
+                    drop_player=(
+                        self._ROSTER_ONLY_PLAYER if state["shrunk"] else None
+                    )
+                )
+            )
+        )
+        # POST /search: zero hits is fine and keeps the non-fatal gc_uuid-resolve
+        # path live rather than patching the stage out (TN-6).
+        router.post(url__startswith=f"{self._BASE}/search").mock(
+            side_effect=_json(lambda: {"hits": {"hits": []}})
+        )
+        for gid in (self._GAME_A, self._GAME_B, self._GAME_C, self._GAME_D):
+            router.get(
+                f"{self._BASE}/game-stream-processing/{gid}/boxscore"
+            ).mock(
+                side_effect=_json(
+                    lambda gid=gid: self._boxscore(
+                        gid,
+                        drop_player=(
+                            state["dropped_line_player"]
+                            if state["shrunk"] and gid == self._GAME_A
+                            else None
+                        ),
+                    )
+                )
+            )
+
+    # -- DB helpers -------------------------------------------------------
+
+    @staticmethod
+    def _rows(conn_factory, sql: str, params: tuple = ()) -> list[tuple]:
+        conn = conn_factory()
+        try:
+            return list(conn.execute(sql, params))
+        finally:
+            conn.close()
+
+    def _subject_team_id(self, conn_factory) -> int:
+        """The ``teams.id`` the pipeline created for our ``public_id``.
+
+        Every set-equality assertion below is scoped to THIS team, because all
+        three retire helpers are team-scoped. An unscoped query also sweeps in
+        the opponent teams and their backfilled roster/line rows, which move for
+        reasons that have nothing to do with the grain under test -- e.g.
+        retiring game D leaves that opponent's own rows behind by design.
+        """
+        rows = self._rows(
+            conn_factory, "SELECT id FROM teams WHERE public_id = ?", (self._PUBLIC_ID,)
+        )
+        assert len(rows) == 1, f"expected exactly one subject team row, got {rows}"
+        return rows[0][0]
+
+    def _game_ids(self, conn_factory) -> set[str]:
+        return {r[0] for r in self._rows(conn_factory, "SELECT game_id FROM games")}
+
+    def _roster_player_ids(self, conn_factory) -> set[str]:
+        return {
+            r[0]
+            for r in self._rows(
+                conn_factory,
+                "SELECT player_id FROM team_rosters WHERE team_id = ?",
+                (self._subject_team_id(conn_factory),),
+            )
+        }
+
+    def _batting_player_ids(self, conn_factory, game_id: str) -> set[str]:
+        return {
+            r[0]
+            for r in self._rows(
+                conn_factory,
+                "SELECT player_id FROM player_game_batting "
+                "WHERE game_id = ? AND team_id = ?",
+                (game_id, self._subject_team_id(conn_factory)),
+            )
+        }
+
+    def test_second_shrunk_generation_retires_all_three_grains_and_still_renders(
+        self, tmp_path, monkeypatch
+    ):
+        """AC-1..AC-6 in one run: two real generations, three real retires."""
+        import sqlite3 as _sqlite3
+
+        import respx
+
+        from src.db import reconcile_at_load as _recon
+        from src.gamechanger.loaders import game_loader as _game_loader
+        from src.reports import lifecycle as _lifecycle
+        from src.reports.renderer import render_report as _real_render
+
+        # -- real disk-backed DB, production schema ----------------------
+        db_path = str(tmp_path / "test.db")
+        seed = _sqlite3.connect(db_path)
+        load_real_schema(seed)
+        seed.commit()
+        seed.close()
+
+        def _conn_factory():
+            c = _sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        # NOTE (TN-6 E-273 item 2): nothing is pre-seeded. A bare
+        # ``membership_type='tracked'`` team with no report and no games is an
+        # ORPHAN by E-273's predicate and would be swept at run-1 start. Letting
+        # the real pipeline create every row avoids that by construction.
+
+        monkeypatch.setenv("GAMECHANGER_BASE_URL", self._BASE)
+        monkeypatch.setenv("GAMECHANGER_REFRESH_TOKEN_WEB", "fake-refresh")
+        monkeypatch.setenv("GAMECHANGER_CLIENT_ID_WEB", "fake-client-id")
+        monkeypatch.setenv("GAMECHANGER_CLIENT_KEY_WEB", "fake-client-key")
+        monkeypatch.setenv("GAMECHANGER_DEVICE_ID_WEB", "fake-device-id")
+        monkeypatch.delenv("PROXY_ENABLED", raising=False)
+
+        dropped_line_player = self._first_player_with_stats(self._GAME_A)
+        state = {"shrunk": False, "dropped_line_player": dropped_line_player}
+        rendered: list[dict] = []
+
+        spy_game = _RecordingSpy(_recon.retire_absent_games)
+        spy_roster = _RecordingSpy(_recon.retire_departed_roster_players)
+        spy_lines = _RecordingSpy(_recon.retire_absent_player_lines)
+        spy_reclaim = _RecordingSpy(_lifecycle.reclaim_orphan_reference_data)
+
+        def _capturing_render(data):
+            rendered.append(data)
+            return _real_render(data)
+
+        with respx.mock(assert_all_called=False) as router:
+            self._register(router, state)
+            with (
+                patch(
+                    "src.gamechanger.token_manager.TokenManager.get_access_token",
+                    return_value="fake-token-e270",
+                ),
+                patch("src.http.session.time.sleep", return_value=None),
+                patch("src.reports.generator.get_connection", side_effect=_conn_factory),
+                patch("src.api.db.get_connection", side_effect=_conn_factory),
+                patch(
+                    "src.reports.generator.render_report",
+                    side_effect=_capturing_render,
+                ),
+                patch("src.reports.generator._REPO_ROOT", tmp_path),
+                patch(
+                    "src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"
+                ),
+                # Out of scope per TN-6; they need plays/spray payloads this
+                # fixture does not carry.
+                patch(
+                    "src.reports.generator._crawl_and_load_spray", return_value=None
+                ),
+                patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+                # -- attribution spies (AC-6). Call-through: behavior unchanged.
+                patch.object(_recon, "retire_absent_games", spy_game),
+                patch.object(
+                    _recon, "retire_departed_roster_players", spy_roster
+                ),
+                # game_loader imports this at MODULE level, so patching the
+                # reconcile_at_load attribute would NOT be seen there.
+                patch.object(
+                    _game_loader, "retire_absent_player_lines", spy_lines
+                ),
+                patch.object(
+                    _lifecycle, "reclaim_orphan_reference_data", spy_reclaim
+                ),
+            ):
+                from src.reports.generator import generate_report
+
+                # ---- RUN 1: the full crawl -------------------------------
+                result_one = generate_report(self._PUBLIC_ID)
+                assert result_one.success is True, result_one.error_message
+
+                games_after_one = self._game_ids(_conn_factory)
+                roster_after_one = self._roster_player_ids(_conn_factory)
+                lines_after_one = self._batting_player_ids(_conn_factory, self._GAME_A)
+
+                # The fixture actually loaded -- if the real crawler had failed
+                # to PARSE these payloads the pipeline would abort here and
+                # every assertion below would pass vacuously against an empty
+                # prior set (TN-6's silent-defeat mode).
+                assert len(games_after_one) == 4, games_after_one
+                assert self._DROPPED_GAME in games_after_one
+                assert self._ROSTER_ONLY_PLAYER in roster_after_one
+                assert dropped_line_player in lines_after_one
+                assert len(lines_after_one) >= 3, lines_after_one
+                # Every boxscore PARSED, not just the schedule: each of the four
+                # games carries real stat rows. A boxscore the crawler could not
+                # parse is skipped silently, which would leave this grain with
+                # nothing to diff on run 2 and make AC-2 pass for the wrong
+                # reason.
+                for gid in games_after_one:
+                    assert self._batting_player_ids(_conn_factory, gid), (
+                        f"game {gid} loaded no batting lines -- its boxscore did "
+                        "not parse, so the fixture is not exercising the pipeline"
+                    )
+
+                spy_game.reset()
+                spy_roster.reset()
+                spy_lines.reset()
+                spy_reclaim.reset()
+
+                # ---- RUN 2: the shrunk crawl -----------------------------
+                state["shrunk"] = True
+                result_two = generate_report(self._PUBLIC_ID)
+
+        # ---- AC-3: the destructive re-run still produces a report --------
+        assert result_two.success is True, result_two.error_message
+        assert result_two.outcome == "ready"
+        assert len(rendered) == 2, "render_report did not run on both generations"
+        report_files = list((tmp_path / "data" / "reports").glob("*.html"))
+        assert report_files, "no report HTML was written"
+        # ``all``, not ``any``: with ``any`` a run-2 render that produced an
+        # EMPTY file would still pass on the strength of run 1's file -- the
+        # "passes for the wrong reason" shape this whole test exists to remove.
+        assert all(f.stat().st_size > 0 for f in report_files), [
+            (f.name, f.stat().st_size) for f in report_files
+        ]
+
+        # ---- AC-2: every grain's rows are GONE ---------------------------
+        games_after_two = self._game_ids(_conn_factory)
+        roster_after_two = self._roster_player_ids(_conn_factory)
+        lines_after_two = self._batting_player_ids(_conn_factory, self._GAME_A)
+
+        assert self._DROPPED_GAME not in games_after_two, "game-grain retire did not fire"
+        assert games_after_two == games_after_one - {self._DROPPED_GAME}
+        assert self._ROSTER_ONLY_PLAYER not in roster_after_two, (
+            "roster-grain retire did not fire"
+        )
+        assert dropped_line_player not in lines_after_two, (
+            "player-line-grain retire did not fire"
+        )
+        # Only the dropped entries went -- a retire that took the neighbours
+        # would also satisfy the three assertions above.
+        assert roster_after_two == roster_after_one - {self._ROSTER_ONLY_PLAYER}
+        assert lines_after_two == lines_after_one - {dropped_line_player}
+
+        # The retired game's child surface went with it (whole-game delete).
+        assert not self._rows(
+            _conn_factory,
+            "SELECT 1 FROM player_game_batting WHERE game_id = ?",
+            (self._DROPPED_GAME,),
+        )
+        assert not self._rows(
+            _conn_factory,
+            "SELECT 1 FROM game_perspectives WHERE game_id = ?",
+            (self._DROPPED_GAME,),
+        )
+
+        # ---- AC-6: attribute the deletions to the RETIRE ------------------
+        # Positive: each grain's helper REPORTS the id it retired. Absence of a
+        # row is not attribution when two hard-deleting passes are in play.
+        assert spy_game.results, "the game-grain retire helper was never called"
+        game_retired = [
+            gid for r in spy_game.results for gid in r.retired_game_ids
+        ]
+        assert game_retired == [self._DROPPED_GAME], game_retired
+
+        assert spy_roster.results, "the roster-grain retire helper was never called"
+        roster_retired = [
+            pid for r in spy_roster.results for pid in r.retired_player_ids
+        ]
+        assert roster_retired == [self._ROSTER_ONLY_PLAYER], roster_retired
+
+        assert spy_lines.results, "the player-line retire helper was never called"
+        line_retired = [
+            pid
+            for r in spy_lines.results
+            for ids in r.retired.values()
+            for pid in ids
+        ]
+        assert line_retired == [dropped_line_player], line_retired
+
+        # Negative: the OTHER destructive pass ran and took nothing. ``deferred``
+        # must be False -- a deferred sweep also deletes nothing, so without this
+        # the negative half would pass while proving only that the reclamation
+        # never actually ran.
+        #
+        # WHY THIS IS NOT A TAUTOLOGY, and the seam that keeps it honest: the
+        # reclamation only sees the temp DB because ``generate_report`` resolves
+        # ``get_connection`` in the GENERATOR namespace and passes that borrowed
+        # connection in (``generator.py:1518``). ``lifecycle.py:32`` imports
+        # ``get_connection`` at MODULE level, so patching ``src.api.db`` -- which
+        # this test also does -- would NOT rebind it. If a future edit makes
+        # ``cleanup_expired_reports`` or the reclamation open its OWN connection,
+        # this block silently stops proving attribution: it would run against the
+        # real ``data/app.db``, find nothing orphaned, and report exactly the
+        # ``deferred=False`` / ``(0, 0, 0)`` asserted here -- passing, with no
+        # failing test anywhere to signal the degradation.
+        assert spy_reclaim.results, "the E-273 reclamation never ran on run 2"
+        for reclaim_result in spy_reclaim.results:
+            assert reclaim_result.deferred is False, (
+                "reclamation was deferred -- it did not actually run, so it "
+                "cannot be exonerated as the deleter"
+            )
+            assert (
+                reclaim_result.teams_deleted,
+                reclaim_result.players_deleted,
+                reclaim_result.roster_rows_deleted,
+            ) == (0, 0, 0), reclaim_result

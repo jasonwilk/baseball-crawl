@@ -4,7 +4,16 @@
 [E-270: Harden Reconcile-at-Load and Purge](../E-270-reconcile-purge-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
+<!-- DONE 2026-07-24. PM AC verdict 4/4, code-reviewer APPROVED. Two PM scope
+     rulings: (1) AC-2(ii) is satisfied by STRENGTHENING the pre-existing E-267
+     ordering comment rather than adding a redundant second one -- the AC
+     specifies a state, not a diff; (2) the pre-existing E-267 `_roster_entry`
+     docstring correction is KEPT (the new guard-comment points AT that
+     docstring, so a corrected claim would otherwise reference a false one).
+     Both of this story's new consequence-claims shipped INVERTED and were
+     caught by code-reviewer -- see epic History. -->
+<!-- was: IN_PROGRESS -->
 
 ## Description
 After this story is complete, the verified no-op `not_final_ids &= fresh_ids` line in the scouting loader's game reconcile will be gone (or replaced by a comment pinning the subset invariant), the two ordering-fragility couplings in `_load_team_core` will carry explicit structural comments, and the sole test structurally able to catch a mis-ordered roster reconcile will carry a do-not-delete guard-comment. These are correctness-preserving clarity cleanups the E-267 audit identified.

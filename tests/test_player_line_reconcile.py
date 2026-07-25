@@ -484,6 +484,216 @@ def test_missing_boxscore_404_retires_nothing(db: sqlite3.Connection) -> None:
     assert _batting_players(db) == {"p-1", "p-2"}
 
 
+# ---------------------------------------------------------------------------
+# E-270-04: the REAL per-game skip path
+# ---------------------------------------------------------------------------
+# The test directly above is CORRECT but INSUFFICIENT, and the gap is specific:
+# its ``{}`` boxscores dict trips the global ``if not boxscores`` short-circuit
+# in ``_load_team_core``, so the reconcile never runs at all. It therefore says
+# nothing about the PER-GAME shape -- one previously-loaded game's key absent
+# from an otherwise-POPULATED dict -- which is what a real per-game 404 produces
+# and what the loader's "iterate only present boxscores" behaviour actually
+# governs. Mutation-verified: deleting that global guard does not fail it.
+#
+# The two tests below drive the per-game shape. Their design point is that
+# "game A's lines survived" is NOT self-validating: it is equally true when the
+# reconcile ran and correctly skipped A, when the reconcile never ran, when the
+# loader crashed first, and when A was never loaded to begin with. Each of those
+# is a passing test that proves nothing. So both tests pair the survival claim
+# with POSITIVE evidence that the per-game reconcile executed -- a spy on
+# ``retire_absent_player_lines`` asserting it ran, and ran for game B ONLY.
+
+_GAME_A = "game-A-0001"
+_GAME_B = "game-B-0002"
+
+
+def _two_game_crawl(
+    team_id: int, boxscores: dict[str, dict]
+) -> SimpleNamespace:
+    """A crawl whose SCHEDULE always lists both games, whatever ``boxscores`` holds.
+
+    Keeping both games on the schedule is load-bearing: it isolates the
+    player-line grain. If game A fell out of the schedule array too, the
+    GAME-grain reconcile would retire the whole game row and A's lines would
+    vanish for an entirely different reason -- a passing assertion attributed to
+    the wrong mechanism.
+    """
+    return _crawl(
+        team_id,
+        boxscores,
+        games=[
+            _game_entry(_GAME_A, opponent="Opp One"),
+            dict(_game_entry(_GAME_B, opponent="Opp Two"),
+                 start_ts="2026-04-17T18:00:00Z"),
+        ],
+    )
+
+
+def _spy_on_player_line_retire():
+    """Patch the player-line retire with a call-through recording spy.
+
+    Patches the name in ``game_loader``, NOT in ``reconcile_at_load``: the
+    former imports it at MODULE level (``game_loader.py:43``), so rebinding the
+    source module's attribute would not be seen at the call site. Verified
+    against that import, not assumed.
+    """
+    from unittest.mock import patch
+
+    from src.db.reconcile_at_load import retire_absent_player_lines
+    from src.gamechanger.loaders import game_loader as _game_loader
+
+    return patch.object(
+        _game_loader,
+        "retire_absent_player_lines",
+        side_effect=retire_absent_player_lines,
+    )
+
+
+def _reconciled_game_ids(spy) -> list[str]:
+    """The ``game_id`` the per-game reconcile actually ran for, per call."""
+    return [call.kwargs["game_id"] for call in spy.call_args_list]
+
+
+def test_absent_game_key_in_a_populated_dict_retires_nothing(
+    db: sqlite3.Connection,
+) -> None:
+    """A game missing from an otherwise-POPULATED boxscore dict is never diffed.
+
+    The real per-game 404: the crawler skips the failed game and returns the
+    others, so the dict is non-empty and the global short-circuit does NOT fire.
+    Game A has no fresh evidence, so bias-to-refuse leaves its lines alone --
+    the loader simply never reaches it.
+
+    **Why this is not the survival tautology it looks like.** The spy
+    assertions are the discriminators, not the survival ones: they establish
+    that the per-game reconcile RAN (so the pass is not "the code never
+    executed"), and that it ran for B *only* (so A was skipped rather than
+    diffed-and-refused). Drop them and this test passes with the entire
+    reconcile deleted -- which is precisely the defect the test above has and
+    this one exists to avoid reproducing.
+
+    **The ``errors == 0`` assertions close a further world the spy cannot see.**
+    ``GameLoader._retire_absent_player_lines`` catches EVERY exception, logs at
+    ERROR and returns 1 -- deliberately, so a failed cleanup never loses a good
+    load. ``unittest.mock`` records a call BEFORE invoking ``side_effect``, so a
+    reconcile that raises still satisfies ``call_count > 0`` AND
+    ``== [_GAME_B]``, the ERROR is invisible to ``_retire_warnings`` (WARNING
+    only), and nothing is deleted -- this test would go green against a
+    reconcile that blew up. The returned 1 reaches ``LoadResult.errors`` via
+    ``game_loader.py:679`` -> ``scouting_loader.py:224``; verified empirically,
+    not read off the code. So the spy proves the path was ENTERED and
+    ``errors == 0`` proves it COMPLETED.
+
+    **Companion:** ``test_dropped_player_in_a_covered_game_is_retired_while_absent_game_survives``
+    is the other half of this pair -- it proves the reconcile is LIVE rather
+    than inert. Deleting it degrades this test (see that docstring).
+    """
+    team = _insert_team(db)
+    first = ScoutingLoader(db).load_team(
+        _two_game_crawl(
+            team,
+            {
+                _GAME_A: _boxscore(_SLUG_A, _team_block(["a-1", "a-2", "a-3"])),
+                _GAME_B: _boxscore(_SLUG_A, _team_block(["b-1", "b-2", "b-3"])),
+            },
+        )
+    )
+    assert first.errors == 0, "the first load itself failed"
+    # Both games really loaded -- otherwise "A survived" would be vacuously true
+    # of a game that was never there.
+    assert _batting_players(db, _GAME_A) == {"a-1", "a-2", "a-3"}
+    assert _batting_players(db, _GAME_B) == {"b-1", "b-2", "b-3"}
+
+    # Re-scout: game A's boxscore 404'd, game B's came back intact. The dict is
+    # NON-EMPTY, so the global `if not boxscores` guard does not fire.
+    with _spy_on_player_line_retire() as spy:
+        second = ScoutingLoader(db).load_team(
+            _two_game_crawl(
+                team,
+                {_GAME_B: _boxscore(_SLUG_A, _team_block(["b-1", "b-2", "b-3"]))},
+            )
+        )
+
+    # POSITIVE evidence the per-game path executed, for B alone, and CLEANLY.
+    assert spy.call_count > 0, (
+        "the per-game reconcile never ran -- this test would otherwise 'pass' "
+        "on survival alone, exactly like the whole-empty-dict test above"
+    )
+    assert _reconciled_game_ids(spy) == [_GAME_B], (
+        "game A was diffed despite having no fresh boxscore; the loader must "
+        "iterate only PRESENT boxscores"
+    )
+    assert second.errors == 0, (
+        "the player-line reconcile RAISED and was swallowed -- every other "
+        "assertion here is still satisfied by that failure"
+    )
+
+    # ...and nothing was retired from either game.
+    assert _batting_players(db, _GAME_A) == {"a-1", "a-2", "a-3"}
+    assert _batting_players(db, _GAME_B) == {"b-1", "b-2", "b-3"}
+
+
+def test_dropped_player_in_a_covered_game_is_retired_while_absent_game_survives(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The paired variant: the reconcile RAN, and it only touched the covered game.
+
+    Same shape as the test above, but game B's fresh block drops one player
+    while staying populated. That player's line must be retired, proving the
+    reconcile is live on the covered game -- while game A, absent from the dict,
+    is untouched. Together the two assertions separate "skipped because absent"
+    from "the reconcile is not running at all", which neither claim does alone.
+
+    B's block is sized 3 -> 2 so the drop clears the 0.5 floor unambiguously
+    (2 comparable of 3 prior); at 2 -> 1 the gate sits exactly on the boundary.
+
+    **Do not delete this test as redundant with its companion.** It is the ONLY
+    one of the pair that distinguishes a LIVE reconcile from an INERT one. In
+    ``test_absent_game_key_in_a_populated_dict_retires_nothing`` game B's block
+    is unchanged, so "ran and correctly found nothing absent", "ran and refused"
+    and "ran and is a no-op that deletes nothing" are observationally
+    identical there. Only a real deletion separates them, and only this test
+    performs one. The pair splits the work: the companion proves
+    skipped-vs-diffed, this one proves live-vs-inert, and neither does both.
+    """
+    team = _insert_team(db)
+    first = ScoutingLoader(db).load_team(
+        _two_game_crawl(
+            team,
+            {
+                _GAME_A: _boxscore(_SLUG_A, _team_block(["a-1", "a-2", "a-3"])),
+                _GAME_B: _boxscore(_SLUG_A, _team_block(["b-1", "b-2", "b-3"])),
+            },
+        )
+    )
+    assert first.errors == 0, "the first load itself failed"
+    assert _batting_players(db, _GAME_A) == {"a-1", "a-2", "a-3"}
+    assert _batting_players(db, _GAME_B) == {"b-1", "b-2", "b-3"}
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        with _spy_on_player_line_retire() as spy:
+            second = ScoutingLoader(db).load_team(
+                _two_game_crawl(
+                    team,
+                    {_GAME_B: _boxscore(_SLUG_A, _team_block(["b-1", "b-2"]))},
+                )
+            )
+
+    assert _reconciled_game_ids(spy) == [_GAME_B]
+    # See the companion's docstring: a swallowed reconcile failure satisfies the
+    # spy assertions, so the clean-completion check belongs here too.
+    assert second.errors == 0, "the player-line reconcile RAISED and was swallowed"
+    # The covered game's dropped line is GONE -- the reconcile is live.
+    assert _batting_players(db, _GAME_B) == {"b-1", "b-2"}
+    # The absent game is untouched, including the player that shares its index.
+    assert _batting_players(db, _GAME_A) == {"a-1", "a-2", "a-3"}
+
+    warnings = _retire_warnings(caplog)
+    assert any("b-3" in w for w in warnings), warnings
+    assert not any("a-" in w for w in warnings), warnings
+
+
 def test_credential_expiry_401_aborts_before_any_load(
     db: sqlite3.Connection,
 ) -> None:

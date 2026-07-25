@@ -86,9 +86,16 @@ def _roster_entry(pid: str, first: str, last: str, number: str = "9") -> dict:
     `test_reconcile_runs_before_dedup_so_a_merged_roster_row_is_not_retired`
     needs exactly what the convention forbids -- matching last names with one
     first name a prefix of the other ("John Smith" / "J Smith") -- so it builds
-    its roster through this helper instead. Making these names unique would make
-    that test pass unconditionally and silently disarm the only guard on the
-    reconcile's upper placement boundary.
+    its roster through this helper instead.
+
+    Making these names unique silently disarms the only guard on the reconcile's
+    upper placement boundary. Precisely (measured under both orderings in
+    E-270-05, and stated loosely here before): a non-mergeable pair leaves the
+    dedup sweep with nothing to merge, so BOTH orderings converge on the same end
+    state and the test loses all discriminating power. It does not go green by
+    itself -- it FAILS, still expecting the merged id. The disarming happens at
+    the natural repair, when the expectation is updated to match and the test
+    then passes under both orderings for good.
     """
     return {"id": pid, "first_name": first, "last_name": last, "number": number}
 
@@ -544,6 +551,30 @@ def test_reconcile_runs_before_dedup_so_a_merged_roster_row_is_not_retired(
     db: sqlite3.Connection,
 ) -> None:
     """The UPPER placement boundary: the reconcile must precede the dedup sweep.
+
+    **DO NOT DELETE THIS TEST IN A CLEANUP PASS (E-270-05 AC-3).** It is the SOLE
+    test in this file structurally capable of catching the roster reconcile being
+    mis-ordered below ``dedup_team_players``, and it will look redundant to a
+    future reader: its subject (a roster row surviving) is asserted by several
+    neighbours, and its fixture violates the file's own unique-name convention,
+    which reads like an oversight to be tidied up.
+
+    Both impressions are wrong, and the second is the trap. That convention --
+    derive every fixture name from the player id so the dedup sweep cannot
+    collapse them -- makes every OTHER test in this file structurally blind to
+    this ordering, because a dedup-mergeable pair is precisely what it forbids
+    (see ``_roster_entry``'s docstring). This test needs the forbidden shape.
+
+    What "normalising" the names actually does, measured under both orderings
+    rather than assumed: with a NON-mergeable pair the dedup sweep finds nothing
+    to merge, so both orderings converge on the SAME end state
+    (``{p-short, p-a, p-b, p-c}``) and the test can no longer tell them apart.
+    It does not pass at that point -- it FAILS, because it still expects
+    ``p-long``. The danger is the natural repair: update the expectation to the
+    new end state and it goes green under BOTH orderings, permanently disarmed
+    with no signal. With the mergeable pair the two orderings genuinely diverge
+    (``p-long`` survives correctly ordered; ``p-long`` is HARD-DELETED
+    mis-ordered), which is the entire discriminating power of this test.
 
     The two calls sit ~11 lines apart in one function and nothing structural
     keeps them in order, so this pins it. Same defect class as E-267-03's

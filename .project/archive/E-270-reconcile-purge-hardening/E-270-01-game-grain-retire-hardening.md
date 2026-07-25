@@ -4,7 +4,18 @@
 [E-270: Harden Reconcile-at-Load and Purge](../E-270-reconcile-purge-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
+<!-- DONE 2026-07-24. PM AC verdict 8/8 (AC-4 failed round 1 — the retire loop
+     re-enumerated the two protection branches instead of consuming the shared
+     predicate — remediated and re-verified). code-reviewer APPROVED 8/8; the
+     round-1 MUST FIX and both SHOULD FIXes are terminal. The `exempt` narrowing
+     (SHOULD FIX 1) was accepted by PM and TN-1/TN-2 were amended to match.
+     A post-DONE addendum (test-and-comment only: a second `else`-arm test plus
+     three corrected claims in a docstring and two source comments) was
+     PM-re-verified against all 8 ACs — the refusal-gate code is byte-identical
+     to the version verified at DONE, so DONE stands unamended. See epic
+     History 2026-07-24 "E-270-01 addendum". -->
+<!-- was: IN_PROGRESS -->
 
 ## Description
 After this story is complete, the game-grain retire (`retire_absent_games` in `src/db/reconcile_at_load.py`) will refuse a retire pass when more than `MAX_GAME_RETIREMENTS` retire-eligible games are absent from the fresh schedule (an absolute cap on top of the `FLOOR_RATIO` gate), and it will refuse to hard-delete a game that still holds another perspective's child stat rows even after that perspective's `game_perspectives` row has been stripped. Both protections share ONE predicate so the cap's exempt set can never drift from the loop's refusal set.
@@ -23,7 +34,7 @@ This story merges audit items 1 ([[IDEA-160]] `MAX_GAME_RETIREMENTS`) and 2 ([[I
 - [ ] **AC-8**: `MAX_ROSTER_DEPARTURES`, the universal `FLOOR_RATIO` gate, and the `classify_absences` extra_guard cannot-widen invariant are unchanged; existing `test_game_grain_reconcile.py` and `test_roster_grain_reconcile.py` tests still pass.
 
 ## Technical Approach
-Work is contained to `src/db/reconcile_at_load.py` and the existing `tests/test_game_grain_reconcile.py`. Add the constant and the two helpers (`_foreign_perspective_child_rows_exist`, `_game_is_cross_perspective_protected`), precompute `exempt` over `prior_ids` once before `classify_absences` inside `retire_absent_games`, close over it in the composed guard, add the second refusal branch in the retire loop, and extend the refusal-reason strings. Follow the shape and constraints in epic Technical Notes TN-1 through TN-4 — the population correctness (why raw `len(absent)` deadlocks), the shared-predicate design, the `and` composition, and the WARN distinguishability are all specified there. Reuse the DRY child-table list already imported (`_PERSPECTIVE_CHILD_TABLES`) for the foreign-child existence check rather than re-listing tables. The `.claude/rules/python-style.md` "missing safety signal defaults to REFUSE" rule applies — no new health/evidence input may default to a permissive value.
+Work is contained to `src/db/reconcile_at_load.py` and the existing `tests/test_game_grain_reconcile.py`. Add the constant and the two helpers (`_foreign_perspective_child_rows_exist`, `_game_is_cross_perspective_protected`), precompute `exempt` once over the absent set before `classify_absences` inside `retire_absent_games` (see TN-1 for the binding constraints and why the population is scoped to `absent` rather than all of `prior_ids`), close over it in the composed guard, gate the retire loop's refusal on the shared predicate, and extend the refusal-reason strings. Follow the shape and constraints in epic Technical Notes TN-1 through TN-4 — the population correctness (why raw `len(absent)` deadlocks), the shared-predicate design, the `and` composition, and the WARN distinguishability are all specified there. Reuse the DRY child-table list already imported (`_PERSPECTIVE_CHILD_TABLES`) for the foreign-child existence check rather than re-listing tables. The `.claude/rules/python-style.md` "missing safety signal defaults to REFUSE" rule applies — no new health/evidence input may default to a permissive value.
 
 ## Dependencies
 - **Blocked by**: None

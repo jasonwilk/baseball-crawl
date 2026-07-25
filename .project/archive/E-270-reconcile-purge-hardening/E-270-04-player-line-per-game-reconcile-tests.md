@@ -4,7 +4,14 @@
 [E-270: Harden Reconcile-at-Load and Purge](../E-270-reconcile-purge-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
+<!-- DONE 2026-07-24. PM AC verdict 4/4, code-reviewer APPROVED. The story's
+     real deliverable is EVIDENCE, not coverage: mutation 1 (bypass the global
+     `if not boxscores` short-circuit) leaves the existing :468 test PASSING,
+     which converts the audit's annotation-as-coverage claim from an assertion
+     into a demonstration. Strengthened past its ACs during review — see epic
+     History (the ENTERED-vs-COMPLETED correction). -->
+<!-- was: IN_PROGRESS -->
 
 ## Description
 After this story is complete, the player-line reconcile will have a test that exercises the REAL per-game skip path — a previously-loaded game whose key is absent from an otherwise-populated fresh boxscore dict — plus a paired variant proving the reconcile still runs on the game that IS present. This replaces a mis-annotated coverage claim: the existing `test_missing_boxscore_404_retires_nothing` passes a whole-empty boxscores dict and so only exercises the global `if not boxscores` early-return, never the per-game path.

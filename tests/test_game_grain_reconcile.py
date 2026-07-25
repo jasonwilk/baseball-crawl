@@ -31,7 +31,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from migrations.apply_migrations import run_migrations
+from src.db import reconcile_at_load
 from src.db.game_merge import _PERSPECTIVE_CHILD_TABLES, merge_duplicate_game
+from src.db.reconcile_at_load import (
+    FLOOR_RATIO,
+    MAX_GAME_RETIREMENTS,
+    retire_absent_games,
+)
 from src.gamechanger.loaders import ensure_season_row
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 
@@ -906,6 +912,618 @@ def test_retire_is_scoped_to_the_crawled_season(db: sqlite3.Connection) -> None:
 
     assert result.retired_game_ids == ["g-1"]
     assert _game_ids(db) == {"g-0", "g-2", "g-3"}
+
+
+# ---------------------------------------------------------------------------
+# E-270-01: absolute retirement cap + stripped-perspective guard
+# ---------------------------------------------------------------------------
+# Two protections that interlock and are therefore tested together: the cap
+# refuses a mass retire the 0.5 floor waves through, and the cap's EXEMPT set is
+# the same decision as the loop's REFUSAL set -- so widening the refusal (the
+# foreign-child branch) automatically widens the exemption and no deadlock opens.
+
+
+def _seed_games(
+    db: sqlite3.Connection, team: int, count: int, *, prefix: str = "g"
+) -> list[dict]:
+    """Load ``count`` completed games on distinct dates and return the array."""
+    games = [
+        _game(
+            f"{prefix}-{i}",
+            start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+            opponent=f"Opp {i}",
+        )
+        for i in range(count)
+    ]
+    ScoutingLoader(db).load_team(_crawl(team, games))
+    assert len(_game_ids(db)) == count
+    return games
+
+
+def _insert_foreign_child_row(
+    db: sqlite3.Connection, table: str, game_id: str, foreign_team_id: int
+) -> None:
+    """Attach ONE child stat row under a FOREIGN ``perspective_team_id``.
+
+    The ``else: raise`` is load-bearing. This helper is parametrized over the
+    ``_PERSPECTIVE_CHILD_TABLES`` constant, so a future SIXTH child table makes
+    this fail loudly rather than silently leaving the new table's foreign rows
+    unprotected -- the same guard-surface == delete-surface discipline the
+    production check follows.
+    """
+    if table == "player_game_batting":
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, 4, 2)",
+            (game_id, _PLAYER, foreign_team_id, foreign_team_id),
+        )
+    elif table == "player_game_pitching":
+        db.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, ip_outs) "
+            "VALUES (?, ?, ?, ?, 9)",
+            (game_id, _PLAYER, foreign_team_id, foreign_team_id),
+        )
+    elif table == "plays":
+        db.execute(
+            """
+            INSERT INTO plays (game_id, play_order, inning, half, season_id,
+                               batting_team_id, perspective_team_id, batter_id,
+                               outcome)
+            VALUES (?, 99, 1, 'top', ?, ?, ?, ?, 'single')
+            """,
+            (game_id, _SEASON, foreign_team_id, foreign_team_id, _PLAYER),
+        )
+    elif table == "spray_charts":
+        db.execute(
+            """
+            INSERT INTO spray_charts (game_id, player_id, team_id,
+                                      perspective_team_id, chart_type,
+                                      event_gc_id, season_id, x, y)
+            VALUES (?, ?, ?, ?, 'offensive', ?, ?, 1.0, 2.0)
+            """,
+            (
+                game_id, _PLAYER, foreign_team_id, foreign_team_id,
+                f"foreign-evt-{game_id}", _SEASON,
+            ),
+        )
+    elif table == "reconciliation_discrepancies":
+        db.execute(
+            """
+            INSERT INTO reconciliation_discrepancies
+                (game_id, run_id, perspective_team_id, team_id, player_id,
+                 signal_name, category, status)
+            VALUES (?, 'foreign-run', ?, ?, ?, 'so', 'batting', 'MATCH')
+            """,
+            (game_id, foreign_team_id, foreign_team_id, _PLAYER),
+        )
+    else:  # pragma: no cover -- fires only when a 6th child table appears
+        raise AssertionError(
+            f"unhandled perspective child table {table!r} -- extend this helper "
+            "and confirm the production guard covers the new table too"
+        )
+    db.commit()
+
+
+def test_cap_refuses_a_mass_retire_that_passes_the_floor(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-2/AC-7: >MAX_GAME_RETIREMENTS absences refuse where the floor would not.
+
+    Sizing is deliberate: 8 prior games meeting a 5-game fresh array leaves
+    ``comparable = 5`` against a floor of ``8 * 0.5 = 4``, so the health gate
+    PASSES and every other guard is satisfied -- ``boxscores_complete`` holds
+    (all five fresh games load), none of the three absences is
+    cross-perspective protected. The ONLY thing that can refuse here is the cap.
+    A fixture that also failed the floor would pass against a cap-less
+    implementation and prove nothing.
+    """
+    team = _insert_team(db)
+    games = _seed_games(db, team, 8)
+    assert 5 >= 8 * FLOOR_RATIO, "fixture must PASS the floor, or it proves nothing"
+    assert 8 - 5 > MAX_GAME_RETIREMENTS, "fixture must exceed the cap"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        ScoutingLoader(db).load_team(_crawl(team, games[:5]))
+
+    assert _game_ids(db) == {f"g-{i}" for i in range(8)}, "the cap must refuse ALL"
+    assert db.execute(
+        "SELECT COUNT(DISTINCT game_id) FROM player_game_batting"
+    ).fetchone()[0] == 8
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 3, warnings
+    assert all("REFUSED" in w for w in warnings)
+    assert all(f"MAX_GAME_RETIREMENTS={MAX_GAME_RETIREMENTS}" in w for w in warnings)
+    # The floor did NOT fire -- otherwise this test would pass without a cap.
+    assert not any("not authoritative" in w for w in warnings), warnings
+
+
+def test_absences_at_the_cap_still_retire(db: sqlite3.Connection) -> None:
+    """AC-2 boundary: the cap is a ceiling, not a veto -- exactly N still retires.
+
+    Same 8-game fixture as the refusal test above, dropping exactly
+    ``MAX_GAME_RETIREMENTS``. Without this, a cap accidentally implemented as
+    ``< MAX`` (or as a blanket refusal) would still pass the test above.
+    """
+    team = _insert_team(db)
+    games = _seed_games(db, team, 8)
+
+    keep = 8 - MAX_GAME_RETIREMENTS
+    ScoutingLoader(db).load_team(_crawl(team, games[:keep]))
+
+    assert _game_ids(db) == {f"g-{i}" for i in range(keep)}
+
+
+def test_cap_excludes_cross_perspective_games_so_a_genuine_removal_retires(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-3: no permanent-refusal deadlock -- the cap counts ``absent - exempt``.
+
+    The real-world population api-scout measured: ~4% of a team's stored game
+    ids are absent from its own fresh array and are ALL cross-perspective twins,
+    which this grain refuses-and-KEEPS, so they recur in ``absent`` forever. A
+    cap over raw ``len(absent)`` would let two such games permanently
+    false-refuse every genuine removal after them.
+
+    The discrimination floor is mandatory and is asserted below: at least
+    ``MAX_GAME_RETIREMENTS`` protected absences PLUS at least one genuine one, so
+    raw ``len(absent)`` exceeds the cap (a raw-count implementation refuses the
+    whole pass and fails here) while ``len(absent - exempt) == 1`` (the correct
+    implementation retires the genuine removal).
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+
+    keeps = [
+        _game(f"g-keep-{i}", start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+              opponent=f"Opp {i}")
+        for i in range(5)
+    ]
+    shared = [
+        _game(f"g-shared-{i}", start_ts=f"2026-05-{10 + i:02d}T18:00:00Z",
+              opponent=f"Shared Opp {i}")
+        for i in range(MAX_GAME_RETIREMENTS)
+    ]
+    gone = _game("g-gone", start_ts="2026-06-01T18:00:00Z", opponent="Gone Opp")
+
+    ScoutingLoader(db).load_team(_crawl(team_a, [*keeps, *shared, gone]))
+    # B loads the SAME game rows, so each shared game carries TWO perspectives.
+    ScoutingLoader(db).load_team(_crawl(team_b, shared, own_key=_SLUG_B))
+    for game in shared:
+        assert db.execute(
+            "SELECT COUNT(*) FROM game_perspectives WHERE game_id = ?",
+            (game["id"],),
+        ).fetchone()[0] == 2
+
+    prior = 5 + len(shared) + 1
+    absent = len(shared) + 1
+    assert len(shared) >= MAX_GAME_RETIREMENTS, "discrimination floor"
+    assert absent > MAX_GAME_RETIREMENTS, "raw count must exceed the cap"
+    assert prior - absent >= prior * FLOOR_RATIO, "fixture must pass the floor"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        # A's fresh schedule drops the shared games AND the genuine removal.
+        ScoutingLoader(db).load_team(_crawl(team_a, keeps))
+
+    assert "g-gone" not in _game_ids(db), (
+        "the genuine single-perspective removal was false-refused -- the cap "
+        "counted cross-perspective-protected games it can never retire"
+    )
+    for game in shared:
+        assert game["id"] in _game_ids(db)
+    warnings = _retire_warnings(caplog)
+    refusals = [w for w in warnings if "REFUSED" in w]
+    assert len(refusals) == len(shared), warnings
+    assert all("another team's data" in w for w in refusals)
+    assert not any("MAX_GAME_RETIREMENTS" in w for w in warnings), warnings
+
+
+def test_stripped_perspective_games_are_exempt_from_the_cap_too(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-4: exempt == refusal, pinned on the NEW foreign-child branch.
+
+    Same deadlock shape as the test above, but the two protected games are
+    protected ONLY by surviving foreign CHILD rows -- their foreign
+    ``game_perspectives`` rows are stripped, so ``_other_perspectives`` returns
+    empty for them. If the cap's exempt set knew only the old junction-row
+    branch while the loop refuses on both, these two would count toward the cap,
+    push the raw absent count over it, and permanently false-refuse the genuine
+    removal. That drift is exactly what the ONE shared predicate prevents.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+
+    keeps = [
+        _game(f"g-keep-{i}", start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+              opponent=f"Opp {i}")
+        for i in range(5)
+    ]
+    stripped = [
+        _game(f"g-stripped-{i}", start_ts=f"2026-05-{10 + i:02d}T18:00:00Z",
+              opponent=f"Shared Opp {i}")
+        for i in range(MAX_GAME_RETIREMENTS)
+    ]
+    gone = _game("g-gone", start_ts="2026-06-01T18:00:00Z", opponent="Gone Opp")
+
+    ScoutingLoader(db).load_team(_crawl(team_a, [*keeps, *stripped, gone]))
+    ScoutingLoader(db).load_team(_crawl(team_b, stripped, own_key=_SLUG_B))
+
+    # Strip B's junction rows, leaving B's child stat rows behind -- the
+    # IDEA-159 state: single-perspective to the old guard, still holding another
+    # team's data in fact.
+    for game in stripped:
+        db.execute(
+            "DELETE FROM game_perspectives WHERE game_id = ? "
+            "AND perspective_team_id = ?",
+            (game["id"], team_b),
+        )
+    db.commit()
+    for game in stripped:
+        assert db.execute(
+            "SELECT COUNT(*) FROM game_perspectives WHERE game_id = ?",
+            (game["id"],),
+        ).fetchone()[0] == 1, "only THIS team's junction row may survive"
+        assert db.execute(
+            "SELECT COUNT(*) FROM player_game_batting WHERE game_id = ? "
+            "AND perspective_team_id = ?",
+            (game["id"], team_b),
+        ).fetchone()[0] > 0, "the foreign CHILD rows must survive, or this is vacuous"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        ScoutingLoader(db).load_team(_crawl(team_a, keeps))
+
+    assert "g-gone" not in _game_ids(db), (
+        "the genuine removal was false-refused -- the cap counted games the "
+        "loop refuses on the foreign-child branch"
+    )
+    for game in stripped:
+        assert game["id"] in _game_ids(db)
+    warnings = _retire_warnings(caplog)
+    refusals = [w for w in warnings if "REFUSED" in w]
+    assert len(refusals) == len(stripped), warnings
+    assert all("child stat row(s) under another perspective" in w for w in refusals)
+    assert not any("MAX_GAME_RETIREMENTS" in w for w in warnings), warnings
+
+
+@pytest.mark.parametrize("table", _PERSPECTIVE_CHILD_TABLES)
+def test_foreign_child_row_in_any_child_table_refuses_the_retire(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture, table: str
+) -> None:
+    """AC-5: a foreign row in ANY of the five child tables protects the game.
+
+    Parametrized over the ``_PERSPECTIVE_CHILD_TABLES`` constant itself, which is
+    the point: the production guard reads the SAME constant the whole-game delete
+    loops, so guard surface and delete surface cannot drift. The
+    ``reconciliation_discrepancies`` case is the one a hand-written four-table
+    list would miss -- a game whose ONLY foreign footprint is a reconciliation
+    row, hard-deleted along with another perspective's data.
+
+    Here the game holds exactly ONE ``game_perspectives`` row (this team's), so
+    ``_other_perspectives`` is empty and the old guard would wave it through.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+    games = _seed_games(db, team_a, 4)
+    _insert_foreign_child_row(db, table, "g-3", team_b)
+
+    assert db.execute(
+        "SELECT COUNT(*) FROM game_perspectives WHERE game_id = 'g-3'"
+    ).fetchone()[0] == 1, "the foreign JUNCTION row must be absent, or this is vacuous"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        ScoutingLoader(db).load_team(_crawl(team_a, games[:3]))
+
+    assert "g-3" in _game_ids(db), f"a foreign {table} row did not protect the game"
+    assert db.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE game_id = 'g-3' "  # noqa: S608
+        "AND perspective_team_id = ?",
+        (team_b,),
+    ).fetchone()[0] > 0, "the other perspective's row was destroyed"
+    # This team's own rows on the refused game survive too -- a refusal keeps
+    # everything, it does not half-retire.
+    assert db.execute(
+        "SELECT COUNT(*) FROM player_game_batting WHERE game_id = 'g-3' "
+        "AND perspective_team_id = ?",
+        (team_a,),
+    ).fetchone()[0] > 0
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED" in warnings[0]
+    assert "child stat row(s) under another perspective" in warnings[0]
+
+
+def test_protection_with_no_matching_reason_still_refuses(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``else`` arm, FIRST-REFUSAL case: no prior ``reason`` to fall back on.
+
+    The refusal gate calls ``_game_is_cross_perspective_protected`` and then
+    re-checks the two branches only to NAME which fired. When the predicate says
+    protected and neither named branch matches, the ``else`` supplies the
+    message.
+
+    Note what the missing arm would NOT cause: the game is still refused, since
+    the ``continue`` closing the gate is unconditional and no delete is reachable
+    from inside it. Here -- the game is the run's FIRST refusal, so ``reason`` is
+    unbound -- dropping the ``else`` raises ``UnboundLocalError``. The companion
+    ``test_unmatched_protection_does_not_inherit_a_previous_games_reason``
+    covers the nastier variant, where ``reason`` IS bound from an earlier game
+    and the WARN silently names the wrong cause.
+
+    Two ways to reach the arm, both real:
+
+    * A third protection branch is added to the predicate (which the shared-
+      predicate design explicitly invites) before its reason string is written.
+    * A live race, in a bounded window. Before this pass's first hard delete the
+      connection has no open transaction (``load_payload`` commits per boxscore)
+      and Python's ``sqlite3`` opens one only before DML, so the gate and the
+      re-checks are separate bare SELECTs sharing no snapshot of the WAL file: a
+      concurrent writer removing the foreign row in between leaves the gate
+      saying protected and both re-checks saying no. After the first delete the
+      loop reads inside a write transaction and the window is closed.
+
+    The monkeypatch reproduces the OBSERVABLE state of both: predicate True over
+    a DB that genuinely holds no foreign rows for the game.
+    """
+    team = _insert_team(db)
+    games = _seed_games(db, team, 4)
+    # Precondition: g-3 is genuinely UNPROTECTED -- one perspective, no foreign
+    # child rows -- so nothing but the else arm can save it.
+    assert db.execute(
+        "SELECT COUNT(*) FROM game_perspectives WHERE game_id = 'g-3'"
+    ).fetchone()[0] == 1
+    for table in _PERSPECTIVE_CHILD_TABLES:
+        assert db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE game_id = 'g-3' "  # noqa: S608
+            "AND perspective_team_id != ?",
+            (team,),
+        ).fetchone()[0] == 0
+
+    monkeypatch.setattr(
+        reconcile_at_load,
+        "_game_is_cross_perspective_protected",
+        lambda *_args, **_kwargs: True,
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        result = retire_absent_games(
+            db,
+            team_id=team,
+            season_id=_SEASON,
+            fresh_game_ids={g["id"] for g in games[:3]},
+            fetch_ok=True,
+            not_final_game_ids=(),
+            boxscores_complete=True,
+        )
+
+    assert result.retired_game_ids == []
+    assert _game_ids(db) == {"g-0", "g-1", "g-2", "g-3"}
+    reason = result.refusals["g-3"]
+    assert "does not name" in reason
+    assert "_game_is_cross_perspective_protected" in reason
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED" in warnings[0]
+
+
+def test_unmatched_protection_does_not_inherit_a_previous_games_reason(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``else`` arm, STALE-CARRYOVER case -- the one a survival-only test misses.
+
+    ``reason`` is a function-scope local reused across loop iterations, so
+    dropping the ``else`` does not just lose a message: on any game AFTER a
+    refusal has already bound ``reason``, the unmatched game silently inherits
+    the PREVIOUS game's text. The retire is refused either way, so a test
+    asserting only survival passes against that bug. What it corrupts is the
+    WARN -- the operator's sole signal for WHY a retire was refused (TN-4) --
+    which would name a cause that belongs to a different game.
+
+    The fixture makes the carryover observable, which requires ordering: the
+    loop walks ``sorted(prior_ids)``, so ``x-shared`` (refused via the named
+    ``_other_perspectives`` branch, binding ``reason``) precedes ``y-lonely``
+    (protected only by the patched predicate, matching no named branch). The
+    discriminating assertion is that ``y-lonely``'s reason is NOT ``x-shared``'s.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+
+    keeps = _seed_games(db, team_a, 4)
+    shared = _game("x-shared", start_ts="2026-05-01T18:00:00Z", opponent="Shared Opp")
+    lonely = _game("y-lonely", start_ts="2026-05-02T18:00:00Z", opponent="Lonely Opp")
+    ScoutingLoader(db).load_team(_crawl(team_a, [*keeps, shared, lonely]))
+    # Only x-shared gets a second perspective, so only IT matches a named branch.
+    ScoutingLoader(db).load_team(_crawl(team_b, [shared], own_key=_SLUG_B))
+    assert db.execute(
+        "SELECT COUNT(*) FROM game_perspectives WHERE game_id = 'x-shared'"
+    ).fetchone()[0] == 2
+    assert db.execute(
+        "SELECT COUNT(*) FROM game_perspectives WHERE game_id = 'y-lonely'"
+    ).fetchone()[0] == 1
+    assert sorted(["x-shared", "y-lonely"]) == ["x-shared", "y-lonely"], (
+        "iteration order is sorted(prior_ids) -- the named-branch refusal must "
+        "come FIRST or there is no bound reason to inherit"
+    )
+
+    monkeypatch.setattr(
+        reconcile_at_load,
+        "_game_is_cross_perspective_protected",
+        lambda *_args, **_kwargs: True,
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        result = retire_absent_games(
+            db,
+            team_id=team_a,
+            season_id=_SEASON,
+            fresh_game_ids={g["id"] for g in keeps},
+            fetch_ok=True,
+            not_final_game_ids=(),
+            boxscores_complete=True,
+        )
+
+    assert result.retired_game_ids == []
+    assert {"x-shared", "y-lonely"} <= _game_ids(db)
+
+    shared_reason = result.refusals["x-shared"]
+    lonely_reason = result.refusals["y-lonely"]
+    assert "also loaded by perspective(s)" in shared_reason
+    # THE discriminator: y-lonely must carry its OWN reason, not x-shared's.
+    assert lonely_reason != shared_reason, (
+        "the unmatched game inherited the previous game's refusal reason -- the "
+        "WARN now names a cause belonging to a different game"
+    )
+    assert "also loaded by perspective(s)" not in lonely_reason
+    assert "does not name" in lonely_reason
+    assert "_game_is_cross_perspective_protected" in lonely_reason
+
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 2, warnings
+    assert all("REFUSED" in w for w in warnings)
+    lonely_warns = [w for w in warnings if "y-lonely" in w]
+    assert len(lonely_warns) == 1
+    assert "also loaded by perspective(s)" not in lonely_warns[0]
+
+
+def test_foreign_child_row_on_a_DIFFERENT_game_does_not_protect(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5 scoping: the guard is per-game, not "does this DB hold foreign rows".
+
+    An unscoped existence check (one missing ``game_id`` predicate) would read as
+    protective for every game the moment ANY foreign child row exists anywhere,
+    silently disabling the whole grain -- and it would pass every other test in
+    this section, since those attach the foreign row to the absent game itself.
+    Here the foreign row sits on a game that is still PRESENT, so the absent game
+    must still retire.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+    games = _seed_games(db, team_a, 4)
+    _insert_foreign_child_row(db, "player_game_batting", "g-0", team_b)
+
+    ScoutingLoader(db).load_team(_crawl(team_a, games[:3]))
+
+    assert _game_ids(db) == {"g-0", "g-1", "g-2"}, (
+        "a foreign child row on an unrelated game blocked the retire -- the "
+        "guard is not scoped to the game under consideration"
+    )
+
+
+def test_boxscores_incomplete_refuses_even_below_the_cap(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-6: compose direction -- ``boxscores_complete=False`` alone refuses.
+
+    One absence, comfortably under the cap and over the floor, so the ONLY
+    condition that can refuse is the boxscore-coverage signal. Pins that the two
+    guards are ANDed rather than the cap replacing the existing one.
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, 4)
+
+    result = retire_absent_games(
+        db,
+        team_id=team,
+        season_id=_SEASON,
+        fresh_game_ids={"g-0", "g-1", "g-2"},
+        fetch_ok=True,
+        not_final_game_ids=(),
+        boxscores_complete=False,
+    )
+
+    assert result.retired_game_ids == []
+    assert set(result.refusals) == {"g-3"}
+    assert _game_ids(db) == {"g-0", "g-1", "g-2", "g-3"}
+
+
+def test_cap_refuses_even_when_boxscores_are_complete(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-6: compose direction -- the cap alone refuses.
+
+    The mirror of the test above: every other signal says go (fetch ok, floor
+    cleared, boxscores complete, no cross-perspective protection) and the cap
+    still refuses the whole pass.
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, 8)
+
+    result = retire_absent_games(
+        db,
+        team_id=team,
+        season_id=_SEASON,
+        fresh_game_ids={f"g-{i}" for i in range(5)},
+        fetch_ok=True,
+        not_final_game_ids=(),
+        boxscores_complete=True,
+    )
+
+    assert result.retired_game_ids == []
+    assert len(result.refusals) == 3
+    assert _game_ids(db) == {f"g-{i}" for i in range(8)}
+
+
+def test_refusal_reasons_distinguish_the_three_whole_set_causes(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-7: an operator can tell WHICH gate refused from the WARN alone.
+
+    Three passes over one untouched 8-game fixture (a refusal writes nothing, so
+    they are order-independent). The cap constant appears in the cap case and
+    ONLY there -- the whole point of the distinction, since the remedies differ:
+    a floor refusal means "suspect the crawl", a boxscores refusal means "a game
+    failed to load", a cap refusal means "that many games really vanished".
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, 8)
+
+    def _refuse(fresh: set[str], *, boxscores_complete: bool) -> dict[str, str]:
+        result = retire_absent_games(
+            db,
+            team_id=team,
+            season_id=_SEASON,
+            fresh_game_ids=fresh,
+            fetch_ok=True,
+            not_final_game_ids=(),
+            boxscores_complete=boxscores_complete,
+        )
+        assert result.retired_game_ids == []
+        assert result.refusals
+        return result.refusals
+
+    floor = _refuse({"g-0"}, boxscores_complete=True)
+    incomplete = _refuse(
+        {f"g-{i}" for i in range(7)}, boxscores_complete=False
+    )
+    capped = _refuse({f"g-{i}" for i in range(5)}, boxscores_complete=True)
+
+    assert all("not authoritative" in r for r in floor.values())
+    assert not any("MAX_GAME_RETIREMENTS" in r for r in floor.values())
+
+    assert all("boxscores_complete=False" in r for r in incomplete.values())
+    assert not any("MAX_GAME_RETIREMENTS" in r for r in incomplete.values())
+    assert not any("not authoritative" in r for r in incomplete.values())
+
+    assert all(
+        f"MAX_GAME_RETIREMENTS={MAX_GAME_RETIREMENTS}" in r for r in capped.values()
+    )
+    assert all("retire-eligible absent count 3" in r for r in capped.values())
+    assert not any("not authoritative" in r for r in capped.values())
+
+    assert _game_ids(db) == {f"g-{i}" for i in range(8)}
 
 
 def test_reconcile_failure_rolls_back_and_does_not_fail_the_load(

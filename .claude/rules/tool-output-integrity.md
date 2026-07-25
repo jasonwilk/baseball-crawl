@@ -31,6 +31,18 @@ When a target known or expected to be non-empty returns empty, truncated, or gar
 
 When two channels disagree, **the clean read wins** over a flaky empty or garbled result. A "no files found" Glob is NOT proof of absence under a flaky channel -- confirm absence through a second channel before relying on it.
 
+## Prose you AUTHOR is a claim too
+
+The rules above govern what you READ. The same discipline binds what you WRITE: a comment, docstring, spec citation, or CLAUDE.md sentence asserting how the code behaves is an unverified claim until resolved against the repo. Prose is unexecutable, so a green suite says NOTHING about it -- E-270 shipped six such defects across five shapes (a docstring citing a test name that existed in no file, a comment claiming "both callers" when one did not exist, a spec citation pointing at a path that could never exist, and two consequence claims that were exactly backwards).
+
+Before reporting prose complete:
+
+1. **Enumerate every symbol AND path the prose cites** -- test names, functions, flags, files, headings -- not just the ones in your diff, and resolve each against the repo. Where a reference is missing, establish WHY rather than noting it.
+2. **EXECUTE behavioral claims rather than reasoning to them.** "This would raise X" is a hypothesis until you make it raise X. In E-270 the claim "a KEEP->PURGE FK aborts the purge" was true only for a default-action FK; running it showed an `ON DELETE CASCADE` edge raises NOTHING and commits.
+3. **Cite a stable anchor, not a line range.** Line numbers rot -- twice in E-270, once to the epic's own text between planning and its final story. Cite by test name, symbol, or heading, and the citation survives.
+
+**The safety-comment sub-class (where this defect concentrates).** Alarming prose is self-protecting: a claim naming the SCARIER outcome feels right for a safety note and is therefore least likely to be challenged. Sharpest form -- **the tidy general rule at the END of a safety note is where this lands, because that is the sentence that sounds most authoritative and gets checked least.** It is also where over-correction lands: E-270 fixed an understatement into a categorically false rule in that exact position. When you write a closing generalization, check it against the codebase's dominant pattern; if that pattern would violate your rule, the rule is wrong.
+
 ## Prohibitions
 
 1. **Never assert or relay file content or a tool outcome you have not seen cleanly in your own context.** Report what you observed, not what you expect.

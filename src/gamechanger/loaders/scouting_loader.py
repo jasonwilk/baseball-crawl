@@ -172,6 +172,27 @@ class ScoutingLoader:
         # this SELECT as an optimization and do not pass ``set()`` at a call site
         # where the snapshot is inconvenient -- either silently disables the
         # guard that stops a truncated crawl from mass-deleting a roster.
+        #
+        # ORDERING COUPLING, invisible at both ends (E-270-05): this is a bare
+        # local that travels ~85 lines before use -- captured here, passed to
+        # ``_reconcile_departed_roster`` near the end of this method, consumed
+        # there as ``previously_rostered_ids``, whose only job is to scope the
+        # departure cap to GENUINE departures (``absent & previously``, see
+        # ``_cap_on_genuine_departures``). Both drift directions are silent and
+        # they fail OPPOSITELY:
+        #
+        # * A team_rosters write placed ABOVE this SELECT (or this SELECT moved
+        #   below one) pollutes the snapshot with rows THIS run created, so our
+        #   own backfill churn counts as genuine departures and the cap
+        #   false-refuses -- the self-trapping mode E-267 had to fix.
+        # * A team_rosters write placed BELOW this SELECT creates rows OUTSIDE
+        #   the snapshot; when they go absent they read as churn and do NOT count
+        #   toward the cap, weakening the one guard that stops a truncated roster
+        #   crawl from mass-deleting a roster.
+        #
+        # Safe edit: keep this SELECT the FIRST thing that touches team_rosters
+        # in this method, and add no team_rosters write between it and the
+        # ``_reconcile_departed_roster`` call. No signature enforces either.
         pre_load_roster_ids = {
             row[0]
             for row in self._db.execute(
@@ -233,6 +254,27 @@ class ScoutingLoader:
         # schedule no longer carries. Runs AFTER the boxscore load so the
         # redirect map is populated -- a cross-perspective redirect stores the
         # game under a canonical id that is NOT the fresh event id.
+        #
+        # ORDERING COUPLING (E-270-05): this call MUST stay below
+        # ``_load_boxscores``, and BOTH failure directions are silent.
+        # ``game_loader.redirect_map`` is EMPTY until that load runs, so a
+        # reconcile hoisted above it finds every redirected game's canonical id
+        # missing from ``fresh_ids`` and treats those live games as absent. What
+        # happens next depends on a second, independent guard: under the SAME
+        # hoist ``processed_event_ids`` is empty too, so ``boxscores_complete``
+        # is False and every absence is REFUSED -- the grain silently stops
+        # retiring anything at all, restoring the stale-game bug it exists to
+        # close. It does not mass-delete today. But the guards are independent:
+        # relax ``boxscores_complete`` on top of a hoist and the same absence
+        # becomes a hard delete of live games and their full child surface --
+        # bounded, though, by a THIRD guard, the ``MAX_GAME_RETIREMENTS`` cap,
+        # which limits what survives that relaxation to at most two games and
+        # refuses the pass entirely above it (measured, not inferred: with the
+        # relaxation in place, 1 absent -> 1 retired, 2 -> 2, 3 -> 0 retired and
+        # the whole pass refused). A hoist that makes MANY redirected games look
+        # absent therefore trips the cap rather than emptying the season.
+        # Nothing in the signature enforces any of these couplings -- an empty
+        # ``redirect_map`` is indistinguishable from "no redirects this run".
         if full_games is not None:
             self._reconcile_absent_games(
                 team_id, db_season_id, full_games,
@@ -351,7 +393,21 @@ class ScoutingLoader:
         # A redirected game lives under the canonical id, not the fresh event id.
         redirect_targets = set(redirect_map.values())
         fresh_ids.update(redirect_targets)
-        not_final_ids &= fresh_ids
+        # INVARIANT: not_final_ids is a SUBSET of fresh_ids by construction --
+        # the loop above adds every surviving gid to fresh_ids UNCONDITIONALLY
+        # before the completed/not-final branch, and fresh_ids only grows after
+        # (the redirect update). A `not_final_ids &= fresh_ids` line used to sit
+        # here; it read as a filter but could never remove anything, so E-270-05
+        # deleted it. Verified rather than reasoned: 8262 adversarial input
+        # combinations (falsy/odd ids, every status shape, absent keys, six
+        # redirect-map shapes) executed against this exact block produced zero
+        # cases where the intersection differed, and an assertion of the
+        # invariant held across all 179 invocations in a full suite run.
+        #
+        # If a future edit adds an id to not_final_ids on a path that does NOT
+        # also add it to fresh_ids, this invariant breaks and a not-final game
+        # could be classified REMOVED and hard-deleted. Keep the unconditional
+        # `fresh_ids.add(gid)` above the branch.
 
         try:
             from src.db.reconcile_at_load import retire_absent_games
