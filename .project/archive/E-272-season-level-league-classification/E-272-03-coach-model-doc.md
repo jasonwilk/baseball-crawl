@@ -4,7 +4,7 @@
 [E-272: Season × Level → League Classification (+ NRBL)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the baseball-coach model doc (`.claude/agent-memory/baseball-coach/league-pitch-rules.md`) carries the Nebraska Reserve Baseball League (NRBL) as a recognized pitch-count league, documents the season × level → league classification model, and reconciles its existing "league SELECTION is inferred, not chosen" framing to the "Both, E-272 first" reality (E-272 improves inference now; the operator-pick layer comes later via E-263).

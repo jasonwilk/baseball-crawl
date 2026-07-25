@@ -2987,6 +2987,142 @@ class TestRestDayReferenceDateIsVenueLocal:
         assert result.reference_date == self._LOCAL
 
 
+class TestPublicSeasonCapture:
+    """E-272-02 AC-6: `team_season.season` is captured off the public-API
+    payload alongside the year, with no schema change and no extra request."""
+
+    def _fetch(self, payload):
+        gen = _ReportGeneration("https://web.gc.com/teams/abc")
+        gen.public_id = "abc"
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = payload
+        session = MagicMock()
+        session.get.return_value = resp
+        with patch("src.http.session.create_session", return_value=session):
+            gen._fetch_public_team_info()
+        # Still exactly one public-API call -- no new crawling (AC-6).
+        assert session.get.call_count == 1
+        return gen
+
+    def test_init_defaults_season_to_none(self):
+        assert _ReportGeneration("https://web.gc.com/teams/abc").season_from_api is None
+
+    def test_season_captured_alongside_year(self):
+        gen = self._fetch({
+            "name": "Norfolk Motor Company Seniors 18U",
+            "team_season": {"year": 2026, "season": "summer"},
+            "ngb": "[]",
+            "age_group": "18U",
+        })
+        assert gen.season_from_api == "summer"
+        assert gen.season_year_from_api == 2026
+
+    def test_season_absent_from_team_season_is_none(self):
+        gen = self._fetch({"name": "Lincoln Reserve", "team_season": {"year": 2026}})
+        assert gen.season_from_api is None
+        assert gen.season_year_from_api == 2026
+
+    def test_no_team_season_object_is_none(self):
+        gen = self._fetch({"name": "Lincoln Reserve"})
+        assert gen.season_from_api is None
+
+
+class TestSeasonThreadedIntoLeagueDetection:
+    """E-272-02 AC-6: the captured season reaches `detect_league_level`, so the
+    SAME opponent name resolves to a different league by season.
+
+    Drives the real `_query_render_save` and captures the `league` handed to
+    `compute_starter_prediction` -- dropping the `season=` kwarg at the call
+    site makes the summer case fall back to `nsaa_subvarsity` and fails here.
+    """
+
+    def _resolved_league(self, db, tmp_path, monkeypatch, *, team_name, season):
+        monkeypatch.setenv("OPERATING_TIMEZONE", "America/Chicago")
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
+
+        team_id = _seed_team(db)
+        _seed_season(db)
+        db.commit()
+
+        def _fresh_conn():
+            conn = sqlite3.connect(str(tmp_path / "test.db"))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        captured: dict[str, object] = {}
+
+        def _fake_history(t, s, *, db=None):
+            return [{"player_id": "p1", "game_date": "2026-07-01"}]
+
+        def _fake_prediction(profiles, history, *, reference_date, workload, league):
+            captured["league"] = league
+            return None
+
+        def _fake_tier2(pred, rows, *, team_name, team_record, reference_date,
+                        public_id):
+            return None, None
+
+        gen = _ReportGeneration("https://web.gc.com/teams/abc")
+        gen.team_id = team_id
+        gen.season_id = "2026"
+        gen.report_id = 1
+        gen.slug = "season-thread"
+        gen.generated_at = "2026-07-10T02:30:00Z"
+        gen.expires_at = "2026-07-24T02:30:00Z"
+        gen.team_info = {"name": team_name}
+        gen.title = team_name
+        gen.public_id = "abc123"
+        # What _fetch_public_team_info would have captured.
+        gen.team_name_from_api = team_name
+        gen.ngb_from_api = "[]"
+        gen.age_group_from_api = None
+        gen.season_from_api = season
+
+        with (
+            patch("src.reports.generator.get_connection", side_effect=_fresh_conn),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.get_pitching_workload",
+                  lambda t, s, ref, *, db=None: {}),
+            patch("src.reports.generator.get_pitching_history", _fake_history),
+            patch("src.reports.generator.build_pitcher_profiles",
+                  lambda rows: {"p1": {}}),
+            patch("src.reports.starter_prediction.compute_starter_prediction",
+                  _fake_prediction),
+            patch("src.reports.generator._run_tier2_enrichment", _fake_tier2),
+            patch("src.reports.generator.render_report", lambda data: "<html></html>"),
+            patch("src.reports.generator._update_report_ready"),
+            patch("src.reports.generator._update_run_record"),
+            patch("src.reports.generator._finalize_run_record"),
+        ):
+            result = gen._query_render_save()
+
+        assert result.outcome == "ready", result.error_message
+        return captured["league"]
+
+    def test_summer_reserve_resolves_nrbl(self, db, tmp_path, monkeypatch):
+        assert self._resolved_league(
+            db, tmp_path, monkeypatch,
+            team_name="Anytown Reserve", season="summer",
+        ) == "nrbl"
+
+    def test_absent_season_reserve_resolves_nsaa_subvarsity(
+        self, db, tmp_path, monkeypatch,
+    ):
+        """AC-6: the report still generates with no season present."""
+        assert self._resolved_league(
+            db, tmp_path, monkeypatch,
+            team_name="Anytown Reserve", season=None,
+        ) == "nsaa_subvarsity"
+
+    def test_summer_varsity_resolves_legion(self, db, tmp_path, monkeypatch):
+        assert self._resolved_league(
+            db, tmp_path, monkeypatch,
+            team_name="Anytown Varsity", season="summer",
+        ) == "legion"
+
+
 class TestCleanupOrphanTeams:
     """AC-1, AC-2, AC-4: FK-safe orphan deletion."""
 

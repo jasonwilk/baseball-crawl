@@ -29,8 +29,8 @@ You are a requirements translator and domain validator. Every piece of data we c
 
 ## Lincoln-Specific Context
 
-- **Seasons are sequential, not parallel.** HS spring ends, then Legion summer starts. No overlap.
-- **Roster carryover is ~80%.** LSB Reserve maps to sophomore-level Legion. Coaches know their players but need fresh baselines each season.
+- **Seasons are sequential, not parallel.** HS spring ends, then Legion/NRBL summer starts. No overlap.
+- **Roster carryover is ~80%.** LSB Reserve maps to NRBL, the sophomore-age, reserve-tier summer league. Coaches know their players but need fresh baselines each season.
 
 ## Core Responsibilities
 

@@ -10,6 +10,10 @@
 ## Calibration (findings of mine that were falsified)
 - [Never claim a ratio-gate population change is side-effect-free](ratio_gate_population_claims.md) — E-267-02: my "no false refusals" hand-derivation held at N=30 and broke at N=3. Enumerate fail-open AND fail-closed, evaluate at the smallest realistic N, say "verify empirically".
 - [Re-verify "the defect still persists" after a redesign narrows the code](stale_defect_characterization.md) — E-267-03: I carried a round-1 harm description into round 2 where the new `team_id` predicate had made it false. Quote the WHERE clause, walk the binding positionally.
+- ["Same branch" is not a reason to withdraw a test-coverage finding](finding_withdrawal_shared_branch_reasoning.md) — E-272-02: I withdrew a sibling case on shared-return reasoning; the four names route through four distinct patterns, so enumeration discriminates. Concede when the implementer's version is better.
+
+## Closure-Pass Practice
+- [Re-diffstat at Step 1b/1d and compare to what you reviewed](closure_diff_growth_after_integration_review.md) — E-272: the closure diff grew 15→37 files AFTER my Step 1c APPROVED, `src/` included. Remediation + PM bookkeeping land after the last review BY DESIGN. Never let an approval stretch; state src/-reviewed vs context-layer-unreviewed precisely. Also check `git status` for `??`/`MM` — "everything is staged" was wrong twice.
 
 ## Invariant Audit Patterns
 - [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).

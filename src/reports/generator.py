@@ -1545,6 +1545,7 @@ class _ReportGeneration:
         self.public_id: str | None = None
         self.team_name_from_api: str | None = None
         self.season_year_from_api: int | None = None
+        self.season_from_api: str | None = None
         self.ngb_from_api: str | None = None
         self.age_group_from_api: str | None = None
         # Identity (step 2). identity_match_method is stashed here and written
@@ -1640,7 +1641,34 @@ class _ReportGeneration:
         return None
 
     def _fetch_public_team_info(self) -> None:
-        """Step 1b: fetch team name + season year from the public API (no auth)."""
+        """Step 1b: fetch team name + season year from the public API (no auth).
+
+        DO NOT split this into per-field or per-signal error handling.
+
+        The coarseness is load-bearing safety, not sloppiness.  All five signals
+        (`team_name`, `season_year`, `season`, `ngb`, `age_group`) are assigned
+        together inside the single 200-block from one parsed payload, so any
+        failure leaves them ALL None.  Four of the five feed league detection
+        (`season_year` is used for the team row, not the gate), and with those
+        four None::
+
+            detect_league_level(ngb=None, age_group=None, team_name=None,
+                                season=None)          # -> "unknown"
+            get_rules_for_league("unknown", ref_date)  # -> None
+
+        so the Most Likely Arms card SUPPRESSES.  Degrading to "no card" is the
+        safe direction for a pitch-count gate.
+
+        Granular handling would BREAK that.  If `season` could fail while
+        `team_name` survived, a summer opponent named "...Varsity" would resolve
+        `nsaa_varsity` (the season-absent default) instead of `legion` -- and
+        NSAA Varsity UNDER-rests relative to Legion at 46-50p, 61-70p and 81-90p
+        (and permits 110 pitches post-April vs 105).  That is a silent
+        under-rest recommendation on a real arm, which is strictly worse than
+        showing no card.  An isolated `season=None` alongside a usable
+        `team_name` is not a shape this function can currently produce; keep it
+        that way.  See IDEA-168 for the related season-vocabulary trigger.
+        """
         try:
             from src.http.session import create_session
 
@@ -1654,11 +1682,33 @@ class _ReportGeneration:
                 self.team_name_from_api = pub_data.get("name")
                 ts = pub_data.get("team_season") or {}
                 self.season_year_from_api = ts.get("year")
+                # Season string ("summer") disambiguates spring NSAA from the
+                # summer Legion/NRBL family in detect_league_level (E-272).
+                self.season_from_api = ts.get("season")
                 self.ngb_from_api = pub_data.get("ngb")
                 self.age_group_from_api = pub_data.get("age_group")
+            else:
+                # Observability only -- the control flow above is unchanged and
+                # deliberately so.  Without this the non-200 path was entirely
+                # silent (the except-handler below never fires for it), so a
+                # suppressed card had no operator-visible cause.
+                logger.warning(
+                    "Public team info for %s returned HTTP %s -- league signals "
+                    "unavailable, starter card will suppress",
+                    self.public_id,
+                    resp.status_code,
+                )
             session.close()
-        except Exception:  # noqa: BLE001
-            logger.warning("Could not fetch public team info for %s", self.public_id)
+        except Exception as exc:  # noqa: BLE001
+            # No status code here on purpose: `resp` is unbound when the request
+            # itself raised (timeout / DNS / TLS), so the exception is the only
+            # cause available.
+            logger.warning(
+                "Could not fetch public team info for %s (%s: %s)",
+                self.public_id,
+                type(exc).__name__,
+                exc,
+            )
 
     def _ensure_team_row(self, conn: sqlite3.Connection | None = None) -> None:
         """Step 2: ensure the team row exists; backfill name/season/public_id.
@@ -2383,6 +2433,7 @@ class _ReportGeneration:
                             ngb=self.ngb_from_api,
                             age_group=self.age_group_from_api,
                             team_name=self.team_name_from_api,
+                            season=self.season_from_api,
                         )
 
                         pitcher_profiles = build_pitcher_profiles(

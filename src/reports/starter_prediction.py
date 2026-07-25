@@ -157,13 +157,23 @@ def format_nsaa_rest_table(rules: PitchCountRules) -> str:
 
 # ── NSAA Subvarsity Rules ─────────────────────────────────────────────
 
+# Source: NSAA 2022 Pitch Count Regulations
+# (https://nsaahome.org/wp-content/uploads/2022/02/2022-Pitch-Counts.pdf),
+# Sub-Varsity table -- max 90, flat year-round with NO April-1 split (that
+# phase split applies to NSAA Varsity only).  Sub-Varsity is stricter than
+# NSAA Varsity pre-April by exactly one rest day at every tier: the shared
+# 30/50/70/90 breakpoints map to 1/2/3/4 rather than 0/1/2/3, so no tier here
+# permits a back-to-back appearance.  Exact curve cross-checked against
+# .claude/agent-memory/baseball-coach/league-pitch-rules.md, heading
+# "NSAA Sub-Varsity — All Season", which carries the table;
+# .claude/rules/pitch-rules.md documents the constant and defers to it.
 NSAA_SUBVARSITY = PitchCountRules(
     max_pitches=90,
     rest_tiers=(
-        RestTier(1, 30, 0),
-        RestTier(31, 50, 1),
-        RestTier(51, 70, 2),
-        RestTier(71, 90, 3),
+        RestTier(1, 30, 1),
+        RestTier(31, 50, 2),
+        RestTier(51, 70, 3),
+        RestTier(71, 90, 4),
     ),
 )
 
@@ -176,6 +186,26 @@ def get_subvarsity_rules(_reference_date: datetime.date) -> PitchCountRules:
 # ── Legion Rules ──────────────────────────────────────────────────────
 
 LEGION = PitchCountRules(
+    max_pitches=105,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 45, 1),
+        RestTier(46, 60, 2),
+        RestTier(61, 80, 3),
+        RestTier(81, 105, 4),
+    ),
+)
+
+
+# ── NRBL Rules (Nebraska Reserve Baseball League -- summer sub-varsity) ──
+
+# NRBL follows the American Legion pitch-count regulations (nrbl.net), so the
+# tiers equal LEGION's today.  This is a DISTINCT constant on purpose, mirroring
+# the PITCH_SMART_15_18 note below: NRBL and American Legion are separately
+# governed bodies that merely AGREE right now, so a future Legion-only change
+# must not silently move NRBL, nor an NRBL-only change move Legion.
+# See .claude/rules/pitch-rules.md.
+NRBL = PitchCountRules(
     max_pitches=105,
     rest_tiers=(
         RestTier(1, 30, 0),
@@ -220,22 +250,151 @@ _NGB_MAP: dict[str, str] = {
 # Priority order for multi-value ngb lists.
 _NGB_PRIORITY = ("nsaa", "nfhs", "american_legion", "usssa", "perfect_game")
 
-# Team name keyword patterns.  Order matters for first-match semantics.
-_NAME_KEYWORDS: list[tuple[re.Pattern[str], str]] = [
-    # NSAA level keywords -- more specific patterns before less specific
-    (re.compile(r"\bjunior\s+varsity\b|\bjv\b", re.IGNORECASE), "nsaa_subvarsity"),
-    (re.compile(r"\bfreshman\b|\bfrosh\b", re.IGNORECASE), "nsaa_subvarsity"),
-    (re.compile(r"\breserve\b", re.IGNORECASE), "nsaa_subvarsity"),
-    (re.compile(r"\bsophomore\b", re.IGNORECASE), "nsaa_subvarsity"),
-    (re.compile(r"\bvarsity\b", re.IGNORECASE), "nsaa_varsity"),
-    # Youth travel age pattern BEFORE seniors/juniors so "14U Juniors" → youth_travel
-    (re.compile(r"\b\d+U\b", re.IGNORECASE), "youth_travel"),
-    # Legion keywords -- "American Legion" before bare "Legion"
-    (re.compile(r"\bamerican\s+legion\b|\blegion\b", re.IGNORECASE), "legion"),
-    (re.compile(r"\bpost\s+\d+", re.IGNORECASE), "legion"),
-    (re.compile(r"\bseniors\b", re.IGNORECASE), "legion"),
-    (re.compile(r"\bjuniors\b", re.IGNORECASE), "legion"),
+# ── Age brackets (empty-ngb path) ─────────────────────────────────────
+
+# A single "\d+U" age bracket, e.g. "18U".  The U suffix is load-bearing:
+# GameChanger's free-text RANGE form ("Between 13 - 18") carries no U but DOES
+# contain a legion-age integer, so a bare-integer match could resolve legion off
+# that 18 instead of leaving the range on the youth estimate.  Requiring the U
+# makes the range form structurally unmatchable (TN-2).
+_AGE_BRACKET_RE = re.compile(r"\b(\d+)U\b", re.IGNORECASE)
+
+# GameChanger's free-text age-RANGE form, e.g. "Between 13 - 18" or "13-18".
+_AGE_RANGE_RE = re.compile(r"\b\d+\s*-\s*\d+\b")
+
+# Mapped bracket floors: 17U and up is Legion-age, 15U-16U is NRBL-age.
+# 14U and below stay youth_travel (the labeled Pitch Smart 15-18 estimate).
+_BRACKET_LEGION_MIN = 17
+_BRACKET_NRBL_MIN = 15
+
+
+# ── Season vocabulary ─────────────────────────────────────────────────
+
+# Lowercase "summer" is the ONLY season token observed anywhere in the proxy
+# corpus (api-scout, E-272 OQ-1).  Every other value -- an unconfirmed
+# "spring", an unrecognized token, or an absent season -- takes the NSAA
+# default.
+#
+# The default encodes "spring is likelier", NOT "stricter".  Do not read it as a
+# blanket safety margin, because it only IS one on the sub-varsity branch:
+#   - SUB-VARSITY branch (-> NSAA_SUBVARSITY, 90): conservative.  It demands at
+#     least Legion/NRBL's rest at every pitch count 1-90, so an ambiguous season
+#     over-rests rather than under-rests.
+#   - VARSITY branch (-> nsaa_varsity): NOT conservative.  NSAA Varsity
+#     UNDER-rests relative to Legion at 46-50p (1 day vs 2), 61-70p (2 vs 3) and
+#     81-90p (3 vs 4), and post-April permits 110 pitches vs Legion's 105.
+# So a change that widens this vocabulary or extends the level-word matrix still
+# owes the varsity path its own safety review -- the fallback direction is only
+# self-evidently safe for sub-varsity.  (Divergence bands cross-checked against
+# .claude/agent-memory/baseball-coach/league-pitch-rules.md, which names the
+# same 46-50 / 61-70 / 81-90 NSAA-vs-Legion split.)
+_SUMMER_SEASON = "summer"
+
+# Recognized NON-summer tokens.  Used ONLY by the data-quality log below, never
+# by the gate: an unrecognized token is not evidence of a conflict, so it stays
+# silent rather than producing a disagreement we cannot substantiate.
+_KNOWN_NON_SUMMER_SEASONS = frozenset({"spring", "fall", "winter"})
+
+
+# ── Level words (season picks the family, the word picks the tier) ────
+
+_LEVEL_VARSITY = "varsity"
+_LEVEL_SUBVARSITY = "subvarsity"
+_LEVEL_LEGION = "legion"
+
+# Order matters (first match wins): more specific patterns before less specific,
+# so "Junior Varsity" is sub-varsity rather than varsity, and "American Legion"
+# is matched before a bare "Legion".  These map to a level CLASS rather than
+# straight to a league id -- season selects the family (TN-2 4c).
+_LEVEL_WORD_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bjunior\s+varsity\b|\bjv\b", re.IGNORECASE), _LEVEL_SUBVARSITY),
+    (re.compile(r"\bfreshman\b|\bfrosh\b", re.IGNORECASE), _LEVEL_SUBVARSITY),
+    (re.compile(r"\breserves?\b", re.IGNORECASE), _LEVEL_SUBVARSITY),
+    (re.compile(r"\bsophomore\b", re.IGNORECASE), _LEVEL_SUBVARSITY),
+    (re.compile(r"\bvarsity\b", re.IGNORECASE), _LEVEL_VARSITY),
+    (re.compile(r"\bamerican\s+legion\b|\blegion\b", re.IGNORECASE), _LEVEL_LEGION),
+    (re.compile(r"\bpost\s+\d+", re.IGNORECASE), _LEVEL_LEGION),
+    (re.compile(r"\bseniors\b", re.IGNORECASE), _LEVEL_LEGION),
+    (re.compile(r"\bjuniors\b", re.IGNORECASE), _LEVEL_LEGION),
 ]
+
+
+def _normalize_season(season: str | None) -> str | None:
+    """Lowercase/strip a season token, mapping empty-ish values to None."""
+    if not season or not season.strip():
+        return None
+    return season.strip().lower()
+
+
+def _is_summer_season(season: str | None) -> bool:
+    """True when the season token is the summer family (case-insensitive)."""
+    return _normalize_season(season) == _SUMMER_SEASON
+
+
+def _league_from_age_bracket(text: str | None) -> str | None:
+    """Resolve a single ``\\d+U`` age bracket in *text* to a league id.
+
+    Returns ``None`` only when *text* carries no bracket at all -- that is what
+    lets the caller fall through to the level-word path.  A bracket that IS
+    present ALWAYS resolves: an unmapped one (14U and below) resolves to
+    ``youth_travel`` rather than falling through, which is what makes a bracket
+    beat a name keyword ("14U Juniors" is youth_travel, not legion).
+    """
+    if not text:
+        return None
+    match = _AGE_BRACKET_RE.search(text)
+    if not match:
+        return None
+    age = int(match.group(1))
+    if age >= _BRACKET_LEGION_MIN:
+        return "legion"
+    if age >= _BRACKET_NRBL_MIN:
+        return "nrbl"
+    return "youth_travel"
+
+
+def _league_from_level_word(team_name: str | None, season: str | None) -> str | None:
+    """Resolve an NSAA/Legion level word to a league id, disambiguated by season.
+
+    Season picks the FAMILY and the level word picks the TIER within it, so no
+    level word falls through to ``unknown``.  Legion-specific words are
+    season-independent.  Returns ``None`` when no level word matches.
+    """
+    if not team_name:
+        return None
+    for pattern, level in _LEVEL_WORD_PATTERNS:
+        if not pattern.search(team_name):
+            continue
+        if level == _LEVEL_LEGION:
+            return "legion"
+        summer = _is_summer_season(season)
+        if level == _LEVEL_VARSITY:
+            return "legion" if summer else "nsaa_varsity"
+        return "nrbl" if summer else "nsaa_subvarsity"
+    return None
+
+
+def _log_bracket_season_disagreement(
+    bracket_league: str, season: str | None,
+) -> None:
+    """Log a data-quality WARNING when a mapped bracket contradicts the season.
+
+    Observability ONLY -- the bracket has already won the gate (TN-2 4a); this
+    never changes the resolved league.  Every MAPPED bracket is summer-family,
+    so a disagreement is a mapped bracket plus a season normalizing to a KNOWN
+    non-summer token.  An absent season is not a disagreement, and neither is an
+    unrecognized one.
+    """
+    if bracket_league not in ("legion", "nrbl"):
+        return
+    if _normalize_season(season) in _KNOWN_NON_SUMMER_SEASONS:
+        logger.warning(
+            "League detection: age bracket resolved %s (summer-family) but "
+            "season is %r -- bracket wins, season ignored",
+            bracket_league,
+            season,
+        )
+
 
 # Warning messages for unsupported leagues.
 _LEAGUE_WARNINGS: dict[str, str] = {
@@ -252,6 +411,7 @@ def detect_league_level(
     ngb: str | list[str] | None = None,
     age_group: str | None = None,
     team_name: str | None = None,
+    season: str | None = None,
 ) -> str:
     """Detect league/level from cascading priority signals.
 
@@ -261,10 +421,14 @@ def detect_league_level(
         ngb: GC public API ``ngb`` field -- JSON string or already-parsed list.
         age_group: GC public API ``age_group`` field.
         team_name: Team name for keyword fallback.
+        season: GC public API ``team_season.season`` field.  Consulted ONLY to
+            disambiguate a level word (spring NSAA vs summer Legion/NRBL); a
+            recognized ``ngb``, a DB field, and an age bracket all outrank it.
 
     Returns:
         League/level identifier string: ``nsaa_varsity``, ``nsaa_subvarsity``,
-        ``legion``, ``usssa``, ``perfect_game``, ``youth_travel``, or ``unknown``.
+        ``legion``, ``nrbl``, ``usssa``, ``perfect_game``, ``youth_travel``,
+        or ``unknown``.
     """
     # Priority 1: DB fields (tracked teams)
     if program_type:
@@ -298,30 +462,36 @@ def detect_league_level(
         # ngb has values but none recognized → unknown
         return "unknown"
 
-    # ngb is empty -- check age_group
-    if age_group:
-        # Two youth-travel age_group forms both route to youth_travel (the
-        # labeled Pitch Smart 15-18 estimate in get_rules_for_league):
-        #   - the bracket form, e.g. "14U"
-        #   - GameChanger's free-text range form, e.g. "Between 13 - 18"
-        # Band-ambiguity caveat: a broad range like 13-18 dips below the 15-18
-        # curve, so PITCH_SMART_15_18 is applied as a *labeled estimate*,
-        # consistent with the existing coarse \d+U mapping -- not a precise
-        # per-age lookup.
-        if re.search(r"\d+U\b", age_group, re.IGNORECASE) or re.search(
-            r"\b\d+\s*-\s*\d+\b", age_group
-        ):
-            return "youth_travel"
-        # age_group suggests HS (e.g., "High School") → fall through to name
-        # Other ambiguous age_group values also fall through
+    # ── ngb empty: age bracket, then season x level word (TN-2 step 4) ──
+    #
+    # The age-bracket ladder runs AHEAD of every level word, because a bracket
+    # is the harder signal: "16U Reserve" is nrbl via the 16U bracket (not
+    # nsaa_subvarsity via "Reserve"), and "14U Juniors" is youth_travel via the
+    # 14U bracket (not legion via "Juniors").  The ladder reads age_group first,
+    # then the team name -- the two paths share one ladder.
+    #
+    # Band-ambiguity caveat (unchanged): a broad range like 13-18 dips below the
+    # 15-18 curve, so PITCH_SMART_15_18 is applied as a *labeled estimate*, not
+    # a precise per-age lookup.
+    bracket_league = _league_from_age_bracket(age_group)
+    if bracket_league is None and age_group and _AGE_RANGE_RE.search(age_group):
+        # GameChanger's free-text range form is NOT a mapped bracket; it stays
+        # on the labeled youth estimate (IDEA-126).  Checked before the team
+        # name so a structured age_group keeps outranking a name keyword.
+        return "youth_travel"
+    if bracket_league is None:
+        bracket_league = _league_from_age_bracket(team_name)
+    if bracket_league is not None:
+        _log_bracket_season_disagreement(bracket_league, season)
+        return bracket_league
+    # A non-bracket age_group (e.g. "High School") falls through to the name.
 
-    # Priority 3: Team name keywords
-    if team_name:
-        for pattern, league_id in _NAME_KEYWORDS:
-            if pattern.search(team_name):
-                return league_id
+    # Level word, with season picking the league family.
+    level_league = _league_from_level_word(team_name, season)
+    if level_league is not None:
+        return level_league
 
-    # Priority 4: Unknown
+    # No matching signal.
     return "unknown"
 
 
@@ -372,6 +542,8 @@ def get_rules_for_league(
         return get_subvarsity_rules(reference_date)
     if league == "legion":
         return LEGION
+    if league == "nrbl":
+        return NRBL
     if league == "youth_travel":
         return PITCH_SMART_15_18
     return None

@@ -6,6 +6,24 @@ type: reference
 
 # POST /search Query-Parser Behavior
 
+## Hit Shape — NO `age_group` / `competition_level` (CONFIRMED 2026-07-25)
+
+Verified across **150 hits** from 6 queries: every hit is `{type, result}` with
+
+```
+result.{id, public_id, name, sport, season.{name, year}, location.{city, state, country}, avatar_url, type}
+```
+
+`age_group` and `competition_level` are **absent** — not null-valued, genuinely not in the
+payload. So the `public_id`→`gc_uuid` bridge **cannot** supply the level field; the public
+team profile is the only cheap source (see [[public-team-age-group-level-field]]). Note the
+season object here IS nested (`result.season.name` / `.year`), which is a **different shape**
+from the public team profile's flat `team_season.season` string — do not conflate them
+(see [[public-team-profile-season-shape]]).
+
+This also undercuts the *inferred* schema in the `/search/opponent-import` doc, which
+speculates those fields exist there (see [[search-opponent-import-regression]]).
+
 ## Diacritic Folding (CONFIRMED 2026-04-17)
 
 GC's search backend folds diacritics to ASCII at query time. A query containing accented Latin letters returns hits on the first attempt; no client-side normalization is required for accented-letter names to match indexed teams.

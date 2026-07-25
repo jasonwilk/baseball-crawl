@@ -75,7 +75,7 @@ Cross-team player identity and multi-season/longitudinal tracking are explicitly
 ## Scouting Model
 
 - [probable-starter-model.md](probable-starter-model.md) -- Deterministic probable-starter prediction model: ranked signals, NSAA/Legion rest thresholds by league+level+phase, role classification rules, committee handling, report output shape, backtesting scoring
-- [league-pitch-rules.md](league-pitch-rules.md) -- Per-league pitch count rules: gate keyed by league x level x phase; NSAA breakpoints (30/50/70/90/110) differ from Legion/Pitch Smart (30/45/60/80/105); Sub-Varsity +1 day stricter; implementation gap in starter_prediction.py
+- [league-pitch-rules.md](league-pitch-rules.md) -- Per-league pitch count rules: gate keyed by league x level x phase; NSAA breakpoints (30/50/70/90/110) differ from Legion/NRBL/Pitch Smart (30/45/60/80/105); Sub-Varsity +1 day stricter (corrected E-272-01); NRBL added as a distinct summer league (E-272); season is now a classification axis (spring->NSAA family, summer->Legion/NRBL family) that picks which table a level word maps to
 
 ## Scouting Signal Catalog
 

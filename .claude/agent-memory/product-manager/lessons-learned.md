@@ -3,6 +3,24 @@
 
 Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 
+## E-272 — Retiring a claim: sweep for DERIVATIVES, not restatements (2026-07-25)
+
+I wrote a false safety generalization into TN-4 at planning time ("the season-absent default over-rests, never under-rests" — true for sub-varsity, false for Varsity, because NSAA Varsity and Legion cross over in the middle tiers). CA caught it by refusing to restate a claim it had not checked against the constants. **Then I propagated it five times inside one epic across four structural positions, and found three of those myself only AFTER running a deliberate correction pass on the very file documenting the defect.**
+
+**The mechanism: a retired claim degrades into forms that no longer READ as claims.**
+- A **title** reads as a label. (`IDEA-168: … (no log, wrong-but-safe rules)`)
+- An **index-row closing sentence** — the tidy generalization that ends an entry, which is exactly where `tool-output-integrity.md` says this defect concentrates. I corrected that row's middle and left its last line.
+- A **rating** reads as metadata. "Rough Timing: **No urgency**" was *derived from* the safety claim, so retiring the claim silently invalidated the rating — while **sharing none of its tokens**. No grep for the claim's wording could ever have surfaced it.
+- A **single adjective** compresses the whole argument. "the **conservative** NSAA default" IS the claim, in one word, reading as description.
+
+**Practice:** when retiring a claim, enumerate and check its derivatives — the label that names it, the rating justified by it, the adjective compressing it, the summary that paraphrases it. This is `feedback_descope_grep_gap` running in the correction direction: a token-grep for the original wording finds none of these, so the sweep must be semantic. Highest-value positions to check first are the ones a reader actually sees: title, index row, first sentence, closing sentence, any rating or status label.
+
+**Corollary — state the count honestly when it moves.** My first tally was four; the sweep that produced it was itself incomplete. I corrected it upward to five in the History rather than quietly revising, because the fact that a careful count was wrong IS part of the lesson.
+
+**Second E-272 lesson — keep the NUMBER and the BANNER distinct when reclassifying.** When `"14U Reserve"` moved `nsaa_subvarsity`→`youth_travel`, the disclosure to the operator initially listed three rest-day rows. Two things were missing: the loosening is **non-uniform** (breakpoints differ, so 3 of 7 shared ranges are unchanged — smaller than the 3-row table implied), and the **daily cap rises 90→105** — a different KIND of change from a rest-day shift, and the more consequential half. When a reclassification moves a team between rule tables, diff the FULL curve plus the cap, not the tiers that happen to be adjacent.
+
+**Third — a "safe direction" claim is a claim, not a reassurance.** Both the TN-4 error and my IDEA-168 error took the form of asserting a failure was safe. That framing is self-protecting: it lowers the reader's guard and makes the idea look lower-priority, so it is the least-challenged sentence in the document. Verify a safety-direction claim against the actual constants at every pitch count, in both directions, before writing it.
+
 ## E-267 — AC-Verification Craft: what my layer can and cannot catch (2026-07-20)
 
 The most instructive epic I have verified. Six stories, twelve story-rounds, two independent closure reviews. **Seven of my own spec defects were found during dispatch and two of my claims were falsified by review** — the lessons below are drawn from those, not from the implementers' work.

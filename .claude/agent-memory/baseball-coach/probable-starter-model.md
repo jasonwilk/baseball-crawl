@@ -36,7 +36,7 @@ Both failures came from missing two hard gates:
 ## Rest Thresholds — Gate Is Keyed by League x Level x Phase
 
 **NSAA and Legion use different breakpoints. Do not conflate them.**
-Full authoritative tables, daily max caps, hard/guideline flags, the sub-varsity implementation gap, universal NSAA rules (doubleheaders, midnight rule, ambidextrous pitchers), and the corrected structural conclusion are in [[league-pitch-rules]].
+Full authoritative tables (including NRBL), daily max caps, hard/guideline flags, the season x level classification model that picks the league family (E-272), universal NSAA rules (doubleheaders, midnight rule, ambidextrous pitchers), and the corrected structural conclusion are in [[league-pitch-rules]].
 
 ### NSAA Varsity (breakpoints 30/50/70/90/110)
 Two phases. Pre-April 1 daily max is 90 (no 91-110 tier). April 1-State daily max is 110.

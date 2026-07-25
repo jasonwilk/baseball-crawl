@@ -23,4 +23,13 @@ This CONTRADICTS:
 
 If the cached sample is current, the real path is `team_season.year` (flat) and `team_season.season` is a season-name string — so both the endpoint doc example and testing.md's example are wrong.
 
+**RE-CONFIRMED AT SCALE 2026-07-25 (E-272 probe).** An 18-team live sweep found
+`team_season.season` populated as a bare string on **all 18** (`"summer"` ×17, `"spring"` ×1)
+with `team_season.year` a flat int alongside it. So the shape is settled beyond the original
+n=1 sample, and `season` is a **discriminating** signal, not a constant. Two adjacent facts
+from that sweep: the shape is **identical with and without** the vendor `Accept`
+(see [[public-team-accept-header-inert]]), and `POST /search` uses a **different, nested**
+season shape (`result.season.{name,year}`) — do not conflate the two
+(see [[search-endpoint-notes]]).
+
 **Status: LIVE-CONFIRMED 2026-07-07 (E-255-R-01).** A plain public curl (`GET /public/teams/{public_id}`, 200 OK, no creds) returned `team_season.season` as the bare string `"summer"`, `team_season.year` as the flat int `2025`, and `team_season.record` with singular keys `{win, loss, tie}` — matching the cached sample exactly. The doc's `team_season.season.year` nesting and testing.md's worked example are BOTH wrong; the real path is `team_season.year` (flat) with `team_season.season` a season-name string. Verified fact recorded in `.project/research/E-255-verified-facts.md` (AC-2/G). Feeds E-255-01/02/04's corrections.

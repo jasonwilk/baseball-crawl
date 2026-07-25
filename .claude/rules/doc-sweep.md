@@ -28,6 +28,12 @@ A doc/context-layer verification is complete only when all three of the followin
 
 A verification that ran only step 1 is incomplete: report it as a gap, not a pass.
 
+## Retired Claims Survive in Forms Carrying None of Their Tokens
+
+A claim you REMOVED is harder to sweep than a concept you added: it survives not as a restatement but as residue that no longer looks like a claim. E-272 retired one sentence ("the season-absent default is the stricter table, so it over-rests") and found five survivals across four structural positions, plus a sixth shape in the same review -- a **title** encoding the retired predicate above a correct body; an **index row** still asserting what its own topic file has retracted; a **rating or priority derived from the claim but sharing none of its words** (an urgency of "no urgency" that rested entirely on the retired safety claim -- no grep will ever find this); a **compressed adjective** carrying the whole claim in one word ("safe", "conservative") inside an otherwise unrelated sentence; and an error **hiding behind a legitimate neighbouring use of the same token** (one wrong "fourth" beside two correct ones, so the grep hit looks accounted for).
+
+So when the swept concept is a RETIREMENT, step 2 must enumerate the **judgements that DEPENDED on the claim**, not merely rephrasings of it -- every rating, priority, risk adjective, and summary line in the neighbourhood. Ask "what would I have written differently if I had never believed this?" And check each hit individually even when a neighbouring hit is correct.
+
 ## Relationship to Other Rules
 
 - This is the doc/prose-surface companion to the tool-output-integrity grep prohibition (`.claude/rules/tool-output-integrity.md`, Prohibition 3): a grep hit -- or a grep miss -- is a candidate signal, never a ruling. Confirm with a read.

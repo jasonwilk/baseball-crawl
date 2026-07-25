@@ -4,7 +4,7 @@
 [E-272: Season × Level → League Classification (+ NRBL)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `NSAA_SUBVARSITY` rest-tier constant in the starter-prediction engine encodes the authoritative NSAA Sub-Varsity curve (stricter than Varsity by exactly one rest day at every tier) instead of the current curve that is byte-identical to NSAA Varsity pre-April. This corrects a live under-resting bug: sub-varsity opponent arms are currently marked available a day too early at every pitch tier.

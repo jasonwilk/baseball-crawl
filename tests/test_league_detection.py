@@ -7,6 +7,7 @@ Tests ``detect_league_level()`` and supporting helpers in
 from __future__ import annotations
 
 import datetime
+import logging
 
 from src.api.db import build_pitcher_profiles
 from src.reports.starter_prediction import (
@@ -391,10 +392,35 @@ class TestSubvarsityRules:
     def test_subvarsity_90_pitch_max(self) -> None:
         assert NSAA_SUBVARSITY.max_pitches == 90
 
-    def test_subvarsity_same_rest_tiers_as_pre_april(self) -> None:
-        """Subvarsity rest tiers match NSAA pre-April (same 90-pitch structure)."""
+    def test_subvarsity_rest_tiers_stricter_than_pre_april_by_one_day(self) -> None:
+        """E-272-01 (AC-1/AC-3): Sub-Varsity shares NSAA Varsity's pre-April
+        90-pitch breakpoints but requires exactly one MORE rest day at every
+        tier (1/2/3/4 vs 0/1/2/3), per the NSAA 2022 Pitch Count Regulations.
+
+        Replaces ``test_subvarsity_same_rest_tiers_as_pre_april``, which
+        asserted equality and so encoded the under-resting bug.
+        """
         from src.reports.starter_prediction import NSAA_PRE_APRIL
-        assert NSAA_SUBVARSITY.rest_tiers == NSAA_PRE_APRIL.rest_tiers
+
+        assert NSAA_SUBVARSITY.rest_tiers != NSAA_PRE_APRIL.rest_tiers
+        assert len(NSAA_SUBVARSITY.rest_tiers) == len(NSAA_PRE_APRIL.rest_tiers)
+        for sub_tier, var_tier in zip(
+            NSAA_SUBVARSITY.rest_tiers, NSAA_PRE_APRIL.rest_tiers
+        ):
+            # Same breakpoints ...
+            assert sub_tier.min_pitches == var_tier.min_pitches
+            assert sub_tier.max_pitches == var_tier.max_pitches
+            # ... one more rest day.
+            assert sub_tier.rest_days == var_tier.rest_days + 1
+
+    def test_subvarsity_rest_tiers_exact_curve(self) -> None:
+        """AC-1: pin the authoritative Sub-Varsity curve literally, so a
+        Varsity-side change cannot drag Sub-Varsity along via the
+        relative-comparison test above."""
+        assert [
+            (t.min_pitches, t.max_pitches, t.rest_days)
+            for t in NSAA_SUBVARSITY.rest_tiers
+        ] == [(1, 30, 1), (31, 50, 2), (51, 70, 3), (71, 90, 4)]
 
     def test_subvarsity_year_round(self) -> None:
         """Subvarsity rules don't change with date."""
@@ -403,6 +429,47 @@ class TestSubvarsityRules:
         rules_may = get_subvarsity_rules(datetime.date(2026, 5, 15))
         assert rules_march == rules_may
         assert rules_march.max_pitches == 90
+
+    def test_subvarsity_arm_needs_one_more_rest_day_than_varsity(self) -> None:
+        """E-272-01 (AC-2): behavioral -- for the same pitch load, a
+        sub-varsity arm is STILL excluded on the day a varsity arm becomes
+        available, and becomes available exactly one day later.  Runs through
+        ``_is_excluded`` (the real eligibility gate), not just the constants,
+        so the correction is proven where it changes report output.
+        """
+        from src.reports.starter_prediction import NSAA_PRE_APRIL, _is_excluded
+
+        reference_date = datetime.date(2026, 4, 15)
+
+        for var_tier in NSAA_PRE_APRIL.rest_tiers:
+            pitches = var_tier.max_pitches  # top of the tier
+            var_rest = var_tier.rest_days
+            label = f"{pitches}p"
+
+            def _profile(days_rest: int) -> dict:
+                last = reference_date - datetime.timedelta(days=days_rest)
+                return {
+                    "appearances": [
+                        {"game_date": last.isoformat(), "pitches": pitches}
+                    ]
+                }
+
+            # Rested exactly as long as Varsity requires: varsity available,
+            # sub-varsity is not.
+            profile = _profile(var_rest)
+            var_excluded, _ = _is_excluded(profile, reference_date, NSAA_PRE_APRIL)
+            sub_excluded, sub_reason = _is_excluded(
+                profile, reference_date, NSAA_SUBVARSITY
+            )
+            assert var_excluded is False, f"{label}/{var_rest}d varsity"
+            assert sub_excluded is True, f"{label}/{var_rest}d subvarsity"
+            assert sub_reason is not None
+            assert f"needs {var_rest + 1}" in sub_reason
+
+            # One more day of rest: sub-varsity is now available too.
+            assert _is_excluded(
+                _profile(var_rest + 1), reference_date, NSAA_SUBVARSITY
+            ) == (False, None), f"{label}/{var_rest + 1}d subvarsity"
 
 
 # ── AC-13: Warning Output Contract end-to-end ─────────────────────────
@@ -590,3 +657,460 @@ class TestYouthTravelFallback:
         )
         assert pred.confidence == "suppress"
         assert pred.predicted_starter is None
+
+
+# ══ E-272-02: season x level -> league classification (+ NRBL) ═════════
+
+
+class TestMappedAgeBrackets:
+    """AC-2: single \\d+U brackets map to a league family (empty-ngb path)."""
+
+    def test_18u_is_legion(self) -> None:
+        assert detect_league_level(ngb="[]", age_group="18U") == "legion"
+
+    def test_17u_is_legion(self) -> None:
+        assert detect_league_level(ngb="[]", age_group="17U") == "legion"
+
+    def test_16u_is_nrbl(self) -> None:
+        assert detect_league_level(ngb="[]", age_group="16U") == "nrbl"
+
+    def test_15u_is_nrbl(self) -> None:
+        assert detect_league_level(ngb="[]", age_group="15U") == "nrbl"
+
+    def test_14u_stays_youth_travel(self) -> None:
+        """AC-2: the unmapped bracket boundary is unchanged."""
+        assert detect_league_level(ngb="[]", age_group="14U") == "youth_travel"
+
+    def test_19u_is_legion(self) -> None:
+        """TN-2: 17U and ABOVE is legion, so an unseen 19U resolves too."""
+        assert detect_league_level(ngb="[]", age_group="19U") == "legion"
+
+    def test_bracket_in_team_name_maps_too(self) -> None:
+        """TN-2: age_group and team_name share one bracket ladder."""
+        assert detect_league_level(
+            ngb="[]", team_name="Norfolk Motor Company 18U",
+        ) == "legion"
+        assert detect_league_level(
+            ngb="[]", team_name="Columbus 16U Blues",
+        ) == "nrbl"
+
+    def test_bracket_is_case_insensitive(self) -> None:
+        assert detect_league_level(ngb="[]", age_group="18u") == "legion"
+
+    def test_mapped_bracket_beats_subvarsity_keyword(self) -> None:
+        """TN-2 4a: the bracket runs ahead of ALL level words, so "16U Reserve"
+        is nrbl via the bracket -- NOT nsaa_subvarsity via "Reserve"."""
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln 16U Reserve",
+        ) == "nrbl"
+
+    def test_mapped_bracket_beats_legion_keyword(self) -> None:
+        """A 15U team named "Juniors" is NRBL-age, not Legion-age."""
+        assert detect_league_level(
+            ngb="[]", team_name="Waverly 15U Juniors",
+        ) == "nrbl"
+
+    def test_unmapped_bracket_beats_nsaa_level_word(self) -> None:
+        """TN-2 4b: the UNMAPPED half of the ladder outranks NSAA level words
+        too, so a 14U bracket in the NAME wins over "Reserve" / "Varsity" /
+        "Freshman" / "JV".
+
+        SCOPE: this is the bracket-in-TEAM-NAME path only.  With
+        ``age_group="14U"`` the old code already short-circuited to
+        youth_travel before reaching any name keyword, so nothing changed there
+        (pinned by ``test_unmapped_bracket_in_age_group_is_unchanged``).
+
+        This is the combination whose outcome CHANGED, and the only one that
+        changed in the LESS-strict direction: the old ``_NAME_KEYWORDS`` table
+        ordered reserve/varsity ahead of the flat ``\\d+U`` entry, so
+        "Lincoln 14U Reserve" returned nsaa_subvarsity (90 max, 1/2/3/4) and
+        "Lincoln 14U Varsity" returned nsaa_varsity; both now take the labeled
+        Pitch Smart estimate (105 max, 0/1/2/3/4).  Pinned rather than left
+        emergent so a maintainer who finds it surprising meets the reasoning
+        before deciding it is a bug: a team branded "14U" is a youth-travel org,
+        whereas NSAA sub-varsity/varsity are Nebraska HS tiers and HS teams do
+        not brand by age bracket.
+        """
+        for name in (
+            "Lincoln 14U Reserve",
+            "Lincoln 14U Varsity",
+            "Lincoln 14U Freshman",
+            "Lincoln 14U JV",
+        ):
+            assert detect_league_level(
+                ngb="[]", team_name=name,
+            ) == "youth_travel", name
+
+    def test_unmapped_bracket_in_age_group_is_unchanged(self) -> None:
+        """Scope guard for the test above: the age_group path did NOT change --
+        a 14U age_group already outranked every name keyword."""
+        for name in ("Lincoln Reserve", "Lincoln Varsity"):
+            assert detect_league_level(
+                ngb="[]", age_group="14U", team_name=name,
+            ) == "youth_travel", name
+
+    def test_unmapped_bracket_nsaa_word_is_labeled_an_estimate(self) -> None:
+        """The less-strict landing spot is not presented as a binding rule: the
+        youth_travel path sets is_estimate, so the report banners it."""
+        history = _build_history_for_warning_test()
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 4, 15),
+            league=detect_league_level(ngb="[]", team_name="Lincoln 14U Reserve"),
+        )
+        assert pred.is_estimate is True
+
+    def test_range_form_is_not_a_mapped_bracket(self) -> None:
+        """TN-2: the U suffix is load-bearing -- a bare-integer match would grab
+        the 18 out of "Between 13 - 18" and wrongly return legion."""
+        assert detect_league_level(
+            ngb="[]", age_group="Between 13 - 18",
+        ) == "youth_travel"
+        assert detect_league_level(ngb="[]", age_group="13-18") == "youth_travel"
+
+
+class TestLegion18UBugFixed:
+    """AC-1: the live bug -- a scouted 18U Legion opponent rendered the youth
+    Pitch Smart estimate instead of the binding Legion rules."""
+
+    def test_18u_legion_opponent_resolves_legion(self) -> None:
+        """Empty ngb, no DB fields, Legion/Seniors name + 18U bracket."""
+        assert detect_league_level(
+            ngb="[]",
+            age_group="18U",
+            team_name="Norfolk Motor Company Seniors 18U",
+        ) == "legion"
+
+    def test_18u_legion_opponent_gets_binding_legion_rules(self) -> None:
+        """AC-1: the resolved league selects the LEGION table (max 105), not the
+        Pitch Smart estimate."""
+        from src.reports.starter_prediction import LEGION, PITCH_SMART_15_18
+
+        level = detect_league_level(
+            ngb="[]",
+            age_group="18U",
+            team_name="Norfolk Motor Company Seniors 18U",
+        )
+        rules = get_rules_for_league(level, datetime.date(2026, 7, 18))
+        assert rules is LEGION
+        assert rules is not PITCH_SMART_15_18
+
+    def test_18u_legion_opponent_is_not_flagged_an_estimate(self) -> None:
+        """AC-1: end-to-end, the youth estimate banner is driven by
+        ``is_estimate``; a Legion-resolved 18U opponent must not set it."""
+        history = _build_history_for_warning_test()
+        profiles = build_pitcher_profiles(history)
+        level = detect_league_level(
+            ngb="[]",
+            age_group="18U",
+            team_name="Norfolk Motor Company Seniors 18U",
+        )
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 7, 18),
+            league=level,
+        )
+        assert pred.is_estimate is False
+        assert pred.confidence != "suppress"
+
+
+class TestSeasonLevelWordMatrix:
+    """AC-3: season picks the league FAMILY across every level word."""
+
+    # ── Summer ────────────────────────────────────────────────────────
+    def test_summer_varsity_is_legion(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Varsity", season="summer",
+        ) == "legion"
+
+    def test_summer_jv_is_nrbl(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln JV", season="summer",
+        ) == "nrbl"
+
+    def test_summer_reserve_is_nrbl(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Reserve", season="summer",
+        ) == "nrbl"
+
+    def test_summer_freshman_is_nrbl(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Freshman", season="summer",
+        ) == "nrbl"
+
+    def test_summer_sophomore_is_nrbl(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Sophomore", season="summer",
+        ) == "nrbl"
+
+    def test_summer_junior_varsity_is_nrbl_not_legion(self) -> None:
+        """"Junior Varsity" must stay sub-varsity (nrbl in summer) rather than
+        matching bare "Varsity" (legion in summer)."""
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Junior Varsity", season="summer",
+        ) == "nrbl"
+
+    # ── Spring ────────────────────────────────────────────────────────
+    def test_spring_varsity_is_nsaa_varsity(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Varsity", season="spring",
+        ) == "nsaa_varsity"
+
+    def test_spring_jv_is_nsaa_subvarsity(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln JV", season="spring",
+        ) == "nsaa_subvarsity"
+
+    def test_spring_freshman_is_nsaa_subvarsity(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Freshman", season="spring",
+        ) == "nsaa_subvarsity"
+
+    # ── Season absent → NSAA spring default ───────────────────────────
+    def test_season_absent_varsity_defaults_nsaa_varsity(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Varsity",
+        ) == "nsaa_varsity"
+
+    def test_season_absent_jv_defaults_nsaa_subvarsity(self) -> None:
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln JV",
+        ) == "nsaa_subvarsity"
+
+    # ── Legion words are season-independent ───────────────────────────
+    def test_legion_words_ignore_season(self) -> None:
+        """TN-2 4c: Legion/Post/Seniors/Juniors resolve legion in any season."""
+        for season in ("summer", "spring", None):
+            for name in (
+                "Lincoln Legion",
+                "Lincoln American Legion",
+                "Post 143",
+                "Waverly Seniors",
+                "Waverly Juniors",
+            ):
+                assert detect_league_level(
+                    ngb="[]", team_name=name, season=season,
+                ) == "legion", f"{name!r} / season={season!r}"
+
+    def test_reserves_plural_is_a_level_word(self) -> None:
+        """TN-2 4c lists "Reserves" alongside "Reserve"."""
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Reserves", season="summer",
+        ) == "nrbl"
+        assert detect_league_level(
+            ngb="[]", team_name="Lincoln Reserves",
+        ) == "nsaa_subvarsity"
+
+
+class TestSeasonDiscriminator:
+    """AC-3 (multi-scope anchor): the SAME team name resolves to a different
+    league in each season.  A single-season fixture would hide the whole season
+    axis, so this asserts all three scopes side by side."""
+
+    def test_reserve_resolves_by_season(self) -> None:
+        name = "Anytown Reserve"
+        assert detect_league_level(
+            ngb="[]", team_name=name, season="summer",
+        ) == "nrbl"
+        assert detect_league_level(
+            ngb="[]", team_name=name, season="spring",
+        ) == "nsaa_subvarsity"
+        assert detect_league_level(ngb="[]", team_name=name) == "nsaa_subvarsity"
+
+    def test_reserve_selects_a_different_rule_table_by_season(self) -> None:
+        """The season axis reaches the rest TABLE, not just the league id."""
+        from src.reports.starter_prediction import NRBL
+
+        ref = datetime.date(2026, 6, 15)
+        summer = get_rules_for_league(
+            detect_league_level(
+                ngb="[]", team_name="Anytown Reserve", season="summer",
+            ), ref,
+        )
+        spring = get_rules_for_league(
+            detect_league_level(
+                ngb="[]", team_name="Anytown Reserve", season="spring",
+            ), ref,
+        )
+        assert summer is NRBL
+        assert spring is NSAA_SUBVARSITY
+        assert summer.max_pitches == 105
+        assert spring.max_pitches == 90
+
+    def test_spring_subvarsity_selects_the_corrected_e272_01_curve(self) -> None:
+        """E-272-01 linkage: the spring sub-varsity path must land on the
+        CORRECTED 1/2/3/4 table, not the pre-E-272-01 0/1/2/3 curve."""
+        rules = get_rules_for_league(
+            detect_league_level(
+                ngb="[]", team_name="Anytown Reserve", season="spring",
+            ),
+            datetime.date(2026, 4, 15),
+        )
+        assert rules is NSAA_SUBVARSITY
+        assert [
+            (t.min_pitches, t.max_pitches, t.rest_days) for t in rules.rest_tiers
+        ] == [(1, 30, 1), (31, 50, 2), (51, 70, 3), (71, 90, 4)]
+
+
+class TestSeasonNormalization:
+    """AC-3 / TN-4: season matching is case-insensitive; anything that is not
+    "summer" takes the NSAA default (conservative on the sub-varsity branch
+    exercised here -- see `_SUMMER_SEASON`, it is not a blanket safety margin)."""
+
+    def test_summer_is_case_insensitive(self) -> None:
+        for token in ("summer", "Summer", "SUMMER", "  summer  "):
+            assert detect_league_level(
+                ngb="[]", team_name="Lincoln Reserve", season=token,
+            ) == "nrbl", f"season={token!r}"
+
+    def test_unrecognized_season_takes_the_nsaa_default(self) -> None:
+        """TN-4: an unknown token must not be guessed into the summer family.
+        For the SUB-VARSITY branch this fixture drives, that is the safe
+        direction -- NSAA_SUBVARSITY (90) demands at least NRBL's rest at every
+        pitch count, so the sub-varsity default over-rests rather than
+        under-rests.  This does NOT generalize to the varsity branch; see the
+        `_SUMMER_SEASON` comment for the bands where NSAA Varsity under-rests."""
+        for token in ("fall", "winter", "offseason", "", "   "):
+            assert detect_league_level(
+                ngb="[]", team_name="Lincoln Reserve", season=token,
+            ) == "nsaa_subvarsity", f"season={token!r}"
+
+
+class TestRecognizedNgbWinsOverBracket:
+    """AC-4: a recognized ngb outranks the age bracket and the season."""
+
+    def test_usssa_ngb_beats_15u_bracket(self) -> None:
+        """A genuine USSSA 15U team is usssa (suppress), NOT nrbl."""
+        assert detect_league_level(
+            ngb='["usssa"]', age_group="15U",
+        ) == "usssa"
+
+    def test_usssa_ngb_beats_18u_bracket(self) -> None:
+        assert detect_league_level(
+            ngb='["usssa"]', age_group="18U", team_name="Lincoln 18U",
+        ) == "usssa"
+
+    def test_legion_ngb_beats_14u_bracket(self) -> None:
+        """The precedence holds in the other direction too."""
+        assert detect_league_level(
+            ngb='["american_legion"]', age_group="14U",
+        ) == "legion"
+
+    def test_nsaa_ngb_beats_bracket_and_stays_season_blind(self) -> None:
+        """TN-2: the step-2 nsaa name disambiguation stays season-BLIND."""
+        assert detect_league_level(
+            ngb='["nsaa"]', age_group="16U", team_name="Lincoln Reserve",
+            season="summer",
+        ) == "nsaa_subvarsity"
+
+
+class TestNrblRules:
+    """AC-5: NRBL engine wiring."""
+
+    def test_get_rules_for_nrbl(self) -> None:
+        from src.reports.starter_prediction import NRBL
+
+        rules = get_rules_for_league("nrbl", datetime.date(2026, 6, 15))
+        assert rules is NRBL
+        assert rules.max_pitches == 105
+
+    def test_nrbl_is_distinct_constant_from_legion(self) -> None:
+        """TN-3: same tiers today, separately defined -- mirrors
+        test_pitch_smart_is_distinct_constant_from_legion."""
+        from src.reports.starter_prediction import LEGION, NRBL
+
+        assert NRBL is not LEGION
+        assert NRBL.rest_tiers == LEGION.rest_tiers
+        assert NRBL.max_pitches == LEGION.max_pitches
+        # Equal VALUES but no shared structure: the tiers are separate literals,
+        # so editing LEGION's table cannot reach NRBL's.
+        assert NRBL.rest_tiers is not LEGION.rest_tiers
+
+    def test_nrbl_year_round_no_date_split(self) -> None:
+        """TN-10: summer leagues are flat year-round, no April phase split."""
+        assert get_rules_for_league(
+            "nrbl", datetime.date(2026, 3, 15),
+        ) is get_rules_for_league("nrbl", datetime.date(2026, 7, 15))
+
+    def test_nrbl_renders_binding_not_an_estimate(self) -> None:
+        """AC-5: NRBL is a real rule unit -- no estimate banner, no suppress."""
+        history = _build_history_for_warning_test()
+        profiles = build_pitcher_profiles(history)
+        pred = compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 6, 15),
+            league="nrbl",
+        )
+        assert pred.is_estimate is False
+        assert pred.confidence != "suppress"
+        assert pred.suppress_reason is None
+        if pred.data_note:
+            assert "not yet supported" not in pred.data_note
+            assert "not detected" not in pred.data_note
+
+
+class TestBracketSeasonDisagreementLog:
+    """AC-7: a mapped bracket that contradicts the season logs a data-quality
+    WARNING.  Observability only -- the bracket still wins the gate."""
+
+    def test_disagreement_logs_warning(self, caplog) -> None:
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            level = detect_league_level(
+                ngb="[]", age_group="18U", season="spring",
+            )
+        assert level == "legion"  # bracket still wins
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("age bracket resolved legion" in m for m in messages), messages
+        # The conflicting season is named so the line is actionable.
+        assert any("'spring'" in m for m in messages), messages
+
+    def test_nrbl_bracket_disagreement_logs_warning(self, caplog) -> None:
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            level = detect_league_level(
+                ngb="[]", age_group="16U", season="spring",
+            )
+        assert level == "nrbl"
+        assert any("nrbl" in r.getMessage() for r in caplog.records)
+
+    def test_absent_season_is_not_a_disagreement(self, caplog) -> None:
+        """TN-2: an ABSENT season is explicitly not a disagreement."""
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            assert detect_league_level(ngb="[]", age_group="18U") == "legion"
+        assert caplog.records == []
+
+    def test_agreeing_season_is_silent(self, caplog) -> None:
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            assert detect_league_level(
+                ngb="[]", age_group="18U", season="summer",
+            ) == "legion"
+        assert caplog.records == []
+
+    def test_unrecognized_season_is_silent(self, caplog) -> None:
+        """We cannot substantiate a conflict with a token we do not know."""
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            assert detect_league_level(
+                ngb="[]", age_group="18U", season="banana",
+            ) == "legion"
+        assert caplog.records == []
+
+    def test_unmapped_bracket_is_not_a_disagreement(self, caplog) -> None:
+        """14U is not a mapped (summer-family) bracket, so there is nothing to
+        disagree with."""
+        with caplog.at_level(
+            logging.WARNING, logger="src.reports.starter_prediction",
+        ):
+            assert detect_league_level(
+                ngb="[]", age_group="14U", season="spring",
+            ) == "youth_travel"
+        assert caplog.records == []

@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-07-16 | Source: E-245 (pitch-charted coverage badge and zero-charted notes), E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative), E-239 (removed dashboard comparison table and references; standalone reports is now the primary coaching surface), E-243 (reframed Predicted Starter as Most Likely Arms ranked list), E-264 (ERA game-length basis label on the Pitching table)*
+*Last updated: 2026-07-25 | Source: E-245 (pitch-charted coverage badge and zero-charted notes), E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative), E-239 (removed dashboard comparison table and references; standalone reports is now the primary coaching surface), E-243 (reframed Predicted Starter as Most Likely Arms ranked list), E-264 (ERA game-length basis label on the Pitching table), E-272 (corrected the Estimated Rest note's description of when it applies)*
 
 ---
 
@@ -49,7 +49,7 @@ The report shows pitching and batting stats in a self-contained format. You'll s
 
 Arms that cannot pitch that day appear in a separate **Unavailable today** block, each with a brief reason.
 
-For opponents whose game schedules are not fully public (common with many youth and travel programs), the section still identifies the most likely arm but marks it with an **Estimated rest** note. Treat it as a directional read — pitching availability norms vary between programs.
+Some opponents' age level doesn't map to a recognized high school, legion, or reserve-league rest rule -- most often the youngest youth/travel brackets (14U and under), or when the age group on record is a broad range rather than a specific bracket. For those opponents, the section still identifies the most likely arm but marks it with an **Estimated rest** note: rest and availability are worked out from a standard youth pitch-count guide instead of that level's own rule. Treat it as a directional read — pitching availability norms vary between programs.
 
 When there are not enough games on record, the section shows a plain "not enough games yet" message rather than guessing.
 

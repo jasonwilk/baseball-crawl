@@ -4,7 +4,7 @@
 [E-272: Season × Level → League Classification (+ NRBL)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/pitch-rules.md` documents NRBL as an implemented pitch-count league, expresses the season as a classification axis in its League-to-Classification mapping, reconciles its "Forward direction (E-263)" note so the E-263 (operator-pick) and E-272 (season-axis inference) directions read coherently, and its frontmatter `paths:` glob covers every file that reads the season signal for league selection.

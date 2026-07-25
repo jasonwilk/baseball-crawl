@@ -4,7 +4,7 @@
 [E-272: Season × Level → League Classification (+ NRBL)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `detect_league_level()` resolves an opponent's league from the season × level model (season picks the league family; age/level picks the tier), the Nebraska Reserve Baseball League (NRBL) is a supported pitch-count league, and the live bug — a scouted 18U American Legion opponent rendering the youth Pitch Smart estimate instead of the Legion rules — is fixed. The report applies the correct rest table for spring NSAA, summer Legion, and summer NRBL opponents without an operator having to intervene.
