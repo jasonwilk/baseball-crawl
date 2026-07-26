@@ -1,5 +1,29 @@
 # Handoff hiccup ledger (running; classified per eval protocol axis D)
 
+## E-276 DISPATCH PHASE (2026-07-26/27)
+
+7. Hub SKIPPED the "and review" Codex pass (Phase 4), sent CR straight to
+   Phase 5. Caught by the OPERATOR (four-word question), not a gate. Recovery
+   high-quality: CR held so it adjudicates Codex findings with the final diff
+   (the approve-then-reverse failure the ordering exists to prevent; 3 prior
+   epics). Classification: LAYER/procedure-fidelity + probable compaction
+   assist (post-compact skill = relayed procedure).
+8. Hub stopped at the closure COMMIT and dropped steps 7-11 (worktree/branch
+   removal, shutdowns, straggler sweep); operator prompted twice. Hub's own
+   diagnosis, verbatim-worthy: "I treated the procedure as a list of things to
+   report on rather than a sequence to execute" and "I was the one participant
+   with no second party checking my sequencing." n=2 same class, same epic ->
+   promoted to the layer pass as deliverable 4b (artifact preconditions +
+   checked end-state + navigator-as-sequencing-checker). Note: the navigator
+   thread independently flagged the surviving worktree BEFORE the operator
+   asked — the two-party sequencing check exists when a navigator is present.
+   Also: ugrep silent-empty bit this dispatch TWICE despite its dedicated
+   rules paragraph (salience dilution evidence, feeds the rehome mandate);
+   CR designed it out with an AST-based sweep (the knowledge works when
+   retrieved). Operator raised dispatch send-cap thresholds mid-flight
+   (dc1cc9e). E-276 closure commit: bfc614a. Total epic cost: 24.2h span /
+   12.0h ACTIVE / 61MB / 21 subagents — vs 2.5-4h / 8-13MB full-epic bands.
+
 ## DESIGN CORRECTION (operator reveal, ~22:2xZ): the navigator's bounded-finish
 instruction was NEVER RELAYED to P1 — operator deliberately withheld it to observe
 the unsteered state. Therefore: ALL P1 behavior after the pivot flag is UNSTEERED.

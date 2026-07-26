@@ -51,6 +51,64 @@ plus the four vendor guides (re-fetch; dated 2026-07-26).
    pass retires. Deletion list -> operator approval BEFORE executing.
    Net-negative lines expected for the whole pass.
 
+## MANDATE SCALED UP (operator, 2026-07-26): restructure-to-vendor-shape, not
+## surgical prune
+
+Deliverable 3 becomes REHOME + PRUNE: target end-state is the vendor shape —
+CLAUDE.md = brief repo description + genuine gotchas + pointers; long
+Commands/Architecture blocks -> paths-scoped rules and on-demand reference
+files; tool quirks -> tool-adjacent placement (the ugrep quirk bit the E-276
+dispatch TWICE despite its rules paragraph — salience dilution, not missing
+content; CR's AST workaround shows the knowledge works when retrieved);
+duplications -> single placement; DELETE only scaffolding/conflict classes,
+each with defect + recurrence citation; anything uncitable is REHOMED, never
+deleted. Coordinate with E-276-05's shipped CLAUDE.md rewrite — no double-edit.
+
+Deliverable 6 becomes NEAR-COMPLETE memory prune: durable copies of the good
+lessons now live in committed rules + this research dir — memory entries
+duplicating them are redundant drafts (vendor auto-memory rule applied
+retroactively). Reset aggressively; selectively re-bootstrap per the Fable
+memory guidance; deletion list to the operator before execution.
+
+## Vendor method addendum (claude.com blog: "The new rules of context
+## engineering for Claude 5 generation models", fetched 2026-07-26)
+
+Binds deliverable 3's METHOD; all [VENDOR]:
+- "Unhobbling": over-constraint itself degrades 5-gen models — CONFLICTING or
+  overlapping guidance forces excessive deliberation. The prune hunts a second
+  class beyond self-recheck scaffolding: instruction PAIRS in tension.
+- Progressive disclosure = the vendor-named who-loads-this test: detailed
+  verification/review guidance belongs in SKILLS selectively activated;
+  CLAUDE.md "briefly describes what your repo is for," gotchas over inferables.
+- Repetition -> single placement: deliberate defense-in-depth duplication is an
+  old-generation pattern; keep only where two AUDIENCES (not two reminders)
+  need it.
+- Examples -> interface design: prefer expressive parameter enums over
+  exhaustive worked examples in skills/tools.
+- Run `claude doctor` as a DIAGNOSTIC INPUT before deliverable 3 — second
+  opinion, not autopilot; accepted suggestions still need citations.
+
+## Procedure-fidelity fixes for the implement skill (defect-cited, E-276
+## dispatch, n=2 in one epic — add as deliverable 4b)
+
+The dispatch hub skipped Phase 4 (Codex) and then closure steps 7-11, both
+while able to quote the omitted step; its own diagnosis: "I treated the
+procedure as a list of things to report on rather than a sequence to execute."
+Root pattern: procedures executed from post-compact/ambient memory are RELAYED
+procedures. Fixes, both end-state-shaped (file-wins for procedures):
+(a) Phase-5 entry precondition: if the review modifier is active, verify the
+    Codex findings artifact EXISTS before the closure integration review; if
+    absent, run Phase 4 now.
+(b) Closure completion = a CHECKED END-STATE, not a step list: the skill's
+    final step requires command-output evidence — `git worktree list` shows
+    main only; epic branch deleted; epic dir archived; `git status` clean;
+    team shut down — before "closure complete" may be reported.
+(c) Note for dispatch-pattern.md: the hub had "no second party checking my
+    sequencing" (its words) — every artifact role has a verifier; the
+    orchestrator's PROCEDURE does not. The navigator/sub-lead pairing covers
+    this (the navigator independently flagged the un-removed worktree before
+    the operator asked); name sequencing-check as part of that role.
+
 ## Constraints
 
 - Freeze discipline: every change defect- or vendor-cited (the citations are in
