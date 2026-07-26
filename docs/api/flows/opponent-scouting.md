@@ -166,7 +166,7 @@ See [`GET /teams/{team_id}/season-stats`](../endpoints/get-teams-team_id-season-
 
 **Following is NOT required for any step in the public-endpoint scouting chain.**
 
-Confirmed on an unfollowed team (`public_id: 8O8bTolVfb9A`, 2026-03-12):
+Confirmed on an unfollowed team (`public_id: yYyYyYyYyYyY`, 2026-03-12):
 - Step 1 (schedule, no auth): HTTP 200 ✓
 - Step 2 (roster, gc-token): HTTP 200 ✓
 - Step 3 (boxscores, gc-token): HTTP 200 ✓ (24 games, 19 players)
@@ -213,7 +213,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 | Team | `public_id` | Games | Players | Verified |
 |------|------------|-------|---------|----------|
 | Anytown Eagles Varsity | `xXxXxXxXxXxX` | 28 | confirmed | 2026-03-12 |
-| Unfollowed team | `8O8bTolVfb9A` | 24 | 19 | 2026-03-12 |
+| Unfollowed team | `yYyYyYyYyYyY` | 24 | 19 | 2026-03-12 |
 
 ---
 
