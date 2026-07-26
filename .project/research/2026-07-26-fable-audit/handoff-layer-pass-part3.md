@@ -78,15 +78,33 @@ The live paths are
 All the snippets D5 needed are now transcribed verbatim into
 `model-behavior-reference.md`, so no re-fetch should be necessary.
 
-## D6 — list written, awaiting the operator; NOTHING deleted
+## D6 — EXECUTED and COMMITTED (`4584192`), scoped to the always-loaded tier
 
-`d6-memory-prune-deletion-list.md` in this directory. It opens with a scoping
-recommendation (prune the nine always-loaded `MEMORY.md` files hard; treat the
-107 inert topic files as a separate question) and the reasoning behind it. Read
-that before the itemized list — it changes what is being ruled on.
+The operator approved the narrower scope argued in `d6-memory-prune-deletion-list.md`
+(that file stays as the record): prune the nine `MEMORY.md` files, which are the
+only agent-memory files that cost context, and defer the 107 inert topic files to
+a separate pass with a higher bar. Read the list file's opening section before
+re-opening any of this — it argues why the aggressive-reset case rests on hygiene
+rather than context cost.
 
-Unaudited remainder is named at the bottom of that file: the 107 topic files,
-and three code-reviewer checks I explicitly did not verify.
+Headline: **`claude-architect/MEMORY.md` went 20,123 → 12,901 bytes**, under the
+read-limit hook's 17,100 ask, almost entirely by collapsing one 8,554-byte bullet
+that restated all 27 sections of its own `epic-codifications.md`. All five
+code-reviewer "Mandatory Review Checks" proved to be in `code-reviewer.md` with
+their defect citations, so none needed promoting; the section became a tombstone
+saying they moved and remain mandatory, because a bare deletion is
+indistinguishable from a retirement to the next reader.
+
+Three stale claims were fixed as approved riders, each found by hitting it: the
+PM-Bash staleness fallback in `workflow-discipline.md`, the false
+raw-to-processed pipeline at `etl-patterns.md:20`, and the commit-verification
+string in CLAUDE.md — see the incident below, because I got that third one's
+rationale wrong and the correction is `7568bff`.
+
+**Still unaudited, and the natural next pass:** the 107 topic files, named at the
+bottom of the deletion-list file. The largest untouched block is the per-epic
+consultation records under `baseball-coach/` (nine files, ~78 KB) and
+`product-manager/`.
 
 ## 3b — NOT STARTED
 
@@ -194,3 +212,44 @@ wrong-content findings were phrased in words the other did not contain. And **a
 duplicate that has DRIFTED is more dangerous than one that has not, while
 looking less so**: it reads as independent confirmation of a rule it actually
 contradicts.
+
+### The `[pii-scan]` incident — read this before 3b, it is the whole argument in miniature
+
+**What happened.** CLAUDE.md told every agent to verify that a `[pii-scan]`
+confirmation appears after committing. D5's commit output did not contain it. I
+grepped `.githooks/` and `.claude/hooks/`, found `[pii-hook]` eight times and
+`[pii-scan]` zero times, and concluded the string was never emitted — writing
+into CLAUDE.md that it was "a string `.githooks/pre-commit` has never emitted, so
+the check it asks for could only ever fail." The very next commit printed
+`[pii-scan] Scanned 1 file(s), 0 violations.` It is emitted by
+`src/safety/pii_scanner.py`, the Python scanner the hook pipes into, which my
+grep never covered. Corrected in `7568bff`.
+
+**Three things it demonstrates, all of which 3b is about.**
+
+1. **An unexpected absence is a cross-check trigger, not a finding.** I had a
+   genuine observation (the string really was missing from D5's output) and a
+   genuine grep result. Both were true. The conclusion drawn from them was false,
+   because the search scope was narrower than the claim.
+2. **The tidy closing generalization is where the defect lands.** The narrow
+   sentence — "the shell file does not contain this string" — was correct. The
+   confident generalization appended to it was not. That is exactly the position
+   `tool-output-integrity.md` warns about, and I produced it while holding that
+   rule in context.
+3. **The coincidence is what made it survive.** Had `[pii-scan]` appeared in D5's
+   output, the bad grep would have been caught instantly. It did not appear,
+   because the scanner filters and none of D5's nine `.claude/` files qualified.
+   A real observation lined up behind a wrong inference and certified it.
+
+**Why this binds 3b specifically.** 3b's job is to trim procedural scaffolding
+from the always-loaded rules on the grounds that Opus 5 does not need to be told
+to check its own work. This incident is a defect that no amount of self-checking
+would have caught — the author was confident, the evidence looked consistent, and
+the error was in the SCOPE of a search rather than in the care taken. **What
+caught it was a tool emitting evidence that it had operated** (the commit
+printing what the scanner actually said), and, twice more in the same session, a
+mechanical exact-match: an Edit refused a `should not` / `must not` mismatch that
+my context had rendered wrong, and a splice script aborted on a byte-count
+assertion. Type-1 self-recheck prose caught none of these; instruments did. Trim
+accordingly — the prose that tells an agent to be careful is the cheapest thing
+to cut, and the checks that make an instrument SHOW ITS WORK are the last.
