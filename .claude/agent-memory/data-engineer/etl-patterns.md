@@ -17,7 +17,7 @@
 
 ## ETL Patterns
 
-- Raw-to-processed pipeline: (1) store raw API JSON blobs as audit trail, (2) parse and normalize into schema tables
+- **There is no raw-to-processed pipeline.** The live ingestion paths (ScoutingLoader -> GameLoader, morning-run, `bb report generate`) crawl-to-load in memory and transform API JSON in flight straight into schema tables, with no on-disk raw stage and no audit-trail blob. This entry said the opposite until 2026-07-26; following it would rebuild the file-reading loader twin that E-256 deleted. Raw bytes persist only on the out-of-band capture paths -- mitmproxy's `proxy/data/`, and one redacted documentation sample per endpoint under `data/raw/`. See `.claude/rules/architecture-subsystems.md` and `http-discipline.md`.
 - Ingestion must be idempotent: `INSERT OR IGNORE` or `INSERT ... ON CONFLICT` patterns
 - Bulk-load a full game's worth of data in a single transaction
 - Handle missing/null fields gracefully: log warnings, do not crash

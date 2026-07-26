@@ -10,7 +10,7 @@ An epic that has been in `READY` status for **more than 60 days** is **STALE**. 
 
 **Why:** five epics sat READY 99-122 days on premises the reports-first descope (E-239) had invalidated -- their target surfaces were deleted out from under them (AGENTIC-FLOW-REVIEW §2.2). A READY marker is a standing claim that the plan is still current; past 60 days that claim needs re-checking, not blind trust.
 
-**How staleness is measured:** the age of the epic's READY transition -- the `READY` date recorded in the epic's `## Status` / `## History` section if present, else the date of the most recent commit touching the epic directory (`git log -1 --format=%cs -- epics/E-NNN-slug/`) as a proxy. "More than 60 days" is the trigger; a re-confirmation resets the clock (record the new READY/re-confirmed date so the next check measures from it).
+**How staleness is measured:** the age of the epic's READY transition -- the `READY` date recorded in the epic's `## Status` / `## History` section if present, else the date of the most recent commit touching the epic directory (`git log -1 --format=%cs -- epics/E-NNN-slug/`) as a proxy. "More than 60 days" is the trigger; a re-confirmation resets the clock (record the new READY/re-confirmed date so the next check measures from it). **PM cannot run that `git log` fallback** -- PM has no Bash tool, deliberately (its own anti-pattern 1). So the primary path is PM's to run and the fallback is not: when the epic file carries no READY date, PM asks the main session for the commit date rather than estimating one.
 
 This gate is wired into the Prerequisites of both the plan and implement skills, so a stale READY epic cannot silently proceed on either path.
 

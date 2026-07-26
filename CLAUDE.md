@@ -145,7 +145,7 @@ Epics that implement a `docs/ROADMAP.md` §5 slice (sequence A-E) follow the tra
 - Write descriptive commit messages explaining the "why"
 - Keep PRs focused on a single concern
 - Reference story IDs in commit messages when working on stories
-- After committing, verify the `[pii-scan]` confirmation appears in the output -- if it is missing, the safety scan may not have run; investigate before proceeding
+- After committing, verify the `[pii-hook] PII scan passed.` confirmation appears in the output -- if it is missing, the safety scan may not have run; investigate before proceeding. (This line said `[pii-scan]` until 2026-07-26, a string `.githooks/pre-commit` has never emitted, so the check it asks for could only ever fail.)
 
 ## Agent Ecosystem
 

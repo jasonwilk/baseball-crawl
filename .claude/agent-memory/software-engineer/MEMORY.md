@@ -9,8 +9,6 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 ### Data Handling
 - Parse defensively: missing fields produce warnings, not crashes
 - Loaders must be idempotent -- re-running the same data must not create duplicates
-- Store raw API responses before transforming (raw -> processed pipeline)
-- Use dataclasses or Pydantic models between functions, not raw dicts
 
 ## Key File Paths
 
@@ -35,14 +33,8 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 - `migrations/` -- numbered SQL migration files (`001_*.sql`, `002_*.sql`, etc.)
 
 ## Testing Rules
-See CLAUDE.md Testing section and `.claude/rules/testing.md`.
-- Use `respx` for `httpx` mocking, `responses` for `requests` mocking.
+See `.claude/rules/testing.md`.
 - Test data files go in `tests/fixtures/` or inline in the test.
-
-## HTTP Request Discipline
-See CLAUDE.md HTTP Request Discipline section.
-- Session factory: `src/http/session.py`, function `create_session()`
-- **NEVER create raw `httpx.Client()` or `requests.Session()` directly** -- always use `create_session()`
 
 ## Working as a Dispatched Subagent
 
