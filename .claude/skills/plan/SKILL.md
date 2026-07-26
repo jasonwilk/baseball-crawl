@@ -51,7 +51,9 @@ Before starting the planning workflow, verify:
    - If continuation: load the existing epic and resume at the appropriate phase (Phase 3 if stories exist, Phase 1 if not).
    - If new epic: proceed with Phase 0.
 
-3. **Apply the READY Freshness Gate to any existing READY epic in scope.** If the planning request continues, refines, or otherwise acts on an epic already in `Status: READY`, check its READY age per the READY Freshness Gate (`.claude/rules/workflow-discipline.md`): if it has been READY for more than 60 days it is **STALE**. Before proceeding, PM MUST either re-confirm it against `docs/ROADMAP.md` (resetting the recorded READY date) or demote it to `DRAFT` for re-refinement. A new-epic planning request with no existing READY epic in scope is unaffected by this check.
+3. **Check for an existing discovery artifact, and START from it.** If executed-evidence research already exists for this problem -- an audit report, a probe, a POC, anything under `.project/research/` -- the planning team begins from that artifact and **verifies its citations instead of re-deriving its conclusions**. The epic then lists, up front, every decision the evidence does NOT settle, each routed to its authority (operator or domain expert) **before** stories firm up. Conversely, a contested or destructive design with no such artifact gets a discovery phase that PRODUCES one before a planning team spawns. E-276 is the counterexample: four committee rounds re-derived ground the audit had already settled, at 24.8MB before READY against a 7.6-13.3MB band for entire epics, and the one genuinely open item needed an operator ruling that could have been asked in round one.
+
+4. **Apply the READY Freshness Gate to any existing READY epic in scope.** If the planning request continues, refines, or otherwise acts on an epic already in `Status: READY`, check its READY age per the READY Freshness Gate (`.claude/rules/workflow-discipline.md`): if it has been READY for more than 60 days it is **STALE**. Before proceeding, PM MUST either re-confirm it against `docs/ROADMAP.md` (resetting the recorded READY date) or demote it to `DRAFT` for re-refinement. A new-epic planning request with no existing READY epic in scope is unaffected by this check.
 
 ---
 
@@ -123,6 +125,23 @@ You are a [agent-type] subagent for planning epic E-NNN. Provide domain expertis
 ```
 You are a [agent-type] subagent for planning epic E-NNN. Consultation mode: do not create or modify implementation files or planning artifacts. Provide domain expertise when consulted by PM or the main session. Wait for questions via SendMessage.
 ```
+
+**Append to every planning spawn prompt above**, regardless of mode:
+
+```
+Deliver everything via SendMessage to "main" -- your plain-text output is not
+visible to anyone. Say when you are done or blocked; do not go idle holding a
+finished answer.
+
+Anything I relay to you is a SUMMARY of a durable artifact (the epic file, a
+story, a research file). Verify it against that artifact before acting; where
+they conflict, THE ARTIFACT WINS. Say so when you find a conflict.
+
+State your context health in one word (ok / tight / low) when it becomes
+material. "Low" means finish what you hold, flush it to a file, and stop.
+```
+
+Rationale and evidence in `.claude/rules/dispatch-pattern.md`, "Briefs, Channels, and Context" -- undelivered results and relayed-claim defects are the two most-reproduced failures in this repo's session history.
 
 **Exit condition**: All planning subagents spawned and ready (the team formed implicitly on the first spawn).
 

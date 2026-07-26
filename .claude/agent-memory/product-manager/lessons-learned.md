@@ -130,7 +130,7 @@ Three recurring violations identified in 2026-03-02 audit:
 **Incident (E-058 formation)**: User said "work with SE to propose a fix." PM wrote the epic solo without consulting SE.
 
 **Root cause**: Three compounding factors:
-1. PM was spawned one level deep and could not spawn SE (spawning is one-level-deep -- a platform constraint).
+1. PM could not spawn SE. (Stated reason corrected 2026-07-26: not a one-level-deep platform constraint — nesting works. PM's `tools:` frontmatter does not grant the `Agent` tool. Same outcome, different cause, and this one is changeable.)
 2. No escalation path existed -- when PM could not spawn, it had no procedure for messaging the team lead/user with specific questions for the requested expert.
 3. The user-directed override rule in the Consultation Triggers section used guidance language ("honor that request") rather than MUST language with an enforcement mechanism. A prose guideline with no procedural checkpoint is not enforceable.
 

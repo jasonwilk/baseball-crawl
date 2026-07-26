@@ -44,7 +44,7 @@ These patterns apply to **explicit agent naming only** -- cases where the user n
 
 **Trigger**: A spawned agent reports that it cannot reach or spawn another agent (e.g., PM says "I can't spawn SE" or an implementer says "I need input from architect but can't reach them").
 
-**Required action**: The main session spawns the missing agent directly (the main session has full spawning capability even when nested agents do not). Relay the original question to the newly spawned agent. Return the agent's actual response to the requesting agent.
+**Required action**: The main session spawns the missing agent directly (the main session always holds the `Agent` tool; most named agent definitions in this repo do not grant it, which is why they cannot spawn -- subagent nesting itself works). Relay the original question to the newly spawned agent. Return the agent's actual response to the requesting agent.
 
 **Prohibited**:
 - Answering the question yourself and relaying your answer as if it came from the missing agent.

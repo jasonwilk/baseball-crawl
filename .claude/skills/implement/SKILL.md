@@ -135,7 +135,17 @@ Your working directory for all file operations: [epic-worktree-path]
 
 Use absolute paths under this directory for ALL file reads, writes, and git commands.
 Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree.
+
+Deliver every result via SendMessage to "main". Your plain-text output is not
+visible to anyone; only the tool call delivers. Report when the story is done or
+when you are blocked -- do not go idle holding a finished answer.
+
+Any brief I send you is a RELAY of the story file and the epic. Verify it
+against those files before acting, and where they disagree, THE FILE WINS and my
+brief is wrong. Tell me when you find a conflict.
 ```
+
+Those last two paragraphs are not boilerplate to trim: **8 of 10 spawns in one audited session finished and went idle without delivering**, and E-276's planning shipped 9 relay defects, every one caught (when it was caught at all) by a receiver checking the brief against the artifact. See `.claude/rules/dispatch-pattern.md`, "Briefs, Channels, and Context".
 
 **Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. Code-reviewer spawn context:
 

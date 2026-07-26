@@ -43,6 +43,16 @@ Many boundary violations start as "quick checks" that feel like orchestration bu
 
 For the procedural protocol on handling completion reports, see the implement skill (`.claude/skills/implement/SKILL.md`, Phase 3 Step 5).
 
+## Briefs, Channels, and Context
+
+**A brief is a relay; the durable artifact wins.** Every inter-agent brief, handoff note, or kickoff prompt is a SUMMARY of something committed elsewhere -- an epic file, a story, a research artifact. The receiver verifies the brief against that artifact before acting, and where they conflict **the artifact wins and the brief is wrong**. This is not distrust of the sender: a brief is written at one moment and read at another, and the gap is where the defect lives. In E-276's planning the hub shipped 9 relay defects; the ones that were caught were caught by exactly this check (a PM catch, and a code-reviewer refuting the brief before review), and E-267's handoff incident is the same shape with a 45-second gap. State the relay status explicitly when you write a brief, so the receiver knows to check.
+
+**Spawn prompts name the delivery channel.** Any named-agent spawn states where the result goes -- "deliver via SendMessage to `<target>`" -- and how big it should be. Without it, agents finish the work and go idle holding the answer: 8 of 10 spawns in one audited session, 6 of 8 in another, and the analyst studying the pattern then reproduced it on itself. A plain-text final message is not delivery; only the tool call is.
+
+**Report context pressure, and drain before you are forced to.** Long-lived teammates state context health when it becomes material -- one word is enough. A "low" report means: finish the task in hand, flush state to a durable artifact, and stop. Work restarts cleanly from the committed record on a fresh instance; it does not restart cleanly from a summary of a summary. In E-276 a PM drained deliberately across three generations and the work survived; the 2026-07-25 session that pushed on instead degraded.
+
+**A compaction boundary is a session boundary.** After any auto-compact, re-read the authoritative artifacts -- the epic file, the story statuses -- BEFORE asserting any prior state or briefing any agent. Post-compact assertions about pre-compact state are reconstructions from a summary, and they are structurally unverifiable from memory: in E-276 the hub auto-compacted at 21:21:42Z and its next two relay defects were both post-compact assertions of pre-compact state, one of which handed a PM a false "the design is settled" premise. This is file-wins applied to your own past. The companion move is to flush state to the durable artifact *before* the pressure peaks, so that what compaction summarizes is already secondary to something on disk.
+
 ## Dispatch Procedures
 
 The **implement skill** (`.claude/skills/implement/SKILL.md`) is the authoritative source for all dispatch procedures: team creation, story assignment, review loops, staging boundary, closure sequence, and edge cases. Load it when the user requests dispatch.

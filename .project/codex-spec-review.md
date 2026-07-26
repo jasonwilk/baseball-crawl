@@ -71,9 +71,13 @@ For every story in the epic, check each item and report findings:
 - Are any claims about existing infrastructure actually accurate (file paths, module names, API behaviors)?
 - If the epic references other epics as "completed", have those actually been completed and archived?
 
+### 9b. Safety Absolutes Without an Attempted Counterexample
+- Does any AC or Technical Note make an **absolute claim about deletion, destruction, or a safety guarantee** -- "cannot delete", "always refuses", "never retires more than", "aborts on"? For each one, try to BUILD the counterexample: construct the input, ordering, or FK action under which the claim fails. A surviving absolute is shippable; a falsified one is a blocking finding, and the epic should name whoever is assigned to attempt the construction.
+- **Reasoning to an absolute is not evidence for it.** In E-270 the claim "a KEEP-to-PURGE foreign key aborts the purge" was true only for a default-action FK; an `ON DELETE CASCADE` edge raises nothing, commits, and destroys the preserved row. That epic shipped 7 prose defects of this class, E-272 shipped the NRBL over-rest claim, and E-276's planning produced 4-5 wrong gate absolutes -- **every one of them killed by construction, none by review.**
+
 ## Epic-Level Checks
 
-The per-story categories above (1-9) evaluate each story individually. The following categories operate on the epic as a whole -- checking consistency *across* files, propagation *across* stories, and surface area *across* ACs. Evaluate these against the facts table built during setup.
+The per-story categories above (1-9b) evaluate each story individually. The following categories operate on the epic as a whole -- checking consistency *across* files, propagation *across* stories, and surface area *across* ACs. Evaluate these against the facts table built during setup.
 
 ### 10. Internal Consistency
 - Do values that appear in multiple locations (counts, env var names, field names, status codes) match across all occurrences in the epic and story files?

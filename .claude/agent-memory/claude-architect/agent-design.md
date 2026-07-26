@@ -43,7 +43,7 @@ System prompt in markdown body...
 - Write detailed descriptions: Claude uses these to decide when to delegate
 - Limit tool access: grant only necessary permissions
 - Check into version control for team sharing
-- Subagents CANNOT spawn other subagents (no nesting)
+- Subagent nesting WORKS (corrected 2026-07-26, Claude Code 2.1.220 — verified in transcripts: a subagent called the `Agent` tool and produced four `spawnDepth: 1` children carrying its `parentAgentId`). Our named agents cannot spawn because **no agent definition in `.claude/agents/` grants the `Agent` tool** — a configuration choice, changeable, not a platform limit. The old "no nesting" claim was false and had propagated to 7 sites.
 
 ### Persistent Memory for Agents
 - `memory: user` -- recommended default, learns across all projects
@@ -127,7 +127,7 @@ Without these tools, spawned teammates can do file work but cannot reply to assi
 
 Team formation is now implicit and teardown automatic (the explicit `TeamCreate`/`TeamDelete` tools were removed in Claude Code v2.1.178). The flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` gates the team-coordination surface: without it, both `SendMessage` and the shared `Task*` task list are unavailable and spawned agents are one-shot (consistent with TN-4 and the durable `CLAUDE.md` Agent Ecosystem note).
 
-Spawner-only tool (NOT to be added to teammates):
-- `Agent` (Task tool) -- main session only
+Spawner-only tool (deliberately NOT granted to teammates):
+- `Agent` (Task tool) -- currently held only by the main session. This is our GRANT policy, not a platform capability limit; granting it to an agent would let that agent spawn (see the nesting correction above). Revisit deliberately, not by accident.
 
 Any future new agent definition MUST include the 5 team-comms tools unless it is intentionally isolated from team dispatch.
