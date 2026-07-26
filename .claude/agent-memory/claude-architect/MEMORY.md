@@ -65,6 +65,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - `boundaries.md` -- Operational boundary catalog (host vs container, auth vs public, PII, hallucinated identifiers)
 - `ingest-workflow-log.md` -- Per-endpoint integration history from ingest-endpoint skill executions (19 endpoints, 2026-03-04)
 - `codex-config.md` -- Codex CLI configuration, model, reasoning effort, available models
+- `model-behavior-reference.md` -- Four-tier placement architecture, verification taxonomy, per-model adapters (4.8/Opus 5/Sonnet 5/Fable 5), dated alias-to-model register. Consult BEFORE any placement or agent-definition call.
 
 ## Claude Code Platform Facts
 - CLAUDE.md loaded every session; keep concise
