@@ -27,8 +27,8 @@
 # epic worktree is present, so non-dispatch sessions are never affected.
 # Denial/warning is communicated via JSON output; the hook always exits 0.
 
-WARN_AT=15
-DENY_AT=25
+WARN_AT=40
+DENY_AT=60
 
 # Fail open if jq is missing (same posture as worktree-guard.sh).
 if ! command -v jq &>/dev/null; then
