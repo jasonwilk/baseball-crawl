@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -341,13 +342,28 @@ def test_empty_roster_payload_retires_nothing(
     assert not _roster_warnings(caplog), "an empty payload is not a refusal DECISION"
 
 
-def test_catastrophic_roster_shrink_refuses_on_the_floor(
+def test_catastrophic_roster_shrink_refuses_on_the_cap(
     db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The flat floor still applies underneath the cap (it can only tighten).
+    """A catastrophic shrink still refuses -- but the CAP is what refuses it.
 
-    Sized so the FLOOR is what fires: 14 prior, 1 fresh -> ``1 >= 7`` fails.
-    Complements the test above, where the floor passes and the cap fires.
+    **RENAMED and RE-REASONED at E-276-03, keeping its OUTCOME and losing its
+    REASON.** It was ``..._refuses_on_the_floor`` and asserted
+    ``"floor_ratio" in warnings[0]`` with a docstring reading *"the flat floor
+    still applies underneath the cap"*. **Under V1 there is no floor** -- the
+    roster grain's permit condition is a non-empty payload AND the departure
+    cap, nothing else -- so the old name asserted a design that no longer
+    exists.
+
+    Sized 14 prior / 1 fresh. The outcome is unchanged because 13 genuine
+    absences is far above ``MAX_ROSTER_DEPARTURES``, so this refuses under both
+    regimes and is a REGRESSION GUARD, not a discriminating test.
+
+    Its opposite number is ``test_an_empty_previously_rostered_ids_leaves_the
+    _grain_unguarded``, which is this same shape with ONE input varied and the
+    opposite outcome. Read the two together: they are what shows
+    ``previously_rostered_ids`` is no longer a cap-scoping refinement but the
+    input the sole guard is built from.
     """
     team = _insert_team(db)
     fourteen = [f"p-{i}" for i in range(1, 15)]
@@ -360,7 +376,18 @@ def test_catastrophic_roster_shrink_refuses_on_the_floor(
     assert _roster_ids(db, team) == set(fourteen)
     warnings = _roster_warnings(caplog)
     assert len(warnings) == 1
-    assert "floor_ratio" in warnings[0], "the floor should be the named cause here"
+    assert "refused_by=cap" in warnings[0], "the cap is the only refuser left"
+    assert "floor_ratio=" not in warnings[0], (
+        "the message still cites a floor that no longer decides anything"
+    )
+    # ⚠️ The token is ``floor_ratio=`` -- the PARAMETER, which used to carry a
+    # number -- not the bare word. The message deliberately contains the English
+    # phrase "there is no floor ratio beneath it", which differs from the old
+    # parameter token by a single underscore. Asserting on the bare word would
+    # make this test fail the moment someone backticks that phrase to
+    # ``floor_ratio``, which this codebase does constantly -- a failure with
+    # nothing to do with the defect being guarded.
+
 
 
 # ---------------------------------------------------------------------------
@@ -941,3 +968,547 @@ def test_roster_additions_are_never_gated(db: sqlite3.Connection) -> None:
     ScoutingLoader(db).load_team(_crawl(team, _roster(*twelve), batters=["p-1"]))
 
     assert _roster_ids(db, team) == set(twelve)
+
+
+# ===========================================================================
+# E-276-03: the roster grain loses its floor (V1)
+# ===========================================================================
+#
+# ⛔ This story REMOVES a guard rather than fixing one. The permit condition is
+# now exactly `(fresh payload non-empty) AND (cap permits)`, and
+# MAX_ROSTER_DEPARTURES is the SOLE safety control on this grain.
+#
+# It does NOT fix the post-upsert prior read here -- it removes the gate that
+# carried it. What it fixes is the CONCEALMENT: a floor that appeared to
+# protect, could not (the cap fires first), and would have locked the grain
+# permanently if it had been repaired instead of removed.
+#
+# ⚠️ FIXTURE TRAP: any test needing two DISTINCT games for one team MUST vary
+# the DATE. Two games for one team on the same date collapse into a single
+# `games` row via the cross-perspective natural key, and the tell is silent -- a
+# player holding zero batting rows after a run in which he batted.
+
+
+@contextmanager
+def _capture_roster_results():
+    """Call-through spy yielding each ``RosterRetireResult``.
+
+    Patch target is ``reconcile_at_load`` for this grain (function-local import
+    in ``_reconcile_departed_roster``). Appended AFTER the call returns, so a
+    non-empty list certifies the helper COMPLETED -- that wrapper swallows every
+    exception WITHOUT incrementing ``LoadResult.errors``, so on this grain
+    ``errors == 0`` is vacuous as completion evidence.
+    """
+    from src.db import reconcile_at_load as _recon
+
+    real = _recon.retire_departed_roster_players
+    captured: list[object] = []
+
+    def _call_through(*args, **kwargs):
+        result = real(*args, **kwargs)
+        captured.append(result)
+        return result
+
+    with patch.object(
+        _recon, "retire_departed_roster_players", _call_through
+    ):
+        yield captured
+
+
+def _assert_captured_roster_results(captured) -> None:
+    from src.db.reconcile_at_load import RosterRetireResult
+
+    assert captured, (
+        "the roster reconcile never ran -- row survival alone is satisfied by a "
+        "spy that never fired (wrong patch module)"
+    )
+    for result in captured:
+        assert isinstance(result, RosterRetireResult), (
+            f"the spy recorded {result!r}, not a result object"
+        )
+
+
+def test_a_three_row_roster_with_one_survivor_now_retires_both_departures(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-1: the floor is gone -- this story's discriminating case.
+
+    3 stored rows, fresh crawl carries 1, churn-free. **Pre-fix the floor fires**
+    (``1 >= 0.5 * 3`` fails) and nothing is retired; **post-fix** the cap sees 2
+    genuine departures, permits, and both absent rows go.
+
+    **The sizing rule, so a variant is derivable**: a floor can only refuse where
+    the cap permits when ``a < b <= MAX_ROSTER_DEPARTURES``, with ``a`` stored
+    rows still present and ``b`` stored rows absent -- so churn-free, every
+    discriminating shape has a stored roster of <= 3 rows, exactly
+    ``(a,b) in {(0,1), (0,2), (1,2)}``. This is ``(1,2)``. That bound holds ONLY
+    at churn 0; with backfill churn the divergence is unbounded in churn rows,
+    which is what the whole-set test below exercises.
+
+    **NOT the 9-stored/9-brand-new shape**: at this grain ``absent & previously``
+    would be 9, over the cap, so the cap refuses under BOTH regimes and the test
+    could not fail. That shape discriminates at the player-line grain only.
+    """
+    team = _insert_team(db)
+    stored = ["p-1", "p-2", "p-3"]
+    ScoutingLoader(db).load_team(_crawl(team, _roster(*stored), batters=["p-1"]))
+    assert _roster_ids(db, team) == set(stored)
+
+    with _capture_roster_results() as captured:
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster("p-1"), batters=["p-1"])
+        )
+
+    _assert_captured_roster_results(captured)
+    result = captured[-1]
+    assert result.refused is False
+    assert result.retired_player_ids == ["p-2", "p-3"]
+    assert result.gate_outcome.refused_by is None
+    assert _roster_ids(db, team) == {"p-1"}
+
+
+def test_the_whole_set_construction_retires_the_churn_and_exactly_two_pre_existing(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-2: the churn-region divergence at ordinary roster size.
+
+    10 rostered, fresh crawl drops 2, and 20 backfill-churn rows created by this
+    run's own jersey backfill. **Pre-fix the floor refuses and ZERO rows are
+    retired** (the live population is 30 with an overlap of 8). **Post-fix** the
+    cap sees ``absent & previously == 2`` -- exactly at the cap -- permits, and
+    **22 rows are retired: the 20 churn rows plus exactly 2 pre-existing ones**,
+    with the 8 survivors intact.
+
+    The pre-existing count is asserted explicitly, not just the total: **this is
+    what pins the CAP -- and not a floor -- as the thing bounding pre-existing
+    loss**, and it is the executable form of the accepted rate residual. It was
+    built to defeat a deletion-neutrality claim; under V1 it executes, which is
+    the change of régime this story ships.
+    """
+    team = _insert_team(db)
+    rostered = [f"r-{i}" for i in range(10)]
+    churn = [f"c-{i}" for i in range(20)]
+
+    # Run 1 establishes the 10-row pre-load snapshot. The churn rows must be
+    # created by RUN 2's own backfill, not run 1's: a first load retires its own
+    # churn immediately (that is the AC-4 behaviour below), so churn seeded here
+    # would simply be gone before run 2 started.
+    ScoutingLoader(db).load_team(
+        _crawl(team, _roster(*rostered), batters=rostered)
+    )
+    assert _roster_ids(db, team) == set(rostered)
+
+    survivors = rostered[:8]
+    with _capture_roster_results() as captured:
+        # Fresh roster carries 8; the boxscore lists 20 players who are NOT on
+        # it, so the jersey backfill creates 20 churn rows during this run.
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster(*survivors), batters=[*survivors, *churn])
+        )
+
+    _assert_captured_roster_results(captured)
+    result = captured[-1]
+    assert result.refused is False
+    assert len(result.retired_player_ids) == 22
+    pre_existing = [p for p in result.retired_player_ids if p in rostered]
+    assert sorted(pre_existing) == ["r-8", "r-9"], (
+        "exactly 2 PRE-EXISTING rows may go -- that is the cap, not a floor"
+    )
+    assert result.genuine_departure_count == 2
+    assert _roster_ids(db, team) == set(survivors)
+
+
+def test_an_empty_previously_rostered_ids_leaves_the_grain_unguarded(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5b: with the floor gone, an empty snapshot disables the ONLY guard.
+
+    This is ``test_catastrophic_roster_shrink_refuses_on_the_cap`` with **one
+    input varied** -- which is what makes it evidence rather than illustration.
+    Same 13-row stored roster, same 1-row fresh crawl; the only difference is
+    ``previously_rostered_ids``.
+
+    ``_cap_on_genuine_departures`` computes ``absent & previously``. Empty
+    ``previously`` makes that intersection empty, so the guard sees zero
+    departures and permits **unconditionally at any roster size**. That part is
+    unchanged by this story. What changed is what sits underneath: **today the
+    floor still refuses; under V1 nothing does.**
+
+    ⚠️ DISCRIMINATING, not a characterization: pre-fix the floor refuses here and
+    retires 0; post-fix all 12 absences go.
+    """
+    from src.db.reconcile_at_load import retire_departed_roster_players
+
+    team = _insert_team(db)
+    thirteen = [f"p-{i}" for i in range(1, 14)]
+    ScoutingLoader(db).load_team(_crawl(team, _roster(*thirteen), batters=["p-1"]))
+    assert _roster_ids(db, team) == set(thirteen)
+
+    result = retire_departed_roster_players(
+        db,
+        team_id=team,
+        season_id=_SEASON,
+        fresh_player_ids={"p-1"},
+        previously_rostered_ids=set(),  # THE one varied input
+        exempt_player_ids=set(),
+    )
+
+    assert result.refused is False, "with an empty snapshot nothing refuses"
+    assert result.genuine_departure_count == 0, "the cap sees no departures"
+    assert len(result.retired_player_ids) == 12, (
+        "every absent pre-existing row went, with no bound at all"
+    )
+    assert _roster_ids(db, team) == {"p-1"}
+
+
+def test_churn_retirement_is_unchanged_on_a_first_load_and_in_steady_state(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-4: behaviour-unchanged regression -- the churn retire must not move.
+
+    Two shapes, both identical to today and both required to stay identical: a
+    FIRST load (empty ``previously_rostered_ids``, 13 rostered + 3 backfill
+    churn rows) and the ordinary steady state (13 roster, 13 fresh, 3 churn).
+    Exactly the 3 churn rows are retired, unrefused, in each.
+
+    This is what keeps a mid-season cut who still appears in a completed
+    boxscore from being re-added to the grid forever.
+
+    **⚠️ Asserted on STATE, deliberately NOT on the retire WARN.** On a first
+    load every churn row takes the **INFO-level** recurring-churn branch, so the
+    WARNING-level hard-deleted line is never emitted at all: a log-grep
+    assertion reports "nothing retired" on a run that retired all three. That is
+    a false NEGATIVE, not a failure, and this file's own ``_roster_warnings``
+    helper filters to WARNING -- so reusing it here would satisfy nothing.
+    """
+    team = _insert_team(db)
+    rostered = [f"p-{i}" for i in range(13)]
+    churn = [f"c-{i}" for i in range(3)]
+
+    # FIRST load: previously_rostered_ids is empty; the boxscore backfills 3
+    # rows for players absent from the roster crawl.
+    with _capture_roster_results() as captured:
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster(*rostered), batters=[*rostered, *churn])
+        )
+    _assert_captured_roster_results(captured)
+    first = captured[-1]
+    assert first.refused is False
+    assert sorted(first.retired_player_ids) == sorted(churn)
+    assert _roster_ids(db, team) == set(rostered)
+
+    # STEADY state: same 13 rostered, same 3 churn rows re-created this run.
+    with _capture_roster_results() as captured:
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster(*rostered), batters=[*rostered, *churn])
+        )
+    _assert_captured_roster_results(captured)
+    steady = captured[-1]
+    assert steady.refused is False
+    assert sorted(steady.retired_player_ids) == sorted(churn)
+    assert steady.genuine_departure_count == 0, "churn is never a departure"
+    assert _roster_ids(db, team) == set(rostered)
+
+
+@pytest.mark.parametrize(
+    ("cap", "expected_survivors"), [(2, 16), (5, 1)]
+)
+def test_erosion_a_progressively_degrading_crawl_empties_a_roster_by_the_RATE(
+    db: sqlite3.Connection, cap: int, expected_survivors: int
+) -> None:
+    """AC-7: the executable form of "rate, not bound" (epic TN-19).
+
+    26-row roster against a crawl that degrades progressively over 5
+    invocations. **At cap 2, 16 survive; at cap 5, only 1 does.** Raising the cap
+    from 2 to 5 does not mean "5 lost" -- it means 5 PER INVOCATION, i.e. ``5N``,
+    unbounded in N, and morning-run walks several teams per process so N is not
+    one.
+
+    **Why the existing tests do not substitute for this.** Three tests do fire
+    when the cap is raised -- the constant pin plus two behavioural ones -- but
+    every one fails for the reason *"the cap moved"*, which is exactly what a
+    tuner intends. They are items on the tuner's own change list. **No other test
+    in the suite encodes the CONSEQUENCE of a cap value at any value**, so a
+    tuner who raises it and correctly updates all three gets a green suite and
+    learns nothing about ``5N``.
+
+    **The cap is varied through the INJECTION POINT, not by monkeypatching the
+    constant**: ``roster_departure_guard``'s ``max_departures`` default binds at
+    DEFINITION time, so rebinding ``MAX_ROSTER_DEPARTURES`` does not reach the
+    guard. Note that parameter had **zero callers** in ``src/`` or ``tests/``
+    before this test -- "no caller does X" is an observation about the tree, not
+    an invariant, and this test is its first caller.
+    """
+    from src.db.reconcile_at_load import (
+        classify_absences,
+        retire_departed_roster_players,
+        roster_departure_guard,
+    )
+
+    team = _insert_team(db)
+    roster26 = [f"p-{i:02d}" for i in range(26)]
+    ScoutingLoader(db).load_team(_crawl(team, _roster(*roster26), batters=["p-00"]))
+    assert len(_roster_ids(db, team)) == 26
+
+    real_classify = classify_absences
+
+    def _classify_with_cap(*args, **kwargs):
+        # Re-point extra_guard at the INJECTION POINT with this run's cap.
+        kwargs["extra_guard"] = lambda absent: roster_departure_guard(
+            frozenset(absent & set(surviving)), max_departures=cap
+        )
+        return real_classify(*args, **kwargs)
+
+    per_invocation: list[int] = []
+    for step in range(5):
+        surviving = set(_roster_ids(db, team))
+        # The crawl sheds exactly ``cap`` players per invocation. That is
+        # DELIBERATELY tuned to the cap, and it is the whole demonstration: the
+        # cap does not bound how much a degrading crawl can take, it sets the
+        # RATE at which it takes it. Shed fewer and the loss is crawl-limited;
+        # shed more and the cap refuses the whole set and nothing is lost at all
+        # -- which is the catastrophic case, and is why protection here runs
+        # BACKWARDS with respect to severity.
+        fresh = sorted(surviving)[: max(1, len(surviving) - cap)]
+        before = len(surviving)
+        with patch(
+            "src.db.reconcile_at_load.classify_absences", _classify_with_cap
+        ):
+            retire_departed_roster_players(
+                db,
+                team_id=team,
+                season_id=_SEASON,
+                fresh_player_ids=set(fresh),
+                previously_rostered_ids=surviving,
+                exempt_player_ids=set(),
+            )
+        db.commit()
+        per_invocation.append(before - len(_roster_ids(db, team)))
+        assert per_invocation[-1] <= cap, (
+            f"invocation {step + 1} exceeded the per-invocation rate"
+        )
+
+    survivors = len(_roster_ids(db, team))
+    assert survivors == expected_survivors, (
+        f"cap={cap}: per-invocation {per_invocation}, {survivors} survivors"
+    )
+    assert sum(per_invocation) == 26 - expected_survivors
+
+
+def test_two_stored_against_two_brand_new_permits_and_retires_both(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-8(a): CHARACTERIZATION -- passes under both regimes by design.
+
+    2 stored ids against 2 brand-new fresh ids. This was the DISCRIMINATING
+    fixture for a floor-bearing design; under V1 it is a characterization test of
+    the accepted behaviour. It pins that this grain does NOT refuse here, and it
+    fails if someone re-adds a floor.
+
+    Note why it also permitted BEFORE this story, so the "identical to today"
+    claim is not mysterious: the two brand-new ids get ``team_rosters`` rows from
+    the same run's roster load, so the old live-population read saw 4 with an
+    overlap of 2 and cleared ``2 >= 0.5 * 4``. The floor never bit here.
+    """
+    team = _insert_team(db)
+    ScoutingLoader(db).load_team(
+        _crawl(team, _roster("old-1", "old-2"), batters=["old-1"])
+    )
+    assert _roster_ids(db, team) == {"old-1", "old-2"}
+
+    with _capture_roster_results() as captured:
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster("new-1", "new-2"), batters=["new-1"])
+        )
+
+    _assert_captured_roster_results(captured)
+    result = captured[-1]
+    assert result.refused is False
+    assert sorted(result.retired_player_ids) == ["old-1", "old-2"]
+    assert _roster_ids(db, team) == {"new-1", "new-2"}
+
+
+def test_passing_the_pre_load_set_as_the_classification_universe_locks_the_grain(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-8(b): the classification-universe slip, executed over two runs.
+
+    The slip is passing ``previously_rostered_ids`` (or any pre-load-derived
+    set) to ``classify_absences`` as its prior population, instead of the LIVE
+    exempt-filtered read. It reads as obviously correct while writing it.
+
+    **Run 1** (first load, so the pre-load set is EMPTY): the slipped classifier
+    has no candidates and retires nothing, where the correct form retires the 3
+    backfill-churn rows. **Run 2**: those rows are now pre-existing, so they land
+    in ``absent & previously`` -- 3 genuine departures against a cap of 2 -- and
+    the cap refuses. **Every subsequent run repeats it: permanently unretirable.**
+
+    **More consequential under V1, not less.** The cap is now the only guard on
+    the grain, so a slip that feeds it a wrong population has nothing beneath it.
+
+    Story 01 AC-9b owns the primitive-level contract test that the live set is
+    what reaches the classifier; this is the executed two-run consequence, which
+    is demonstrable only at this grain.
+    """
+    from src.db import reconcile_at_load as _recon
+
+    team = _insert_team(db)
+    rostered = [f"p-{i}" for i in range(13)]
+    churn = [f"c-{i}" for i in range(3)]
+    real_classify = _recon.classify_absences
+
+    def _slipped(prior_ids, fresh_ids, **kwargs):
+        # THE SLIP: the pre-load set replaces the live read as the universe.
+        # On a first load that set is empty, so nothing is even a candidate.
+        return real_classify(set(), fresh_ids, **kwargs)
+
+    with patch.object(_recon, "classify_absences", _slipped):
+        ScoutingLoader(db).load_team(
+            _crawl(team, _roster(*rostered), batters=[*rostered, *churn])
+        )
+
+    assert _roster_ids(db, team) == {*rostered, *churn}, (
+        "the slip must leave the churn rows behind -- the correct form retires "
+        "them on run 1"
+    )
+
+    # Run 2 onward: correct code, but the stranded rows are now PRE-EXISTING.
+    for run in (2, 3):
+        with _capture_roster_results() as captured:
+            ScoutingLoader(db).load_team(
+                _crawl(team, _roster(*rostered), batters=[*rostered, *churn])
+            )
+        _assert_captured_roster_results(captured)
+        result = captured[-1]
+        assert result.refused is True, f"run {run}: expected the cap to refuse"
+        assert result.gate_outcome.refused_by == "cap"
+        assert result.genuine_departure_count == 3, (
+            f"run {run}: the stranded churn now counts as genuine departures"
+        )
+        assert _roster_ids(db, team) == {*rostered, *churn}, (
+            f"run {run}: still unretirable -- the lock is permanent"
+        )
+
+
+def test_every_refused_by_value_this_grain_can_emit_is_reachable(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-3: the COMPLETE five-value set, each driven to.
+
+    Per epic TN-11's per-grain membership table this grain's set is
+    ``None | "cap" | "empty_payload" | "fetch_not_ok" |
+    "skipped_no_exemption_plan"``. **``"gate"`` is UNREACHABLE here** -- V1 runs
+    no floor gate -- so a test asserting it would assert a state the code cannot
+    produce.
+
+    **The two SYNTHESIZED values are the ones that matter most.** Both
+    ``if not fresh_player_ids: return`` and ``if exempt_player_ids is None:
+    return`` in ``_reconcile_departed_roster`` occur BEFORE the helper is ever
+    called, so without synthesis two mechanisms that each produce "0 retired"
+    would sit upstream of the record meant to disambiguate them -- on the one
+    grain that has no gate and where ``refused_by`` is the only structural
+    discriminator there is.
+
+    The sixth state -- *no absences, nothing to decide* -- must read as ``None``
+    and not as any refusal.
+    """
+    from src.db.reconcile_at_load import retire_departed_roster_players
+
+    team = _insert_team(db)
+    thirteen = [f"p-{i}" for i in range(1, 14)]
+    ScoutingLoader(db).load_team(_crawl(team, _roster(*thirteen), batters=["p-1"]))
+
+    seen: dict[str, str | None] = {}
+
+    # cap -- 13 genuine departures against a cap of 2.
+    seen["cap"] = retire_departed_roster_players(
+        db, team_id=team, season_id=_SEASON, fresh_player_ids={"p-1"},
+        previously_rostered_ids=set(thirteen), exempt_player_ids=set(),
+    ).gate_outcome.refused_by
+
+    # fetch_not_ok -- the AUTHORITY check inside the helper sees no fresh ids.
+    seen["fetch_not_ok"] = retire_departed_roster_players(
+        db, team_id=team, season_id=_SEASON, fresh_player_ids=set(),
+        previously_rostered_ids=set(thirteen), exempt_player_ids=set(),
+    ).gate_outcome.refused_by
+
+    # None -- every prior id is present, so nothing was decided.
+    seen["none"] = retire_departed_roster_players(
+        db, team_id=team, season_id=_SEASON, fresh_player_ids=set(thirteen),
+        previously_rostered_ids=set(thirteen), exempt_player_ids=set(),
+    ).gate_outcome.refused_by
+
+    # empty_payload -- the WRAPPER's early return, a DIFFERENT site from
+    # fetch_not_ok above. Collapsing the two would re-create the ambiguity the
+    # record exists to remove.
+    loader = ScoutingLoader(db)
+    seen["empty_payload"] = loader._reconcile_departed_roster(
+        team, _SEASON, [], set(thirteen)
+    ).gate_outcome.refused_by
+
+    # skipped_no_exemption_plan -- the dedup pre-plan failed, so pending merges
+    # cannot be told from departures. Roster-ONLY value.
+    with patch.object(
+        ScoutingLoader, "_pending_collapse_player_ids", return_value=None
+    ):
+        seen["skipped_no_exemption_plan"] = loader._reconcile_departed_roster(
+            team, _SEASON, _roster("p-1"), set(thirteen)
+        ).gate_outcome.refused_by
+
+    assert seen == {
+        "cap": "cap",
+        "fetch_not_ok": "fetch_not_ok",
+        "none": None,
+        "empty_payload": "empty_payload",
+        "skipped_no_exemption_plan": "skipped_no_exemption_plan",
+    }
+    # Nothing was retired on any of these paths.
+    assert _roster_ids(db, team) == set(thirteen)
+
+
+def test_the_refusal_WARN_names_the_cap_and_carries_the_caps_own_counts(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-10: the operator-facing message, which in production is the only signal.
+
+    Removing the floor CHANGED the first refusal branch's meaning -- it is no
+    longer "suspected partial crawl" but "the fresh crawl was empty" -- so
+    ``fresh_comparable_count`` and ``floor_ratio`` stop being numbers that
+    decided anything. Leaving them would ship a message whose figures do not
+    explain the decision.
+
+    This matters more under V1 than before: the cap is the ONLY refuser left, so
+    this string is the only thing separating a healthy bias-to-refuse from the
+    permanent lock in IDEA-186, whose whole difficulty is that a recurring cap
+    refusal *"looks exactly like the guard working"*.
+
+    A test may assert on the message here because the message IS the deliverable
+    (AC-3 forbids it as a proxy for behaviour, which is a different thing).
+    """
+    team = _insert_team(db)
+    thirteen = [f"p-{i}" for i in range(1, 14)]
+    ScoutingLoader(db).load_team(_crawl(team, _roster(*thirteen), batters=["p-1"]))
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        ScoutingLoader(db).load_team(_crawl(team, _roster("p-1"), batters=["p-1"]))
+
+    warnings = [w for w in _roster_warnings(caplog) if "REFUSED" in w]
+    assert len(warnings) == 1
+    message = warnings[0]
+    assert "refused_by=cap" in message
+    assert "genuine_departure_count=12" in message, "the CAP's own count"
+    from src.db.reconcile_at_load import MAX_ROSTER_DEPARTURES
+
+    assert f"MAX_ROSTER_DEPARTURES={MAX_ROSTER_DEPARTURES}" in message
+    assert "SOLE guard" in message, (
+        "an operator meeting a recurring cap refusal must be told there is "
+        "nothing beneath it"
+    )
+    # The floor's numbers are gone: they no longer decide anything.
+    # Both asserted as PARAMETER tokens (trailing ``=``), not bare words: the
+    # message itself says "there is no floor ratio beneath it" in English, one
+    # underscore away from the old parameter name. See the note in
+    # ``test_catastrophic_roster_shrink_refuses_on_the_cap``.
+    assert "floor_ratio=" not in message
+    assert "fresh_comparable_count=" not in message

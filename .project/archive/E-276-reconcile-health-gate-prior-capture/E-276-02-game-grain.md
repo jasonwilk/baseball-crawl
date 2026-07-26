@@ -4,7 +4,18 @@
 [E-276: Reconcile-at-Load Health Gate — Capture the Prior Set Before the Run's Own Writes](epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-07-26. **Both gates cleared**: code-reviewer APPROVED (no MUST FIX; its disarmed-assertion sweep came back clean without changing the verdict), all 11 ACs PM-verified. One review round; unblocks 03 and 05.
+
+**Cost, for the closure record**: **18 sends**, against story 01's **41**. Same two-gate loop; the difference is that 01 carried the shared primitive plus four spec corrections.
+
+**Two spec corrections landed during this story**: AC-9's absolute test baseline was **removed** (not updated — `4207` predated story 01, so the AC's own evidence made its requirement unverifiable), and TN-9 gained a row for `scouting_loader.py::_reconcile_absent_games` **plus a construction rule**, after this became the third consecutive story whose TN-9-scoped sweep was complete against an incomplete table.
+
+*(Historical, kept because both were live warnings while the story ran:)*
+
+**⛔ Two things in this story changed AFTER it was written. Read them from this file, not from any relayed summary.**
+
+1. **AC-6 no longer carries a count.** It read *"**Both** prose sites"*; TN-9's table has since grown twice and neither edit came near this file. It now reads **"EVERY prose site assigned to this story in TN-9"**, and **TN-9 is the authority on which sites those are** — the two named in the AC are orientation as of 2026-07-26, not the set. **Open TN-9 and work from it.**
+2. **Story 01 shipped the shared primitive you build on**, including the gate-outcome record and the opt-in `permit_empty_prior` rule. **Its docstrings were corrected twice for claims that were false in ways a green suite cannot detect** — read `crawl_is_authoritative`'s docstring as it now stands rather than as story 01's ACs describe it.
 
 ## Description
 
@@ -36,7 +47,9 @@ The reconcile call itself must stay below the boxscore load: the redirect map is
 
 - [ ] **AC-5**: A comment at the capture site names **both** drift directions of the new long-span ordering coupling — a write moved above the capture, and the reconcile hoisted above the boxscore load — in the manner of the existing roster-snapshot comment. Nothing in the signature enforces either position; per TN-4 and the epic's Background both failure directions are silent.
 
-- [ ] **AC-6**: **Both** prose sites assigned to this story in TN-9 are corrected in this same change.
+- [ ] **AC-6**: **EVERY** prose site assigned to this story in TN-9 is corrected in this same change. **TN-9 is the authority on which sites those are — read it, do not work from the list below.** The two named here are the sites as of 2026-07-26 and are given as orientation, not as the set.
+
+      **⚠️ THIS AC READ "Both prose sites" UNTIL 2026-07-26, AND THE COUNT WAS THE DEFECT** *(fixed pre-dispatch, on the team lead's instruction, before this story was assigned)*. TN-9's table has grown **twice** — once at the second Codex pass, once at story 01's round-1 review — and neither edit came anywhere near this file. **A hardcoded count over another artifact's table is falsified by an edit that never touches it, and no sweep of this story finds it**: the sentence stays unmodified and self-consistent while quietly under-specifying the work. That is this epic's 9th mechanism, and it had already shipped here twice over in other forms — the `18 of 18` figure, and a WHAT-CHANGED heading reading "Three" over four items. **Do not reintroduce a count here, and prefer "every … assigned in TN-9" to an enumeration anywhere an AC delegates its scope to another artifact.**
 
       **(a)** The comment block at the `comparable` assignment in `retire_absent_games`, whose "Two population mismatches were tried and rejected here" paragraph claims newly-completed games "are not in prior either". That claim is false today and is exactly what AC-1 disproves.
 
@@ -58,7 +71,13 @@ The reconcile call itself must stay below the boxscore load: the redirect map is
 
       **Evidence tier, recorded honestly**: the static enumeration is what makes the property general; the 179 invocations confirm no suite-exercised path falsifies it but are **not** a proof over production inputs.
 
-- [ ] **AC-9 (suite green — scoped to THIS STORY, which is what previously went unstated)**: `python -m pytest tests/` reports 0 failed, with **no existing assertion changed BY THIS STORY**. The pre-implementation baseline is **4207 passed**.
+- [ ] **AC-9 (suite green — scoped to THIS STORY, which is what previously went unstated)**: `python -m pytest tests/` reports 0 failed, with **no existing assertion changed BY THIS STORY**. **The baseline is whatever the suite reported at the completion of the immediately preceding story — measure it, do not quote it** — and the whole delta must be accounted for as tests this story ADDS.
+
+      **⚠️ THIS AC QUOTED AN ABSOLUTE BASELINE OF `4207` AND IT WAS STALE** *(corrected 2026-07-26; found by SE, which used the correct figure and flagged rather than editing)*. **4207 predates story 01**, which added 37 and ended at **4244** — so a reviewer checking this story's 4262 against 4207 sees +55 and cannot tell whether an assertion changed. **The AC's own evidence made its own requirement unverifiable.**
+
+      **⛔ The fix is to REMOVE the number, not to update it to 4244.** Any absolute baseline in a story that another story precedes is falsified by that story's ordinary success — this is the **third** count in this epic to rot by an edit that never touched it (after story 02 AC-6's *"Both"* and story 03 AC-9's *"plus one"*), and updating it would merely reset a timer. **Stories 03 and 04 were checked and quote no baseline** [PM-VERIFIED by grep], so nothing inherits this.
+
+      ⚠️ **Do NOT sweep the `4207` in AC-8** four criteria above. That one is **evidence of a measurement SE actually ran** (179 reconcile invocations, 0 violations, at that suite size) and editing it would falsify the record. **Same distinction the R5 round settled for line numbers: a figure is a CRITERION when a reader must meet it, and EVIDENCE when a reader must see what was observed. Correct the first; preserve the second.**
 
       **⚠️ THE SCOPE WORDS ARE LOAD-BEARING AND WERE MISSING** *(added 2026-07-25, second Codex spec pass)*. The unscoped form — *"with no existing assertion changed"* — was **false in both directions**. Looking backward: story 01 blocks this one and **inverts** `tests/test_reconcile_at_load.py::test_empty_payload_refused_even_with_empty_prior`, so an assertion has already changed before this story starts. Looking forward: **story 03 AC-11 changes a second**, inside the 72 grain-file tests. The epic-wide total is **TWO** expected assertion changes, tabulated in **Success Criterion 2**.
 

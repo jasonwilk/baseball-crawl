@@ -29,10 +29,16 @@ def _fold_name(name: str) -> str:
     NFKD-decompose, drop combining marks (so ``José`` -> ``Jose``), then
     ``casefold`` (Unicode-aware lowercasing, so accented capitals fold too).
 
-    This is the SINGLE fold shared by detection (:func:`find_duplicate_players`,
-    via a registered SQLite function) and the planner's terminal-name test
-    (:func:`_terminal_names`), so the two never diverge (E-253-08). It replaces
-    the ASCII-only SQL ``COLLATE NOCASE`` in detection, which missed
+    This is the SINGLE fold shared by every consumer that compares player names,
+    so they never diverge (E-253-08). THREE today: detection
+    (:func:`find_duplicate_players`, via a registered SQLite function), the
+    planner's terminal-name test (:func:`_terminal_names`), and -- added by
+    E-276-01 -- the reconcile's matched-victim diagnostic
+    (``src.db.reconcile_at_load._dedup_candidate_victims``), which names
+    ``bb data dedup-players`` as the remedy and so MUST fold exactly as
+    detection does, or it will name pairs that instrument cannot see.
+
+    It replaces the ASCII-only SQL ``COLLATE NOCASE`` in detection, which missed
     accented-name duplicates. For pure-ASCII names it is identical to
     ``str.lower()`` / ``NOCASE``, so all existing ASCII fork/component behavior
     is unchanged (AC-4).

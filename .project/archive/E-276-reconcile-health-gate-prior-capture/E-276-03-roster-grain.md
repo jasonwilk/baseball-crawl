@@ -4,7 +4,19 @@
 [E-276: Reconcile-at-Load Health Gate — Capture the Prior Set Before the Run's Own Writes](epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-07-26. **Both gates cleared**: code-reviewer APPROVED at round 2, all 11 ACs PM-verified. Two review rounds; unblocks 05.
+
+**AC-9 was RE-VERIFIED after the round-1 MUST FIX, not carried over** — a round-1 pass predates the fix it failed on. Confirmed: four prose sites corrected, **each recording its prior wording rather than replacing it silently**, and the `.claude/rules/python-style.md` TN-9 row unchanged and still assigned to story 05.
+
+**This story's sweep produced the epic's best evidence for the contract-anchored rule** — it reached a **rules file** no diff-anchored sweep of any width could — **and, applied faithfully, exposed the rule's own missing stopping condition** (*"whose contract this story changes" includes "whose CALLER SET this story changes"*), now written into TN-9.
+
+**⛔ THIS STORY REMOVES A GUARD RATHER THAN FIXING ONE — the roster grain ships with LESS gating than it started with, on the operator's ruling to invert the bias here.** `MAX_ROSTER_DEPARTURES` becomes the sole guard. That is deliberate and settled; do not "restore" the floor.
+
+**Three things changed after this story was written. Read them here, not from a relayed summary.**
+
+1. **AC-9's lead-in no longer says "plus one this story adds"** — that was already stale when found: all of (a), (b) and (c) are TN-9-assigned, and (c)'s own body says so.
+2. **⛔ TN-9's CONSTRUCTION RULE is binding on this story, and it is not the same as reading the table.** Three consecutive stories had a TN-9-scoped sweep that was complete against an incomplete table. Before declaring AC-9 complete: **grep every identifier whose CONTRACT this story changes, repo-wide, and inspect each hit's prose.** The rule is anchored on the contract, **not on the diff** — a wider diff-anchored sweep still cannot reach prose that sits near no changed line, which is how one of the four misses hid. **Add what you find to TN-9; do not fix it silently** — the table is what Success Criterion 4 and story 05 consume.
+3. **This story edits `scouting_loader.py`, which is exactly where story 02's missed site lived.** Treat that file as high-prior-probability, not as a secondary target.
 
 ## Description
 
@@ -153,7 +165,9 @@ The grain is in scope because the operator's brief explicitly asked us to check 
 
       **MANDATORY, and the failure is invisible**: two source probes are already named `test_*.py` and already contain `def test_` functions with **zero assertions**. Copying them yields tests pytest collects and passes unconditionally, forever, proving nothing — and it would not look wrong in a diff. **Treat every printed value as an assertion to write, never as output to preserve.** A ported file containing `def test_` with no `assert` fails this AC.
 
-- [ ] **AC-9 (prose the fix falsifies, corrected in this same change)**: The prose sites assigned to this story in epic TN-9 are corrected here, plus one this story adds:
+- [ ] **AC-9 (prose the fix falsifies, corrected in this same change)**: **EVERY** prose site assigned to this story in epic TN-9 is corrected here. **TN-9 is the authority on which sites those are — read it, do not work from the list below**, which is orientation as of 2026-07-26 and not the set.
+
+      **⚠️ THIS AC'S LEAD-IN READ "plus one this story adds" AND WAS ALREADY STALE WHEN FOUND** *(fixed 2026-07-26, in the sweep that fixed story 02 AC-6's hardcoded "Both")*. **All three of (a), (b) and (c) are now TN-9-assigned** — (c) was the "one this story adds" until it was moved into TN-9's table on 2026-07-25, and **(c)'s own body says so** four paragraphs below while this sentence went on counting it as an outsider. The repair that closed the inventory gap fixed (c) and fixed TN-9, and never touched the sentence that enumerates them. **A verified repair verifies what it was pointed at** — and the two sites inside (a) and the module-docstring sweep, all added later, were never "one" either.
 
       **(a)** `retire_departed_roster_players`' docstring and the `_cap_on_genuine_departures` comment, both of which describe the arrangement as a cap layered *under* a floor and the pre-load capture as feeding only the cap.
 
@@ -182,7 +196,9 @@ The grain is in scope because the operator's brief explicitly asked us to check 
 
       **`tests/test_roster_grain_reconcile.py::test_catastrophic_roster_shrink_refuses_on_the_floor` keeps its OUTCOME and loses its REASON.** Sized 14 prior / 1 fresh, it refuses under V1 too — but by the cap (13 genuine absences), not the floor. Its assertion `"floor_ratio" in warnings[0]` fails, and its name and docstring (*"the flat floor still applies underneath the cap"*) become false. **Specify this as an EXPECTED CHANGE, not a regression**, and rename it so the file does not carry a test whose name asserts a design that no longer exists.
 
-      Beyond that, the two direct helper call sites in this file (per TN-13) take the mechanical keyword-argument churn in this same change.
+      **⛔ THE TN-13 CHURN CLAUSE IS MOOT ON THIS GRAIN — no churn edit is required, and making one would be WRONG.** *(Corrected 2026-07-26; SE self-reported it rather than leaving it for review.)* This clause read *"the two direct helper call sites in this file (per TN-13) take the mechanical keyword-argument churn in this same change."* **V1 adds NO parameter to this grain** — TN-1(a)'s roster EXEMPTION leaves the correctly-timed capture where it already is — so both sites compile and pass **unchanged**, and SE correctly made no edit.
+
+      TN-13's roster row is now marked **MOOT**, and the epic-wide total is **7, not 9**. **The correction lives at the inventory** so every consumer inherits it — story 01 AC-12 restates the same count and is already DONE. **Do not manufacture a keyword-argument edit to satisfy the old wording.**
 
 ## Technical Approach
 

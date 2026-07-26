@@ -59,12 +59,9 @@ the exact invocation you are using before relying on either answer.
 
 ## Three more ways a grep reported zero — MARKUP moved, content did not (E-276, all verified)
 
-> **Read this first if you are about to write a measurement into a memory file.** *A handoff
-> artifact is at least read once, soon, by someone who might notice. A memory file is read cold,
-> months later, by someone with no thread to check it against.* So: **never write a number from a
-> live thread into memory — wait for it to settle, or record the mechanism instead of the
-> measurement.** Generalizes past greps to anything numeric arriving mid-revision. (This entry
-> shipped a retracted figure once; see the magnitude note below.)
+> **About to write a measurement into a memory file?** The rule is now canonical in
+> `.claude/rules/context-layer-assessment.md` (Learning-Loop Lifecycle) — read it there, not here.
+> This entry is why it exists: it shipped a retracted figure once (see the magnitude note below).
 
 Same family as the three above, but the cause is different and none is a synonym problem, so
 `.claude/rules/doc-sweep.md`'s synonym-expansion step does **not** reach them. These are the *same
@@ -137,14 +134,6 @@ Same-terms, the real delta was at most one and plausibly zero. The lesson never 
 count and is stronger without it. Still mark such a CLEAN result superseded and uncitable, on the
 ground that **a method that cannot fail toward false-clean is not the same as one that happened
 not to.**
-
-> **Why that wrong number got here** — the surface is new and worth its own line. The figure
-> reached this file *before* its retraction did: inherited mid-flight from another agent still
-> revising it, and written straight into durable storage. **A memory file is the
-> highest-persistence, lowest-revisit artifact I have**, so a retired number does more damage here
-> than anywhere else — it outlives the thread that corrected it, and the next reader has no way to
-> know it was withdrawn. **Never write a number from a live thread into memory. Wait for it to
-> settle, or record the mechanism instead of the measurement.**
 
 **Mitigation for any literal-phrase sweep of this repo's prose** — strip emphasis and normalize
 quote depth before matching, then read the hits:

@@ -4,7 +4,28 @@
 [E-276: Reconcile-at-Load Health Gate — Capture the Prior Set Before the Run's Own Writes](epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-07-26. All 9 ACs PM-verified. **Context-layer-only, so per the dispatch protocol PM verified alone**; per-story code review is skipped and the whole diff is picked up at the unconditional **Closure CR Integration Review**. The last of five stories.
+
+**Two things this story produced that outlived it, both found by sweeping OUTSIDE its declared scope:**
+1. **`docs/admin/operations.md` promises the opposite of what ships** — an operator-facing runbook stating a partial crawl *"never causes data loss"*, **false precisely where the operator inverted the bias**. TN-9 now carries a `docs/` row routed to **docs-writer at closure**. **This is the only defect the epic found that would have reached the OPERATOR rather than an agent, and Success Criterion 4 would have passed with it standing.**
+2. **F-7** — a `src/` prose qualifier on `permit_empty_prior`, reported not fixed because it belongs to story 01, which was already DONE. Routed as a **closure remediation to software-engineer**, NOT a reopening.
+
+**The scope widening in the Files list below was RATIFIED, not tolerated** — see its entry.
+
+**⛔ THIS EPIC CORRECTED ITS OWN SPEC ~12 TIMES WHILE SHIPPING. Do not describe the design from the epic's Goals or from any story's Description — read the CODE and the Technical Notes banners.** Several ACs across stories 01–03 describe pre-correction states in passing; every one that mattered has a correction note beside it, and **the correction is the current text.**
+
+**Three specific traps for this story**, all of which have already caught someone:
+1. **Never write "all three grains now read their prior correctly."** The roster grain has **no gate at all** — the epic's own Goal 2 says so and AC-3 forbids the smoothed phrasing.
+2. **TN-9 is the inventory, and it grew FOUR times during dispatch** — three of them found by a reviewer, not by a sweep. Read it as it now stands, including its **construction rule** and that rule's **stopping condition**.
+3. **The `permit_empty_prior` sentence below is 0-for-2 and on its third version.** See the carried note.
+
+**⛔ CARRY THIS INTO ANY `permit_empty_prior` PROSE — a sentence with a 0-for-2 record just got its third version, and code-reviewer flagged the third as STILL a shade strong** *(CR's observation, not a finding; recorded here 2026-07-26 so it does not evaporate between stories)*.
+
+The shipped line reads *"the default protects the next one that does."* CR's point: for a **single-population live-fed caller, refusing and permitting are both harmless** — so the default does not *protect*, it **forces the next caller to choose explicitly.** That is the honest floor.
+
+**Why this needs a stranger's eye rather than a quick edit**: this exact sentence has been **false twice, in opposite directions**, and both times it read as reasonable to whoever wrote it. **A third confident rewrite by someone close to it is the pattern, not the fix.** Check the mechanism before restating the claim, and if the weaker form is right, take the weaker form.
+
+**Related, do NOT fold in**: [[IDEA-190]] proposes replacing this paragraph's guarantee with an executable caller-set pin. **Deliberately out of this epic** — it is a `tests/` file, and this story is context-layer prose routed to claude-architect.
 
 ## Description
 
@@ -158,6 +179,10 @@ Why this file set routes here: `CLAUDE.md` and `.claude/agent-memory/` are conte
 - `CLAUDE.md`
 - `.claude/agent-memory/claude-architect/epic-codifications.md`
 - `.project/research/E-276-residue-sweep.md` — **NEW.** The durable destination for AC-6's residue-sweep report and AC-9's category-(iii) flag. Added 2026-07-25 at the third Codex pass; without it AC-6, AC-9 and the Definition-of-Done line below are verifiable only against ephemeral agent output. **It lives in `.project/research/` rather than in the epic directory deliberately** — the epic is archived at closure, while the flag it carries is a handoff to data-engineer that outlives this epic.
+
+- `.claude/rules/python-style.md` — **ADDED 2026-07-26, RATIFYING claude-architect's declared scope widening.** TN-9 assigns this row to story 05 and **Success Criterion 4 measures against TN-9**, but the row was added *after* this Files list was written — and **story 05 is LAST, so flagging rather than fixing would have left SC-4 structurally unsatisfiable.** CA read that correctly and made the edit as **SCOPE-IT, not delete**: the policy-hook carve-out and the EVIDENCE-versus-hook distinction survive untouched; only the "universal floor still applies underneath" reassurance is qualified. It **re-executed** the supporting evidence rather than relaying it.
+
+      ⚠️ **This is the THIRD time in this epic that a Files list went stale against an inventory that grew after it** (story 03's `scouting_loader.py`, story 01's `player_dedup.py`, now this). **A story's Files list and the inventories its ACs delegate to are two artifacts that drift apart silently** — the AC stays satisfiable-looking while the work becomes unreachable. **PM ratified rather than reverted**: the alternative was an SC-4 that could not be met by the last story in the epic.
 
 ## Agent Hint
 claude-architect

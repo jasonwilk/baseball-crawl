@@ -40,7 +40,11 @@ from dataclasses import dataclass, replace
 
 from src.db.game_merge import GameMergeError, merge_duplicate_game
 from src.db.players import ensure_player_row
-from src.db.reconcile_at_load import PlayerLineBlock, retire_absent_player_lines
+from src.db.reconcile_at_load import (
+    PlayerLineBlock,
+    retire_absent_player_lines,
+    snapshot_prior_line_player_ids,
+)
 from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 from src.gamechanger.types import TeamRef
@@ -625,6 +629,42 @@ class GameLoader:
         Returns:
             ``LoadResult`` for this game.
         """
+        # PLAYER-LINE CAPTURE ANCHOR (E-276-01). The health gate's protected
+        # population must be read BEFORE any of this run's writes to this game's
+        # player-line delete scope -- reading it at retire time returns
+        # ``old | fresh``, so every row we just wrote lands on both sides of the
+        # floor ratio and relaxes it by half a row. At a full id churn the gate
+        # then reads a comfortable 9-of-18 -- 9 stale lines plus the 9 just
+        # written, clearing the floor at exact equality -- and hard-deletes all
+        # nine live lines.
+        #
+        # This is the earliest correct point and it CANNOT be hoisted out of the
+        # per-game loop: the set keys on the CANONICAL game id, and that id does
+        # not exist until ``_load_boxscore_data`` has resolved the duplicate,
+        # recorded the redirect and rebound ``summary.event_id`` -- which it has
+        # done by the time this method is entered. A whole-run pre-capture would
+        # have to guess ids that do not yet exist.
+        #
+        # Fails CLOSED: without the snapshot the gate has no evidence, and an
+        # empty one would fail OPEN via the vacuous-permit rule, so a read error
+        # aborts this game's load rather than proceeding without it.
+        perspective_team_id = self._team_ref.id
+        try:
+            prior_snapshots = snapshot_prior_line_player_ids(
+                self._db,
+                game_id=summary.event_id,
+                perspective_team_id=perspective_team_id,
+                team_ids=(own_team_id, opp_team_id),
+            )
+        except sqlite3.Error as exc:
+            logger.error(
+                "Failed to capture the pre-upsert player-line snapshot for game "
+                "%s (perspective %s): %s; skipping this game rather than "
+                "reconciling it against no evidence.",
+                summary.event_id, perspective_team_id, exc,
+            )
+            return LoadResult(errors=1)
+
         try:
             self._upsert_game(
                 summary.event_id, game_date,
@@ -641,7 +681,6 @@ class GameLoader:
             return LoadResult(errors=1)
 
         # Record which perspective loaded this game.
-        perspective_team_id = self._team_ref.id
         try:
             self._db.execute(
                 """
@@ -679,6 +718,7 @@ class GameLoader:
         result.errors += self._retire_absent_player_lines(
             summary.event_id, perspective_team_id,
             own_data, own_team_id, opp_data, opp_team_id,
+            prior_snapshots=prior_snapshots,
         )
 
         result.loaded += 1  # count the game itself
@@ -741,8 +781,16 @@ class GameLoader:
         own_team_id: int,
         opp_data: dict | None,
         opp_team_id: int,
+        *,
+        prior_snapshots: dict[tuple[str, int], frozenset[str]],
     ) -> int:
         """Retire stale per-player stat rows for this game + perspective.
+
+        ``prior_snapshots`` is the pre-upsert protected population captured at
+        the anchor in :meth:`_upsert_game_and_stats` (E-276-01). It is required
+        and keyword-only: the parameter's whole value is its TIMING, and a
+        positional slot on a six-argument call is where a wrong value gets
+        passed silently.
 
         Returns the ``LoadResult.errors`` increment (1 if the reconcile itself
         failed, else 0). A reconcile failure must not abort the game's load --
@@ -776,6 +824,7 @@ class GameLoader:
                 game_id=game_id,
                 perspective_team_id=perspective_team_id,
                 blocks=blocks,
+                prior_snapshots=prior_snapshots,
             )
             if retired.retired or retired.refusals or retired.uncovered_team_ids:
                 logger.info(

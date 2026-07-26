@@ -4,7 +4,13 @@
 [E-276: Reconcile-at-Load Health Gate — Capture the Prior Set Before the Run's Own Writes](epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-07-26. **Both gates cleared**: code-reviewer APPROVED with **no findings — the first clean review of this dispatch** — and all 5 ACs PM-verified. **Send cost 11**, the cheapest story by a wide margin.
+
+**⛔ THE JERSEY OBSERVATION FROM THIS STORY IS CORROBORATION, NOT COVERAGE.** Its pre-fix run fired story 01's AC-15 diagnostic on 9 victims via the **jersey** half, on real committed payloads. **Nothing in this story asserts it** — if that branch regressed tomorrow, this test would not notice. **MF-1's unit test remains the only thing holding it, and this result MUST NOT be cited as a reason to thin that test.** *(Code-reviewer's explicit instruction, recorded here so it survives the epic.)*
+
+**⛔ SCOPE IS FIXED AND WAS ALREADY RULED ON, 2026-07-26.** An executable caller-set pin for `crawl_is_authoritative` was proposed during story 03 and **deliberately NOT placed here**: it is a structural AST test — a different file, a different kind of test, a different subject — and this story is the epic's cleanest single-purpose slice. **Do not absorb it.** It is [[IDEA-190]]. *(That this story is "test-only" is not a reason to host it — test-only is not a subject.)*
+
+**Read AC-2's TN-18 note before writing any assertion.** At this level the epic's anti-WARN steer **INVERTS**: there is no structural retire record at `generate_report()` level, so a WARN or a seam spy is the only signal separating a genuine refusal from *the reconcile never running for that game* — and "the rows survived" is satisfied by both.
 
 ## Description
 

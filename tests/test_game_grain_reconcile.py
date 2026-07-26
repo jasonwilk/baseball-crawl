@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -37,6 +38,7 @@ from src.db.reconcile_at_load import (
     FLOOR_RATIO,
     MAX_GAME_RETIREMENTS,
     retire_absent_games,
+    snapshot_prior_loaded_game_ids,
 )
 from src.gamechanger.loaders import ensure_season_row
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
@@ -907,6 +909,11 @@ def test_retire_is_scoped_to_the_crawled_season(db: sqlite3.Connection) -> None:
         # inputs rather than inherit a permissive default on a hard-delete path.
         not_final_game_ids=(),
         boxscores_complete=True,
+        # E-276-02 mechanical churn: no write intervenes here, so the
+        # pre-load snapshot IS the current population.
+        prior_snapshot=snapshot_prior_loaded_game_ids(
+            db, team_id=team, season_id=_SEASON
+        ),
     )
     db.commit()
 
@@ -1303,6 +1310,11 @@ def test_protection_with_no_matching_reason_still_refuses(
             fetch_ok=True,
             not_final_game_ids=(),
             boxscores_complete=True,
+            # E-276-02 mechanical churn: no write intervenes here, so the
+            # pre-load snapshot IS the current population.
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team, season_id=_SEASON
+            ),
         )
 
     assert result.retired_game_ids == []
@@ -1372,6 +1384,11 @@ def test_unmatched_protection_does_not_inherit_a_previous_games_reason(
             fetch_ok=True,
             not_final_game_ids=(),
             boxscores_complete=True,
+            # E-276-02 mechanical churn: no write intervenes here, so the
+            # pre-load snapshot IS the current population.
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team_a, season_id=_SEASON
+            ),
         )
 
     assert result.retired_game_ids == []
@@ -1442,6 +1459,11 @@ def test_boxscores_incomplete_refuses_even_below_the_cap(
         fetch_ok=True,
         not_final_game_ids=(),
         boxscores_complete=False,
+        # E-276-02 mechanical churn: no write intervenes here, so the
+        # pre-load snapshot IS the current population.
+        prior_snapshot=snapshot_prior_loaded_game_ids(
+            db, team_id=team, season_id=_SEASON
+        ),
     )
 
     assert result.retired_game_ids == []
@@ -1469,6 +1491,11 @@ def test_cap_refuses_even_when_boxscores_are_complete(
         fetch_ok=True,
         not_final_game_ids=(),
         boxscores_complete=True,
+        # E-276-02 mechanical churn: no write intervenes here, so the
+        # pre-load snapshot IS the current population.
+        prior_snapshot=snapshot_prior_loaded_game_ids(
+            db, team_id=team, season_id=_SEASON
+        ),
     )
 
     assert result.retired_game_ids == []
@@ -1499,6 +1526,11 @@ def test_refusal_reasons_distinguish_the_three_whole_set_causes(
             fetch_ok=True,
             not_final_game_ids=(),
             boxscores_complete=boxscores_complete,
+            # E-276-02 mechanical churn: no write intervenes here, so the
+            # pre-load snapshot IS the current population.
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team, season_id=_SEASON
+            ),
         )
         assert result.retired_game_ids == []
         assert result.refusals
@@ -1549,3 +1581,475 @@ def test_reconcile_failure_rolls_back_and_does_not_fail_the_load(
     assert any(
         "Game-grain reconcile failed" in r.getMessage() for r in caplog.records
     )
+
+
+# ===========================================================================
+# E-276-02: the game grain's gate reads the games loaded as of the RUN START
+# ===========================================================================
+#
+# The pollution here is the sharpest illustration of the general mechanism.
+# Newly-completed games appear in NORMAL operation -- that is what re-scouting
+# is for -- and each one lands in both the numerator and the denominator of the
+# live-population gate, relaxing the floor by half a game. Stale absences that
+# correctly refuse on their own start retiring once enough new games load
+# alongside them.
+#
+# And on this grain the pollution is NOT an artifact of reading inside an open
+# transaction: ``load_payload`` commits per game, so those rows are COMMITTED by
+# the time the reconcile runs. No isolation-level change could fix it.
+
+
+@contextmanager
+def _capture_game_retire_results():
+    """Call-through spy yielding the ``GameRetireResult`` of each pass.
+
+    Patch target is ``reconcile_at_load`` for THIS grain, because
+    ``_reconcile_absent_games`` imports the helper FUNCTION-LOCALLY -- the
+    player-line grain imports at module level and must be patched in
+    ``game_loader`` instead. Getting this wrong makes the spy silently never
+    fire, which is why every test using this asserts positively that a result
+    object was captured.
+
+    Appended AFTER the wrapped call returns, so a non-empty list certifies the
+    helper COMPLETED rather than merely that it was entered. That matters here:
+    ``_reconcile_absent_games`` swallows every exception WITHOUT incrementing
+    ``LoadResult.errors``, so on this grain ``errors == 0`` is vacuous as
+    completion evidence and the spy is the only instrument that works.
+    """
+    from src.db.reconcile_at_load import retire_absent_games as _real
+
+    captured: list[object] = []
+
+    def _call_through(*args, **kwargs):
+        result = _real(*args, **kwargs)
+        captured.append(result)
+        return result
+
+    with patch.object(reconcile_at_load, "retire_absent_games", _call_through):
+        yield captured
+
+
+def _assert_captured_game_results(captured) -> None:
+    from src.db.reconcile_at_load import GameRetireResult
+
+    assert captured, (
+        "the game-grain reconcile never ran -- row survival alone is satisfied "
+        "by a spy that never fired (wrong patch module)"
+    )
+    for result in captured:
+        assert isinstance(result, GameRetireResult), (
+            f"the spy recorded {result!r}, not a result object -- the wrapper "
+            "swallowed an exception and returned None"
+        )
+
+
+def test_newly_completed_games_no_longer_authorize_retiring_stale_ones(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-1 + AC-2: the story's discriminating case.
+
+    2 prior-loaded games against a fresh schedule of 2 brand-new COMPLETED
+    games. Both stale games are absent, which on its own is a total shrink the
+    floor refuses -- and pre-fix the two newly-completed games rescue it: the
+    live population is 4 (2 stale + 2 just written), the overlap is 2, and
+    ``2 >= 0.5 * 4`` PERMITS, so both stale games are hard-deleted with their
+    full child surface. The cap does not save them either: 2 absences is exactly
+    ``MAX_GAME_RETIREMENTS``.
+
+    Post-fix the gate measures the pre-load snapshot -- 0 of 2 -- and refuses.
+
+    **The discriminating assertion is ``gate_prior_count == 2``**, not the
+    surviving row count: a survival count can pass post-fix for a wrong reason,
+    and three mechanisms produce "0 retired" on this grain. The run-2 fixture
+    supplies boxscores for every completed game in the fresh array precisely so
+    ``boxscores_incomplete`` cannot refuse first and hide the gate.
+    """
+    team = _insert_team(db)
+    stale = _seed_games(db, team, 2, prefix="stale")
+    assert _game_ids(db) == {"stale-0", "stale-1"}
+
+    fresh_new = [
+        _game(f"new-{i}", start_ts=f"2026-06-{10 + i:02d}T18:00:00Z",
+              opponent=f"New Opp {i}")
+        for i in range(2)
+    ]
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING), _capture_game_retire_results() as captured:
+        ScoutingLoader(db).load_team(_crawl(team, fresh_new))
+
+    _assert_captured_game_results(captured)
+    result = captured[-1]
+    gate = result.gate_outcome
+
+    assert gate.refused_by == "gate", (
+        "refused for the wrong reason -- the cap or the completeness signal "
+        "fired instead of the health gate"
+    )
+    assert gate.gate_evaluated is True
+    assert gate.gate_permitted is False
+    assert gate.permitted is False
+    assert gate.gate_prior_count == 2, (
+        "the gate measured the POST-load population (4) -- the two games this "
+        "run just wrote are inflating both sides of the ratio"
+    )
+    assert gate.gate_comparable_count == 0
+
+    # Unit-level AND per-id surfaces both checked; neither alone closes the trap.
+    assert result.retired_game_ids == []
+    assert set(result.refusals) == {"stale-0", "stale-1"}
+
+    assert {"stale-0", "stale-1"} <= _game_ids(db), (
+        "stale games were hard-deleted because newly-completed games relaxed "
+        "the floor"
+    )
+    assert {"new-0", "new-1"} <= _game_ids(db)
+
+    refusals = [w for w in _retire_warnings(caplog) if "REFUSED" in w]
+    assert len(refusals) == 2
+    assert all("refused_by=gate" in w for w in refusals)
+    assert all("not authoritative" in w for w in refusals)
+    assert all("START of this run" in w for w in refusals)
+
+
+def test_first_ever_load_evaluates_a_vacuously_permitted_gate_and_retires_nothing(
+    db: sqlite3.Connection,
+) -> None:
+    """The empty-snapshot case, which must NOT short-circuit.
+
+    On a first-ever load the snapshot is legitimately empty while the LIVE prior
+    -- the candidate population -- already holds the rows this run just wrote.
+    The pass therefore runs, a gate IS computed and is permitted vacuously, and
+    nothing is retired because every live prior id is present in ``fresh``.
+
+    Gating an early return on the SNAPSHOT instead would be a different design
+    and a worse one; asserting ``gate_evaluated`` is what distinguishes the two.
+    """
+    team = _insert_team(db)
+    games = [
+        _game(f"g-{i}", start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+              opponent=f"Opp {i}")
+        for i in range(3)
+    ]
+
+    with _capture_game_retire_results() as captured:
+        ScoutingLoader(db).load_team(_crawl(team, games))
+
+    _assert_captured_game_results(captured)
+    result = captured[-1]
+    assert result.retired_game_ids == []
+    assert result.refusals == {}
+    assert result.gate_outcome.gate_evaluated is True
+    assert result.gate_outcome.gate_permitted is True
+    assert result.gate_outcome.gate_prior_count == 0, "the SNAPSHOT is the empty one"
+    assert len(_game_ids(db)) == 3, "...the LIVE prior set is not"
+
+
+# ---------------------------------------------------------------------------
+# AC-7: deletion-neutrality, ported with its range attached
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("p_pre", range(13))
+def test_deletion_neutrality_sweep_over_0_to_12(p_pre: int) -> None:
+    """AC-7: the fix never permits a DELETION today's code refuses.
+
+    The ported 0-of-2197 sweep -- three parameters over ``0..12``, i.e. 13**3
+    combinations -- previously alive only in a session scratchpad. **Its STATUS
+    has changed but the port has not**: deletion-neutrality is now proved
+    structurally from ``W subset-of fresh`` (epic TN-5), so this is
+    CORROBORATION rather than sole support.
+
+    ⚠️ **Cite it with its range or not at all: ``0..12`` does not reach a 20-30
+    game season** (CLAUDE.md, "Scope"). Zero failures over a space that stops
+    short of production reads as strong evidence *because* the count is zero,
+    which is exactly why the range is a stated limitation and not a citation
+    detail. What makes the property general is the algebra, not this sweep.
+
+    Scoped to DELETIONS, never to permits: the two computations genuinely
+    disagree where the post-load population is empty, and a test phrased
+    "permits whenever today permits" would fail against a correct design.
+    """
+    from src.db.reconcile_at_load import crawl_is_authoritative
+
+    checked = 0
+    for kept in range(13):          # prior games still vouched for by fresh
+        for written in range(13):   # rows this run adds; W subset-of fresh
+            comparable_pre = min(kept, p_pre)
+            corrected = crawl_is_authoritative(
+                fetch_ok=True,
+                fresh_count=comparable_pre,
+                prior_count=p_pre,
+                permit_empty_prior=True,
+            )
+            legacy = crawl_is_authoritative(
+                fetch_ok=True,
+                fresh_count=comparable_pre + written,
+                prior_count=p_pre + written,
+            )
+            if p_pre - comparable_pre <= 0:
+                continue  # nothing deletable either way
+            checked += 1
+            assert not (corrected and not legacy), (
+                f"corrected permits a deletion legacy refuses: prior={p_pre} "
+                f"kept={kept} written={written}"
+            )
+    assert checked or p_pre == 0, "the parametrization must exercise deletions"
+
+
+def test_every_game_this_run_writes_is_in_the_fresh_array(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-8: the runtime guard on ``W subset-of fresh`` for this grain.
+
+    The premise underwrites deletion-neutrality here, and it rests on a
+    single-field coupling nothing else guards: ``_build_games_index_from_data``
+    sets ``event_id`` from ``game["id"]`` and ``_reconcile_absent_games`` reads
+    that same key to build ``fresh_ids``, in two modules with no assertion tying
+    them.
+
+    ``W`` is what the run wrote into the delete scope -- the live prior MINUS the
+    pre-load snapshot -- and every member must be in the fresh array. Break the
+    coupling and ``W - fresh`` becomes non-empty: those rows are candidates the
+    run itself created.
+
+    ⚠️ **What this buys is ATTRIBUTION, not detection, and the stronger claim is
+    false.** MEASURED: re-keying ``event_id`` to a value outside the fresh array
+    fails **91** unrelated tests, because the ``games`` rows land under ids
+    nothing else can find -- so that break is loud, just uninformative about its
+    cause. A subtler re-sourcing need not be loud at all. This test's job either
+    way is to fail with the coupling NAMED.
+
+    Driven across the shapes that could plausibly falsify it: a first-ever load,
+    a clean re-scout, a run adding newly-completed games, and one where a game
+    goes absent.
+    """
+    from src.db.reconcile_at_load import retire_absent_games as _real
+
+    team = _insert_team(db)
+    observed: list[tuple[int, int, list[str]]] = []
+
+    def _checking_call_through(conn, **kwargs):
+        # RECORD, never assert, inside this callback.
+        # ``_reconcile_absent_games`` wraps the helper in a broad
+        # ``except Exception`` that swallows and rolls back WITHOUT incrementing
+        # ``LoadResult.errors``, so an AssertionError raised here is eaten and
+        # the run looks clean -- the epic's own "a crash produces the observable
+        # of a refusal" trap, arriving inside a guard written against a
+        # different failure. Verified by execution: asserting here made this
+        # test fail with "the reconcile did not run", pointing at the wrong
+        # cause. Every check therefore runs OUTSIDE the load, below.
+        live = set(reconcile_at_load._prior_loaded_game_ids(
+            conn, kwargs["team_id"], kwargs["season_id"]
+        ))
+        written = live - set(kwargs["prior_snapshot"])
+        fresh = set(kwargs["fresh_game_ids"])
+        observed.append((len(written), len(fresh), sorted(written - fresh)))
+        return _real(conn, **kwargs)
+
+    first = [
+        _game(f"g-{i}", start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+              opponent=f"Opp {i}")
+        for i in range(4)
+    ]
+    later = [
+        _game(f"n-{i}", start_ts=f"2026-05-{10 + i:02d}T18:00:00Z",
+              opponent=f"New Opp {i}")
+        for i in range(2)
+    ]
+
+    with patch.object(
+        reconcile_at_load, "retire_absent_games", _checking_call_through
+    ):
+        ScoutingLoader(db).load_team(_crawl(team, first))            # first-ever
+        ScoutingLoader(db).load_team(_crawl(team, first))            # clean re-scout
+        ScoutingLoader(db).load_team(_crawl(team, [*first, *later])) # additions
+        ScoutingLoader(db).load_team(_crawl(team, [*first[:3], *later]))  # absence
+
+    assert len(observed) == 4, "the reconcile did not run on every invocation"
+    violations = [
+        (index, escapees)
+        for index, (_w, _f, escapees) in enumerate(observed, start=1)
+        if escapees
+    ]
+    assert violations == [], (
+        f"W is not a subset of fresh on run(s) {violations} -- those ids were "
+        "written by the run itself and are absent from the fresh array, so the "
+        "event_id / game['id'] coupling is broken and they are now retire "
+        "candidates the run created"
+    )
+    assert observed[0][0] == 4, "the first-ever load must write its whole array"
+    assert any(written == 2 for written, _fresh, _esc in observed[1:]), (
+        "no invocation exercised a run that ADDED games -- the shape the "
+        "coupling matters for"
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC-11: MULTI-RUN twin accumulation, at production scale
+# ---------------------------------------------------------------------------
+#
+# Every probe and sweep in this epic's planning was SINGLE-RUN, and the failure
+# that reopened the design three times is multi-run. This grain is the one with
+# a real accumulation mechanism to exercise.
+#
+# ``_game_is_cross_perspective_protected`` refuses-and-KEEPS a game another
+# perspective holds, so a protected game is absent from the fresh array on every
+# subsequent run, forever, and is never retired. The gate is computed BEFORE
+# per-id protection is applied, so a protected id sits in the DENOMINATOR
+# (it is in the snapshot) and not in the NUMERATOR (it is not in fresh).
+# Protected twins therefore degrade the floor ratio monotonically as they
+# accumulate.
+#
+# THE THRESHOLD, confirmed against the code rather than inherited: with ``P``
+# present, ``X`` protected-absent and ``g`` genuinely absent, the corrected gate
+# permits iff ``P >= X + g`` (from ``fresh_count >= prior_count * FLOOR_RATIO``
+# with ``fresh_count = P`` and ``prior_count = P + X + g``, at FLOOR_RATIO 0.5).
+# Today's polluted gate permits iff ``P + N >= X + g`` with ``N`` rows written
+# this run -- so the fix is stricter by exactly ``N``. That is an AVAILABILITY
+# effect in the direction this epic chose, NOT a deletion-neutrality violation:
+# TN-5 scopes the guarantee to deletions and says the gates may disagree in the
+# refusing direction.
+#
+# ⚠️ Measured production occupancy is FAR below the threshold: the E-270 probe
+# put cross-perspective twins at ~4% of stored ids (22 of ~583), while
+# ``P >= X + g`` needs more than half a team's games absent-and-protected.
+# These are REGRESSION GUARDS against accumulation, not a report of a live
+# defect, and must not be cited as one.
+
+
+def _shared_and_own(team_a: int, team_b: int, db: sqlite3.Connection,
+                    n_shared: int, n_keep: int, n_gone: int):
+    """Load a production-scale season for A, with ``n_shared`` twins held by B."""
+    keeps = [
+        _game(f"keep-{i}", start_ts=f"2026-04-{1 + i:02d}T18:00:00Z",
+              opponent=f"Keep Opp {i}")
+        for i in range(n_keep)
+    ]
+    shared = [
+        _game(f"shared-{i}", start_ts=f"2026-05-{1 + i:02d}T18:00:00Z",
+              opponent=f"Shared Opp {i}")
+        for i in range(n_shared)
+    ]
+    gone = [
+        _game(f"gone-{i}", start_ts=f"2026-06-{1 + i:02d}T18:00:00Z",
+              opponent=f"Gone Opp {i}")
+        for i in range(n_gone)
+    ]
+    ScoutingLoader(db).load_team(_crawl(team_a, [*keeps, *shared, *gone]))
+    # B loads the SAME rows, so every shared game carries TWO perspectives.
+    ScoutingLoader(db).load_team(_crawl(team_b, shared, own_key=_SLUG_B))
+    return keeps, shared, gone
+
+
+def test_accumulating_protected_twins_keep_retiring_genuine_removals(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-11: N sequential runs at production scale, asserted PER RUN.
+
+    24 completed games (CLAUDE.md "Scope": ~30 per team): 18 keeps, 4 shared
+    twins, 4 genuine removals. Each run drops one more shared game AND one
+    genuine removal from A's fresh array, so ``X`` grows monotonically while a
+    real removal must still retire at every step.
+
+    Classification: **REGRESSION GUARD**, not discrimination. The
+    twins-are-kept and genuine-removal-retires assertions hold under BOTH
+    regimes; only the boundary case below flips.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+    keeps, shared, gone = _shared_and_own(
+        team_a, team_b, db, n_shared=4, n_keep=16, n_gone=4
+    )
+    assert len(keeps) + len(shared) + len(gone) == 24, "production season size"
+
+    per_run: list[tuple[int, int, str | None]] = []
+    for run in range(1, 5):
+        fresh = [*keeps, *shared[run:], *gone[run:]]
+        with _capture_game_retire_results() as captured:
+            ScoutingLoader(db).load_team(_crawl(team_a, fresh))
+        _assert_captured_game_results(captured)
+        result = captured[-1]
+        live = _game_ids(db)
+
+        # The genuine removal for THIS run retired...
+        assert gone[run - 1]["id"] not in live, (
+            f"run {run}: the genuine removal was refused -- accumulating twins "
+            "pushed the pass over a mechanism it should not have reached"
+        )
+        # ...and every protected twin dropped so far is KEPT, with .refusals
+        # naming the protection for each (refused_by is unit-level and cannot).
+        for twin in shared[:run]:
+            assert twin["id"] in live, f"run {run}: a protected twin was deleted"
+            assert "another team's data" in result.refusals[twin["id"]]
+
+        assert result.gate_outcome.gate_permitted is True
+        assert result.gate_outcome.refused_by is None, (
+            f"run {run}: a unit-level mechanism refused while the pass still "
+            "retired -- refused_by must stay None on a permitting pass"
+        )
+        per_run.append((
+            len(live),
+            result.gate_outcome.gate_prior_count,
+            result.gate_outcome.refused_by,
+        ))
+
+    # Exact per-run surviving counts: 24 minus one genuine removal per run.
+    assert [rows for rows, _prior, _by in per_run] == [23, 22, 21, 20]
+    # The gate's denominator shrinks with the retires, never grows with them.
+    assert [prior for _rows, prior, _by in per_run] == [24, 23, 22, 21]
+
+
+def test_at_the_twin_accumulation_boundary_the_GATE_is_what_refuses(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-11's boundary assertion -- the DISCRIMINATING half.
+
+    Sized so ``P < X + g`` post-fix while both other mechanisms permit:
+    ``P = 2`` present, ``X = 3`` protected-absent, ``g = 1`` genuinely absent.
+    Retire-eligible absences are ``absent - exempt == 1``, well under
+    ``MAX_GAME_RETIREMENTS``, and every completed game in the fresh array has a
+    boxscore -- so neither the cap nor the completeness signal can fire, leaving
+    the gate as the only possible refuser.
+
+    **This is AC-2's wrong-reason trap in its sharpest form**: three mechanisms
+    produce "0 retired" here and the accumulation walks the input toward the
+    boundary of one of them, so an undiscriminated refusal assertion passes for
+    the wrong reason by construction.
+
+    Pre-fix this PERMITS and the genuine removal is deleted: two newly-completed
+    games make the live population 8 with an overlap of 4, and ``4 >= 0.5 * 8``
+    holds. The fix is stricter by exactly those two rows.
+    """
+    team_a = _insert_team(db, _SLUG_A, _UUID_A, "Team A")
+    team_b = _insert_team(db, _SLUG_B, _UUID_B, "Team B")
+    keeps, shared, gone = _shared_and_own(
+        team_a, team_b, db, n_shared=3, n_keep=2, n_gone=1
+    )
+
+    newly_completed = [
+        _game(f"new-{i}", start_ts=f"2026-07-{1 + i:02d}T18:00:00Z",
+              opponent=f"New Opp {i}")
+        for i in range(2)
+    ]
+
+    with _capture_game_retire_results() as captured:
+        ScoutingLoader(db).load_team(
+            _crawl(team_a, [*keeps, *newly_completed])
+        )
+
+    _assert_captured_game_results(captured)
+    gate = captured[-1].gate_outcome
+
+    assert gate.refused_by == "gate", (
+        "refused for the wrong reason -- the cap or the completeness signal "
+        "fired, so this fixture is not exercising the accumulation boundary"
+    )
+    assert gate.gate_permitted is False
+    assert gate.gate_prior_count == 6, "P + X + g, as of the start of the run"
+    assert gate.gate_comparable_count == 2, "only the two keeps are vouched for"
+
+    live = _game_ids(db)
+    assert gone[0]["id"] in live, "the genuine removal was retired at the boundary"
+    for twin in shared:
+        assert twin["id"] in live

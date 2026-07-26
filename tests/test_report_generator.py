@@ -5802,14 +5802,21 @@ class _RecordingSpy:
     def __init__(self, real):
         self._real = real
         self.results: list = []
+        #: Per-call keyword arguments, parallel to ``results``. Needed by
+        #: E-276-04, which must know WHICH game each player-line call was for --
+        #: the result object carries no game id. Additive: nothing that predates
+        #: it reads this.
+        self.calls: list[dict] = []
 
     def __call__(self, *args, **kwargs):
         result = self._real(*args, **kwargs)
         self.results.append(result)
+        self.calls.append(kwargs)
         return result
 
     def reset(self) -> None:
         self.results.clear()
+        self.calls.clear()
 
 
 class TestGenerateReportDestructiveReconcile:
@@ -5959,6 +5966,57 @@ class TestGenerateReportDestructiveReconcile:
                 return ids[0]
         raise AssertionError("no lineup group in the fixture boxscore")
 
+    def _churn_map(self, game_id: str) -> dict[str, str]:
+        """``{original player_id: brand-new player_id}`` for one game's own block.
+
+        The replacements keep the committed fixture's ALL-NUMERIC 12-digit final
+        segment, for the PII-scanner reason documented at the game ids above, and
+        start well clear of the synthetic ids already in use.
+        """
+        block = self._boxscore(game_id)[self._OWN_KEY]
+        originals = sorted(
+            {
+                stat["player_id"]
+                for group in block.get("groups", [])
+                for stat in group.get("stats", [])
+                if stat.get("player_id")
+            }
+        )
+        return {
+            pid: f"00000000-0000-4000-8000-{910 + i:012d}"
+            for i, pid in enumerate(originals)
+        }
+
+    def _boxscore_with_churn(self, game_id: str) -> dict:
+        """The same game, with every own-block player id RE-ISSUED.
+
+        This is the shape the subset-shaped scenario structurally cannot produce:
+        run 2 introduces ids that were never in run 1, so the post-upsert prior
+        set is strictly larger than the pre-upsert one and the two gate
+        populations diverge. Dropping players can never do that.
+
+        **Names are re-derived, not carried over.** Re-using the committed names
+        would give each churn id a matching last name and an identical first
+        name, which ``dedup_team_players`` merges -- and the test would then be
+        measuring the dedup sweep rather than the reconcile.
+        """
+        payload = self._boxscore(game_id)
+        mapping = self._churn_map(game_id)
+        block = payload[self._OWN_KEY]
+        for entry in block.get("players", []):
+            new_id = mapping.get(entry.get("id"))
+            if new_id:
+                entry["id"] = new_id
+                entry["first_name"] = f"Churn{new_id[-4:]}"
+                entry["last_name"] = f"Reissued{new_id[-4:]}"
+        for group in block.get("groups", []):
+            for bucket in ("stats", "extra"):
+                for stat in group.get(bucket, []):
+                    new_id = mapping.get(stat.get("player_id"))
+                    if new_id:
+                        stat["player_id"] = new_id
+        return payload
+
     # -- transport --------------------------------------------------------
 
     def _register(self, router, state: dict) -> None:
@@ -6005,13 +6063,17 @@ class TestGenerateReportDestructiveReconcile:
                 f"{self._BASE}/game-stream-processing/{gid}/boxscore"
             ).mock(
                 side_effect=_json(
-                    lambda gid=gid: self._boxscore(
-                        gid,
-                        drop_player=(
-                            state["dropped_line_player"]
-                            if state["shrunk"] and gid == self._GAME_A
-                            else None
-                        ),
+                    lambda gid=gid: (
+                        self._boxscore_with_churn(gid)
+                        if state.get("churn") and gid == self._GAME_A
+                        else self._boxscore(
+                            gid,
+                            drop_player=(
+                                state["dropped_line_player"]
+                                if state["shrunk"] and gid == self._GAME_A
+                                else None
+                            ),
+                        )
                     )
                 )
             )
@@ -6286,3 +6348,169 @@ class TestGenerateReportDestructiveReconcile:
                 reclaim_result.players_deleted,
                 reclaim_result.roster_rows_deleted,
             ) == (0, 0, 0), reclaim_result
+
+    def test_second_generation_that_RE_ISSUES_player_ids_retires_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """E-276-04: the churn shape, at the seam where the defect reached live data.
+
+        The sibling above drives a run 2 that is a strict SUBSET of run 1 -- it
+        drops a game, a roster player and a line player. That is why the class
+        was passing for the right reason and still could not see this defect:
+        with no new ids, the post-upsert prior set EQUALS the pre-upsert one and
+        both gate populations agree. **Dropping players can never produce the
+        divergence; only re-issuing ids can.**
+
+        Here run 2 re-issues every own-block player id for one game. The gate's
+        protected population is the pre-upsert snapshot, whose overlap with the
+        fresh block is zero, so the grain REFUSES and the prior lines survive.
+
+        Pre-fix the same input hard-deletes them: the live population is twice
+        the block with an overlap of exactly half, which clears the floor at
+        equality and permits.
+
+        **⚠️ Assertion steer INVERTS here (TN-18).** There is no structural
+        retire record at ``generate_report()`` level, so a seam spy is the only
+        positive signal separating a genuine refusal from *the reconcile never
+        running for that game* -- and "the rows survived" is satisfied by both.
+        The E-244 redirect footgun makes the never-ran case live rather than
+        theoretical. A clean result object rules out the blew-up case only.
+        """
+        import sqlite3 as _sqlite3
+
+        import respx
+
+        from src.db import reconcile_at_load as _recon
+        from src.gamechanger.loaders import game_loader as _game_loader
+        from src.reports import lifecycle as _lifecycle
+        from src.reports.renderer import render_report as _real_render
+
+        db_path = str(tmp_path / "test.db")
+        seed = _sqlite3.connect(db_path)
+        load_real_schema(seed)
+        seed.commit()
+        seed.close()
+
+        def _conn_factory():
+            c = _sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        monkeypatch.setenv("GAMECHANGER_BASE_URL", self._BASE)
+        monkeypatch.setenv("GAMECHANGER_REFRESH_TOKEN_WEB", "fake-refresh")
+        monkeypatch.setenv("GAMECHANGER_CLIENT_ID_WEB", "fake-client-id")
+        monkeypatch.setenv("GAMECHANGER_CLIENT_KEY_WEB", "fake-client-key")
+        monkeypatch.setenv("GAMECHANGER_DEVICE_ID_WEB", "fake-device-id")
+        monkeypatch.delenv("PROXY_ENABLED", raising=False)
+
+        # Neither shrink flag is set: the schedule and roster are unchanged
+        # across both runs, so ONLY the player-line grain is exercised and a
+        # surviving line cannot be explained by some other pass declining.
+        state = {"shrunk": False, "dropped_line_player": None, "churn": False}
+        rendered: list[dict] = []
+        spy_lines = _RecordingSpy(_recon.retire_absent_player_lines)
+        spy_reclaim = _RecordingSpy(_lifecycle.reclaim_orphan_reference_data)
+
+        def _capturing_render(data):
+            rendered.append(data)
+            return _real_render(data)
+
+        with respx.mock(assert_all_called=False) as router:
+            self._register(router, state)
+            with (
+                patch(
+                    "src.gamechanger.token_manager.TokenManager.get_access_token",
+                    return_value="fake-token-e276",
+                ),
+                patch("src.http.session.time.sleep", return_value=None),
+                patch("src.reports.generator.get_connection", side_effect=_conn_factory),
+                patch("src.api.db.get_connection", side_effect=_conn_factory),
+                patch(
+                    "src.reports.generator.render_report",
+                    side_effect=_capturing_render,
+                ),
+                patch("src.reports.generator._REPO_ROOT", tmp_path),
+                patch(
+                    "src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"
+                ),
+                patch(
+                    "src.reports.generator._crawl_and_load_spray", return_value=None
+                ),
+                patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+                # MODULE-level import in game_loader, so patching the
+                # reconcile_at_load attribute would NOT be seen at the call site.
+                patch.object(
+                    _game_loader, "retire_absent_player_lines", spy_lines
+                ),
+                patch.object(
+                    _lifecycle, "reclaim_orphan_reference_data", spy_reclaim
+                ),
+            ):
+                from src.reports.generator import generate_report
+
+                result_one = generate_report(self._PUBLIC_ID)
+                assert result_one.success is True, result_one.error_message
+
+                lines_after_one = self._batting_player_ids(_conn_factory, self._GAME_A)
+                # The fixture actually loaded. Without this the run-2 assertions
+                # pass vacuously against an empty prior set -- the silent-defeat
+                # mode this class's docstring names.
+                assert len(lines_after_one) >= 3, lines_after_one
+
+                churn_map = self._churn_map(self._GAME_A)
+                # The map spans the whole own block (lineup AND pitching); the
+                # batting table holds only the batters, so COVERAGE is the
+                # property, not equality. A pitcher who never batted is in the
+                # map and legitimately absent here.
+                assert lines_after_one <= set(churn_map), (
+                    "the churn map does not cover every loaded batting line, so "
+                    "run 2 would not be a TOTAL re-issue for this grain"
+                )
+                assert not (set(churn_map.values()) & lines_after_one), (
+                    "the re-issued ids must be genuinely new"
+                )
+                churned_batters = {churn_map[pid] for pid in lines_after_one}
+
+                spy_lines.reset()
+                spy_reclaim.reset()
+
+                state["churn"] = True
+                result_two = generate_report(self._PUBLIC_ID)
+
+        # AC-2: a refusal, not a pipeline failure -- it still renders.
+        assert result_two.success is True, result_two.error_message
+        assert result_two.outcome == "ready"
+        assert len(rendered) == 2, "render_report did not run on both generations"
+
+        # AC-2 positive signal: the reconcile RAN for this game and REFUSED.
+        # "The rows survived" alone is satisfied by a reconcile that never ran.
+        game_a_calls = [
+            (kwargs, result)
+            for kwargs, result in zip(spy_lines.calls, spy_lines.results, strict=True)
+            if kwargs.get("game_id") == self._GAME_A
+        ]
+        assert game_a_calls, (
+            "the player-line reconcile never ran for the churned game -- the "
+            "E-244 redirect footgun makes this a live alternative, and it "
+            "produces the same surviving rows as a genuine refusal"
+        )
+        for _kwargs, result in game_a_calls:
+            assert result.retired == {}, f"lines were retired: {result.retired}"
+            assert result.refusals, "the grain neither retired nor refused"
+
+        # AC-1: the prior lines SURVIVE, and the re-issued ids landed beside
+        # them. Pre-fix the originals are hard-deleted and this set equality
+        # fails.
+        lines_after_two = self._batting_player_ids(_conn_factory, self._GAME_A)
+        assert lines_after_one <= lines_after_two, (
+            "prior lines were hard-deleted by a re-issued id churn -- the gate "
+            "measured the post-upsert population"
+        )
+        assert lines_after_two == lines_after_one | churned_batters
+
+        # The other destructive pass ran and took nothing, so it cannot be
+        # mistaken for the reason the lines are still here.
+        assert spy_reclaim.results, "the E-273 reclamation never ran on run 2"
+        for reclaim_result in spy_reclaim.results:
+            assert reclaim_result.deferred is False
+

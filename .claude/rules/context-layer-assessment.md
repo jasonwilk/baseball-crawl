@@ -50,7 +50,7 @@ A lesson that must be recalled by an agent but lands only in a non-auto-loading 
 
 ### Deletion-Side Eviction
 
-Symmetry with promotion: for each file, flag, column, table, command, or agent this epic DELETED or RENAMED, grep `.claude/rules/`, `.claude/agents/`, `CLAUDE.md`, and **every agent's own `.claude/agent-memory/<agent>/` directory -- the `MEMORY.md` index AND its topic files, not just the index** -- for references, and strike or annotate each as history. Reconcile-not-strike: a hit is a *candidate* for eviction, not an automatic strike; preserve still-valid guidance.
+Symmetry with promotion: for each file, flag, column, table, command, or agent this epic DELETED or RENAMED — **and for each CLAIM it RETIRED, which no identifier grep reaches** — grep `.claude/rules/`, `.claude/agents/`, `CLAUDE.md`, and **every agent's own `.claude/agent-memory/<agent>/` directory -- the `MEMORY.md` index AND its topic files, not just the index** -- for references, and strike or annotate each as history. Reconcile-not-strike: a hit is a *candidate* for eviction, not an automatic strike; preserve still-valid guidance.
 
 **Ownership (who edits which dir).** Each agent's memory dir is reconciled by the OWNING agent. An agent ON the dispatch team reconciles its own dir at closure (its edits ride the closure patch); a hit in the dir of an agent NOT on the team is flagged by the main session as a follow-up sweep. Whoever runs the deletion-side sweep (typically claude-architect) MAY read ANY dir to IDENTIFY hits and report them as the closure seed, but only the owning agent edits its own content.
 
@@ -59,6 +59,10 @@ Accretion without eviction is how stale identifiers accumulate (the cross-season
 ### Memory Retirement
 
 At closure, PM greps its Pending-Work / active-epic memory for the archived epic's ID and retires the entry (an epic left listed as READY/active months after completing is the failure this prevents).
+
+**A retired CLAIM strands copies the retiring epic cannot fix, and it is the retiring epic's job to leave them findable.** Sweep for the JUDGEMENTS that rested on the claim, not its wording (`.claude/rules/doc-sweep.md`) — E-276 retired *"a wrong roster delete self-heals / grid clutter, never a corrupted stat"* and its live twin in another agent's memory shared **no token** with it, surfacing only from the judgement step. Every hit outside your own dir is **flagged, never edited**, and a flag that lives only in a completion message is a handoff to nobody: file it as an idea against the owning agent with a resolution trigger (IDEA-187, IDEA-191), because the owner may not be spawned for weeks.
+
+**Never write a number from a live thread into a memory file. Wait for it to settle, or record the MECHANISM instead of the MEASUREMENT.** A handoff artifact is read once, soon, by someone who might notice it is stale; **a memory file is read cold, months later, by someone with no thread to check it against.** In E-276 a figure that was retracted through three successive corrections had already reached another agent's durable memory, and was struck only because the retraction happened to be relayed in time. When a figure does turn out wrong, cut the magnitude rather than revising it downward if the lesson never depended on the count — and leave the withdrawal visible, so a later reader knows it was withdrawn rather than never taken.
 
 ### Cadence and the ratchet
 

@@ -35,6 +35,11 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from src.db.players import ensure_player_row
+from src.db.reconcile_at_load import (
+    GateOutcome,
+    RosterRetireResult,
+    snapshot_prior_loaded_game_ids,
+)
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.loaders.game_loader import (
     GameLoader,
@@ -171,7 +176,16 @@ class ScoutingLoader:
         # churn, so the cap counts zero departures and never fires. Do not drop
         # this SELECT as an optimization and do not pass ``set()`` at a call site
         # where the snapshot is inconvenient -- either silently disables the
-        # guard that stops a truncated crawl from mass-deleting a roster.
+        # SOLE guard that stops a truncated crawl from mass-deleting a roster.
+        #
+        # ⛔ STRENGTHENED at E-276-03, and the advice is unchanged -- only the
+        # stakes are. This said "the guard", which was imprecise while a floor
+        # ratio also stood underneath: a truncated crawl would still have been
+        # refused by the floor even with an empty snapshot. **V1 removed that
+        # floor.** ``MAX_ROSTER_DEPARTURES`` is now the only thing on this
+        # grain, and it is computed as ``absent & previously`` -- so an empty
+        # set here makes the cap count zero departures and permit
+        # unconditionally, at any roster size, with nothing beneath it.
         #
         # ORDERING COUPLING, invisible at both ends (E-270-05): this is a bare
         # local that travels ~85 lines before use -- captured here, passed to
@@ -201,6 +215,45 @@ class ScoutingLoader:
                 (team_id, db_season_id),
             )
         }
+
+        # GAME-grain capture anchor (E-276-02). The games loaded for this
+        # team-season as of the START of this run -- the health gate's protected
+        # population.
+        #
+        # Placement is forced from both sides. It sits BELOW the season-id
+        # derivation because it keys on the DERIVED season id, and ABOVE the
+        # boxscore load because that load is what writes new games. Reading it
+        # later returns ``old | newly_completed``: the payload loader COMMITS PER
+        # GAME, so each newly-completed game is already in the population when
+        # the reconcile runs, and it raises the numerator and denominator
+        # together -- relaxing the floor by half a game each. Newly-completed
+        # games appear in ordinary operation (that is what re-scouting is for),
+        # so stale absences that correctly refuse on their own start retiring
+        # once enough new games load beside them. No isolation-level change
+        # fixes that; the rows are committed, not merely visible-uncommitted.
+        #
+        # SECOND LONG-SPAN ORDERING COUPLING IN THIS METHOD, and like the roster
+        # one above it is invisible at both ends and silent in BOTH drift
+        # directions:
+        #
+        # * A ``games`` WRITE moved ABOVE this SELECT (or this SELECT moved below
+        #   one) pollutes the snapshot with rows THIS run created -- which is
+        #   precisely the defect E-276-02 exists to remove, reintroduced. The
+        #   gate then measures ``|fresh| >= |stale|`` and reads healthy while
+        #   authorizing the retire of genuinely stale games.
+        # * The RECONCILE CALL hoisted ABOVE the boxscore load breaks a
+        #   different, pre-existing coupling: ``game_loader.redirect_map`` is
+        #   EMPTY until that load runs, so every redirected game's canonical id
+        #   is missing from ``fresh_ids`` and reads as absent. Only the CAPTURE
+        #   moves up; the CALL must stay below ``_load_boxscores``. See the
+        #   ORDERING COUPLING note at the ``_reconcile_absent_games`` call.
+        #
+        # Safe edit: keep this SELECT above ``_load_boxscores`` and add no
+        # ``games`` write between it and that load. Nothing in any signature
+        # enforces either position.
+        pre_load_game_ids = snapshot_prior_loaded_game_ids(
+            self._db, team_id=team_id, season_id=db_season_id
+        )
 
         total = self._load_roster_from_data(roster_data, team_id, db_season_id)
 
@@ -280,6 +333,7 @@ class ScoutingLoader:
                 team_id, db_season_id, full_games,
                 schedule_fetch_ok=schedule_fetch_ok,
                 redirect_map=game_loader.redirect_map,
+                prior_snapshot=pre_load_game_ids,
                 # PARSED ids, not FETCHED ids: a boxscore can 200 and still
                 # fail to parse, recording no redirect entry (Fable review).
                 loaded_stream_ids=game_loader.processed_event_ids,
@@ -340,6 +394,7 @@ class ScoutingLoader:
         schedule_fetch_ok: bool,
         redirect_map: dict[str, str],
         loaded_stream_ids: set[str],
+        prior_snapshot: frozenset[str],
     ) -> None:
         """Retire prior-loaded games the fresh schedule dropped (E-267-02).
 
@@ -357,15 +412,31 @@ class ScoutingLoader:
           the redirect targets a cross-perspective twin (stored under the
           canonical id, which is not the fresh event id) would look absent and be
           retired.
-        The floor-ratio health gate derives its own narrower population inside
-        the helper (``prior & fresh``) rather than taking one from here, so that
-        neither upcoming nor newly-completed games -- neither of which can be in
-        the prior-loaded denominator -- can inflate the numerator and raise the
-        deletion cap above half the loaded population.
         * ``not_final`` -- ids whose ``game_status`` is not ``"completed"``.
           Membership uses ``.get(...) == "completed"`` so an ABSENT key (the
           common not-final shape), ``null``, and the ``"new"`` unscored stub all
           land here.
+
+        **The floor-ratio health gate takes its population from HERE** --
+        ``prior_snapshot``, a required parameter of this method, captured by the
+        caller ABOVE the boxscore load and threaded straight through to
+        ``retire_absent_games`` (E-276-02). ⛔ **Do not "simplify" that threading
+        away as redundant**: the helper cannot derive this population for itself,
+        because by the time it runs this run's newly-loaded games are already
+        COMMITTED (``load_payload`` commits per game), so any read it takes
+        returns ``old | newly_completed``.
+
+        ⚠️ This paragraph previously said the gate *"derives its own narrower
+        population inside the helper (``prior & fresh``) rather than taking one
+        from here"*, and justified it on the ground that upcoming and
+        newly-completed games *"cannot be in the prior-loaded denominator"*.
+        **Both halves are now false, and the second was ALWAYS false of
+        newly-completed games** -- they appear in ordinary operation, that is
+        what re-scouting is for, and each one joins the numerator AND the
+        denominator, relaxing the floor by half a game. It is the same claim
+        corrected in ``retire_absent_games``' own comment block, surviving in a
+        second file. Upcoming games remain genuinely excluded, which is the true
+        half that made the sentence read as sound.
 
         A boxscore fetch that skipped any completed game (``loaded_stream_ids``
         missing an id) makes the redirect map incomplete, so the pass refuses
@@ -420,6 +491,7 @@ class ScoutingLoader:
                 fetch_ok=schedule_fetch_ok,
                 not_final_game_ids=not_final_ids,
                 boxscores_complete=fresh_completed_ids <= loaded_stream_ids,
+                prior_snapshot=prior_snapshot,
             )
             if retired.retired_game_ids or retired.refusals:
                 logger.info(
@@ -557,7 +629,7 @@ class ScoutingLoader:
         season_id: str,
         roster_data: list[dict[str, Any]],
         pre_load_roster_ids: set[str],
-    ) -> None:
+    ) -> RosterRetireResult:
         """Retire roster rows for players the fresh crawl dropped (E-267-04).
 
         Reuses the SAME empty-payload guard the roster load itself applies
@@ -582,7 +654,21 @@ class ScoutingLoader:
                 "nothing (an empty crawl proves no departures).",
                 team_id, season_id,
             )
-            return
+            # SYNTHESIZE a result rather than returning None (E-276-03 AC-3).
+            # This path returns BEFORE the helper runs, so without this the
+            # mechanism that produced "0 retired" sits upstream of the record
+            # meant to disambiguate it -- on the one grain that has no gate and
+            # where ``refused_by`` is the only structural discriminator there is.
+            return RosterRetireResult(
+                refused=True,
+                refusal_reason=(
+                    "refused_by=empty_payload: the fresh roster payload carried "
+                    "no player ids, so it proves no departures"
+                ),
+                gate_outcome=GateOutcome(
+                    gate_evaluated=False, refused_by="empty_payload"
+                ),
+            )
 
         # FAIL CLOSED (AC-8): without the exemption plan this retire cannot tell
         # a departure from a pending merge, and guessing wrong splits the
@@ -598,7 +684,19 @@ class ScoutingLoader:
                 "real departures.",
                 team_id, season_id,
             )
-            return
+            # SYNTHESIZE, for the same reason as the empty-payload path above.
+            return RosterRetireResult(
+                refused=True,
+                refusal_reason=(
+                    "refused_by=skipped_no_exemption_plan: the dedup pre-plan "
+                    "failed, so pending-merge ids cannot be told from genuine "
+                    "departures"
+                ),
+                gate_outcome=GateOutcome(
+                    gate_evaluated=False,
+                    refused_by="skipped_no_exemption_plan",
+                ),
+            )
 
         try:
             from src.db.reconcile_at_load import retire_departed_roster_players
@@ -619,12 +717,19 @@ class ScoutingLoader:
                     result.refused, result.roster_db_count,
                     result.fresh_crawl_count, result.absent_count,
                 )
+            return result
         except Exception:  # noqa: BLE001 -- cleanup must never lose a good load
             logger.error(
                 "Roster reconcile failed for team_id=%d season=%s; the loaded "
                 "roster and stats are unaffected.",
                 team_id, season_id, exc_info=True,
             )
+            # A CRASH must not be reportable as a clean pass. The default
+            # ``RosterRetireResult`` carries ``gate_evaluated=False`` and
+            # ``refused_by=None``, which reads as "nothing to decide" -- so a
+            # caller that needs to tell a crash from a no-op must use the
+            # returned object together with the ERROR above, not the row count.
+            return RosterRetireResult()
 
     def _build_team_ref(self, team_id: int) -> TeamRef:
         """Build a ``TeamRef`` by looking up the teams row for ``team_id``.
@@ -667,6 +772,35 @@ class ScoutingLoader:
             # day (America/Chicago -> "1899-12-31"). (E-253-11 Round-1 remediation.)
             start_ts = game.get("start_ts") or game.get("end_ts") or ""
             entry = GameSummaryEntry(
+                # ⚠️ CROSS-MODULE COUPLING, unguarded by any signature
+                # (E-276-02 AC-8). ``event_id`` MUST come from ``game["id"]``,
+                # the SAME key ``_reconcile_absent_games`` reads to build
+                # ``fresh_ids``. That identity is what makes the game grain's
+                # ``W subset-of fresh`` premise hold -- every ``games`` row this
+                # run writes is keyed on an id the fresh array also carries --
+                # and that premise is what makes deletion-neutrality structural
+                # here rather than merely swept (epic TN-3 / TN-5).
+                #
+                # Note ``game_stream_id`` is set from the same field one line
+                # below -- the near-miss to watch, since re-sourcing ``event_id``
+                # from it (or from any other key) type-checks. Break the identity
+                # and ``W - fresh`` becomes non-empty: the candidate set then
+                # includes rows this run itself created and that the fresh array
+                # does not carry.
+                #
+                # ⚠️ HOW LOUD that break is depends on the break, and the
+                # tempting stronger claim -- "it passes every existing test and
+                # fails silently" -- is FALSE as a general statement. MEASURED:
+                # re-keying ``event_id`` to a value outside the fresh array
+                # failed **91** unrelated tests, because the ``games`` rows land
+                # under ids nothing else can find. A subtler break need not be
+                # that loud, but this comment must not claim silence it cannot
+                # support. What the test below buys is ATTRIBUTION -- it names
+                # the coupling as the cause instead of leaving 91 failures, or a
+                # quieter variant's mysterious retire, to be diagnosed from
+                # scratch.
+                #
+                # Pinned by test_every_game_this_run_writes_is_in_the_fresh_array.
                 event_id=str(game_id),
                 game_stream_id=str(game_id),
                 home_away=game.get("home_away"),

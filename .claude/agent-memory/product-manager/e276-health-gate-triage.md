@@ -157,7 +157,7 @@ Two admissible outcomes: close it (a story-03 AC requiring a three-run test that
 
 [[IDEA-185]] partial id churn still retires · [[IDEA-186]] roster retire lock (now carrying the retraction) · [[IDEA-187]] DE's health-gate memory — **deflated TWICE; the residual is one cross-reference**, routed out on **ownership** since only DE may edit its own memory and DE is not on the dispatch team. [[IDEA-188]] roster delete converting a refused fork to an executed merge · [[IDEA-189]] a failing dedup collapse is invisible through `LoadResult.errors`.
 
-## 2026-07-26 rounds — R2–R5 and R1. Epic is STILL READY, NOT dispatched.
+## 2026-07-26 rounds — R2–R5 and R1. **DISPATCHED later the same day — see the dispatch section below; this heading's "NOT dispatched" was true when written.**
 
 **State, so a future instance does not act on the stale summary above**: `epic.md` **~2,180 lines**. Story 01 now runs to **AC-15**; story 03 gained **AC-5b**. **R1 verdict: DIAGNOSTIC ONLY, NO GATE** on the player-line grain — three mechanisms (cap, `extra_guard`, churn-signature) were evaluated **by construction** and none adopted, because **every mechanism that closes the sustained-churn window closes it by refusing forever, and a permanent refusal DOUBLES the coach-facing season aggregate** (27→54 AB, measured). Residual accepted and surfaced; closer is [[IDEA-185]].
 
@@ -174,5 +174,201 @@ Two admissible outcomes: close it (a story-03 AC requiring a three-run test that
 - **Checked-against-data and EXECUTED are different epistemic states.** SE offered a predicate labelled honestly as the former; holding it out and asking for execution is what revealed it needed a *previous invocation's record*, which nothing in production retains — disqualifying it from the AC it was headed for. **The defect this epic fixes survived six review passes because a property was reasoned to rather than run.**
 - **Self-reported defects were the session's most valuable findings and are undiscoverable from artifacts** — DE's mislabelled baseline and swallowed `TypeError`, SE's inferred tuples and its own stale heading. **Sole detector is the actor volunteering it.**
 - **Don't edit quoted output to match a later refinement** — that falsifies the record. Annotate beneath it instead. (SE's call on the `bloat` label; CR reached the same rule independently on a quoted regex.)
+
+## DISPATCHED 2026-07-26 — epic ACTIVE, story 01 IN_PROGRESS (software-engineer)
+
+Order: 01 → 02 → 03 → 05, with 04 eligible any time after 01. Serial. Guardrails restated to every agent: never touch `data/app.db`, synthetic DBs from `migrations/` only, no real crawls.
+
+**Two live spec defects found at the flip, both on story 01's surface, both fixed before SE was assigned. Both are the 10th mechanism, not staleness:**
+
+1. **AC-15's operative sentence still mandated the withdrawn cross-run accumulation signature.** The R1 withdrawal had reached the AC's own body banner, TN-11 and the History — **three sites, none of them the sentence that generated them.** An implementer reads a mandate before its retraction.
+2. **TN-11's field table never listed the member TN-11 claims authority for.** The note said since R1 that the field set *"gained one member on the permitted branch"* and that it *"is cited as authoritative for that set"*, while its table carried only the six refusal-branch fields. **This is TN-11's own downward-drift warning recurring inside TN-11, one round after being written there.**
+
+Also corrected: three Status-block claims falsified by the R1 round without anything editing them (*"R1 is still outstanding"*, *"nothing here authorizes dispatch"*, and the `READY` marker itself).
+
+**⛔ CLOSURE ITEM — trigger 8, context-layer assessment. Do not let this live only in the message channel.**
+
+A finding surfaced at dispatch when the team lead re-issued an instruction I had already completed, acting on my earlier report rather than on `epic.md`. **Disposition, agreed with the team lead: an AMENDMENT to `.claude/rules/tool-output-integrity.md`, NOT a new number in the findings series.**
+
+- **It is NOT a new host.** The **5th host** already covers it literally — *"a summary inherits the truth-value of the moment it was written and carries it forward silently."* A status report is a summary. I checked this against the canonical Index in `.project/research/E-276-process-findings.md`, not `epic.md`'s partial copy.
+- **The team lead's "a message has no mtime" was wrong** and I said so: messages carry transcript timestamps, and the differential's transcript-grep step runs on them fine.
+- **What IS new, and is the part worth keeping:** **re-reading the carrier is a no-op as a check.** In every prior host, *"open the primary"* and *"re-read the carrier"* were **different acts**. Here the carrier is what a reader would naturally re-open, and re-opening it returns the same stale sentence with the same confidence, indefinitely. **A stale file re-read gives you fresh content; a stale message re-read gives you the staleness again.**
+- **Detector line, as agreed:** *if re-reading a thing cannot change what it says about the world, it is not a source.*
+- **Attach to the existing** *"A handoff artifact is a claim with a timestamp"* **passage** — same family (frozen carrier, already consumed, correction cannot reach the reader), and that passage does **not** state the re-read property.
+- **DO NOT NUMBER IT FROM MEMORY OR FROM `epic.md`.** The canonical Index ran to the **14th** as of 2026-07-26 and can move before closure. If it ever does get a number, take it from the research file's Index.
+
+**And the framing correction I had to make, because collapsing it loses a distinction the series drew on purpose**: the team lead offered these as three instances of one mechanism. They are not. **Two are repair-completeness (10th), one is staleness (9th).** Merging two separated hosts is a worse error than missing one.
+
+**The self-consistent move this section exists to be**: I persisted this here rather than leaving it in the team lead's message queue, because the finding is precisely that a message is not a source. A closure item carried only by the channel it indicts would not survive to closure.
+
+### ⛔ SECOND CLOSURE ITEM, same gate — A SWEEP-SHAPED BLIND SPOT. Two claims can AGREE ON THE VERDICT and DISAGREE ON THE FACT.
+
+**Found at story 01 round 2, 2026-07-26.** Persisted here for the same reason as the item above: the team lead asked that it survive closure and explicitly asked not to have to relay it correctly.
+
+**The instance.** Story 01 carried, in ONE file, both:
+- **AC-6's calibration** — *"applying it unconditionally would not widen the gate in production, because all three helpers early-return on an empty live prior."* **TRUE.**
+- **AC-12's justification, 45 lines below** — *"an unconditional vacuous-permit would make an empty roster payload read as authoritative there."* **FALSE.** `fetch_ok` is checked first and roster passes `fetch_ok=bool(fresh)`, so an empty payload refuses on that conjunct either way (executed by SE; PM re-verified at the call site).
+
+**Both sentences support the SAME CONCLUSION — that vacuous-permit must be opt-in.** That is why nothing caught it.
+
+> **A consistency sweep hunts contradictions between a claim and its verdict. These two agreed on the verdict and disagreed on the FACT. A sweep looking for inconsistency is structurally incapable of seeing it** — there is no inconsistency to find, only a false premise producing a correct answer.
+
+**Why this is not just the reason-rots-independently shape already in `tool-output-integrity.md`.** That rule says a verdict's stated reason can rot while the verdict stays right, and its detector is *reopen the cited file*. **This is the harder case: BOTH sentences were present, BOTH were checkable, and the file was open.** The defect was not staleness or an unresolved citation — it was **two live claims of unequal strength pointing the same way**, where the stronger one was false and the weaker one was already sitting in the same document. **The available detector is not re-reading; it is EXECUTING the stronger claim**, which is what SE did.
+
+**Transferable form**: *when an artifact states the same conclusion twice at different strengths, the stronger statement is the one to execute — agreement between them is not evidence, because the weaker one would be true either way.*
+
+**⚙️ SE'S REFINEMENT — ACCEPTED, FOLDED IN AS A QUALIFIER RATHER THAN A SEPARATE ENTRY, because the rule as I first wrote it OVERPROMISED.** *"Execute the stronger claim"* carries an unstated **precondition: the stronger claim must be reducible to something runnable.** It was here — *"would make an empty payload authoritative"* is a prediction about a function call, settled in seconds. **Many such claims are not executable at all**, and against those my rule gave no instruction while sounding like it did. Two limbs, and the second is the one that generalizes:
+
+> - **Where the stronger claim is executable — execute it.**
+> - **Where it is not, the PAIRING is itself the trigger.** Two live claims of unequal strength agreeing is *a place to look, not a place to relax* — **because the weaker one would be true either way and therefore certifies nothing about the stronger.**
+
+**That last clause is the load-bearing half.** It supplies the reason the pairing is suspicious at all; without it the rule reads as a stylistic preference for strong statements rather than a detector. *(SE produced this against its own fix, unprompted. Credit it.)*
+
+**⛔ AND SE CAUGHT AN INSTANCE OF THIS DETECTOR INSIDE ITS OWN NSF-1 FIX, BY APPLYING IT — the sharpest specimen the epic has.** Its new box closed with *"a reader who takes 'all three' as unconditional will mis-predict exactly the input this epic turns on."* **False.** The epic turns on the 9-vs-9 churn, where `prior_count == 9`; *"all three"* mis-predicts at `prior_count == 0` — the **first-ever-load** case. Strong form and true form pointing the same way, the strong one wrong. Corrected to name the first-ever-load case and why it must permit, citing TN-3.
+
+**Where it landed is the whole finding: the CLOSING SENTENCE of a box whose subject is over-strong claims, written while applying the rule against over-strong claims.** This is the third independent confirmation that **awareness confers no immunity** — and note what did work: not vigilance, but SE mechanically running a named check against its own output. **The rule caught its author in the act of writing the rule's own defect.** SE then re-audited its other two fixes and the round-2 consequence claims by the same method, re-verifying premises in source rather than arguing them.
+
+### ⛔ THE DETECTION RECORD IS THE FINDING, MORE THAN ANY INSTANCE — and it splits into TWO classes the tally must not merge
+
+**Elevated at the team lead's prompting, 2026-07-26, after PM checked the claim against the record rather than adopting the framing.** The team lead's version was *"careful reading is 0-for-N, mechanical checks are N-for-N."* **That is right for one class and wrong for the other, and merging them would overstate a true finding into a false one** — the exact defect this entry catalogues.
+
+**CLASS A — a FALSE PREMISE inside a CORRECT conclusion.** Four instances this dispatch: `18 of 18`; AC-12's roster justification; SE's own NSF-1 closing sentence; PM's *"unreliable by construction."*
+
+> **Caught by EXECUTION or MEASUREMENT in 4 of 4. Caught by careful re-reading in 0 of 4.**
+
+**And the 0-for-4 is not for want of reading.** In each case someone had the material open: PM re-read IDEA-189 *while editing it* and did not see the refuting table 25 lines above; SE re-read its own box; six review passes read `18 of 18`. **Two of the four were produced by the very people who had just written the rule against them, hours earlier.** The conclusion is always right, so reading confirms it and stops.
+
+**CLASS B — a MISSING ITEM in an enumeration** (TN-9's four misses). **These WERE caught by reading** — but never by the author, always by a second party running an independent sweep. The failing check is not "read carefully," it is "the author re-reads their own enumeration."
+
+> **The unifying fact, and it is the one to carry**: in **8 of 8** across both classes, **the author never caught their own.** What differs is only what the second party had to do — **execute** it for class A, **enumerate** it for class B.
+
+**So the honest rule is not "reading does not work."** It is: **reading works only from OUTSIDE the claim's authorship, and for a false premise under a right conclusion, not even then — you have to run it.** Stated at the team lead's stronger form it would have been a class-A truth generalized over a class-B counterexample.
+
+**Attach alongside the re-read-is-a-no-op item, same gate (trigger 8).** Same file, `.claude/rules/tool-output-integrity.md`; distinct property, so do NOT fold the two together. **Do not number either from memory or from `epic.md`** — see the warning above.
+
+**🏅 THE STRONGEST SINGLE PIECE OF EVIDENCE IN THIS RECORD, and it is not any instance above**: code-reviewer applied the **criterion-versus-evidence** cut **by hand, unprompted, on story 01's denominator-18, BEFORE the rule was named** — and on being shown the naming said *"I applied that cut by hand there; having it named is better."* **A rule independently reinvented under load is a different class of evidence from a rule agreed to**: agreement is cheap and tells you only that the reader found it plausible. **Carry CR's reinvention, not any participant's concurrence** — including the team lead's and PM's, which are worth nothing by this standard.
+
+## ⛔⛔ A SECOND FAMILY — **THE INSTRUMENT FAILS WHILE LOOKING LIKE IT WORKED.** Own heading, and it BOUNDS the class-A finding above.
+
+**Promoted to its own family 2026-07-26 on the team lead's question, after PM tested whether it was genuinely distinct.** It is, and not cosmetically:
+
+- **Everything above is a CLAIM being wrong** — an over-strong premise surviving because its conclusion is right (class A), or an enumeration missing a member (class B). The artifact under examination is defective.
+- **This family is the INSTRUMENT being wrong** while the artifact may be perfectly fine.
+
+**The unifying property, and it is what makes it dangerous**: *a broken check's output is SHAPE-IDENTICAL to a working one's.* A bad control's empty looks exactly like a tool failure's empty; a vacuous mutation's green looks exactly like a real mutation's green. **They cannot be told apart from the output at all** — the evidence lives outside it, in whether the check's own preconditions held.
+
+| Instance | Direction | What it looked like |
+|---|---|---|
+| **CR's line-wrapped positive control** (below) | **over-reports — FALSE ALARM** | a documented tool quirk |
+| **SE's vacuous mutation probe** (below) | **under-reports — FALSE CLEAN** | a passing hardening probe |
+
+> **⚠️ THIS BOUNDS THE CLASS-A CONCLUSION ABOVE, which is why it cannot be a footnote.** That entry concludes: *for a false premise under a right conclusion, reading is not enough — you have to RUN it.* **This family says the running can lie.** The class-A remedy is exactly what this family attacks, so they must be read together: **run the check AND validate the check's own preconditions** — that the control matched contiguously, that the mutation actually applied.
+>
+> **Detector common to both: an instrument must emit evidence that it OPERATED, separate from its result — and that evidence must not be filtered away.** SE's probe was caught only because a traceback sat *above* the green summary; a report trimmed to the summary line would have shipped it.
+
+**Why it earns a place**: **mutation probes were this dispatch's most-trusted instrument** — story 01's MF-1, story 02's discrimination split, and CR's AC-3 confirmation all rest on one. **A false-clean probe would have been accepted by every party in the loop, PM included.** Trust concentrated in a single instrument is where an instrument-level failure costs most.
+
+### ⛔ INSTANCE 1 — **A POSITIVE CONTROL CAN BE WRONG, AND IT MANUFACTURES A PHANTOM TOOL FAILURE.**
+
+**Found by CR at E-276-03, 2026-07-26, against its own sweep.** Its first identifier sweep's **positive control returned empty**, which it took for the documented ugrep silent-empty quirk. **It was not a tool failure**: the control string was **line-wrapped in the source**, so no contiguous match existed. CR caught it with a contiguous control plus a Python second channel, and flagged that it *"nearly reported a tool failure that was a bad control."*
+
+**Why this needs its own line rather than a footnote on the cross-check rule.** `.claude/rules/tool-output-integrity.md` instructs treating an unexpected empty as a **FAILURE** to cross-check — and here that instruction, **followed correctly, points at the wrong conclusion.** The empty was true output about a badly-chosen probe.
+
+> **The control is a claim too, and it is the one nobody checks — because its entire job is to be what you check other results against.** A control that cannot match for a reason unrelated to the tool (line wrapping, markup, hyphenation, inflection) converts a correct search into a reported outage.
+>
+> **Detector: before concluding "the tool failed", confirm the control string exists CONTIGUOUSLY in the target.** A control drawn by eye from rendered prose is the high-risk case — rendering hides exactly the wrapping that breaks it.
+
+**⚠️ Note the DIRECTION, because it inverts everything else in this record.** Every other instance here is an over-strong claim surviving because it *agreed* with a correct conclusion. **This one produces a FALSE ALARM** — a defect reported in the harness where the harness was fine. **A discipline built only against under-reporting will over-report**, and a team that chases a phantom tool failure once will discount the real quirk next time. *(Pairs exactly with CR's over-flagging argument for the disarmed-assertion predicate: a signal that fires wrongly teaches its readers to ignore it.)*
+
+### ⛔ INSTANCE 2 — **A MUTATION PROBE CAN REPORT SUCCESS WITHOUT EVER HAVING MUTATED.**
+
+**Found by SE at E-276-03 round 2, 2026-07-26, against its own probe.** Its first hardening probe reported **"28 passed"** and was worthless: its own anti-vacuity guard `assert s.count(old) == 1` had **fired**, because the target phrase appears **twice** in the file — once in the emitted message, once in AC-6's mandated sentence at the constant. **The suite therefore ran against UNMUTATED code.** SE caught it only because the traceback sat above the green line.
+
+> **A passing mutation probe whose mutation never applied is indistinguishable from a successful one by its output alone.**
+
+**Detector, SE's own**: keep an **anti-vacuity guard on the mutation edit itself** (`count == n` before substituting) — **and do not filter probe output to the pytest summary line, because the evidence that the mutation applied lives ABOVE it.**
+
+⚠️ **The guard here WORKED and the probe still reported green.** That is the sharp part: the anti-vacuity guard is necessary and **not sufficient**, because its failure was reported on a channel nobody was reading. **A precondition check whose alarm is discarded is not a check.**
+
+### ⛔ INSTANCE 3 — **THE FIXTURE, NOT THE INSTRUMENT: a green test over a fixture that does not do what its name says**
+
+**Found by SE at E-276-04, 2026-07-26, by writing the STRONG assertion first.** Its precondition asserted **set equality** between the churn map and the stored batting lines. It **failed** — the map spans lineup *and* pitching while `player_game_batting` holds only batters. **Had SE written the weaker assertion first, the test would have passed while re-issuing an INCOMPLETE set**: green, named for a full id churn, exercising a partial one.
+
+**This is the same failure as a probe whose mutation never applied, one layer out** — the instrument ran correctly and the *fixture* was not what it claimed. SE's framing, which is the transferable one: **a green test over a fixture that does not do what its name says.**
+
+### ⛔ INSTANCE 4 — a reachability check that ran, produced output, and measured the wrong thing
+
+**CR, closure Step 1a, 2026-07-26.** Its first reachability check substring-matched `t_game` — which hit `first_game`, `next_game` *"and forty other files."* **It redid it as a real import/path scan before trusting it.** Caught by its own author before reporting, like every other member of this family.
+
+### ⛔⛔ A SECOND AXIS ON THIS FAMILY — an instrument that told the TRUTH and MIS-RANKED what it found
+
+**CR, self-reported at closure, crediting PM's harness-README framing.** Its Step 1a audit reported the nine `TypeError` call sites as *the* finding and filed `x_attack.py` / `t_rest.py:71` as *"two softer ones."* **That ordering is inverted.**
+
+> **A `TypeError` is SELF-ANNOUNCING** — anyone who runs it learns immediately. **A probe that still runs, reporting on a configuration that no longer ships, produces a plausible number and tells you nothing is wrong.** *"The quiet one is the dangerous one."*
+
+**Every other member of this family is an instrument that LIED about its result. This one was accurate and ranked its own findings backwards** — which no amount of verifying the findings would catch, because each finding was correct.
+
+**⚠️ And CR's report already contained the evidence against its own ordering**: it listed `t_rest.py:44` among the `TypeError` set **and** `t_rest.py:71` under the removed floor. **Two call sites, two failure modes, one file** — so it fits neither bucket alone. **That is the identical error PM made in the harness README's first draft, reached from the opposite direction**, and neither party saw it in their own artifact while both had it written down.
+
+**Transferable**: *severity ordering is a claim, and it is the claim least likely to be checked, because the findings under it are all true.* **The alarming-looking failure was the safe one.**
+
+### ⛔ THE REVIEW LOOP WAS STRUCTURALLY BLIND TO AN UNTRACKED FILE
+
+**CR, pre-commit, 2026-07-26.** An untracked artifact appears in **neither `git diff` nor `git diff --cached`** — so the entire five-story review loop **could not see it**, which is not carelessness but a gap in the instrument. CR found it by running `git status`, which the per-story loop never runs.
+
+**The cost was not hypothetical**: committing from the index as it stood would have dropped **PM's entire closure assessment block, including the eight per-trigger verdicts and the ARCHIVAL IS BLOCKED line** — while every review passed. The main session's `git add -A` is a backstop firing *after* the reviews, not a review seeing it.
+
+### ⚖️ A DISTINCT SHAPE, AND THE ONLY ONE HERE WHERE THE VERDICT DOES NOT SURVIVE
+
+**Codex finding, E-276 closure.** *A SHOULD FIX accepted on a cost argument that turns out to be wrong is not a SHOULD FIX* — **the cost WAS the disposition, so the disposition does not outlive the cost being checked.**
+
+CR closed this in story 01 by scoping a docstring, on the ground that `retire_absent_player_lines` has no `season_id` in hand — **true of the parameter list, false of what is REACHABLE** (`games.season_id` is `NOT NULL`; the caller holds `game_id`). The rule it broke was **in CR's own rubric**, applied to other agents' code twice in the same epic.
+
+**Everything else in this record is a false premise under a verdict that HELD** — which is why re-reading kept confirming them. **Here, checking the premise FLIPS the verdict.** And the detector is neither of this file's other two: **reproduction changed nothing** (CR had already granted the mechanism) and re-reading had not caught it. **What moved it was re-opening its own reasoning** — a third act, distinct from re-reading and from executing.
+
+**📌 THE PATTERN ACROSS ALL OF IT, which is the single most useful line in this file**: **no defect in this dispatch was caught by a downstream party re-reading an upstream artifact.** Every one was caught by **the author of a check distrusting their own output** — SE against its own probe, its own fixture and its own framing; CR against its own audit, its own severity ordering and its own prior verdict; PM against its own README and its own over-claim. **Design for self-distrust, not for scrutiny.**
+
+**Detector: assert the fixture's defining property at full strength BEFORE the assertion that matters.** A precondition weak enough to pass on a partial fixture is not a precondition.
+
+⚠️ **Direction: FALSE CLEAN**, like instance 2 — but note it was caught **prospectively**, by choosing the strong form, not by a later audit. **That is the second prospective catch of this dispatch** (after SE preserving the true half of a false sentence in story 02), and both came from the same instinct: state the strong claim and let it fail, rather than stating a claim that cannot.
+
+### 🏅 REACHABILITY CORROBORATION — the regime-B residual's premise appeared UNBIDDEN, on real payloads
+
+**E-276-04, 2026-07-26. Recorded on the STRONG reading, whose provenance SE established by RECONSTRUCTION rather than recollection** — it rebuilt the mutant on a scratchpad copy, diffed it, and showed the substitution was **exactly one line** (`gate_prior = frozenset(prior_ids)`) inside `retire_absent_player_lines`. **Story 01 was NOT reverted**; `_dedup_candidate_victims` is byte-identical between the two files, so **AC-15's diagnostic was present and unmodified.** The worktree file's md5 was unchanged by the reconstruction.
+
+**So the diagnostic fired on a PERMITTED retire** — the log shows `hard-deleted 2 stale pitching line(s)` immediately followed by the matched-victim WARN. **It could not have fired on a refusal**; that is AC-15's branch by construction.
+
+**What it corroborates — the PREMISE, not the remedy.** Regime B's accepted residual rests on the claim that a re-issued `player_id` whose *displayed name also changed* is reachable and that `dedup_team_players` structurally cannot close it. **Every prior demonstration was a fixture built to demonstrate it.**
+
+**⚠️ And the sharpest detail is how the collision arose: it was NOT designed in.** SE re-derived the churn players' names deliberately, to stop the dedup sweep merging them and keep the test measuring the reconcile — an unrelated precaution. **It simply left the `number` field alone**, so the re-issued ids inherited their predecessors' jerseys **as residue of what SE did not edit.** The jersey half fired on real committed payloads by accident.
+
+**⛔ It is NOT evidence that MF-1's fix works** — SE's own words: *"that guard was not what fired here — the jersey half was."* The shape occurring and the remedy handling it are separate claims on separate branches. **File under the residual's premise; explicitly not under MF-1.**
+
+*(Same evidence class as CR reinventing the criterion-versus-evidence cut under load: unbidden beats constructed, because a constructed demonstration only shows the shape is buildable.)*
+
+**⛔⛔ CR SHARPENED THIS, AND ITS INSTRUCTION IS A GUARD AGAINST A FUTURE MISREADING — carry it verbatim.** *"Record it as corroboration in the epic's evidence, do NOT credit it as coverage, and do NOT let it be cited as a reason the unit test could be thinned."*
+
+Two corrections to PM's "reachability corroboration" framing, both accepted:
+
+1. **NOTHING ASSERTS IT.** If the jersey branch regressed tomorrow, this test would not notice. **It adds ZERO coverage and is not a regression guard** — MF-1's unit test remains the only thing holding that branch. **This is precisely the hazard the instruction exists for**: corroborating evidence read as coverage is how a real test gets deleted as redundant.
+2. **What it buys is NARROWER than "reachability", and stronger for being narrow.** It **refutes a live objection to MF-1** — that the name-changed / jersey-preserved shape was contrived for a hand-built fixture. CR's form: *"that the fixture author had to avoid the name match for unrelated reasons, and got the jersey match for free, is the strongest available evidence that the shape occurs naturally."*
+
+**The transferable rule underneath**: *evidence that a shape is REAL and a test that would CATCH the shape are different assets, and the first is routinely spent as though it were the second.* **An observation nothing asserts cannot retire an assertion.**
+
+### 📌 Closure-record artifact — the dispatch log DOUBLE-COUNTS story 01, and the operator's threshold decision rests on the number it obscures
+
+**Verified by PM reading `.dispatch-log/E-276.tsv` directly**, not from the relay:
+
+```
+epic	seq	sends	rounds
+E-276	1	37
+E-276	2	4
+```
+
+**Those two rows are ONE story.** Staging SE's late story-01 prose fix wrote a second boundary row, so story 01's real send count is **41 across two rows** — and the `seq` column reads as though 01 and 02 had both completed.
+
+**Why this needs a line at closure rather than a shrug**: the operator raised `DENY_AT` from 25 to 60 **on the strength of these numbers**, and **the datum that justifies it is 37-in-one-story, not 4.** A later reader reconstructing the decision from this file sees a story that cost 4 sends and a threshold of 60, and cannot recover the reasoning.
+
+⚠️ **Second defect in the same artifact, found on the read**: the `rounds` column is **empty on both rows**, so the log records neither the true story boundary nor the review rounds that drove the volume. **The two failures compound** — with rounds populated, a reader might notice a 4-send row carrying two review rounds and question the split; with it blank there is nothing to catch the eye. **Note both, or the fix addresses the visible half of the problem.**
 
 Related: [[lessons-learned]], [[operator-followups]].

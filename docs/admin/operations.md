@@ -540,7 +540,7 @@ Reports expire 14 days after generation. After expiry, the link returns a 404 an
 
 ### Reconcile-at-Load: Generating a Report Can Now Delete Stale Data
 
-*Last updated: 2026-07-20 | Source: E-267 (reconcile-at-load against the fresh crawl)*
+*Last updated: 2026-07-26 | Source: E-267 (reconcile-at-load against the fresh crawl), E-276 (corrected the game and player-line gate to a pre-upsert snapshot; removed the roster grain's floor gate outright)*
 
 **Generating a report is now a destructive operation.** Every report generation calls `ScoutingLoader.load_team()`, which re-scouts the opponent's GameChanger data and loads it. As of E-267, that same load now reconciles the freshly-crawled data against what is already in the database and hard-deletes anything the fresh crawl no longer contains, across three grains:
 
@@ -552,7 +552,14 @@ This corrects an accumulate-only bug where removed games, dropped stat lines, an
 
 **Forward-only, not a repair.** The reconcile only compares the current re-scout against what is already loaded. It never rewrites or retroactively corrects data loaded before E-267 shipped. To start from a clean data slate instead, see [Purging Scouting and Report Data](#purging-scouting-and-report-data-bb-db-purge-scouting) below.
 
-**Bias to refuse.** A retire happens only when the fresh crawl is corroborated healthy -- it fetched successfully, returned a non-empty payload, and did not shrink catastrophically against what is already loaded (the roster grain applies its own stricter absolute cap of two departures per run in addition to the shrink ratio, since a 12-15 player roster tolerates almost no slack). Any doubt keeps the existing data untouched and logs a WARNING explaining the refusal -- a transient failure, a postponed game, or a partial/degraded crawl never causes data loss. A rescheduled game (moved date, same real game) is matched and updated in place rather than treated as a removal.
+**Bias to refuse -- game and player-line grains.** On these two grains, a retire happens only when the fresh crawl is corroborated healthy -- it fetched successfully, returned a non-empty payload, and did not shrink catastrophically against a snapshot of what was already loaded, captured *before* this run's own writes (E-276; a snapshot read after the run's own writes would count rows the run itself just wrote as corroboration, which is not a health check). Any doubt keeps the existing data untouched and logs a WARNING explaining the refusal -- a transient failure, a postponed game, or a partial/degraded crawl never causes data loss on these two grains. A rescheduled game (moved date, same real game) is matched and updated in place rather than treated as a removal.
+
+**The roster grain inverts this bias -- it has no shrink-ratio floor at all (E-276).** The operator ruled to prefer deleting over refusing on this grain: a floor-ratio gate was shown to permanently lock the grain (refusing forever, never updating the roster again) on inputs where today's design eventually converges to a correct roster. The roster grain's only guard is an absolute cap on genuine departures per run (`MAX_ROSTER_DEPARTURES`, currently 2, since a 12-15 player roster tolerates almost no slack) -- more than two previously-rostered players absent in one run refuses the whole roster retire; two or fewer are deleted. Two consequences worth knowing before trusting this grain against a flaky feed:
+
+- **The cap bounds a rate, not a total.** It limits departures *per retire invocation*, not cumulative loss. `bb report morning-run` walks several teams in one process, so a degrading feed can erode a roster by up to the cap's count on *each* team, *each* run -- raising the cap does not put a ceiling on total loss the way it looks like it does.
+- **It protects inversely to severity.** A crawl that collapses almost entirely -- measured on a 13-player roster whose fresh crawl repeatedly returns just 1 row -- loses nothing: the absent count so far exceeds the cap that the cap itself refuses every retire. A crawl that degrades gently, dropping a couple of roster rows per run, can erode a roster over several runs with the cap permitting every step, because a genuine one- or two-player departure and one step of slow degradation look identical to the cap. This is an accepted, deliberate trade, not a defect.
+
+So: a transient failure, a postponed game, or a partial/degraded crawl never causes data loss on the game and player-line grains. **On the roster grain, a partial/degraded crawl can cause data loss** -- bounded per run by `MAX_ROSTER_DEPARTURES`, but not bounded in total across repeated runs.
 
 **Fidelity gate.** Reconcile changes are validated against the [Reconciliation Scoreboard](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) above -- a retire correction should hold or improve plays-vs-boxscore fidelity; it must never regress it.
 
