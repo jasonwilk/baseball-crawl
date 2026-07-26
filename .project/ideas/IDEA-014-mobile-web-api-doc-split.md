@@ -13,7 +13,7 @@ As we discover more endpoints with profile-divergent behavior, the current forma
 After more proxy session ingestion surfaces concrete examples of profile-divergent behavior. The trigger is: we have 3+ endpoints where the doc body needs to describe meaningfully different behavior per profile, and the current format feels inadequate.
 
 ## Dependencies & Blockers
-- [ ] More proxy session data ingested (E-072 planning underway) to surface real examples of divergent behavior
+- [ ] More proxy session data ingested to surface real examples of divergent behavior. **⛔ This pointer went dangling on 2026-07-26: E-072 was ABANDONED and will never deliver the ingestion capability.** The salvaged session-processing design lives in [[IDEA-192]] instead -- but note that IDEA-192 is itself only CANDIDATE with no pull, so this blocker is now *further* from clearing, not closer. If this idea matters on its own, the honest path is to find the divergent-behavior examples by hand rather than waiting on an automation nobody has needed in ~4.5 months.
 - [ ] IDEA-011 investigation (HTTP 500 endpoints that work on mobile but fail on web) would provide concrete cases
 
 ## Open Questions
@@ -22,7 +22,7 @@ After more proxy session ingestion surfaces concrete examples of profile-diverge
 - How many endpoints actually diverge in practice? This might be a small-N problem that does not justify a format overhaul.
 
 ## Notes
-- Related to E-072 (proxy session ingestion work, currently being planned).
+- ~~Related to E-072 (proxy session ingestion work, currently being planned).~~ **E-072 ABANDONED 2026-07-26** -- no roadmap slice, no pull in ~4.5 months, and a large new SKILL.md would have needed an operator-signed context-ratchet exception. Its reusable fragments were extracted to [[IDEA-192]], which supersedes E-072 as this idea's unblock pointer.
 - Related to IDEA-011 (HTTP 500 endpoints that succeed on mobile but fail on web).
 - The current per-endpoint format was established in E-062. Any format changes would need to update the validation script (`scripts/validate_api_docs.py`) and the `.claude/rules/api-docs.md` loading discipline.
 - The `ingest-endpoint` skill would also need updating if the doc format changes.
