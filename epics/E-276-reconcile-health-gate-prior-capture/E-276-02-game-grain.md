@@ -58,7 +58,11 @@ The reconcile call itself must stay below the boxscore load: the redirect map is
 
       **Evidence tier, recorded honestly**: the static enumeration is what makes the property general; the 179 invocations confirm no suite-exercised path falsifies it but are **not** a proof over production inputs.
 
-- [ ] **AC-9**: `python -m pytest tests/` reports 0 failed, with no existing assertion changed. The pre-implementation baseline is **4207 passed**.
+- [ ] **AC-9 (suite green — scoped to THIS STORY, which is what previously went unstated)**: `python -m pytest tests/` reports 0 failed, with **no existing assertion changed BY THIS STORY**. The pre-implementation baseline is **4207 passed**.
+
+      **⚠️ THE SCOPE WORDS ARE LOAD-BEARING AND WERE MISSING** *(added 2026-07-25, second Codex spec pass)*. The unscoped form — *"with no existing assertion changed"* — was **false in both directions**. Looking backward: story 01 blocks this one and **inverts** `tests/test_reconcile_at_load.py::test_empty_payload_refused_even_with_empty_prior`, so an assertion has already changed before this story starts. Looking forward: **story 03 AC-11 changes a second**, inside the 72 grain-file tests. The epic-wide total is **TWO** expected assertion changes, tabulated in **Success Criterion 2**.
+
+      **This story adds none of its own**, which is the real content of the AC and is worth asserting — it is the grain where a stale assertion would most plausibly need editing, and not needing to edit one is evidence the fix is population-only.
 
 - [ ] **AC-10 (PRESERVE the operator-facing which-refuser discrimination)**: When this grain refuses, the WARN it emits MUST name the refusing mechanism and carry **that mechanism's own counts**, rendered from `refused_by` and the gate-outcome record.
 
@@ -69,6 +73,37 @@ The reconcile call itself must stay below the boxscore load: the redirect map is
       **This is not a duplicate of AC-2, and the two do not conflict.** AC-2 governs what a *test* asserts on and forbids the WARN as an assertion target. This governs the *message itself*. The gate-outcome record (epic TN-11) is the source and the WARN renders from it, never the reverse — so a test for this AC may assert on the message text, because here the message **is** the deliverable rather than a proxy for behaviour.
 
       **The generalizable point, worth more than the string**: adding a mechanism to a guarded path silently degrades every message that enumerated the old mechanisms. The comment above will still read as though it holds — an accurate comment made false by a change elsewhere, which is this epic's own subject arriving in its own remediation.
+
+- [ ] **AC-11 (MULTI-RUN, exercising the TWIN-ACCUMULATION shape — at production scale)**: A test drives **N ≥ 4 sequential `ScoutingLoader.load_team` invocations** in which **cross-perspective-protected absences accumulate across runs**, and asserts the **exact surviving game count and the exact retire outcome after each one**. Per-invocation assertions are the deliverable; an endpoint-only assertion does not satisfy this AC.
+
+      **Why a multi-run test at this grain** [epic TN-16]: every probe and sweep in this epic's planning was **single-run**, and the failure that reopened the design three times is **multi-run**. TN-16 assigns the construction to each grain story; story 03 discharges it via AC-7/AC-8(c) and story 01 via its AC-14. **This is the game-grain counterpart, and it is the one with a real accumulation mechanism to exercise.**
+
+      **THE SHAPE, and it is already documented in this repo rather than hypothesised.** `_game_is_cross_perspective_protected` refuses-and-**KEEPS** a game held by another perspective, writing `result.refusals[game_id]` — so a protected game is **absent from the fresh array on every subsequent run, forever**, and is **never retired**. The existing `tests/test_game_grain_reconcile.py::test_cap_excludes_cross_perspective_games_so_a_genuine_removal_retires` states this in its own docstring (*"which this grain refuses-and-KEEPS, so they recur in `absent` forever"*) and cites the api-scout measurement behind it. The consequence for the gate: a protected id sits in the **denominator** (it is in `prior_ids`) and **not in the numerator** (`comparable = prior_ids & fresh`), because the gate is computed **before** per-id protection is applied. **So protected twins degrade the floor ratio monotonically as they accumulate.** That existing test already knows it — it carries an explicit `assert prior - absent >= prior * FLOOR_RATIO, "fixture must pass the floor"` guard. **This AC is that guard's multi-run generalisation.**
+
+      **THE THRESHOLD, so a variant is derivable rather than guessed** [**DERIVED**, PM — arithmetic only, from `crawl_is_authoritative`'s `fresh_count >= prior_count * FLOOR_RATIO` with `fresh_count = |prior ∩ fresh|`; **not executed**, and an implementer should confirm it against the code before sizing a fixture on it]. Write `P` for prior games present in the fresh array, `X` for protected-absent, `g` for genuinely-absent. Then `prior = P + X + g`, `comparable = P`, and:
+
+      > **the corrected gate permits iff `P >= X + g`.**
+
+      Its space, stated with it per this epic's standing rule: **game grain, corrected gate, `FLOOR_RATIO = 0.5`**, protection applied after the gate. It is a function of that one constant and is not a property of the design.
+
+      **What the test asserts, at production scale — 20-30 completed games (CLAUDE.md, "Scope"):**
+
+      - across the sequence, as twins accumulate, **a genuine removal still retires at each step while every protected twin is KEPT** — assert both, per run;
+      - at the boundary the gate refuses, and the refusal is attributed to **`refused_by == "gate"`** — *not* to the cap and *not* to `boxscores_incomplete`. **This is AC-2's wrong-reason trap in its sharpest form**: three mechanisms can produce "0 retired" here and the accumulation walks the input toward the boundary of one of them, so an undiscriminated refusal assertion passes for the wrong reason by construction;
+      - **`.refusals[game_id]` names the protection for each kept twin**, since `refused_by` is unit-level and neither field alone closes the trap.
+
+      **⚠️ THE FIX MAKES THIS SHAPE REACH THE BOUNDARY SOONER, AND THAT MUST BE STATED RATHER THAN DISCOVERED.** With `N` newly-written rows in the run, today's polluted gate permits iff `P + N >= X + g`; the corrected gate permits iff `P >= X + g`. **The fix is stricter by exactly `N`** — it removes the offset that was masking twin accumulation. That is **not** a deletion-neutrality violation: TN-5 scopes the guarantee to *deletions* (the fix never permits a deletion today refuses) and says explicitly that the two gates may disagree in the refusing direction. **It is an availability effect, in the direction this epic deliberately chose**, and it belongs in an assertion rather than in a surprise.
+
+      **⚠️ AND THE MEASURED PRODUCTION OCCUPANCY IS FAR BELOW THE THRESHOLD — say so, or this AC reads as an alarm it is not.** The E-270 probe measured cross-perspective twins at **~4% of stored ids (22 of ~583)**, and `P >= X + g` needs more than half a team's stored games to be absent-and-protected before it binds. **Nothing observed is near it.** This AC is a **regression guard against accumulation**, not a report of a live defect, and it must not be cited as one. What it buys is that the boundary is pinned and per-run behaviour is asserted at the scale the grain actually runs at — which is exactly what no single-run probe in this epic could give.
+
+      **✅ CONSTRUCTIBILITY IS SETTLED — this AC is REQUIRED, not provisional.** *(Settled 2026-07-25 at the second spec pass, which correctly flagged the earlier wording as leaving a READY-surface AC unresolved at dispatch time. It did, and that is now fixed.)* The originating instruction was conditional — *"if the corrected gate's design makes this shape unconstructible"* — and **the condition was discharged against the source rather than left open**:
+
+      - **The mechanism is confirmed in code** [PM-VERIFIED]: `src/db/reconcile_at_load.py` computes `comparable = set(prior_ids) & fresh` and evaluates the gate on it **before** `_game_is_cross_perspective_protected` is applied to build the exempt set. Protected ids are therefore in the denominator and not the numerator, which is the whole shape. **The design does not obstruct it — the design produces it.**
+      - **The fixture pattern already exists in-tree**: `tests/test_game_grain_reconcile.py::test_cap_excludes_cross_perspective_games_so_a_genuine_removal_retires` builds protected games by loading team B over team A's shared games, and **already carries `assert prior - absent >= prior * FLOOR_RATIO, "fixture must pass the floor"`** — its author was already managing this interaction at a single run. Scaling `keeps` / `shared` and iterating is a parameter change to a working pattern.
+
+      **What remains is fixture ENGINEERING at N runs, which is ordinary implementation difficulty — and ordinary difficulty does not license dropping an AC.** An AC carrying its own opt-out is not an acceptance criterion; it is a suggestion, and this epic's entire subject is requirements that evaporate because nothing forced them.
+
+      **If you hit a genuine wall, ESCALATE — do not self-authorize a deferral.** Raise it to PM/team-lead with the specific obstruction. A deferral is then PM's ruling, recorded in epic TN-16 with its risk stated. **The distinction is not bureaucratic**: a design-level impossibility is a finding about the epic, while a hard fixture is a task. Only the first is grounds for deferral, and **the first has already been checked and ruled out.**
 
 ## Technical Approach
 
@@ -104,7 +139,9 @@ software-engineer
 
 ## Definition of Done
 - [ ] All acceptance criteria pass
-- [ ] Tests written and passing. **The DISCRIMINATING tests — AC-1's stale-absences-plus-newly-completed case and AC-2's fixture — demonstrably FAIL against pre-fix code and PASS after.** Scoped deliberately: AC-5 is a comment, AC-6 is prose, and AC-7's ported sweep asserts a property that holds under BOTH regimes (it is a no-op guard on this grain, which is the whole point of porting it). A blanket fail-before/pass-after line would make this story's own Definition of Done unsatisfiable.
+- [ ] Tests written and passing. **The DISCRIMINATING tests — AC-1's stale-absences-plus-newly-completed case, AC-2's fixture, and AC-11's boundary assertion — demonstrably FAIL against pre-fix code and PASS after.** Scoped deliberately: AC-5 is a comment, AC-6 is prose, and AC-7's ported sweep asserts a property that holds under BOTH regimes (it is a no-op guard on this grain, which is the whole point of porting it). A blanket fail-before/pass-after line would make this story's own Definition of Done unsatisfiable.
+
+      **AC-11 is discriminating on its BOUNDARY assertion only, and the split must be kept.** The gate refuses at a **different accumulation level** pre-fix and post-fix — today's polluted gate permits iff `P + N >= X + g`, the corrected one iff `P >= X + g` — so a fixture sized at the boundary flips. The **twins-are-kept** and **genuine-removal-retires** assertions hold under both regimes and are regression guards, not discrimination. Report the two halves separately; reporting AC-11 as wholly fail-before/pass-after is an overclaim.
 - [ ] Code follows project style (see CLAUDE.md)
 - [ ] No regressions in existing tests
 - [ ] `data/app.db` untouched; no network; synthetic DBs from `migrations/` only

@@ -2,7 +2,7 @@
 
 ## HOW TO READ THIS FILE — it is long, and most readers need a small part of it
 
-**This file is ~1,855 lines. Nobody needs all of it, and reading it front-to-back is the wrong approach.** Its length is the residue of a design that was reopened three times plus a deliberate decision to inline everything load-bearing rather than cite an artifact that lives on no filesystem. Both were right; the combination is not free, and this section is the mitigation.
+**This file is ~2,073 lines. Nobody needs all of it, and reading it front-to-back is the wrong approach.** Its length is the residue of a design that was reopened three times plus a deliberate decision to inline everything load-bearing rather than cite an artifact that lives on no filesystem. Both were right; the combination is not free, and this section is the mitigation.
 
 | If you are… | Read | Skip |
 |---|---|---|
@@ -18,7 +18,13 @@
 **Known and deliberate**: the History carries nine-plus process mechanisms with their instances and derivations. **An implementer never needs them.** They are the epic's most transferable output and they are the first thing to extract to a research artifact — see the size note in Technical Notes.
 
 ## Status
-`READY` (2026-07-25) — gate design RESOLVED per grain; final consistency sweep complete.
+`READY` — **re-affirmed 2026-07-25 on the operator's authorization**, after the pre-dispatch amendment and **six review passes**. The freshness gate measures from this date.
+
+Gate design RESOLVED per grain; consistency, banner and claim sweeps all clean.
+
+**The prior "amended-and-not-re-affirmed" hold is DISCHARGED.** It was in force from the pre-dispatch amendment until this line, and its purpose is served: the two acceptance criteria added to the implementer surface after the original READY (**01 AC-14**, **02 AC-11**) have since been through **four further review passes** — two Codex spec audits, an edge-walk, and an independent parallel enumeration with its re-verify. **Nothing about the design changed at any point**; every amendment added tests, disclosures, citations, or corrections to tracking artifacts.
+
+**READY and DISPATCH remain separate gates.** This line asserts the first only. Dispatch is a distinct operator decision and nothing here authorizes it.
 
 **Read the banner at the top of Technical Notes before implementing anything about the gate shape.** It says which parts of this file are current design and which are kept as history, and reading a superseded section as spec is the single most expensive mistake available here.
 
@@ -70,7 +76,19 @@ This epic restores the gate's intended population **on game and player-line**, b
 
    A loss announces itself; a silent reassignment does not — and this project's premise is that a coach reads the report as fact. **That is why this is in your summary rather than in a Technical Note.** It does not change the disposition: the band requires a conjunction of narrow conditions (churn in the band, a live fork, a departure in the same run), **it is exactly `{R−1, R}` at every roster size tested — two wide, scaling with the roster, not an artifact of one size** — and its **occupancy is unmeasured**. It is filed as [[IDEA-188]] rather than treated as a blocker. But you are approving on the strength of what the failure *looks like*, and "invisible" is the part that decides how that weighs.
 
-**Scope that did NOT change**: no cap values move, no schema change, no migration, no crawl, no network, `data/app.db` untouched. Two residuals were routed out rather than absorbed ([[IDEA-185]], [[IDEA-186]]), and a third on ownership grounds ([[IDEA-187]]).
+**Scope that did NOT change**: no cap values move, no schema change, no migration, no crawl, no network, `data/app.db` untouched.
+
+**FIVE residuals were routed out rather than absorbed** — *(corrected 2026-07-25; this read "two … and a third" and under-enumerated by two, in the section an operator reads to see what was deferred)*:
+
+| Idea | Routed out on | What it holds |
+|---|---|---|
+| [[IDEA-185]] | substance | partial id churn still retires, after the gate is honest |
+| [[IDEA-186]] | substance | the permanent roster-retire lock after a truncated crawl |
+| [[IDEA-187]] | **ownership** — DE's own memory file, and DE is not on the Dispatch Team | now deflated twice; residual is one cross-reference |
+| [[IDEA-188]] | substance | a roster delete converting a REFUSED dedup fork into an EXECUTED merge — **pre-existing and WIDENED by V1** |
+| **[[IDEA-189]]** | substance | **a failing dedup collapse is invisible through `LoadResult.errors`** |
+
+**⚠️ [[IDEA-189]] was linked from NOWHERE in this epic until 2026-07-25, and it is the one that qualifies a live premise.** TN-5's three-bucket lock disposition rests in part on a merge failure being **recurring and visible**; IDEA-189 establishes it is recurring but **not visible through the channel this codebase treats as authoritative** (`dedup_team_players` swallows without incrementing `result.errors`). **The bucket-(c) ruling STANDS — IDEA-189 says so itself, "sharpens rather than changes"** — but its supporting assumption is narrower than stated, and a reader had no route to that. **This is a pointer, not a re-opening**; nothing about the disposition moves.
 
 ## Background & Context
 
@@ -306,7 +324,20 @@ Worth carrying as a shape: **a mitigation named in prose, never executed, protec
 ## Success Criteria
 
 1. At each of the three grains, a test exists that FAILS against pre-fix code and PASSES after, driving the real `ScoutingLoader.load_team` — not a direct helper call.
-2. `python -m pytest tests/` reports 0 failed. The **72 tests in the three grain files** (34 + 20 + 18 — the space is named because this count was previously stated as though it were the whole reconcile suite) stay green with no assertion changed, plus mechanical kwarg churn at the 9 direct call sites. **All three figures re-measured and CORRECT** [PM-VERIFIED, 2026-07-25]; note they are **collection** counts, not `def test_` counts — the game file has 30 `def test_` plus one parametrize over the 5-entry `_PERSPECTIVE_CHILD_TABLES`. Counting `def test_` gives 68 and looks like a discrepancy; it is not. **`tests/test_reconcile_at_load.py` is a fourth file, 19 further tests, where exactly ONE assertion inverts by design** — see TN-13.
+2. `python -m pytest tests/` reports 0 failed. The **72 tests in the three grain files** (34 + 20 + 18 — the space is named because this count was previously stated as though it were the whole reconcile suite) stay green, **with EXACTLY TWO existing assertions changed epic-wide, both named and expected**, plus mechanical kwarg churn at the 9 direct call sites. **All three figures re-measured and CORRECT** [PM-VERIFIED, 2026-07-25]; note they are **collection** counts, not `def test_` counts — the game file has 30 `def test_` plus one parametrize over the 5-entry `_PERSPECTIVE_CHILD_TABLES`. Counting `def test_` gives 68 and looks like a discrepancy; it is not. **`tests/test_reconcile_at_load.py` is a fourth file, 19 further tests** — see TN-13.
+
+   **⛔ THIS CRITERION READ "stay green with no assertion changed" AND WAS FALSE. Corrected 2026-07-25 at the second Codex spec pass.** Codex raised the same defect against **story 01 AC-12** and **story 02 AC-9**; the sweep for it found **two further sites, including this Success Criterion** — a structural field, and the third time in this epic that a defect Codex located in an AC also sat in top matter nobody re-read.
+
+   **The two expected changes, epic-wide:**
+
+   | # | Test | Story | Why |
+   |---|---|---|---|
+   | 1 | `tests/test_reconcile_at_load.py::test_empty_payload_refused_even_with_empty_prior` | **01**, AC-12 | asserts `crawl_is_authoritative(fetch_ok=True, fresh_count=0, prior_count=0) is False` — **precisely the input TN-1(c)'s vacuous-permit inverts** |
+   | 2 | `tests/test_roster_grain_reconcile.py::test_catastrophic_roster_shrink_refuses_on_the_floor` | **03**, AC-11 | keeps its OUTCOME (still refuses) and **loses its REASON** — by the cap, not the floor. Its `"floor_ratio" in warnings[0]` assertion fails and its name and docstring become false |
+
+   **Change 2 lands INSIDE the 72**, because `tests/test_roster_grain_reconcile.py` is one of the three grain files (the 18). **That is what made the old wording false rather than merely imprecise** — this criterion asserted the 72 were untouched while a story in the same epic required touching one of them.
+
+   **The mechanism, and it is the epic's own subject once more:** change 2 arrived with the roster design's reversal, *after* TN-13 had established the "exactly one" count against the fourth file. **TN-13's count was correct for its own space and became an epic-wide claim by being read as one.** Every count carries its space — and a count's space can be invalidated by a change elsewhere without a single word of the count being edited.
 
    **Evidence scope, stated because it is narrower than it reads** [CR]: the zero-divergence probes behind "no assertion flips" patched only the **player-line and game** grains. **No roster figure exists** — the grain that produced every correction in this planning session was never measured both ways. Either run the roster probe before READY, or treat this as an obligation on the implementer with its scope named. Do not let a measured-sounding claim cover an unmeasured grain.
 3. The deletion-neutrality property (TN-5) is asserted, not merely argued — **on game and player-line, the two grains where it holds** (story 01 AC-8, story 02 AC-7). **On roster it is deliberately FALSE**, as a prediction of the same `W ⊆ fresh` premise rather than an exception to it, so there is nothing to assert there and its absence is not a gap. *(Scoped 2026-07-25; the unqualified form read as covering all three grains.)*
@@ -342,6 +373,18 @@ Worth carrying as a shape: **a mitigation named in prose, never executed, protec
 - **`.project/research/E-276-roster-design-record.md`** — PM's independent record, written before the authors' file landed, when it was unclear that it would. **Explicitly not the authors' artifact**: assembled from relayed executions, every result attributed and marked `[EXECUTED, <agent>]` because PM ran none of it.
 
 **Keep both, and DIFF rather than delete.** Two records of one design written from different vantage points, neither derived from the other, is a stronger artifact than either — and this epic has spent a day establishing that a claim's *provenance* is where its defects live. Where they disagree, the authors' file is primary and the disagreement is the interesting object.
+
+> **⚠️ "BOTH FILES" ACCOUNTS FOR TWO OF FIVE. The full `E-276-*` research set, added 2026-07-25** — an independent enumeration found three artifacts this epic never mentioned, **two of them carrying retired figures**:
+>
+> | File | Status |
+> |---|---|
+> | `E-276-roster-design-recommendation.md` | **LIVE — primary source** on the roster design |
+> | `E-276-roster-design-record.md` | **LIVE — PM's independent record**, kept for the diff |
+> | `E-276-process-findings.md` | **LIVE** — the extracted process mechanisms; read by claude-architect at the trigger-8 gate |
+> | `E-276-triage-handoff.md` | ⛔ **SUPERSEDED, header added.** Carried *"13 direct `crawl_is_authoritative` calls"* (now **7**) and *"exactly one assertion inverts"* (now **two**) |
+> | `E-276-conjunction-removal-draft.md` | ⛔ **SUPERSEDED, header added.** An executed work order that quotes removed and replacing text side by side |
+>
+> **Neither superseded file was reachable by anything this epic does.** `.project/research/` is outside story 05's sweep scope (`CLAUDE.md`, `.claude/rules/`, `.claude/agent-memory/`), and no term or structural sweep covers it. **The retired count survived in a sibling of the directory story 05 is instructed to write into** — and it survived *because* the sentence above said "both files", which reads as a complete accounting and is a count over a space nobody checked. **The seventh host, in the sentence that scopes the artifact set.**
 
 **Why PM wrote it rather than waiting for its authors**: a gate its setter then waives is worse than no gate, and this one exists precisely because *a design settled in an artifact on no filesystem is a citation that resolves to nothing.* The record's destination also makes the History extraction cheaper — see the size note.
 >
@@ -811,6 +854,8 @@ snapshot 10 · fresh 8 · churn 20  →  live prior 30
 
 **Scale, with its limit stated.** An exhaustive roster sweep found **862 neutrality violations across 6560 reachable combinations** (four parameters over `0..8`, less the degenerate case) for the **corrected-gate-only** shape. **That is a LOWER BOUND for V1, not V1's count** — so `violations(V1) ⊇ violations(corrected-only) ⊇ 862` within the swept space, and V1's exact figure is **unmeasured**. Do not report 862 as V1's number. *(This sweep was previously recorded as "historical, since the conjunction closed those cases." **The conjunction is gone, so those cases are open again** and the sweep is now the measurement of how roster neutrality fails.)*
 
+**⚠️ AND THE RANGE IS A STATED LIMITATION, NOT A CITATION DETAIL — the same disclosure its game-grain neighbour carries** (added 2026-07-25; the neighbour had it and this did not). **`0..8` does not reach a 12-15 player roster**, which is this project's production roster size (CLAUDE.md, "Scope"). So the sweep's space stops short of production on the very grain whose sole remaining guard is a per-invocation cap over a production-sized roster. **Cite it with its range or not at all.** Note the direction differs from the neighbour's and both need saying: over there a **zero** count over a short range reads as strong evidence *because* it is zero; here a **non-zero lower bound** over a short range understates a failure count that production sizes would only increase. **A short range flatters a clean result and deflates a dirty one — the limitation binds in both directions.**
+
 **State the MECHANISM, not "no floor is more permissive"** [CR-2's sharpening, adopted]. The relation holds because **V1 drops two conjuncts and adds none**:
 
 ```
@@ -1107,17 +1152,18 @@ Keeping them distinct is load-bearing for the roster story: the correctly-captur
 
 | Site | Anchor | Story |
 |---|---|---|
-| `src/db/reconcile_at_load.py` | module docstring, the "What IS uniform across all three, and must stay so" paragraph | 01 |
+| `src/db/reconcile_at_load.py` | *(row merged 2026-07-25 into the more specific one below — it named the same file, same anchor, same story, and was a strict subset. **A duplicate row in an inventory three consumers treat as complete, corrected one revision earlier for being INCOMPLETE** — over- and under-enumeration of the same table, one round apart.)* | — |
 | `src/db/reconcile_at_load.py` | `crawl_is_authoritative` docstring — the `fresh_count` **Args** entry and numbered condition 2. **ALREADY FALSE TODAY, PRE-FIX** — see below | 01 |
 | `src/db/reconcile_at_load.py` | `retire_absent_player_lines` docstring, the "Health gate:" paragraph ending "an id churn should REFUSE rather than delete" | 01 |
 | `src/db/reconcile_at_load.py` | `retire_absent_games`, the comment block at the `comparable` assignment — the "Two population mismatches were tried and rejected here" paragraph, specifically the bullet claiming newly-completed games "are not in prior either" | 02 |
 | `src/db/reconcile_at_load.py` | `retire_absent_games`, the **"WHICH gate refused"** comment above the three-branch `transient_reason` — it enumerates **three** causes named apart *"because the remedies differ"*, and that enumeration stops being exhaustive once `refused_by` names the mechanisms explicitly and **`boxscores_incomplete` is separated from the cap** as its own member. **An accurate comment falsified by a change elsewhere, not by an error in it** — and the branch's single unlabelled `(fresh_comparable_count, prior_count, floor_ratio)` triple degrades with it, since it no longer says which population it reports. Found by reading the source during final triage, not from the handoff. [PM-VERIFIED] | 02 |
 | `src/db/reconcile_at_load.py` | the **module docstring's result-type summary** (the `RosterRetireResult -- refused: bool + refusal_reason` line and its siblings) — the grain results gain the gate-outcome record of TN-11, so a summary listing only `refused` + a prose reason understates what each type carries | 01 |
-| `src/db/reconcile_at_load.py` | `retire_departed_roster_players` docstring + the `_cap_on_genuine_departures` comment | 03 |
-| `src/db/reconcile_at_load.py` | **THE FOURTH PRE-EXISTING FALSE CLAIM** — the `MAX_GAME_RETIREMENTS` comment asserting *"a refused retire self-heals, a wrong delete is irreversible"* **and citing the `MAX_ROSTER_DEPARTURES` cap as its precedent.** True for the game grain, **backwards for roster** (executed in both directions, independently confirmed by two agents). **SCOPE IT TO THE GAME GRAIN — DO NOT DELETE IT**; it is correct where it was written. DE's characterisation is the one to use: **this is the sentence that made bias-to-refuse feel *safe* on roster**, which is why the analogy went unchallenged by all four reviewers. *(A separately-raised roster-docstring citation was retracted by its author as a fusion of inference with a real quotation — **that retraction withdraws the fabricated clause, NOT this correction.** The roster docstring is clean; this comment is not.)* | 03 |
+| `src/db/reconcile_at_load.py` | `retire_departed_roster_players` docstring + the `_cap_on_genuine_departures` comment — the arrangement described as a cap layered *under* a floor, and the pre-load capture as feeding only the cap | 03 |
+| `src/db/reconcile_at_load.py` | **`retire_departed_roster_players` docstring, the SEPARATE *"grid clutter, **never a corrupted stat**, which is what separates this grain from the game and player-line grains"* sentence.** V1 falsifies it **in the band régime** — a roster delete there can collapse a refused dedup fork into an executed merge and silently reassign a stat row ([[IDEA-188]]). **SCOPE IT, DO NOT DELETE IT**: it is true outside the band, and it is the sentence the operator's prefer-delete ruling rests on, so a reader must not be left believing it holds unconditionally. **Added to this table 2026-07-25** — see the note below. | 03 |
+| `src/db/reconcile_at_load.py` | **THE FOURTH PRE-EXISTING FALSE CLAIM** — the `MAX_GAME_RETIREMENTS` comment asserting *"a refused retire self-heals, a wrong delete is irreversible"* **and citing the `MAX_ROSTER_DEPARTURES` cap as its precedent.** True for the game grain, **backwards for roster** (executed in both directions, independently confirmed by two agents). **SCOPE IT TO THE GAME GRAIN — DO NOT DELETE IT**; it is correct where it was written. DE's characterisation is the one to use: **this is the sentence that made bias-to-refuse feel *safe* on roster**, which is why the analogy went unchallenged by all four reviewers. *(A separately-raised roster-docstring citation was retracted by its author as a fusion of inference with a real quotation — **that retraction withdraws the fabricated clause, NOT this correction.** ⛔ **The retraction's closing clause — "The roster docstring is clean; this comment is not" — is now FALSE and is corrected here, 2026-07-25.** The roster docstring is **not** clean: it carries the *"grid clutter, never a corrupted stat"* sentence that V1 falsifies in the band régime, now its own row above. **The retraction was right about the fabricated clause and wrong in its generalization** — the verdict held and its closing scope claim did not, which is the reason-rots-independently-of-the-verdict shape `.claude/rules/tool-output-integrity.md` records for retractions, landing in a retraction.)* | 03 |
 | `CLAUDE.md` | the **Canonical reconcile-at-load (retire-absent)** Architecture bullet, its "KNOWN DEFECT (2026-07-25 audit, fix in flight)" paragraph | 05 |
 | `CLAUDE.md` | **A SECOND COPY of the falsified invariant, in the SAME bullet**: *"the health-gate ratio's numerator and denominator MUST be drawn from the same population."* Story 05 replaces only the KNOWN-DEFECT paragraph, so without this row the retired claim survives **two paragraphs from its own replacement**, in the file every session loads. It must take TN-10's necessary-but-not-sufficient wording, not merely be deleted. | 05 |
-| `src/db/reconcile_at_load.py` | the module docstring's **"What IS uniform across all three, and must stay so"** same-population sentence — the in-module twin of the CLAUDE.md copy above. Cited by anchor deliberately; a line number given for it in review has already rotted once. | 01 |
+| `src/db/reconcile_at_load.py` | the module docstring's **"What IS uniform across all three, and must stay so"** paragraph — **specifically its same-population sentence**, the in-module twin of the CLAUDE.md copy above. **Correcting the sentence is the deliverable; the surrounding paragraph is the anchor for finding it.** Cited by anchor deliberately; a line number given for it in review has already rotted once. | 01 |
 | `.claude/agent-memory/claude-architect/epic-codifications.md` | the E-267 entry's T1/T2 bullet (pinned "same population" invariant) and the "STANDING CODIFICATION CHECK — verify CONCLUSIONS harder than STATEMENTS" paragraph (the "benign" ruling) | 05 |
 
 **`crawl_is_authoritative`'s docstring is false BEFORE this epic changes anything** [PM-VERIFIED by clean read, originally found by DE]. Its `Args` entry documents `fresh_count` as *"Size of the fresh payload for this grain"*, and numbered condition 2 glosses it as *"an empty payload proves nothing"* — but **all three call sites pass `len(comparable)`, the overlap `prior & fresh`**, not a payload size. Verified at the three call sites in `retire_absent_games`, `retire_absent_player_lines`, and `retire_departed_roster_players`; each computes `comparable = set(prior_ids) & fresh` immediately above its call.
@@ -1125,6 +1171,16 @@ Keeping them distinct is load-bearing for the roster story: the correctly-captur
 This is worth more than a prose fix, and it belongs in the epic's evidentiary record rather than only in its task list: it is a **pre-existing** false claim about the semantics of the very function whose semantics this epic corrects, found while fixing it. It is evidence FOR the epic's thesis rather than a consequence of it — the parameter has been documented as one thing and fed another since it was written, which is exactly the gap through which "the same population on both sides" stayed true-sounding while the gate measured something else.
 
 **In-module prose corrections belong inside the grain story that changes the behaviour**, never in a separate prose story — same-commit rule per `.claude/rules/tool-output-integrity.md` ("prose you author is a claim"). Only the context-layer files are deferred to 05, and 05 is sequenced last so the prose describes what shipped.
+
+#### ⛔ THIS TABLE SHIPPED KNOWN-INCOMPLETE, AND THE NOTE SAYING SO WAS NOT A FIX — corrected 2026-07-25 (second Codex pass)
+
+**Story 03 AC-9(c) recorded a required prose site as *"NEW, and it is not in TN-9's table"* and then left it out of the table.** Meanwhile **two downstream consumers NAME this table as the complete inventory**: story 05's Technical Approach (*"The full list of prose sites, with stable anchors, is Technical Notes TN-9"*) and **Success Criterion 4** (*"No prose … still states the falsified claims (TN-9)"*). A third, **story 05 AC-6's residue sweep**, depends on it *implicitly* — it sweeps for "the falsified claims" without naming where they are enumerated. **The site is now a row above and the inventory is actually complete**; the alternative fix — narrowing the "full list" claim — was rejected because the consumers want an inventory, not a partial list.
+
+**⛔ THE COUNT IN THIS PARAGRAPH WAS WRONG WHEN FIRST WRITTEN, AND IT WAS MINE.** It read *"three downstream consumers"* and named **story 05's own AC-1 chain** as the third. **AC-1, AC-2, AC-2b and AC-3 cite CLAUDE.md sites directly and never reference TN-9** — they are not consumers of this table at all. Caught by the edge-walk one round after I wrote it, **inside the note whose whole subject is a claim about another artifact that nobody resolved against that artifact.** Corrected to **two explicit plus one implicit**, with the implicit one marked as implicit rather than folded in to preserve a total of three — **restoring the count by re-labelling a weaker member is the move this epic has already named as inflation.**
+
+**This is `.claude/rules/testing.md`'s *annotating a fixture limitation is not covering it*, arriving on a SPEC inventory rather than a test.** The rule's own words: *"an accurate scope note SUBSTITUTES for covering the region, because accuracy about a gap reads as management of it."* Story 03's note was accurate, honest, and load-bearing in the wrong direction — **it is precisely what made the omission feel handled.** A reader of story 03 saw a documented gap; a reader of story 05 saw a complete inventory; **and both were reading the same absent row.**
+
+**The sharper half: an annotation that names a gap is INVISIBLE to the consumer that depends on the gap being closed.** Story 05 never reads story 03. **A note only reaches whoever reads the file it is in** — so a gap annotated in one artifact and depended upon in another is not merely uncovered, it is *unreachable*. **Annotate where the dependency is, or close the gap.** This epic could not have found it by any sweep it ran: nothing was stale and nothing was contradictory in either file alone — the defect existed only in the relation between them.
 
 ### TN-10 — The corrected invariant (necessary-but-not-sufficient is the transferable part)
 
@@ -1162,7 +1218,7 @@ Each is constructed so the legacy gate **and** the cap both PERMIT, leaving the 
 | game | 2 prior loaded, fresh schedule = 2 brand-new completed games | retires both | permits | permits (2 ≤ cap) | refuses |
 | player-line | 9 stored, 9 brand-new | retires 9 | permits | n/a (no cap on this grain) | refuses |
 
-**⚠️ The roster row is RELABELLED, not deleted, and its meaning has changed.** Roster has **no gate** under V1, so this fixture no longer discriminates a gate — **it discriminates the REVERSAL**: today and V1 both delete both rows, identically. It is therefore a *characterization* test on that grain (story 03 AC-8a), not a discriminating one. **Story 03's discriminating fixture is a different shape** — a 3-row stored roster with 1 survivor, where today's floor refuses and V1 retires 2. Do not carry this row's sizing over to it.
+**⚠️ The roster row is RELABELLED, not deleted, and its meaning has changed.** Roster has **no gate** under V1, so this fixture no longer discriminates a gate — **it discriminates the REVERSAL**: today and V1 both delete both rows, identically. It is therefore a *characterization* test on that grain (story 03 AC-8(a)), not a discriminating one. **Story 03's discriminating fixture is a different shape** — a 3-row stored roster with 1 survivor, where today's floor refuses and V1 retires 2. Do not carry this row's sizing over to it.
 
 The game and player-line sizings remain load-bearing and easy to get wrong — in particular, do not carry 9-vs-9 to the roster grain, where the cap refuses regardless.
 
@@ -1221,10 +1277,30 @@ Stories 01, 02 and 03 each mandate asserting on "a structural record carried by 
 | `gate_permitted` | the gate's verdict, or `None` when `gate_evaluated is False` |
 | `gate_prior_count` | the denominator used — **the pre-upsert snapshot**. **The numeric tell**: pre-fix the WARN reads 18 where the true pre-run population is 9 |
 | `gate_comparable_count` | the numerator used |
-| `refused_by` | **UNIT-level refusal only** — `None` \| `"gate"` \| `"cap"` \| `"boxscores_incomplete"` \| `"empty_payload"` \| `"fetch_not_ok"` |
+| `refused_by` | **UNIT-level refusal only** — `None` \| `"gate"` \| `"cap"` \| `"boxscores_incomplete"` \| `"empty_payload"` \| `"fetch_not_ok"` \| `"skipped_no_exemption_plan"`. **The full set is below; it is NOT uniform across grains.** |
 | `permitted` | the value the code acted on; carried though derivable, so a test asserts the acted-on value rather than recomputing it |
 
 **`refused_by` replaces `legacy_*`'s discriminating power while generalizing it**: the wrong-reason trap was never about legacy-vs-corrected, it is that **several mechanisms each produce "0 retired."** Naming the mechanism beats inferring it from two booleans, and it is **the only formulation that works on roster**, which has no gate.
+
+> ### ⛔ THE `refused_by` MEMBERSHIP IS PER GRAIN, AND STATING IT ONCE HERE IS THE FIX FOR A P1
+>
+> **Codex found this and it was real** [pre-dispatch amendment, second Codex pass, 2026-07-25]: the enum above omitted **`skipped_no_exemption_plan`** while the roster subsection below **REQUIRES the wrapper to synthesize exactly that value**, and story 03 AC-3 named a third, different set. **Three sources, three sets, on the surface an implementer builds and asserts against.** The member is now in the enum and the per-grain split is stated here rather than left to be inferred.
+>
+> | Member | game | player-line | roster |
+> |---|---|---|---|
+> | `None` (no unit-level refusal) | ✓ | ✓ | ✓ |
+> | `"gate"` | ✓ | ✓ | **✗ — no floor gate exists under V1** |
+> | `"cap"` | ✓ (`MAX_GAME_RETIREMENTS`) | **✗ — this grain has no cap** | ✓ (`MAX_ROSTER_DEPARTURES`) |
+> | `"boxscores_incomplete"` | ✓ | ✗ | ✗ |
+> | `"empty_payload"` | ✓ | ✓ | ✓ — **synthesized by the wrapper**, see below |
+> | `"fetch_not_ok"` | ✓ | ✓ | ✓ |
+> | `"skipped_no_exemption_plan"` | ✗ | ✗ | ✓ — **roster ONLY; synthesized by the wrapper**, see below |
+>
+> **Why the table rather than one flat list.** The flat list is what drifted: a reader adding a roster-only member to a set presented as universal has no prompt to check the other grains, and a story author reading the flat list has no way to know which members their grain can actually emit. **`refused_by == "gate"` is unreachable on roster and `"cap"` is unreachable on player-line** — a test asserting either would be asserting a state the code cannot produce.
+>
+> **⚠️ `"empty_payload"` and `"fetch_not_ok"` are NOT redundant on roster even though its `fetch_ok` is `bool(fresh)`** — they arrive from different sites (the wrapper's early return vs the authority check), and collapsing them re-creates the ambiguity this record exists to remove. If an implementer finds they are genuinely indistinguishable on that grain, that is a finding to raise, not a simplification to make.
+>
+> **The transferable shape, because this is the SECOND time this enum drifted**: the T6 round added `boxscores_incomplete` after CR-2 found the set non-exhaustive, SE repaired it, and CR-2 verified the repair. **The repair was correct and incomplete** — `skipped_no_exemption_plan` was introduced in the *same* Technical Note, in a later subsection, and never propagated back up to the enum it belonged to. **A verified repair verifies what it was pointed at.** Enumerations drift downward-only: the site that *adds* a member is rarely the site that *lists* them.
 
 **`gate_evaluated` is the fail-closed field.** Do **not** merely null the old fields for roster — a nulled field is indistinguishable from an unset one, which is this codebase's documented missing-safety-signal shape (`.claude/rules/python-style.md`).
 
@@ -1331,12 +1407,12 @@ Port targets (PM's assignment; each story's ACs also state independently what it
 | player-line 9-vs-9 churn | the commissioned defect; **the corrected gate refuses** (story 01 AC-1/AC-2) | 01 |
 | game 2-prior / 2-brand-new-completed | game-grain discriminating case | 02 |
 | **roster 3-row stored / 1 survivor, churn-free** | **the roster-grain DISCRIMINATING case** — today's floor refuses and retires 0; V1's cap permits and retires 2 (story 03 AC-1). **This row was missing while the non-discriminating one below stood in for it.** | 03 |
-| roster 2-vs-2 | **CHARACTERIZATION, not discrimination** — under V1 this permits and retires both, **identically to today**, and fails only if someone re-adds a floor (story 03 AC-8a). Do not carry its sizing to the discriminating fixture above. | 03 |
+| roster 2-vs-2 | **CHARACTERIZATION, not discrimination** — under V1 this permits and retires both, **identically to today**, and fails only if someone re-adds a floor (story 03 AC-8(a)). Do not carry its sizing to the discriminating fixture above. | 03 |
 | the whole-set construction (10 rostered / fresh drops 2 / 20 churn) | **the churn-region divergence at ordinary roster size** — pre-fix the floor refuses and **0** are retired; post-fix the cap permits and **22 are retired, of which exactly 2 are pre-existing** (story 03 AC-2) | 03 |
 | the precondition-(d) slip (snapshot passed as the classification universe) | (d), which no other AC can catch | **03 owns the executed two-run construction. Story 01 AC-9b owns the primitive-level contract test only** — see below |
 | the 0-of-2197 exhaustive sweep | deletion-neutrality on game and player-line — **CORROBORATION, not sole support**, since the property is now proved structurally from `W ⊆ fresh`. **Cite it with its `0..12` range or not at all** (story 02 AC-7). | 02 |
 | ~~`scratchpad/t_divergence_sweep.py`~~ — **NOT PORTED, deliberately** | It measured divergence between a floor and a corrected floor on the roster grain. **Under V1 there is no floor, so it has no subject in the code.** Its finding — that a count is range-dependent while a characterization is not — is a **process** finding, not a property of the shipped design, and belongs with the process record rather than in `tests/`. Story 03's Notes states the same; this row is the correction it asked for. | — |
-| **A MULTI-RUN sequence at every grain that keeps one** | The blind spot that hid F1 from fifteen attacks: every existing probe and sweep is single-run, and the failure is multi-run. A grain with no multi-run regression test is untested against the whole class. | each grain story |
+| **A MULTI-RUN sequence at EVERY grain — all three, no exceptions** | The blind spot that hid F1 from fifteen attacks: every existing probe and sweep is single-run, and the failure is multi-run. A grain with no multi-run regression test is untested against the whole class. | **01 AC-14 · 02 AC-11 · 03 AC-7 + AC-8(c)** — named individually because "each grain story" was not enough (see below) |
 | **THE EROSION CONSTRUCTION — 26-row roster, progressively degrading crawl, 5 invocations, at cap 2 and cap 5** | **The executable form of "rate, not bound"** — cap 2 leaves 16 survivors, **cap 5 leaves 1**. **This was MISSING from this list**: it was found after the list was written and never added, so the epic's most operator-relevant finding about the shipped roster design existed only in prose. TN-16's own rule applies verbatim — *a construction that exists only in a transcript is not a regression test.* **Without it a cap tuner meets no gate at all.** | 03 |
 
 > **⚠️ Why the erosion port is the one item here that is NOT documentation** [CR-2, by fixture enumeration]. `tests/test_reconcile_at_load.py::test_roster_cap_refuses_a_shrink_the_flat_floor_allows` and two siblings do fire if the cap is raised — but **every one of them fails for the reason "the cap moved", which is exactly what the tuner intends.** They are edits on the tuner's own change list. **Not one fails because the CONSEQUENCE of the new value is bad**, and **no test in the suite encodes that consequence at any cap value.** So a tuner who raises the cap and correctly updates all three failing tests gets a **green suite** and learns nothing about `5N`.
@@ -1345,6 +1421,33 @@ Port targets (PM's assignment; each story's ACs also state independently what it
 | id-churn e2e variant | pipeline-level regression | 04 |
 
 **The 0-of-2197 sweep is the one a completeness pass nearly missed, and it is the one that matters most.** Story 02's AC-7 cites it as confirmation of deletion-neutrality, and it currently lives only in a scratchpad — **a cited-but-unported result, precisely what this Technical Note exists to prevent.** **⚠️ Do NOT contrast it against the 862 sweep as "now historical, since the conjunction closed those cases" — that phrasing is RETIRED and TN-5 says so explicitly.** The conjunction is gone, so those cases are open again and the 862 sweep is now the measurement of how roster neutrality fails. This is the retired claim surviving in a second location, two Technical Notes from its own retraction. Cheap to port as a parametrized property test over the three parameters.
+
+#### ⚠️ THE MULTI-RUN ROW WAS PROMISED FOR EVERY GRAIN AND DELIVERED AT ONE — found at the pre-dispatch amendment, 2026-07-25
+
+**The row above assigned itself to "each grain story". Only story 03 carried a matching AC** (AC-7's erosion sequence plus AC-8(c)). **Stories 01 and 02 had none** — no multi-run construction, at either grain, in any form. Now added as **01 AC-14** and **02 AC-11**, and the port row names all four ACs individually rather than a story class.
+
+**Two things about how it was missed, and the second is the transferable one:**
+
+1. **The row's own wording was ambiguous in the direction that hid the gap.** It read *"A MULTI-RUN sequence at every grain **that keeps one**"* — and this epic's own idiom for "keeps a gate" is exactly that (Goals: *"On the two grains that keep a gate (game and player-line)"*). Under that reading the row promised the construction at **precisely the two grains that did not deliver it**, while the grain that did deliver one — roster, which keeps **no** gate — was arguably outside the promise. **A row that can be read as excusing the two omissions and excluding the one delivery is not a requirement**, and the ambiguity turned on three words in a table cell.
+2. **A story-class assignment ("each grain story") is not checkable, and a named-AC assignment is.** Every other row in this table names a construction and a story; this one named a *pattern* and a *category*. **Nothing to grep, nothing to tick off, and three stories each able to assume another carried it** — the same "a requirement claimed by two stories is a requirement written twice or not at all" shape Codex found at precondition (d), arriving in the opposite direction: claimed by *all* stories and written by one.
+
+**And the structural-position finding holds again**: the defect was in a **table cell's assignment column**, not in prose — which is where every top-left hit in both sweeps landed. **The sweep that reported "not one was in an AC" was accurate and did not transfer**: this gap was an *absence* in three ACs, and no term sweep detects an AC that was never written.
+
+#### The twin-accumulation threshold on the game grain — recorded so a fixture is derivable rather than guessed
+
+Story 02 AC-11 pins it; the derivation belongs here so the AC does not have to carry it twice.
+
+`_game_is_cross_perspective_protected` **refuses-and-KEEPS** a game held by another perspective, so a protected game is absent from the fresh array on every subsequent run and is never retired. The gate is computed **before** per-id protection is applied, so a protected id sits in the **denominator** (`prior_ids`) and not in the **numerator** (`comparable = prior_ids & fresh`). **Protected twins therefore degrade the floor ratio monotonically as they accumulate.**
+
+With `P` present, `X` protected-absent and `g` genuinely-absent:
+
+> **the corrected gate permits iff `P >= X + g`.**
+
+[**DERIVED**, PM — arithmetic from `crawl_is_authoritative`'s `fresh_count >= prior_count * FLOOR_RATIO`; **not executed**.] **Its space, per this epic's standing rule**: game grain, corrected gate, `FLOOR_RATIO = 0.5`, protection applied after the gate. A function of one policy constant, not a property of the design.
+
+**⚠️ THE FIX MAKES THIS BIND SOONER, AND IT IS NOT A NEUTRALITY VIOLATION.** With `N` rows written this run, today's polluted gate permits iff `P + N >= X + g` and the corrected gate iff `P >= X + g` — **stricter by exactly `N`**, because the fix removes the offset that was masking the accumulation. **TN-5 scopes deletion-neutrality to DELETIONS** (never permits a deletion today refuses) and states that the gates may disagree in the refusing direction; this is that disagreement, in the direction the epic deliberately chose. **Do not record it as an exception to TN-5** — it is a consequence of TN-5's own scoping, and writing it as an exception is how a scoped claim gets re-read as blanket.
+
+**⚠️ AND THE MEASURED OCCUPANCY IS FAR BELOW THE THRESHOLD.** The E-270 probe measured twins at **~4% of stored ids (22 of ~583)**; `P >= X + g` needs more than half a team's stored games absent-and-protected. **Nothing observed is near it.** This is a **regression guard against accumulation, not a live defect** — and stating that with the threshold is required, because a boundary reported without its distance from production reads as an alarm. *(The same discipline TN-5's sweep ranges now carry: a number without its space misleads in whichever direction the reader is primed for.)*
 
 #### Precondition-(d) OWNERSHIP — one story owns it, stated because four sites disagreed
 
@@ -1356,6 +1459,21 @@ Codex found the (d) regression claimed inconsistently across four places: story 
 | The **executed two-run slip construction** — snapshot passed as the classification universe, run 1 retires nothing, run 2 the rows are pre-existing and trip the cap permanently | **story 03, AC-8** |
 
 The roster grain is the only one where the slip's *consequence* is demonstrable end-to-end, which is why the construction lives there rather than with the primitive. Story 01's file list no longer carries the other grains' test files (TN-13), which removes the fourth inconsistency at its root.
+
+**⚠️ AND THE REASON IS `W ⊆ fresh` — stated because the sentence above was an assertion, and an assertion that a property holds at exactly one grain is precisely the shape this epic keeps finding wrong.** *(Added at the pre-dispatch amendment, 2026-07-25, after the claim was challenged. It survives, and now carries the premise that decides it.)*
+
+The slip substitutes the **snapshot** for the **live prior** as the classification universe. Since `live_prior = snapshot ∪ W`:
+
+```
+correct candidates:  live_prior − fresh  =  (snapshot − fresh) ∪ (W − fresh)
+slipped  candidates: snapshot   − fresh
+```
+
+The two differ by exactly `W − fresh`. **On game and player-line `W ⊆ fresh` holds** (TN-1's discriminator, TN-5's named premise, guarded at runtime by story 02 AC-8), so `W − fresh = ∅` and **the slip is a strict no-op there** — nothing to demonstrate, end-to-end or otherwise. **On roster `W ⊄ fresh`**, because the jersey backfill writes rows the fresh roster crawl never listed; those rows are the entire divergence, and they are what run 2 finds pre-existing and feeds to the cap.
+
+**So the one-grain scope is a PREDICTION of the epic's own discriminator, not an observation about which grain someone happened to build a fixture for** — the same premise that produces the gate shape, deletion-neutrality, and the grain where neutrality is deliberately false. **It is not weakened by the game grain having a cap of its own**: a cap can only make a divergence permanent, and on game there is no divergence for it to make permanent.
+
+**Do not read the twin-accumulation shape (above) as a counterexample to this.** That shape is about the gate's **denominator**; this is about the **classification universe**. Different mechanism, different section, and TN-1's framing note applies to both — *"the candidate/absent set is already correct; only the gate's numerator and denominator are wrong."*
 
 **One thing no test guards, stated so nobody assumes otherwise:** the per-grain rows above pin the over/under-deletion result *per grain*, which is substantively correct, but **no single test asserts the cross-grain claim** that the epic delivers its fix across all three grains. Do not cite "the table" as though a test guards it.
 
@@ -1404,6 +1522,10 @@ assert crawl_is_authoritative(fetch_ok=True, fresh_count=0, prior_count=0) is Fa
 ```
 
 **That is precisely the input TN-1(c)'s vacuous-permit inverts.** [PM-VERIFIED by grep] So the claim "no existing assertion changes" is **false**, and it must be stated as: exactly one existing assertion inverts, named above, plus mechanical kwarg churn at the 9 sites.
+
+**⚠️ AND THAT CORRECTED COUNT HAS SINCE BEEN OVERTAKEN — the epic-wide figure is TWO, not one.** *(Corrected 2026-07-25 at the second Codex spec pass.)* The "exactly one" above is **correct for THIS Technical Note's space** — the fourth file, `tests/test_reconcile_at_load.py`, and the vacuous-permit inversion. **It is not the epic-wide count**, because the roster design's reversal later required a second existing-assertion change: `tests/test_roster_grain_reconcile.py::test_catastrophic_roster_shrink_refuses_on_the_floor` (story 03 AC-11), which keeps its outcome and loses its reason. **Success Criterion 2 carries the epic-wide table and is the place to read the total.**
+
+**This entry now instances its own lesson twice over, which is why the correction is recorded here rather than only upstream.** TN-13 exists to record that *a count was inherited and never measured*; its own correction then *asserted a fresh count that was never measured* (the 13-vs-7 error below); and now the corrected count has gone stale **a third way — without a single word of it being edited.** A change in a *different story* moved the boundary of the space this count ranges over. **A count can be falsified by an edit that never touches it**, and nothing in the sentence signals that it happened.
 
 **How it was missed, which is the transferable part:** the three grain files collect 34 + 20 + 18 = **72** — *precisely* the "72 existing reconcile tests" this epic quoted throughout. **The number was inherited from the commissioning handoff and never measured**, so the regression frame was drawn around a count over a self-chosen space (three grain files) presented as the whole. **The seventh host, surviving in the epic's own success criteria** two rounds after the epic swept itself for exactly that. Every count in this epic carries its space — this one did not, and it was the count doing the most work.
 
@@ -1454,7 +1576,13 @@ Left as a stated non-goal rather than filed, on the team lead's ruling — but n
 
 ### TN-19 — ⛔ THE CAP PIN IS A FALSE MITIGATION FOR THE RATE RESIDUE, AND NEVER COULD HAVE FIRED ON IT — a defect in how the cap was CHARACTERIZED, not a resolved tension
 
-**Read by**: anyone changing `MAX_ROSTER_DEPARTURES`, and any reviewer asked whether the roster grain's sole guard is adequate. Cited by story 03 AC-6 and AC-7.
+**Read by**: anyone changing `MAX_ROSTER_DEPARTURES`, and any reviewer asked whether the roster grain's sole guard is adequate. Cited by story 03 AC-6 and AC-7 — **and that citation ran ONE WAY until 2026-07-25, which defeated this note's whole purpose.**
+
+> **⛔ THE PROMOTION'S STATED PURPOSE WAS UNMET FOR THE LIFE OF THIS NOTE.** The banner records that this finding was *"promoted out of this banner into a numbered Technical Note **so a story and a future cap-tuner can cite it**."* **No story cited it.** `TN-19` appeared in `epic.md` five times and in the story files **zero** times, while this note asserted it was *"cited by story 03 AC-6 and AC-7."* **Both ends were individually correct** — TN-19 named the ACs, and the ACs stated their requirements soundly — **and the edge did not exist**, because citation is directional and only one direction was built.
+>
+> **Why that is worse here than anywhere else in the epic**: the reading guide instructs an implementer to read their story and then **only the TNs it cites by number.** Under that instruction **TN-19 was unreachable from the only story that touches `MAX_ROSTER_DEPARTURES`** — and TN-19 exists to stop exactly one thing, a tuner citing the constant-pin as evidence of adequacy. **A note written to be reached by a cap-tuner, that a cap-tuner's own story does not route to, is a note that fires for nobody.** Same failure as the promotion it replaced, one level up.
+>
+> **Found by an independent enumeration, not by this epic's own edge-walk — which marked the edge VERIFIED.** The walk confirmed the source end (TN-19 names the ACs; the ACs exist and carry their requirements) and did not test the return direction. **A both-ends check that walks one end and stops is indistinguishable from a passing check**, and its ✅ is worth less than no mark at all, because it forecloses the re-check. *(Recorded as a finding about the verification, not only about the edge — see the fifth-pass entry in `.project/research/E-276-process-findings.md`.)*
 
 > **A note on this note's number.** The ruling that produced it (`.project/research/E-276-roster-design-recommendation.md` §6, *"Record this as a FALSE MITIGATION, not as 'resolved — orthogonal'"*) is recorded there as **binding on TN-10**. TN-10 is occupied by the corrected-invariant wording, which stories 01 and 05 bind verbatim, so the finding is carried here instead and the ruling's reference is recorded rather than left dangling. Whether "TN-10" was a mis-citation or referred to a numbering that no longer holds was **not resolvable** from the artifacts; it is not resolved by renumbering something else.
 
@@ -1498,7 +1626,7 @@ None open. Consultation verdicts, one per domain this epic touches:
 
 ## Size — a deliberate decision, not residue
 
-**`epic.md` is ~1,855 lines, and that is too large for the file an implementer reads first.** *(Measured 2026-07-25 at READY; the figure previously read "~213KB / ~1,300 lines" and had gone stale, in the Size section of an epic whose subject is unverified claims. Every count carries its space, including this one.)* Recorded as a decision rather than left as an accident, because the diagnosis is the same lesson this epic keeps producing: **fixing one failure by maximising against it produces its mirror.** Inlining against citation-rot was right; an epic nobody finishes has the same practical effect as one whose citations do not resolve — **the content is unreachable, just for a different reason.**
+**`epic.md` is 2,073 lines, and that is too large for the file an implementer reads first.** *(**Measured at the READY assertion, 2026-07-25 — the last edit before the artifact freezes, so this figure is exact rather than approximate: 2,073.** The figure read "~213KB / ~1,300 lines" at first writing, "~1,855" at READY, "~1,919", then "~1,976" — **stale four times, in the Size section of an epic whose subject is unverified claims.** It is now current only because the standing step below was followed rather than remembered. Every count carries its space, including this one. **The transferable bit is that it goes stale by the file GROWING, which is the one way a self-referential count fails silently: nothing edits the sentence, so nothing prompts a re-measure.** A count about the artifact that contains it has no natural trigger — it needs a standing step, not a reader noticing. **It is now on that standing step: re-measure this figure as the last action of any pass that edits this file.**)* Recorded as a decision rather than left as an accident, because the diagnosis is the same lesson this epic keeps producing: **fixing one failure by maximising against it produces its mirror.** Inlining against citation-rot was right; an epic nobody finishes has the same practical effect as one whose citations do not resolve — **the content is unreachable, just for a different reason.**
 
 **Two mitigations are in place now**: the reading guide at the top of the file, which routes each reader to the small part they need, and the persisted design artifact, which exists precisely so this file does not have to carry the derivations.
 
@@ -1556,6 +1684,33 @@ Written to the specification in the section above. **Sources are listed separate
 | **Codex — spec audit 1** | The precondition-(d) regression claimed inconsistently across **four** sites (story 01 AC-9b, TN-16's port table, story 03 AC-8, story 01's file list). *A requirement claimed by two stories is a requirement written twice or not at all.* |
 | **Codex — spec audit 2** | Second pass over the reopened design. The completed tally across both passes: **seventeen defects, zero arithmetic** — which is why both passes were needed rather than one. |
 | **Final consistency sweep (this round)** | See below. |
+| **Independent READY verification + pre-dispatch amendment** *(added after READY; see the History entry)* | **An ABSENCE, which no sweep in this epic could reach**: TN-16 promised a multi-run construction at every grain and **only story 03 carried one**. Now **01 AC-14** and **02 AC-11**. Also the twin-accumulation threshold, the `0..8` range disclosure, and IDEA-187's second deflation. **One of its five items was DECLINED on the file's own evidence** (story 01 AC-9b's rationale holds, on `W ⊆ fresh`), which is the row's other result: **a verification is a claim too, and this one was right four times out of five.** |
+| **Codex — spec audit 3 (post-amendment, scoped)** | The **roster `refused_by` P1**: TN-11's enum omitted `skipped_no_exemption_plan` while TN-11's own later subsection required the wrapper to synthesize it, and story 03 AC-3 named a third set. **Three sources, three sets.** Plus story 02 AC-11's self-cancelling escape hatch, story 05's undefined report destination, and the suite-bookkeeping staleness. **4 findings, 4 accepted, 0 dismissed** — and PM's sweep for the last one found **2 further sites** including a Success Criterion. |
+| **Codex — spec audit 4 (post-amendment, unscoped)** | **TN-9's prose-site inventory shipped KNOWN-INCOMPLETE** — story 03 AC-9(c) recorded a required site as *"not in TN-9's table"* while story 05's Technical Approach and **Success Criterion 4** both treat that table as the complete inventory. **No sweep this epic ran could have found it**: nothing was stale or self-contradictory in either file alone; the defect existed only in the *relation* between them. Also sharpened audit 3's report-destination finding to the point that overturned PM's fix (see below). **Explicitly CLEARED, and recorded as a result rather than as silence: dependency sequencing, file-overlap/parallelism, agent routing, consultation coverage, repo-reality spot checks.** |
+| **PM edge-walk (fifth pass, operator-scoped)** | 47 cross-artifact edges enumerated and both-ends verified. **2 findings, both in PM's own text** — an inflated consumer count inside the note about unresolved claims, and `AC-8a` cited twice against a story with no such label. **Its own most important result was a FAILURE**: it marked the TN-19 edge ✅ having walked one end only. |
+| **Independent parallel enumeration (CR-3) + re-verify** | **78 edges, 6 findings, none of which the PM pass surfaced.** TN-19's one-way citation (**the edge PM had cleared**); IDEA-189 linked from nowhere; two exhaustive-class under-counts; two research artifacts carrying retired figures, **outside every sweep's scope**; a duplicate TN-9 row; three further routing gaps. **Enumerated four relation kinds PM did not conceive of** — `src/` prose sites, test files, TN→TN, scorecard→audit — **which is where five of the six live.** At re-verify it swept the claim rather than the forwarded list, and **self-reported that its own prior clean was a false clean caused by an exclusion it had added for precision.** |
+
+**FINAL TALLY — and the caveat is the honest form of it, not decoration:**
+
+> **Six review passes. 19 findings. 0 dismissed.**
+>
+> **⚠️ That reads cleaner than it is, and the qualification must travel with the number.** **Several findings were found only because a directed sweep went PAST the cited site** — the Success Criterion under F4, TN-9's third dependent, the fourth positional copy. **One overturned the previous pass's own fix.** So **the passes are not independent of the triage that followed them: the pass supplies the POINTER, the sweep supplies the EXTENT**, and reporting the pair as one number credits the pointer with the extent.
+>
+> **The two most transferable results are about verification instruments failing GREEN, not about the artifact** — a ✅ that forecloses its own re-check, and a clean that was a property of a pattern rather than of the tree. **That is the family where commissioning another pass has the worst expected return, because the next pass inherits the same instrument.** Recorded here so the tally cannot be read at closure as evidence that more passes would find more.
+
+> **⚠️ TWO PASSES INDEPENDENTLY FOUND THE SUITE-BOOKKEEPING P1, AND ONE OF THEM OVERTURNED A PM FIX.** Independent corroboration is the strongest signal either pass produced. **And audit 4 was right where PM was wrong**: PM had answered audit 3's report-destination finding with *"the completion report to PM — not a file"*, which makes an AC verifiable only in-session by one party. Audit 4 named the consequence (*"verification depends on ephemeral agent output rather than a stable artifact"*), and **it is this epic's own TN-16 rule — "a construction that exists only in a transcript is not a regression test" — which PM applied to test constructions and then failed to apply to a verification artifact one pass later.** Destination is now a durable file.
+>
+> **⚠️ ONE RELAY CLAIM IN THE AUDIT-4 HANDOFF DID NOT VERIFY, and is recorded because the epic's own rule says a relayed claim is checked at the point it is restated.** The handoff stated that audit 4's Success-Criterion site was *"a site F4 did not name"* and that the union to reconcile was **five** sites. **PM's F4 sweep had already named and fixed that Success Criterion** — it was one of the two sites the sweep found beyond the two Codex cited, and it was reported as such. The union is **four**, all fixed. **The corroboration is real and the "new site" framing was not**, and separating those two is the whole of the check.
+
+> **⚙️ WHY AUDIT 4's CITATIONS WERE STALE — a GATE-SEQUENCING defect, NOT a Codex defect. Disclosed by the team lead, and the distinction is the point.** PM's first account — *"audit 4 ran against the pre-amendment file"* — was true and named no mechanism. The mechanism: **audit 4 was launched in the background and the audit-3 findings were routed for fixing while it was still running**, so it read the tree **mid-edit** and its citations rotted before it reported. That is why `epic.md:308` resolves to Success Criterion **1** in the current file.
+>
+> **The general form, which is the transferable part: a review running concurrently with fixes to its own subject reports citations that are already stale.** Filing that as a reviewer defect would be wrong in the most expensive direction — it would tune the instrument to compensate for a scheduling choice. **The remedy is sequencing, not review design**: freeze the artifact for the duration of a gate, or run the gate serially against a known revision.
+>
+> **And it is a live specimen of this epic's own reason-rots-independently-of-the-verdict shape**: PM's verdict (*the citations are stale, verify by content*) was right, its stated reason was thin, and **the correct reason was only available from the party who ran the gate.** A reader could have checked the verdict forever without recovering it.
+
+> **⚠️ WAS CODEX RUN ON *THIS* EPIC? — asked at the amendment, and the two rows above answer differently.** **Audit 1: YES, verifiably** — its recorded finding names E-276's own artifacts by ID (story 01 AC-9b, TN-16's port table, story 03 AC-8, story 01's file list), which no inherited reference to an earlier epic could produce. **Audit 2: asserted, not demonstrated here** — its row records only an aggregate tally and cites no E-276-specific finding, so this scorecard does not itself establish its subject. Recorded as the difference it is rather than smoothed into "both ran".
+>
+> **And neither pass covers the amendment**: both predate **01 AC-14** and **02 AC-11**, which land on the surface an implementer executes. **A third pass over the amended ACs is the cheap check, and this scorecard should not be read as covering them.**
 
 ### The final sweep, as its own result
 
@@ -1689,6 +1844,28 @@ By that rule's load-target classification SE reads it as **role-scoped** (it bin
 
 **Recorded here rather than only in the process-findings artifact, for the same reason as the three above: a research file does not reach this gate.**
 
+### A0. ⛔ `Glob` DOES NOT MATCH DOTFILE DIRECTORIES — a repo-wide silent false-absence mode over this project's own governance surface
+
+**Promoted out of a method note at the team lead's direction, because the blast radius is the whole context layer.** Recommended load target: **`.claude/rules/tool-output-integrity.md`, the "Silent-empty from a tool quirk, not from absence" family**, beside the ugrep alternation entry. *(claude-architect owns the call; this is the recommendation and its evidence.)*
+
+**The observation** [PM-VERIFIED, fifth-pass edge-walk]: `Glob` on `/workspaces/baseball-crawl/.claude/agent-memory/*/*.md` returned **`No files found`** — for files read and edited **in that same session**. A brace-expansion form over four known-present paths returned the same. `Grep` over the identical directory returned 60 files immediately.
+
+**Why it is not one quirk in one session: every context-layer path in this repo is dotted** — `.claude/rules/`, `.claude/agents/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agent-memory/`, `.project/ideas/`, `.project/research/`, `.project/archive/`, `.project/baselines/`. **The governance surface is exactly the surface this fails on.**
+
+**It fails in the direction that ships.** `No files found` reads as a clean negative, not an error — so an agent concludes *"no rule covers this,"* *"that memory file does not exist,"* *"the idea was never filed"* and proceeds. **A confident negative from a channel that structurally cannot answer the question.** This is the same failure direction as the emphasis hazard, and the reason both belong in the unexpected-empty family.
+
+**The distinguishing feature, which is why it needs its own entry rather than a line on the ugrep one:**
+
+| | ugrep alternation quirk | **this** |
+|---|---|---|
+| Nature | a **pattern-syntax** bug | a **path-shape** blind spot |
+| Fix that reaches it | use ERE (`-E`), or one pattern / one path | **none of that helps** — no pattern change and no normalization reaches it |
+| Mitigation | rewrite the pattern | **a second channel** (`Grep`), which is what was used |
+
+**And note what made it reportable at all**: it was caught on files the searcher had **personally edited minutes earlier**. Against any unfamiliar path it would have looked like a true negative and been believed — **so the observed instance is not evidence about the rate, only about the existence.** Assume it has fired silently before.
+
+**The rule it instances is already on the books and simply was not applied to `Glob`**: *"A 'no files found' Glob is NOT proof of absence under a flaky channel — confirm absence through a second channel before relying on it."* **That sentence exists in `tool-output-integrity.md` today.** What this adds is the **specific, reproducible, non-flaky cause** — dotted paths — which converts a general caution into a checkable condition: **if your path starts with a dot, `Glob` cannot answer, and the empty result carries no information.**
+
 ### A. Per-observation provenance — the discipline that makes every other timestamped claim mean what it says
 
 > **Scope provenance PER OBSERVATION, not per message.** Pair each read with a `stat` taken *at that read*, and compare the two. A write-up spanning several calls carries one timestamp — usually the newest — so a stale read gets labelled with metadata from a later call that never covered it. **Quoting *a* timestamp reads as rigour and is worth less than quoting *the* timestamp.**
@@ -1752,6 +1929,14 @@ The conjunction's removal deleted the reason behind an AC's conditionality while
 
 **This is NOT entry G.** G is a note surviving its question's answer. This is: **a file whose purpose is recording that something is out of date carries no immunity — and its custodian is the least likely person to re-read it, because they know what it says.**
 
+**⚠️ SECOND INSTANCE, AND IT IS STRONGER THAN THE FIRST — added at the pre-dispatch amendment (2026-07-25).** The entry above was written after repairing `IDEA-187`'s index row. **A later check of the same idea's *body* against the artifact it tracks found the tracked claim itself did not hold**: `IDEA-187` Defect 1 quoted a paragraph of the DE memory file **that does not exist in it** (a full read plus a second-channel grep across `.claude/agent-memory` confirmed the absence), and stated the sufficiency direction **backwards against TN-10** — the note it cites as authoritative — by attaching "necessary but not sufficient" to the temporal clause where TN-10 attaches it to same-population. The file already carried TN-10's version near-verbatim.
+
+**Three things this second instance adds that the first does not:**
+
+1. **The first repair pass touched the row, not the claim.** Repairing an index row's *design description* leaves the underlying report unchecked, and both surfaces then agree — which is what made it read as fixed. **Agreement between an artifact and its index is not evidence about either**, when the index was derived from the artifact.
+2. **Acting on the report would have made the tracked file WORSE**, not merely wasted effort: the proposed edit was to attach the sufficiency note to the temporal clause, which would have introduced the inversion into a memory that did not have it.
+3. **The report credited its own method as the careful one** — *"found by reading the file, not by grepping for the claim"* — and reading is precisely where it failed. **A grep for the quoted paragraph returns zero and settles it in one command.** Near-homograph forms defeat readers and greps in *different* ways, so neither instrument covers the other, and the instrument named as the safeguard was the one that broke. This is `.claude/rules/tool-output-integrity.md`'s quote-the-literal-text requirement arriving in the one artifact whose subject is unverified claims about another file's contents.
+
 ### J. Block-edit hygiene — a mechanical mitigation for a mechanical failure
 
 **Two duplications in this session's editing, one cause**: an `old_string` that did not extend to the end of everything the new text superseded, leaving the tail beside the replacement.
@@ -1803,6 +1988,10 @@ One line each; full text in `.project/research/E-276-process-findings.md`.
 | 7th host | A quantity over a **space the author chose** | Reported as though the space were given. Every count carries its space or it is not a count. |
 | 8th mechanism | **Provenance as authority** | A claim about X from the owner of X is the least-checked kind. The only one that *predicts*; carries a tripwire, not a policy. |
 | — | A **printed conclusion inside an execution artifact** | Inherits the artifact's credibility without inheriting its verification. Companion: *"re-running a script only confirms the script."* |
+| 9th mechanism | **A count falsified by an edit that never touches it** | Correct when written, invalidated **remotely** when its space's boundary moves elsewhere. **Distinct from the 7th host**: that is wrong at authoring time and fixed by stating the space; this one stated its space and the space moved. **No sweep finds it** — the text is unmodified and self-consistent. Instance: TN-13's *"exactly one existing assertion inverts"*, falsified by the roster reversal in a different story. |
+| 10th mechanism | **A verified repair verifies what it was pointed at** | Enumerations drift **downward-only** — the site that ADDS a member is rarely the site that LISTS them. Instance: `refused_by` leaked past a failed review, a repair, and a verification of that repair; three sources carried three sets. |
+
+*(9 and 10 were found after the extraction, at the post-READY amendment and the four Codex passes. Full text: `.project/research/E-276-process-findings.md`, **Addendum 2**, which also carries two method notes — word **inflection** as a further grep-narrowing member, and the `count`-returns-**lines**-not-matches label trap that misled two agents in one session.)*
 
 **The two-pattern taxonomy** — do not collapse; a reviewer drilled on the first probe passes the second:
 
@@ -1831,6 +2020,23 @@ One line each; full text in `.project/research/E-276-process-findings.md`.
 - **Retros in participants' own words** — DE's, SE's.
 
 ### Chronological record
+
+- 2026-07-25: **READY RE-AFFIRMED on the operator's authorization.** The hold below is discharged; the Status block is authoritative. **Six review passes, 19 findings, 0 dismissed** — every one fixed on the closing route rather than the self-consistency route. **Dispatch remains a separate operator gate and is not implied by this line.**
+
+- 2026-07-25: **PRE-DISPATCH AMENDMENT (PM successor, 5th), after an independent READY verification returned five items.** No design change. **READY deliberately NOT re-affirmed** — see Status. *(⚠️ **That hold was TRUE when written and was discharged by the entry above** — the operator authorized READY after four further passes. Left standing rather than edited, because it records a real decision and its reason; **but note it is exactly the shape this epic documents — a claim accurate at authoring, falsified by an event that never touched it.** A reader following its "see Status" pointer lands on the current state, which is why the pointer was written that way.)*
+
+  **Four items actioned, one DECLINED on the file's own evidence:**
+
+  1. **Multi-run ACs added at the two grains that lacked them** — **01 AC-14** (player-line: the no-ratchet property, N ≥ 4 invocations, per-run prior count, production scale) and **02 AC-11** (game: the cross-perspective twin-accumulation shape, with `refused_by == "gate"` at the boundary). TN-16 had promised this construction and **only story 03 delivered it.**
+  2. **The twin-accumulation threshold recorded in TN-16** — `permit iff P >= X + g` [DERIVED, PM, not executed], with its space (`FLOOR_RATIO = 0.5`, protection applied after the gate), the consequence that **the fix binds sooner by exactly `N`** (a TN-5-scoped availability effect, *not* a neutrality violation), and the measured occupancy (~4%, E-270) that puts production far from the boundary.
+  3. **The `0..8` roster sweep now carries its range disclosure**, matching its game-grain neighbour — and the addition notes the disclosure binds in **both** directions: a short range flatters a zero count and deflates a non-zero one.
+  4. **IDEA-187 deflated a second time**, in the file and in the index row, plus the **story 05 AC-9** correction that followed from it.
+
+  **⛔ ITEM 3 OF THE VERIFICATION WAS DECLINED — story 01 AC-9b's punt rationale is CORRECT.** The challenge held that the game-grain accumulation shape refutes *"the roster grain is the only one where the slip's consequence is demonstrable."* It does not: the slip differs from the correct form by exactly **`W − fresh`**, which is **empty on game and player-line** under the epic's own `W ⊆ fresh` discriminator, so the slip is a strict no-op there. The rationale survives and now **carries that premise** in both TN-16 and the story, converting an assertion into a derivation. **The two mechanisms are different objects** — twin accumulation is about the gate's *denominator*, the slip is about the *classification universe* — and conflating them is what made the challenge look sound.
+
+  **The finding worth carrying from this round: an ABSENCE is invisible to every sweep this epic built.** The final sweep reported *"not one [defect] was in an AC"* and was **accurate**; the multi-run gap was three ACs that were never written, and **no term sweep detects an AC that does not exist.** Two contributing shapes, both structural: TN-16's assignment column said *"each grain story"* — **a story CLASS, not named ACs, so there was nothing to tick off and three stories could each assume another carried it** — and the row's own title said *"at every grain **that keeps one**"*, which under this epic's own idiom (*"the two grains that keep a gate"*) reads as promising it at **exactly the two grains that omitted it** while excluding the one that delivered. **A requirement addressed to a category is a requirement nobody owns**; the port row now names all four ACs individually.
+
+  **And the self-referential count went stale a second time** (~1,300 → ~1,855 → **1,919**), by the file *growing* rather than by anyone editing the sentence — the one failure mode a count about its own container has, and the one with no natural trigger.
 
 - 2026-07-25: **READY (PM successor, 4th).** Three passes: the P3 mechanics migration, the final consistency sweep, and the scorecard.
 

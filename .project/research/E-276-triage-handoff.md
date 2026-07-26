@@ -1,5 +1,20 @@
 # E-276 — Triage Handoff (PM → successor PM)
 
+> # ⛔ SUPERSEDED — HISTORICAL WORK ORDER. DO NOT CITE ANY FIGURE FROM THIS FILE.
+>
+> **Marked 2026-07-25 at the fifth-pass edge-walk.** This is a mid-flight handoff snapshot, not a record of what shipped. **The epic is the current spec; this file is the state on the day it was written.** Its MUSTs were executed and its status line (`DRAFT`) is long stale.
+>
+> **Two figures in it are RETIRED and were corrected in the epic after this was written** — recorded specifically because a reader lifting either would be quoting a number this epic went on to refute:
+>
+> | This file says | Current truth | Where corrected |
+> |---|---|---|
+> | *"19 tests, **13 direct `crawl_is_authoritative` calls**"* (MUST-2) | **7 call sites**, across 6 test functions. *(19 tests is right.)* | epic **TN-13** |
+> | *"**exactly one assertion inverts** by design"* (MUST-2) | **TWO**, epic-wide — the vacuous-permit inversion **plus** story 03 AC-11's roster test | epic **Success Criterion 2** |
+>
+> **Why this marker exists rather than an edit to the body**: the body is a historical record and correcting it in place would destroy the evidence that these figures were once believed. **The 13 is itself one of this epic's recorded findings** — a count asserted inside the correction of another count, never measured. **Leave the body; read it through this header.**
+>
+> **How it was found, which is the transferable part**: an independent edge-walk noticed this file is one of **five** `E-276-*` research artifacts while the epic's banner accounts for only **two** (*"both files should be kept"*). **`.project/research/` sits outside story 05's sweep scope** (`CLAUDE.md`, `.claude/rules/`, `.claude/agent-memory/`), so no sweep this epic runs would ever have reached it. **A retired claim surviving in a sibling of the very directory story 05 is told to write into.**
+
 **Date**: 2026-07-25. **Epic**: `/workspaces/baseball-crawl/epics/E-276-reconcile-health-gate-prior-capture/` — status **DRAFT**, correctly (open MUSTs below).
 
 **Running total**: 24 findings triaged — 21 accepted, 3 dismissed. Sources: DE, SE, SE-2, PM self-audit, CR.

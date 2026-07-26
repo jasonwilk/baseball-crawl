@@ -42,6 +42,11 @@ E-276's `epic.md` grew to ~1,300 lines, and its History carried the session's pr
 | 7th host | A quantity over a space the author CHOSE | Reported as though the space were given; every count must carry its space |
 | 8th mechanism | **PROVENANCE AS AUTHORITY** | A claim about X from the owner of X is the least-checked kind; the one with predictive power |
 | — | A printed conclusion inside an execution artifact | Inherits the artifact's credibility without inheriting its verification |
+| 13th mechanism | **THE DANGEROUS FIX PASSES EVERY CHECK** | Removing a false claim about a relation makes the document consistent and leaves the relation broken. **(b) closes every CHECK while closing NOTHING** — the fix a consistency sweep rewards, and the one that discards the finding. See Addendum 2 |
+| 11th mechanism | **A ONE-WAY CITATION IS NOT AN EDGE** | The target exists and carries what the source says, and the target never routes back. **Under a "read only the notes you cite" protocol the note is unreachable** however clearly it names the story. **A both-ends check that walks one end produces a ✅ that forecloses the re-check** — an unverified edge is safer than a wrongly-verified one. Instance: TN-19, whose promotion's stated purpose was unmet for the life of the note. See Addendum 2 |
+| 12th mechanism | **AGREEMENT WITH A DERIVATIVE IS NOT CORROBORATION** | Two artifacts agreeing on a detail *neither needed* is the signature of copying, not of observation. Third instance this epic. **Open the primary; never consult a summary of it.** See Addendum 2 |
+| 9th mechanism | **A COUNT FALSIFIED BY AN EDIT THAT NEVER TOUCHES IT** | Correct when written, invalidated **remotely** when its space's boundary moves elsewhere. **Not the 7th host** — that one is wrong at authoring time and fixed by stating the space; this one *stated* its space and the space moved. **No sweep finds it**: the text is unmodified and self-consistent. See Addendum 2 |
+| 10th mechanism | **A VERIFIED REPAIR VERIFIES WHAT IT WAS POINTED AT** | Enumerations drift **downward-only** — the site that ADDS a member is rarely the site that LISTS them, so a list leaks past a failed review, a repair, *and* a verification of that repair. See Addendum 2 |
 
 **The two-pattern taxonomy** (do not collapse these — a reviewer drilled on the first probe passes the second):
 
@@ -56,7 +61,15 @@ E-276's `epic.md` grew to ~1,300 lines, and its History carried the session's pr
 - **Asymmetric framing (the top codification candidate)** — neither the alarming nor the reassuring qualifier is the defect; the asymmetry is. Check: *are BOTH sides of the trade stated?*
 - **Verification that inherits what it was meant to catch** — a confirmation is only as independent as its most-constrained axis.
 - **A correct narrowing licenses stopping** — more dangerous than an under-covered input set, because it is real work.
-- **Grep and sweep method failures** — a grep cannot distinguish an assertion from its retraction; a correct pattern silently narrows when markup moves; a hit can be the correct form that looks like the error.
+- **Grep and sweep method failures** — a grep cannot distinguish an assertion from its retraction; a correct pattern silently narrows when markup moves; a hit can be the correct form that looks like the error. **Further members catalogued in Addendum 1 and 2: line breaks, and word INFLECTION (`permit` vs `permits`, missed against text the searcher wrote minutes earlier). The class's member COUNT is disputed across three enumerations and is deliberately left unstated.**
+- **The tool label says "occurrences" and the value is LINES** — `output_mode=count` returns matching lines, `-o` returns matches; 19 vs 33 on one pattern. **Two agents misled in one session, hours apart.** Addendum 2.
+- **The four Codex passes bound differently than they read** — 7 findings / 0 dismissed, but two were found only by the sweep that followed the pointer, and one overturned the previous pass's fix. Addendum 2.
+- **A review run CONCURRENTLY with fixes to its own subject cites stale lines** — a **gate-sequencing** defect, not a reviewer defect; filing it as the latter tunes the instrument to compensate for a scheduling choice. The verify-by-content rule absorbed the cost. Addendum 2.
+- **🔧 TWO GREPS AND A READ — the technique, split by which of three failures it catches.** **Discovery**: grep the *target population* for the source's identifier (all ideas for `E-276`). **Verification**: grep each *named consumer* for the citing note's identifier (story 03 for `TN-19`). **Content**: **open the target and count** — no grep reaches a false claim about what the target says (F4). **Enumerating an edge backward is not verifying it backward**, and **opening a file is necessary but not sufficient when the claim is a count.** Addendum 2.
+- **⛔ AN EXCLUSION ADDED FOR PRECISION CAUSED A FALSE CLEAN** — `[^|]{0,200}` to keep matches in a table cell, against prose that uses `|` freely. **The other narrowing members bite BY ACCIDENT; this one bit BY CONSTRUCTION**, so the tighten-the-pattern instinct is the cause and careful work is the more exposed. **Remedy inverts it: simple unanchored patterns, one term per invocation, no exclusions — accept noise, read hits.** Both parties then undercounted the same claim from opposite directions (3 and 4), which is the demonstrated case for sweeping **forms, not sites**. Addendum 2.
+- **🔧 REPAIR SHAPES DIFFER: a citation defect is ONE EDIT AT ONE END; a content-claim defect is a SWEEP** — it propagates into every derived artifact (index rows, summaries, the entry stating the actionable edit). **F4 did not close because it was repaired as a citation defect.** A finding tells you where it *looked*, never where the claim *lives*. Addendum 2.
+- **⛔ THE LIMIT OF ARTIFACT REVIEW — three levels, and the third has no reviewer.** A single-file sweep misses cross-artifact gaps (G2); an **edge-walk** finds those and misses defects in the relation between an artifact and **the process that produced it**; **nothing finds the third — the mechanism appears in no file.** Sole detector: **the actor volunteering it.** Commissioning another pass cannot close this class. Addendum 2.
+- **A rule earning its keep on a case its author never considered** — verify-by-content was written for line-number rot and absorbed *concurrent-edit* rot. **The strongest argument for keeping a rule, and the one that goes missing, because the cost it prevented never became an incident.** Addendum 2.
 - **Editing a retraction into agreement with the text it retracts** — a new failure shape, one instruction away from happening.
 - **The divergence-count gap** — four successive wrong reconciliations, each accepted because it corrected its predecessor.
 - **Single-run blindness** — fifteen failed attacks, all single-run, against a multi-run effect.
@@ -269,3 +282,134 @@ E-276's `epic.md` grew to ~1,300 lines, and its History carried the session's pr
 - **A fresh instance of the markup/whitespace grep-narrowing class, found in one command during the story-03 rewrite.** A literal grep for `grid clutter` against `src/` returned **zero matches** for a phrase that is present at `src/db/reconcile_at_load.py:1217-1219` — the phrase wraps across a line break (`grid\n    clutter`). That is the third catalogued member of the class (line breaks), arriving live during assembly rather than during review. It is a *characterized* member, so it does **not** close the OPEN unexplained thread (a literal grep missing a plain unemphasized string, cause never isolated); it is independent evidence that the *"an unexpected count is a cross-check trigger, never a finding"* reflex is load-bearing in ordinary work, not only under adversarial review. The unexpected zero was treated as a cross-check trigger and the pattern re-run partially, which found it.
 
   **What it cost had it not been cross-checked**: the sentence is `retire_departed_roster_players`' docstring claim that this grain's failure mode is *"grid clutter, never a corrupted stat"* — the sentence the operator's prefer-delete ruling rests on, and one the shipped roster design falsifies in the band régime. A false-clean would have shipped an epic that misses its own most load-bearing prose site.
+
+---
+
+## Addendum 2 — findings from the post-READY amendment and the four Codex passes (2026-07-25)
+
+These post-date the extraction and the first addendum. Two are new mechanisms; two are method notes on the sweep instruments themselves.
+
+- **🔧 THE TECHNIQUE THAT FINDS BOTH CLASSES: enumerate outward from the CITED artifact and grep consumers for ITS OWN IDENTIFIER. [CR-3's method lesson — a checkable procedure, not a disposition.]**
+
+  **Forward enumeration — walk each consumer, collect what it cites — structurally cannot surface *"TN-19 claims story 03 cites it, and story 03 does not."*** The consumer has no pointer to follow, so there is nothing to walk. **Only walking backward from TN-19 and grepping consumers for the string `TN-19` finds it.** This is the mechanism behind the 47-vs-78 enumeration gap, and it is **also why an author cannot find this class in their own work**: you enumerate the links you built, and the defect is a link you believed you built.
+
+  **⚠️ PRECISION THE SINGLE FRAMING LOSES — the gap has TWO shapes needing two different moves, and *"enumerate backward"* only covers one:**
+
+  | | **IDEA-189 shape — the edge is ABSENT** | **TN-19 shape — the edge is PRESENT and false** |
+  |---|---|---|
+  | State | nothing in the epic points to IDEA-189 at all | TN-19 *does* name story 03 AC-6/AC-7 |
+  | Why forward enumeration misses it | there is no link to walk | — it does **not** miss it; the edge was **on the list** |
+  | What actually failed | **discovery** | **verification** |
+  | The move | enumerate the **target population** (all ideas) and grep each for the source's identifier (`E-276`) | grep the **named consumer** for the source's identifier (`TN-19`), rather than checking the named target's *content* |
+
+  **The second row is the one worth carrying, because it is the less obvious failure.** The fifth-pass walk **did** enumerate `TN-19 → 03 AC-6, AC-7` as a backward edge. It then verified it by confirming *the named ACs exist and carry their requirements* — which they do — and marked ✅. **Enumerating an edge in the backward direction is not the same as verifying it in the backward direction.** The verification test is not *"does the target say something sensible?"* but **"does the target contain the source's name?"** — a one-line grep that no amount of reading the target's content substitutes for.
+
+  **⛔ AND THERE IS A THIRD CLASS NO GREP REACHES [CR-3, and it is why F4 did not close on the first repair].** The two above are about whether the *link* is real. The third is about whether the *claim* is:
+
+  | | edge **ABSENT** | edge **PRESENT, citation false** | edge **PRESENT, name resolves, claim about CONTENT false** |
+  |---|---|---|---|
+  | instance | IDEA-189 | TN-19 | **F4 — the DE file's paragraph position** |
+  | what failed | **discovery** | **verification** | **neither grep** |
+  | the move | grep the target population for the source's id | grep the named consumer for the source's id | **open the target and count** |
+
+  **In F4 every name resolves.** Story 05 AC-9 names the DE memory file, IDEA-187 names it, the README row names it — and all three said its per-grain paragraph sat *"at the bottom"* / *"in the last third"* when it is at **line 21 of 35**. **No grep of any kind settles that.** So the standing procedure is **two greps AND a read**: grep the target population for the source's identifier (discovery); grep each named consumer for the citing note's identifier (verification); **open the target for any claim about its content.** All three are mechanical, all three are cheap, and **none is what a careful read of the citing document produces.**
+
+  **⚠️ THE REPAIR SHAPES DIFFER, AND THAT IS THE OPERATIVE HALF:**
+
+  > **A citation defect is fixed by ONE EDIT AT ONE END. A content-claim defect is fixed by a SWEEP** — because the claim propagates into every artifact derived from the first: index rows, summaries, and the entry stating the actionable edit.
+
+  **F4 did not close because it was repaired as if it were a citation defect** — the two artifacts named in the finding were corrected and three derived copies were left standing, including the ideas **index row** and the Open-Questions entry **stating the edit the owning agent would actually make**. A subsequent sweep of the claim's *forms* found a **fourth** the re-verify had not named: story 05 AC-9's own correction note restated the retired position **one paragraph below its own correction**. **A finding tells you where it LOOKED, never where the claim LIVES.**
+
+  **And "open the target" is necessary, not sufficient — demonstrated on this very finding.** CR-3 reported the file as **36 lines** when it is **35**: it *did* open the target, and took the length off a rendered view instead of counting. **The claim was about a count, and only counting settles a count.** By its own diagnosis, an instance of the third class committed inside the correction of the third class.
+
+  **⚖️ THE STRONGEST CASE FOR KEEPING THREE CLASSES RATHER THAN FOLDING THIS INTO THE OTHER TWO** [CR-3's closing observation, and it comes from the only class that resisted three attempts to close]:
+
+  > **F4 is the only one of the six findings that needed a DIFFERENT INSTRUMENT at re-verify than at discovery.** The other five were found by grep and confirmed by grep. **F4 was found by opening a file and counting; its first repair was verified by checking the named sites; and it closed only when the check became *"read every artifact derived from the claim."*** **Discovery instrument, repair shape, and verification instrument all differ for this class.**
+
+  **That is why it is a third class and not a variant of the second.** A taxonomy that splits on *what went wrong* would fold F4 in with TN-19 — both are "a false statement in a citing document." **Splitting on *what finds it, what fixes it, and what confirms it* keeps them apart**, and those are the three questions a reviewer actually has to answer.
+
+  **Companion log — the units trap arrived inside the count used to confirm this fix.** PM's **12** (occurrences, `-o`) and CR-3's **6** (matching lines, `count`) are **both correct for their unit**. It was disposed by **measuring both ways rather than reconciling by argument**, which is the disposal this epic already prescribes for an unexpected count. Second instance of the label trap in one session.
+
+- **⛔ THE DANGEROUS FIX IS THE ONE THAT PASSES EVERY CHECK. [Route (b), pre-registered by CR-3 and sharpened in triage.]** A one-way citation admits two repairs: **(a)** add the citation to the consumer — closes the routing gap; **(b)** delete the source's claim that the consumer cites it — **makes the document self-consistent and leaves the relation exactly as broken as it was.**
+
+  **CR-3 first framed (b) as "closes nothing"; the accurate form is stronger and it adopted it: (b) closes every CHECK while closing NOTHING.** That is what makes it the *dangerous* route rather than merely the weak one — **it is the fix a consistency sweep rewards**, and the one that discards the finding while producing a green result.
+
+  **Generalizes past citations**: whenever a document asserts a relation that does not hold, **removing the assertion and repairing the relation are both "fixes" and only one of them is.** The tell is that the cheaper repair improves no reader's situation — under E-276's reading protocol, deleting TN-19's claim would have left the note exactly as unreachable from the only story touching `MAX_ROSTER_DEPARTURES`, with its promotion's stated purpose still unmet. **Same shape on F3: correcting the residual count closes it; re-scoping the sentence to make it true leaves a retired figure unmarked in a directory outside every sweep's scope.**
+
+- **⛔ A ONE-WAY CITATION IS NOT AN EDGE — AND A "BOTH-ENDS" CHECK THAT WALKS ONE END IS INDISTINGUISHABLE FROM A PASSING ONE. [NEW MECHANISM — found by the independent enumeration, against an edge the first walk marked ✅.]**
+
+  TN-19 stated *"Cited by story 03 AC-6 and AC-7."* **No story file contained the string `TN-19` at all** — five occurrences in `epic.md`, zero across all five stories. **Both ends were individually correct**: TN-19 named the ACs, and the ACs stated their requirements soundly. **The edge did not exist**, because citation is *directional* and only the outbound half was built.
+
+  **Why the miss was structural rather than careless**: the fifth-pass edge-walk verified the SOURCE end — *does TN-19 name real ACs, and do they carry what it says?* — and marked ✅. It never asked the return question. **The evidence was already in that same walk's own output**: its Section 1.B listed story 03's citations as *TN-9, 11, 12, 13, 14, 16, 17*, with no TN-19. **Two sections of one report contradicted each other and the ✅ stood**, because a check that produces a green mark forecloses the re-check that would catch it. **An unverified edge is safer than a wrongly-verified one.**
+
+  **The operational form**: for a citation edge, *"the target exists and carries what the source says"* is **half** the check. The other half is **does the target route back** — and it is the half that matters under a reading protocol, which this epic has: the guide tells an implementer to read their story and then *only the TNs it cites by number*. **Under that protocol an uncited TN is unreachable however clearly it names the story**, so a one-way citation silently converts a mandatory note into an invisible one. TN-19's own banner says it was promoted *"so a story and a future cap-tuner can cite it"* — **its stated purpose was unmet for the life of the note**, and it exists to stop exactly one error a cap-tuner makes.
+
+  **Generalizes to any navigable reference under a "read only what you cite" protocol** — TN→story, doc→doc, rule→agent-definition. Three further instances of the same shape were found in the same pass (TN-1's roster-exemption box, TN-5's roster-premise subsection and its precondition-(e) box, all naming story 03's requirements from a note story 03 did not cite). **The sharpest: story 03 AC-2 restates TN-5's executed table inline without citing it** — the implementer had the numbers and no route to the derivation.
+
+- **⛔ AGREEMENT BETWEEN AN ARTIFACT AND SOMETHING WRITTEN FROM IT IS NOT CORROBORATION. [Recurring — third instance.]** Story 05 AC-9 and IDEA-187 both placed a paragraph in the DE memory file's *"last third" / "bottom."* It is at **line 21 of 35**, with four substantive sections below. **They agreed because one was derived from the other**, and the reviewer who caught it simply opened the file and counted. Prior instances: the ideas index agreeing with its own idea file (both wrong), and the epic index agreeing with the extracted findings file. **The check is to open the primary, never to consult a summary of it** — and the tell is that two sources agree on a *detail neither needed*, which is the signature of copying rather than of independent observation.
+
+- **⛔ A COUNT CAN BE FALSIFIED BY AN EDIT THAT NEVER TOUCHES IT. [NEW MECHANISM — the hardest shape in this epic.]** TN-13 asserted *"exactly one existing assertion inverts"*, which was **true for its space** (the fourth test file, the vacuous-permit inversion). The roster design's reversal then required a **second** existing-assertion change — in a **different story**, in a file TN-13 does not mention. **TN-13's sentence is now false and not one character of it changed.**
+
+  **This is what makes it the hardest shape: no sweep finds it.** A term sweep finds modified or contradictory text; this text is unmodified and internally self-consistent. A structural-field sweep finds scope words in summaries; this is a numeral in a body paragraph that was correct when written. **The only detector is re-deriving the count against the current tree** — which nothing prompts you to do, because nothing looks wrong.
+
+  **Distinguish it from the 7th host, which it resembles and is not.** The 7th host is *a quantity over a space the author chose, reported as though the space were given* — an error at the moment of writing. **This one is correct at the moment of writing and is invalidated remotely, by a change to the space's boundary made elsewhere, later, by someone else.** The 7th host's fix is "state your space"; that fix does **not** help here, because TN-13 *did* state its space and the space itself moved. **The fix is a standing re-derivation, not a better sentence.**
+
+  **Generalizes past counts**: any claim whose truth depends on a *boundary defined elsewhere* — a count, an exhaustive enumeration, a "the only X", a file-list completeness claim — is exposed. Found by Codex across two independent passes; the epic-wide total is now tabulated in Success Criterion 2 rather than inferred from any single note.
+
+- **⛔ A VERIFIED REPAIR VERIFIES WHAT IT WAS POINTED AT. Enumerations drift DOWNWARD-ONLY. [NEW MECHANISM.]** The `refused_by` enum was failed by CR-2 for non-exhaustiveness, repaired by SE (adding `boxscores_incomplete`), and the repair was **verified by CR-2**. It was **correct and incomplete**: a second member, `skipped_no_exemption_plan`, was introduced in a *later subsection of the same Technical Note* and never propagated up to the list. Story 03 then named a third, different set. **Three sources, three sets, on the surface an implementer builds from — surviving a failed review, a repair, and a verification of that repair.**
+
+  **The mechanism: the site that ADDS a member is rarely the site that LISTS them.** New members enter at the point of *use* — a requirement, a wrapper instruction, a story AC — and lists live upstream. So enumerations leak in one direction, and **a review that verifies a repair is scoped to the defect it was shown**, not to the class. "Was this fixed?" gets yes and stops.
+
+  **The mechanical fix that also produced a real finding**: replacing the flat list with a **per-grain membership table** surfaced two facts nobody had stated — **`refused_by == "gate"` is unreachable on roster** (no floor gate under V1) and **`"cap"` is unreachable on player-line** (no cap). A flat list had been silently inviting tests that assert states the code cannot produce. **The table was adopted to fix a consistency defect and paid for itself as a correctness check.**
+
+- **METHOD — the emphasis hazard INVERTS onto the WRITE side: markup interpolation defeating an exact-match EDIT, not a search.** Every prior instance of this class was a *read* failing to find. At the fifth-pass edge-walk an `Edit` was **rejected outright** because the `old_string` reproduced a phrase as `**bolded**` where the file carries it plain. **Same hazard, opposite surface, and the failure mode is better**: a search fails *silently* toward false-clean, while a write fails *loudly* and refuses to land. **The write side is the safe direction of this bug** — which is worth knowing precisely because it means the read side is the one carrying the risk. Mitigation is unchanged and already standing: **read back the literal line after any failed edit, and copy from that read rather than from memory.**
+
+- **⛔ METHOD — A DELIBERATE EXCLUSION ADDED FOR PRECISION PRODUCED A FALSE CLEAN. The worst member of the grep-narrowing class, and it arrived inside the check written to close that class.** [Self-reported by CR-3, cause and all.]
+
+  A sweep for surviving positional claims reported **ZERO surviving** and was wrong. Its pattern carried `[^|]{0,200}` between the two halves of the claim — **an exclusion added to keep matches inside a table cell.** This epic's prose uses `|` freely, so the pattern **silently stopped matching across any sentence containing a pipe** — which is exactly where the missed copy (`E-276-05:91`) sat. **The clean was a property of the pattern, not of the tree.**
+
+  **Why this is categorically worse than the other members, and the distinction is the whole entry**: markup interpolation, case, hyphenation, line breaks and inflection all narrow a pattern **BY ACCIDENT** — the author did not know the text contained them. **This one narrowed BY CONSTRUCTION. The exclusion was added to make the pattern MORE PRECISE, and the precision is what produced the false clean.** So the usual instinct — *tighten the pattern to cut noise* — is the instinct that causes it, and a reviewer doing careful work is more exposed than a careless one.
+
+  **⚠️ It also had the missed line in its own earlier tool output, under a different grep, and did not open it.** Two failures, both volunteered.
+
+  **The remedy is the operational half and it inverts the instinct: simple UNANCHORED patterns, ONE TERM PER INVOCATION, NO EXCLUSIONS.** Accept the noise and read the hits. Run that way, the same sweep returned zero live copies against nine preservation copies — **each classified by reading the surrounding prose rather than by the match** — four out-of-scope exclusions checked and stated, and nine further phrasings never previously tried.
+
+  *(Catalogued as a member without an ordinal, per the standing decision three bullets down: three enumerations of this class disagree on its size, and asserting a count for a member of a class about unverified counts is the seventh host in miniature.)*
+
+  **AND THE SECOND HALF, in its author's words, because it lands on the same finding:**
+
+  > **"I reported a number as a property of the claim when it was a property of my sweep"** — the seventh host, **inside the finding raised about unverified claims.**
+
+  **That both parties undercounted from OPPOSITE directions — the reviewer's three, PM's four — is the argument for sweeping FORMS rather than SITES, and it is now demonstrated twice rather than asserted.** Neither count was a fact about the tree; each was a fact about a search. **Two independent undercounts of one claim is stronger evidence for the method than either party's correction of the other.**
+
+- **METHOD — word INFLECTION is a further member of the grep-narrowing class, and the ordinal is deliberately not stated.** A verification grep for ``permit iff `P >= X + g` `` returned **zero** against live text reading ``permit**s** iff``. Re-searching on the formula alone returned 8 hits across two files. **The miss was against text the searcher had written minutes earlier**, which is the sharpest available demonstration that authorship confers no protection.
+
+  **On the ordinal**: the banner calls this class *markup/whitespace/hyphenation*, Addendum 1 calls line breaks *"the third catalogued member"*, and the amendment relay called inflection *"a sixth"*. **Those enumerations disagree, and this record declines to pick one** — asserting an unverified ordinal for a member of a class about unverified counts is the 7th host in miniature. **Catalogue the member; the count of members is itself a quantity over a space nobody has fixed.**
+
+- **METHOD — the tool label says "occurrences" and the value is LINES. Two agents misled by it in one session.** `output_mode=count` returns **matching lines**; `-o` returns **matches**. On one identical pattern this session the same sweep read **19** and **33**. PM4 hit it on the pre-amendment sweep and PM5 hit it again on the post-amendment one. **Two independent agents, same tool, same misreading, hours apart — that is a property of the label, not of either agent.**
+
+  **The operational consequence is not the discrepancy, it is the false movement it manufactures**: a sweep re-run in the other mode looks like the tree changed when nothing did — and this epic has already recorded (twice) that *an unexpected count is a cross-check trigger, never a finding*. **Compare like with like, or the instrument reports a delta the artifact does not have.**
+
+- **⚙️ PROCESS — a review run CONCURRENTLY with fixes to its own subject reports citations that are already stale. [Gate-sequencing defect; disclosed by the party who caused it.]** Audit 4 was launched in the background while audit 3's findings were being routed and applied, so it read the epic **mid-edit**. Its line citations rotted before it reported — one cited site resolved to a *different* Success Criterion in the tree by the time the findings were triaged.
+
+  **The attribution matters more than the incident, which cost nothing here.** The obvious filing is "the reviewer cited stale lines", and that is **wrong in the most expensive direction**: it tunes the instrument to compensate for a scheduling choice, and the next such report gets discounted for a fault it does not have. **This is a sequencing property of how the gate was run, not a property of the review.**
+
+  **Remedy is sequencing, not review design**: freeze the artifact for the duration of a gate, or run the gate serially against a known revision. **Corollary that saved this one**: the standing *verify-by-content-not-by-line-number* rule absorbed the whole cost — every citation was confirmed by reading, so a stale pointer degraded to a minor inconvenience rather than a wrong disposition. **The rule was written for line-number rot from ordinary editing; it turns out to cover concurrent-edit rot too, which nobody designed it for.**
+
+  **And it is the reason-rots-independently-of-the-verdict shape once more.** PM's first account — *"audit 4 ran against the pre-amendment file"* — was **true, and named no mechanism**. The real reason was recoverable only from the party who ran the gate; **no amount of checking the verdict would have produced it.** A verdict that is right for an unstated reason is not self-correcting, because every check of it passes.
+
+  **⛔ AND THIS BOUNDS WHAT ARTIFACT REVIEW CAN DO AT ALL — record it beside G2's limit, because the two complete each other.** This epic now has a three-level hierarchy of what a review reaches:
+
+  | Review shape | Finds | Blind to |
+  |---|---|---|
+  | **Single-file sweep** (term, structural) | defects *within* an artifact — stale text, contradictions, scope words | a gap annotated in one file and depended on in another |
+  | **Edge-walk** (the fifth pass) | defects in the *relations between* artifacts — G2's class, *"unreachable to any single-file sweep"* | defects in the relation between an artifact and the **process that produced it** |
+  | **— none —** | | **the gate-sequencing defect above: the mechanism lived in HOW THE GATE WAS RUN, which appears in no file** |
+
+  **Every reviewer with access to every artifact would have read *"audit 4 ran against the pre-amendment file"*, found it true, and stopped.** The record was complete, self-consistent, and silent about its own cause.
+
+  **The only channel that recovers this class is THE ACTOR VOLUNTEERING IT.** That is not a review technique and cannot be made into one — which is why the disclosure norm this epic keeps recording as an *outcome* (SE's §12, the four downward credit corrections, this one) is **load-bearing infrastructure rather than good manners.** It is the sole detector for a class of defect no amount of reviewing can reach.
+
+  **Corollary for scoping future passes**: commissioning another artifact review can never close this class, so *"we ran one more pass"* is not evidence against it. **Ask the actors what they did, or it stays invisible.**
+
+- **STATED AS A LIMIT, because the four passes bound differently than they read.** Four Codex passes returned **7 findings, 0 dismissed** — a clean record that is easy to over-read. **Two of the seven were found only because a human-directed sweep went looking beyond the cited site** (the Success Criterion, and TN-9's third dependent), and **one overturned a PM fix from the previous pass**. So the passes are not independent of the triage that followed them: **the pass supplies the pointer, the sweep supplies the extent, and reporting the pair as one number would credit the pointer with the extent.**

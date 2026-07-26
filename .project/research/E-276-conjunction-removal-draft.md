@@ -1,5 +1,13 @@
 # E-276 — Drafted replacement text for the conjunction removal (SE, for PM3)
 
+> # ⛔ SUPERSEDED — EXECUTED WORK ORDER. NOT SPEC, AND NEVER WAS.
+>
+> **Marked 2026-07-25 at the fifth-pass edge-walk.** This file is **drafted replacement text plus instructions to a specific PM** (*"[PM3: relocate … here unchanged]"*). **Its edits were applied; the epic carries the result.** Read it only to audit how the conjunction removal was performed — never as a statement of current design.
+>
+> **The specific trap**: it quotes both the text being REMOVED and the text REPLACING it, side by side and often unlabelled as to which is which. **A reader arriving mid-file cannot tell a superseded quotation from a live one**, and its counts (*"`epic.md` 42, story 01 seven, story 02 six, story 03 zero"*) are a snapshot of a tree that no longer exists.
+>
+> **Found the same way as the triage handoff's marker**: an independent edge-walk found **five** `E-276-*` research files where the epic accounts for **two**. Both unaccounted files now carry a header; neither had one, and **`.project/research/` is outside story 05's sweep scope**, so nothing in this epic's own process would have reached them.
+
 **Status**: draft for PM3 to write into `epic.md` and the stories. **SE does not edit epic or story files.**
 **Scope**: TN-1(b), TN-5, TN-11's record, TN-10/TN-13 pass, the TN-19 collision, and the consequential ACs in stories 01 and 02.
 **Method**: every claim verified against the files or by execution, not against the relay. Corrections to what I was handed are in §6.

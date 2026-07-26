@@ -17,6 +17,7 @@
 
 ## Spec-Audit Frame Patterns
 - [Check REACHABILITY before adjudicating DIRECTION](check_reachability_before_adjudicating_direction.md) — a dispute hands you a framed question, so the cheapest decisive check is the one nobody runs (E-276: 4 agents, 3 rounds on the direction of an asymmetry that fires nowhere; one grep settled it). Also: give reasons not verdicts, record which axes a run held CONSTANT, and prefer a column that SHOWS a property over an inference that implies it.
+- [Enumerate BACKWARDS from the cited artifact](enumerate_backwards_from_the_cited_artifact.md) — a broken edge is invisible walking forward from the consumer; grep the consumers for the TN/idea's OWN id, and regenerate every exhaustive-class claim from the directory (E-276: TN-19 cited by nobody, IDEA-189 linked by nobody, "three ideas"/"two files" were five and five).
 - [A churn inventory drawn over CONSUMER test files omits the primitive's own](inventory_frame_omits_the_primitives_own_tests.md) — recompute from the changed SYMBOL; if the headline test count equals the named files EXACTLY, that equality is the frame and what it excludes holds the unsatisfiable AC (E-276: 34+20+18=72, primitive's 19 tests invisible, one asserts the exact input the fix inverts). Item 5 carries my OWN falsified rule: shape-count vs combination-count is a unit error, and I verified the counterexample in the same session I generalised past it.
 
 ## Invariant Audit Patterns
