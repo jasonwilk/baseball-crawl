@@ -1,7 +1,7 @@
 # Code Reviewer Agent Memory
 
 ## Closure-Smoke (Step 1d) Adjudication
-- [reconcile-scoreboard FAIL is usually stale-baseline drift](closure_smoke_reconcile_baseline_drift.md) — before calling a Step 1d reconcile exit-1 an epic-FAIL, check baseline `db_game_count`/`snapshot_date` vs live completed-game count; if drifted, verify exact% held + abs-Δ grew sublinearly + self_games/dropped_pitch_events invariants hold → operator-owned `--update-baseline`, NOT remediation. Also: `bb creds check` mobile-profile red is noise; reports path uses WEB profile only (E-261).
+- [A red mobile creds profile is not a preflight fail](closure_smoke_preflight_creds_profile.md) — `bb creds check` always prints mobile dead (no programmatic refresh); the reports path uses WEB only, so check `--profile web` before calling ENV-FAIL. Also records what retired with the 2026-07-26 ratchet demotion: Step 1d now asserts only `self_games == 0` and ignores the exit code, so stale-baseline drift can no longer reach you as a FAIL.
 
 ## Measured Tool Behavior
 - [Tool gotchas](tool_gotchas.md) — tools that silently return the wrong answer: `checkout-index` and skip-worktree, ruff's `include` walk-filter, unsplit `$files` exiting 0, `git show HEAD:` mid-epic, `fnmatch` and `**`, `core.quotePath`, `git diff` blind to untracked.

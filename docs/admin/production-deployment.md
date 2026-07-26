@@ -528,22 +528,17 @@ morning-run=<lsb-team-url-1> <lsb-team-url-2> ...
 Both values are real LSB identifiers and must never be committed -- `.smoke-fixture` is
 already in `.gitignore`.
 
-**`generate` target requirement: a terminal fixture team.** The team pinned for `generate`
-must be a **completed-season GC team page** -- one that will gain no further games -- with
-**high play-by-play coverage**. This is what makes the generate -> reconcile-scoreboard
-order below safe: because a terminal team's corpus is static, the closure's
-`bb report generate` ingests no net-new plays, so the reconciliation reading that follows
-measures only the epic's own derivation effect, never a self-caused ingestion delta that
-would false-trip the one-way ratchet.
+**`generate` target requirement: high play-by-play coverage.** The team pinned for
+`generate` must have a plays-rich corpus, or the reconciliation reading that follows is
+vacuous. When pinning it, verify coverage in the dev DB with a count of games that
+actually carry play-by-play rows -- data-bearing, not a bare games count, since
+scored-but-empty games are the modal case.
 
-**One-time bootstrap when pinning the fixture team:**
-1. Verify the fixture team's play-by-play coverage in the dev DB -- a count of games that
-   actually carry play-by-play rows (data-bearing, not a bare games count, since
-   scored-but-empty games are the modal case) -- to confirm the corpus is plays-rich.
-2. Re-snapshot the reconciliation baseline once: `bb report reconcile-scoreboard --update-baseline`.
-
-There is no per-closure re-snapshot and no reordering the checks below -- a static terminal
-fixture kills the drift at the root instead of just moving it to the next epic.
+The fixture was previously also required to be a **terminal** team (a completed season
+gaining no further games), for one reason: a static corpus could not produce a self-caused
+ingestion delta that would false-trip the one-way ratchet. That gate was retired on
+2026-07-26, so nothing now turns on staticness or on the ordering of the checks below. The
+currently pinned team happens to be terminal and needs no change.
 
 ### What the smoke checks (in order)
 
@@ -553,15 +548,14 @@ fixture kills the drift at the root instead of just moving it to the next epic.
    credentials live for the web profile (`bb creds check --profile web` -- **not** the bare
    multi-profile `bb creds check`, which can exit 0 on a mixed state where a valid mobile
    profile masks a dead web profile, and the smoke's `bb report generate` uses the web
-   profile); the reconciliation baseline present
-   (`.project/baselines/reconciliation-scoreboard.json`).
-2. **`bb report generate <generate public_id>`** -- runs first, so the reconciliation ratchet
-   below measures the state this run produced. The printed `reference_date` must equal today
+   profile).
+2. **`bb report generate <generate public_id>`** -- run it first so the scoreboard below
+   reads the state this run produced. The printed `reference_date` must equal today
    in the operating timezone.
 3. **`curl -s http://localhost:8001/health`** -- the app answers.
-4. **`bb report reconcile-scoreboard`** -- `self_games` must be `0` (a hard zero); neither
-   `dropped_pitch_events` nor `no_plays_units` may have regressed against the committed
-   baseline.
+4. **`bb report reconcile-scoreboard --json`** -- `self_games` must be `0`, a hard zero.
+   That is the only assertion; **ignore the command's exit code**, which can still be
+   non-zero from the vestigial baseline diff left behind by the retired ratchet gate.
 5. **`bb report morning-run --dry-run <morning-run urls>`** -- asserts exit `0` only,
    order-independent after the health check. On an arbitrary closure date LSB usually has
    no games, so this step gates the entry-point wiring and schedule-read path, not the

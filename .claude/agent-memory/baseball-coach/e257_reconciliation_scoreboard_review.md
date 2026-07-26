@@ -9,6 +9,14 @@ E-257 productizes the plays-to-boxscore reconciliation scoreboard (CLAUDE.md's b
 play-ingestion north star). PM/main session asked me to resolve three open items from the
 E-245 baseline (`.project/research/E-245-plays-boxscore-reconciliation-baseline.md`).
 
+**Dated correction, 2026-07-26.** The scoreboard's one-way ratchet GATE was retired by
+operator decision; `bb report reconcile-scoreboard` is now a pure diagnostic that an operator
+reads before and after an ingestion change. Where this file below describes when "the gate
+fires" against an accepted abs-Δ floor, read that as history -- no gate fires now. **This
+applies ONLY to the gate mechanics.** Everything else here still stands, in particular the
+display position in section 2: the residual is always SHOWN and LABELLED, never silently
+excluded. `self_games == 0` also still holds as a hard invariant.
+
 ## 1. Headline-metric weighting: BF/FPS vs. equal-weighted AB/H/BB/SO
 
 **Recommendation: equal-weight AB/H/BB/SO as the headline outcome-fidelity bucket. Do NOT

@@ -162,7 +162,7 @@ bb data merge-duplicate-games --execute
 
 **When to run**: as a one-time historical cleanup after seeing a degraded or erroring report attributable to duplicate games (the reports admin UI showing a doubled-up game, or a report generation error tracing back to a duplicate `games` row), or proactively once after upgrading past E-261 to clean up damage from the fixed defect. Dry-run first to review the plan, then `--execute` to apply.
 
-**Closure check**: run `bb report reconcile-scoreboard` before and after, per the [Reconciliation Scoreboard](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) one-way ratchet below -- merging duplicate games should hold steady or improve `no_plays_units` as perspectives consolidate onto a single game row; it must never regress a gated stat.
+**Closure check**: run [`bb report reconcile-scoreboard`](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) before and after, and compare the two readings -- merging duplicate games should hold steady or improve `no_plays_units` as perspectives consolidate onto a single game row, and should not worsen any stat figure.
 
 ### Deduplicating Player Entries (`bb data dedup-players`)
 
@@ -256,7 +256,7 @@ Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned,
 
 ### Reconciliation Scoreboard (`bb report reconcile-scoreboard`)
 
-*Last updated: 2026-07-09 | Source: E-257 (reconciliation scoreboard)*
+*Last updated: 2026-07-26 | Source: E-257 (reconciliation scoreboard); ratchet gate retired 2026-07-26 by operator decision*
 
 `bb report reconcile-scoreboard` is the standing, repeatable **measurement** of how faithfully the plays-derived stats reconstruct GameChanger's official box scores -- the concrete metric behind CLAUDE.md's north-star Operating Principle ("Always Get Closer to Byte-Identical Play Ingestion"). It replaces the one-off manual `recon.sql` baseline from E-245 with a standing command. Read-only: it never writes to the database.
 
@@ -264,9 +264,9 @@ Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned,
 
 | | `bb data reconcile` | `bb report reconcile-scoreboard` |
 |---|---|---|
-| Purpose | Corrective **engine** -- detects and (optionally) fixes pitcher attribution errors | **Measurement + gate** -- tracks plays-vs-boxscore fidelity over time and blocks a regression |
+| Purpose | Corrective **engine** -- detects and (optionally) fixes pitcher attribution errors | **Measurement** -- reports plays-vs-boxscore fidelity as of right now |
 | Writes to the DB? | Yes, in `--execute` mode (reassigns `plays.pitcher_id`) | Never -- always read-only |
-| Output | Per-game/per-signal discrepancy detail, stored in `reconciliation_discrepancies` | A fidelity scoreboard (per-stat exact% / abs-Δ) + three axis counters, diffed against a committed baseline |
+| Output | Per-game/per-signal discrepancy detail, stored in `reconciliation_discrepancies` | A fidelity scoreboard (per-stat exact% / abs-Δ) + three axis counters |
 
 **What it computes**: per-stat fidelity for pitching (`BF`, `SO`, `BB`, `H`, `HBP`) and batting (`AB`, `H`, `BB`, `SO`, `HBP`) -- each as `exact%` (share of units where the plays-derived value equals the boxscore value) and `abs-Δ` (sum of absolute differences) -- plus three axis counters, the north-star "trend toward zero" targets:
 
@@ -281,38 +281,26 @@ Batting `AB` and `H` are labeled in the table as carrying a known residual (quic
 **Commands**:
 
 ```bash
-# Human-readable table + gate verdict
+# Human-readable table
 bb report reconcile-scoreboard
 
-# Machine-readable JSON to stdout (table suppressed; gate verdict goes to stderr)
+# Machine-readable JSON to stdout (table suppressed)
 bb report reconcile-scoreboard --json
-
-# Overwrite the committed baseline with this run's values
-bb report reconcile-scoreboard --update-baseline
 ```
 
-**The gate**: every non-`--update-baseline` run diffs the fresh scoreboard against a committed baseline JSON at `.project/baselines/reconciliation-scoreboard.json` and exits non-zero on a regression. It is a **one-way ratchet** -- only a *worsening* number trips it; an improvement or holding steady always passes. It fires on:
-- A rise in abs-Δ for any gated stat: batting `{AB, H, BB, SO}`, pitching `{H, SO, BB}`.
-- A rise in either ratcheted axis counter: `dropped_pitch_events`, `no_plays_units`.
-- `self_games > 0` -- gated as a **hard zero**, independent of the baseline (a self-game is always a bug, never an acceptable floor).
+**How to use it**: run it before a change to play ingestion, parsing, or reconciliation, run it again after, and compare the two readings yourself. `BF` and `HBP` are context columns; pitch-level fidelity shows up in `dropped_pitch_events` rather than blended into the stat figures. The judgement is yours: CLAUDE.md's Operating Principle asks that every such change move plays-derived stats closer to GameChanger's official box scores, and the scoreboard is how you show that it did.
 
-`BF` and `HBP` are shown in the table as context but are not gated. Pitch-level fidelity is covered via the `dropped_pitch_events` counter rather than blended into the stat ratchet.
+One figure is not a judgement call. **`self_games` must be 0** -- a game with `home_team_id == away_team_id` is always an opponent-resolution bug, never an acceptable floor. The epic closure smoke asserts exactly this and nothing else.
 
-**Baseline lifecycle** (the operator owns every snapshot -- no agent auto-refreshes the baseline):
+This is a manual operator diagnostic and never a CI check; the live database is not available in CI.
 
-1. **First use**: the gate has nothing to diff against until a baseline exists. Run `bb report reconcile-scoreboard --update-baseline` against the live DB, review the written `.project/baselines/reconciliation-scoreboard.json`, and commit it. Until this file is committed, every gated run exits non-zero (code 3) with a bootstrap message rather than passing silently.
-2. **Ongoing**: run the gate before and after any ingestion, parser, or reconciliation change. If a fix legitimately improved a number, re-snapshot with `--update-baseline`, review the JSON commit diff (this diff is the human review point -- it shows exactly which floor moved and by how much), and commit it so the improved number becomes the new floor.
+#### The one-way ratchet gate was retired on 2026-07-26
 
-**Exit codes**:
+Until 2026-07-26 this command was also a regression **gate**: it diffed each run against a committed baseline at `.project/baselines/reconciliation-scoreboard.json`, exited non-zero when a gated stat or axis counter worsened, and obliged the operator to re-snapshot with `--update-baseline` after any legitimate improvement. The operator retired it because it cost more attention than it caught -- by the end, two of the last three epic closures carried explicit ratchet exceptions and the baseline was roughly four epics stale, so the gate was mostly producing paperwork about its own staleness.
 
-| Code | Meaning |
-|---|---|
-| `0` | Pass -- no gated regression |
-| `1` | Gated regression, OR a run precondition failed (e.g. database not found) |
-| `3` | No committed baseline exists yet (first-use bootstrap) |
-| `4` | Committed baseline is present but malformed or missing an expected value |
+**What this means in practice**: there is no baseline to keep fresh, no `--update-baseline` chore, and no ratchet-exception bookkeeping at epic closure. Nothing in the project reads the baseline file.
 
-**When to run**: this is a manual operator diagnostic, not a CI gate -- the live database is not available in CI. Run it around any change to play ingestion, parsing, or reconciliation logic, per CLAUDE.md's Operating Principle that every such change must move plays-derived stats closer to (never further from) GameChanger's official box scores.
+**Vestige, until a follow-up story removes it**: the command's gate code is still in place. It still accepts `--update-baseline`, still diffs against the now-frozen baseline JSON, still describes a live gate in its `--help` text, and can still exit non-zero (`1` regression or precondition failure, `3` baseline absent, `4` baseline malformed). **Ignore that exit code and read the numbers.** If the CLI's own help text and this page disagree, this page is current.
 
 ## Morning-Run Scheduled Reports
 
@@ -561,7 +549,7 @@ This corrects an accumulate-only bug where removed games, dropped stat lines, an
 
 So: a transient failure, a postponed game, or a partial/degraded crawl never causes data loss on the game and player-line grains. **On the roster grain, a partial/degraded crawl can cause data loss** -- bounded per run by `MAX_ROSTER_DEPARTURES`, but not bounded in total across repeated runs.
 
-**Fidelity gate.** Reconcile changes are validated against the [Reconciliation Scoreboard](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) above -- a retire correction should hold or improve plays-vs-boxscore fidelity; it must never regress it.
+**Fidelity check.** Reconcile changes are checked against the [Reconciliation Scoreboard](#reconciliation-scoreboard-bb-report-reconcile-scoreboard) above -- take a reading before and after; a retire correction should hold or improve plays-vs-boxscore fidelity, never worsen it.
 
 **Known, deliberate limitations** (not defects):
 
@@ -655,13 +643,13 @@ Optional `--db-path PATH` overrides `DATABASE_PATH`.
 
 **Operator sequence -- run in this order, against a quiescent database** (no report generation in flight):
 
-1. **Re-snapshot the reconciliation baseline first.** This step is operator-owned -- no agent runs `--update-baseline`:
+1. **Take a "before" scoreboard reading and keep it.** Step 3 compares against this, so capture it somewhere you can read it back:
 
    ```bash
-   bb report reconcile-scoreboard --update-baseline
+   bb report reconcile-scoreboard --json > /tmp/recon-before.json
    ```
 
-   The committed baseline may already be stale relative to the database's current game count; re-snapshotting first gives step 3's diff something meaningful to compare against.
+   (Before 2026-07-26 this step re-snapshotted a committed baseline instead. The ratchet gate that baseline fed is retired -- see [The one-way ratchet gate was retired](#the-one-way-ratchet-gate-was-retired-on-2026-07-26) -- so the comparison is now yours to make directly.)
 
 2. **Run the one-shot:**
 
@@ -669,12 +657,13 @@ Optional `--db-path PATH` overrides `DATABASE_PATH`.
    python scripts/reclaim_orphan_reference_data.py
    ```
 
-3. **Verify.** The reclamation touches only `teams` / `players` / `team_rosters` rows -- zero stat rows -- so the post-run scoreboard must show an EXACT no-diff. Any movement at all means the sweep overreached:
+3. **Verify.** The reclamation touches only `teams` / `players` / `team_rosters` rows -- zero stat rows -- so the scoreboard must read EXACTLY as it did in step 1. Any movement at all means the sweep overreached:
 
    ```bash
-   bb report reconcile-scoreboard                    # expect exact no-diff
-   sqlite3 data/app.db "PRAGMA foreign_key_check;"    # expect empty
-   sqlite3 data/app.db "PRAGMA integrity_check;"      # expect ok
+   bb report reconcile-scoreboard --json > /tmp/recon-after.json
+   diff /tmp/recon-before.json /tmp/recon-after.json   # expect no output
+   sqlite3 data/app.db "PRAGMA foreign_key_check;"     # expect empty
+   sqlite3 data/app.db "PRAGMA integrity_check;"       # expect ok
    ```
 
 **Reading the exit code** -- the one-shot distinguishes three outcomes; do not conflate them:
