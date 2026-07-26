@@ -1,5 +1,33 @@
 # Handoff hiccup ledger (running; classified per eval protocol axis D)
 
+## E-276 CLOSURE VERIFICATION (final entry): VERIFIED (bfc614a)
+
+Independent verifier, by execution: (1) NEGATIVE — the audit's id-churn
+construction run UNMODIFIED through the real loader: 9-of-9 survive, refusal
+WARN shows 0-comparable-of-9-prior (pre-upsert snapshot proven); game-grain
+newly-completed padding: 5 new games inflate neither gate side, 2-of-2 stale
+survive. (2) POSITIVE per shipped spec — legitimate retires work; AC-15 WARN
+fires on permitted churn-shaped retire naming bb data dedup-players and the
+dedup sweep merges the pair; roster cap-only/prefer-delete as ruled; NO fork
+gate/player-line cap/extra_guard shipped (diagnostic-only as ruled).
+(3) Mutation: reverting the capture point reproduces the EXACT pre-fix blast
+radius (9 batting + 2 pitching deleted) at the real generate_report() seam;
+16/3/3 discriminating tests go red per mutant. (4) Prose: KNOWN DEFECT
+replaced everywhere; :596-603 and :962-968 corrected in place; one-run-window
++ dedup-reliance (three named holes) disclosed operator-facing. (5) Full
+suite 4274 passed / 0 failed, RC=0 captured unpiped.
+Corrections to earlier ledger figures: prior reconcile tests were 85 not 72;
+E-270-03 pollution was AUDITED (295+153 dual-recompute calls, 0 divergences),
+not declined; the redteam-era "2 roster wrongful deletions blocked" does NOT
+transfer to the shipped spec (10/2-dropped/20-churn now retires 2, at-cap —
+the CHARTERED prefer-delete inversion; spec delta, not defect).
+OPEN ITEM -> layer pass / docs-writer: docs/admin/operations.md carries the
+roster inversion but NOT the one-run-window/dedup-reliance disclosure — the
+runbook reader learns roster can lose data and wrongly infers player-line is
+safe under sustained churn. One paragraph.
+Harness rot documented at closure (harnesses/README.md): 4 recon_audit files
+need the new keywords; x_attack.py exercises a non-production default.
+
 ## E-276 DISPATCH PHASE (2026-07-26/27)
 
 7. Hub SKIPPED the "and review" Codex pass (Phase 4), sent CR straight to
