@@ -46,6 +46,16 @@ caveats:
     `game-summaries` (stable `event_id`/`game_stream_id` per game), this endpoint's
     `id` cannot be used to dedupe the same game across two teams' schedules. It
     still works as the boxscore/plays `event_id` for the perspective it came from.
+  - >
+    ACCEPT IS STRICT -- a WRONG vendor resource type returns HTTP 415, not a
+    fallback representation (verified live 2026-07-26). The plausible-looking
+    `application/vnd.gc.com.public_game:list+json; version=0.0.0` is NOT this
+    endpoint's type and 415s; the correct type is `public_team_schedule_event`
+    and is not guessable from the path. A GENERIC `application/json, text/plain,
+    */*` returns a normal 200 with the full body -- so the 415 fires on a
+    MISMATCH, not on the absence of a vendor type. Read a 415 here as "check the
+    Accept header", never as "endpoint broken or removed". See
+    `../error-handling.md` ("415 on a Mismatched Vendor Accept Type").
 related_schemas: []
 see_also:
   - path: /game-stream-processing/{event_id}/boxscore

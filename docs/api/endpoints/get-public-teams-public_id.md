@@ -63,7 +63,19 @@ Do NOT include `gc-token` or `gc-device-id` headers on this request.
 - The response `Vary` header is `Origin,Accept-Encoding` -- notably **not** `Accept`. That is server-side confirmation that `Accept` does not select the representation.
 - A same-headers **control** (two bare requests back-to-back) produced the same single differing leaf as the treatment -- `avatar_url`, which is re-signed per request by CloudFront. Excluding `avatar_url`, bare-vs-vendor diffs to zero differing leaves.
 
-Conclusion: this endpoint does not content-negotiate. The `version=0.1.0` pin is inert in both directions -- sending it cannot regress the response, and omitting it costs nothing. **Do not re-probe this.** (Contrast `GET /me/teams`, where a stale `Accept` version returns a false 403 -- see `.claude/rules/auth-module.md`. That trap does not apply here.)
+Conclusion: this endpoint does not content-negotiate **between the correct vendor type and no vendor type**. Across that pair the `version=0.1.0` pin is inert in both directions -- sending it cannot regress the response, and omitting it costs nothing. **Do not re-probe that pair.**
+
+**Bound on the inertness claim, added 2026-07-26 -- "inert" covers correct-vs-absent ONLY, and does NOT mean any `Accept` is safe.** The 2026-07-25 experiment compared the *correct* vendor type against a *bare* request; it never sent a *wrong* one. A live probe on 2026-07-26 sent `application/vnd.gc.com.public_game:list+json; version=0.0.0` (a wrong resource type) to this endpoint and got a hard **HTTP 415**. So the three states are distinct and must not be collapsed:
+
+| `Accept` sent | Result |
+|---------------|--------|
+| Correct vendor type (`public_team_profile`) | 200, byte-identical to bare |
+| Absent / generic (`application/json, text/plain, */*`) | 200, byte-identical to vendor |
+| **Wrong vendor resource type** | **415, no body** |
+
+The `Vary: Origin,Accept-Encoding` evidence above remains correct and is not in tension with this: `Vary` describes which headers select among *representations the server will serve*, and says nothing about which requests it will *refuse*. GC validates the type before it negotiates.
+
+(Contrast `GET /me/teams`, where a stale `Accept` *version* returns a false 403 -- see `.claude/rules/auth-module.md`. That trap does not apply here, but the 415 above does. See `../error-handling.md`, "415 on a Mismatched Vendor Accept Type".)
 
 ## Response
 

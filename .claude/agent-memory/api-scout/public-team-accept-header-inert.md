@@ -1,6 +1,6 @@
 ---
 name: public-team-accept-header-inert
-description: NEGATIVE observation — the vendor Accept header is INERT on GET /public/teams/{public_id} (identical bytes, content-type stays application/json, Vary omits Accept); includes the reusable bare-vs-bare control for A/B diffing endpoints with signed URLs
+description: NEGATIVE observation — the vendor Accept is INERT on GET /public/teams/{public_id} for CORRECT-vs-ABSENT only; a WRONG vendor type still 415s there (2026-07-26). Includes the reusable bare-vs-bare control for A/B diffing endpoints with signed URLs
 metadata:
   type: reference
 ---
@@ -22,9 +22,35 @@ Sending `Accept: application/vnd.gc.com.public_team_profile+json; version=0.1.0`
 - **`Vary: Origin,Accept-Encoding` — notably NOT `Accept`.** Independent server-side
   corroboration that `Accept` does not select the representation.
 
-Conclusion: this endpoint **ignores `Accept` entirely**; it is not content-negotiating. The
-`version=0.1.0` pin is therefore inert in both directions — adopting it cannot regress us,
+Conclusion: this endpoint does not content-negotiate **across the pair that was tested**. The
+`version=0.1.0` pin is inert in both directions for that pair — adopting it cannot regress us,
 and omitting it costs nothing.
+
+## ⚠️ BOUND ON THE ABOVE (2026-07-26) — "inert" ≠ "any Accept is safe"
+
+The 2026-07-25 experiment compared the **correct** vendor type against a **bare** request. It
+never sent a **wrong** one. On 2026-07-26 a wrong resource type
+(`public_game:list+json`) sent to this same endpoint returned a hard **HTTP 415**.
+
+| `Accept` sent | Result |
+|---|---|
+| correct vendor type | 200, byte-identical to bare |
+| absent / browser-generic | 200, byte-identical to vendor |
+| **wrong vendor resource type** | **415, no body** |
+
+So the original sentence "**ignores `Accept` entirely**" was WRONG — struck above. GC validates
+the resource type *before* it negotiates, which is why `Vary` omitting `Accept` is still
+accurate and not in tension: `Vary` describes which headers pick among representations the
+server WILL serve, not which requests it REFUSES.
+
+The general rule (verified on two public endpoints, see [[accept-header-strictness]]): **a
+wrong vendor type 415s; a generic or absent one is served.** The "do not re-probe" instruction
+stands for the correct-vs-absent pair only.
+
+**Method lesson worth more than the fact:** a negative result carries an implicit scope, and
+the closing generalization is where it gets lost. "Inert" was measured over a 2-cell space and
+written as though it covered the whole space. When recording a negative observation, state the
+cells actually tested.
 
 ## Correction to a common misstatement
 
@@ -64,7 +90,8 @@ argument.
 this negative observation in its Headers section, including the `Vary` corroboration and an
 explicit "do not re-probe." It also contrasts it with the `GET /me/teams` **false-403** trap
 (a stale `Accept` version there returns 403 despite valid credentials, per
-`.claude/rules/auth-module.md`) so the two are not conflated: `Accept` is load-bearing on some
-GC endpoints and wholly inert on this one.
+`.claude/rules/auth-module.md`) so the two are not conflated. The doc was corrected on
+2026-07-26 to carry the 415 bound above; it no longer says `Accept` is wholly inert here.
 
-Related: [[public-team-age-group-level-field]], [[public-team-profile-season-shape]].
+Related: [[accept-header-strictness]], [[public-team-age-group-level-field]],
+[[public-team-profile-season-shape]].

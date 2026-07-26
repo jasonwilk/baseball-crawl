@@ -20,6 +20,21 @@ application/vnd.gc.com.event_box_score+json; version=0.0.0
 
 List resources use the pattern `{type}:list+json`. Singleton resources use `{type}+json`.
 
+## A Wrong Vendor Type Gets 415 (a generic one does not)
+
+_Verified live 2026-07-26 on `GET /public/teams/{public_id}/games` and `GET /public/teams/{public_id}` -- both public, no-auth. Full evidence table in `error-handling.md`._
+
+An `Accept` naming the **wrong resource type** is rejected with a hard **HTTP 415**. There is no fallback to a default representation and no silent ignoring of the header.
+
+A **generic** `Accept` (`application/json, text/plain, */*`) returns a normal **200** with the full body. So the 415 fires on a *mismatch*, not on the absence of a vendor type.
+
+Two consequences:
+
+- **A 415 means "check your Accept header."** It looks exactly like a removed or gated endpoint, so it is easy to misdiagnose. The resource type is often not guessable from the path -- the games endpoint wants `public_team_schedule_event`, not the `public_game` a reader would guess.
+- **Pinning a vendor type is more brittle than not pinning one.** A pin that goes stale hard-fails; a generic header cannot. Pins do buy server-side version determinism, so this is a trade rather than a case for dropping them -- but each pin is a maintenance obligation, and a *wrong* pin is worse than *no* pin.
+
+Note that a stale **version** on the *right* type behaves differently -- it returns **403**, not 415 (the false-403 trap; see `error-handling.md` and `.claude/rules/auth-module.md`). Both are Accept problems wearing different status codes.
+
 ## Exceptions to the Vendor Type Convention
 
 Two endpoints do NOT use vendor-typed Accept headers:
@@ -59,6 +74,8 @@ Note: The Content-Type and Accept resource names can differ on the same endpoint
 ## Response Content-Type
 
 All API responses return `Content-Type: application/json` regardless of the Accept header sent. The vendor-typed Accept header is used for API routing/versioning on the server side, not for altering response format.
+
+This applies to requests GC **accepts**. It does not mean the Accept header is optional or inert: a *wrong* vendor resource type is rejected outright with 415, and a stale *version* can return 403. See "A Wrong Vendor Type Gets 415" above.
 
 One exception: `GET /organizations/{org_id}/pitch-count-report` returns **CSV** text, not JSON. This is the only non-JSON endpoint in the spec.
 
