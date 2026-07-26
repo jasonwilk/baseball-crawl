@@ -20,7 +20,7 @@ Whenever a review (the Closure CR Integration Review, a per-story CR of a contex
 
 ## The Discipline
 
-A doc/context-layer verification is complete only when all three of the following are done:
+A verification of the kind named above -- that a CONCEPT was fully added, removed, or reconciled -- is complete only when all three of the following are done. A localized edit that claims nothing about a concept's reach (a typo fix, a broken link, one reworded sentence) is not one of these and owes no sweep.
 
 1. **Token grep** -- grep the obvious keyword(s) for the concept across the affected tree. This is the starting point, never the whole check.
 2. **Synonym expansion** -- before concluding, enumerate the ways the concept is expressed WITHOUT the grepped token (paraphrases, hyphen-free forms, domain synonyms, pronoun/abbreviation references) and grep those too. Ask: "if someone described this idea without using my search term, what words would they use?" Grep each.

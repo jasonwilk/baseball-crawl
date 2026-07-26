@@ -43,7 +43,7 @@ The two causes demand OPPOSITE actions, which is what makes the misfile expensiv
 When a target known or expected to be non-empty returns empty, truncated, or garbled output:
 
 1. **Treat it as a FAILURE** -- do not act on it or report it as the result. If what you have is a *disagreement* rather than an empty or truncated result, run the differential above first: "the tool failed" is one of two candidate causes, not the default.
-2. **Cross-check via an independent channel** -- e.g., `wc -l` / `wc -c` / `sed -n` / `cat -n`, or a second tool (Read vs. Glob).
+2. **Cross-check via an independent channel** -- a different tool, or a different command against the same target.
 3. **Retry** to obtain a clean result.
 4. **Escalate rather than assert** if a clean result still cannot be obtained.
 5. **Read persisted review/tool findings to completion BEFORE characterizing, summarizing, or triaging them.** A preview, a `head`/`tail`, or a truncated view is not the content; a large output's first screen is not its findings. Never characterize findings, ask to triage them, or co-batch a triage decision with the command that produced them until you have read the full persisted output in your own context. (The E-230 fabrication failure was exactly this -- findings characterized before they were read; the ad-hoc main-session triage context is the thin spot.)
