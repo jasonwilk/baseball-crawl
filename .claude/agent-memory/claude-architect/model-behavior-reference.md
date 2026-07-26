@@ -161,6 +161,61 @@ Re-tune trigger is VENDOR RELEASES + harness updates + guide edits — NOT repo
 diffs [Opus G1]. Per-agent effort/thinking/tool-surface audit is a separate
 standing obligation; see `agent-design.md` for the current per-agent table.
 
+## Method rules from the context-engineering blog (the FIFTH vendor source)
+
+[VENDOR blog, "The new rules of context engineering for Claude 5 generation
+models", claude.com, fetched 2026-07-26.] This source governed the layer pass's
+METHOD and was missing from this reference entirely until D5 — seven distinct
+term probes against this file returned zero each. The distillation in
+`handoff-layer-pass.md` ("Vendor method addendum") nominally bound only that
+pass's deliverable 3; these rules in fact govern every placement decision, which
+is why they belong here.
+
+- **Over-constraint degrades 5-generation models.** Anthropic *"removed over 80%
+  of Claude Code's system prompt for models like Claude Opus 5 and Claude Fable 5
+  with no measurable loss."* The named cause is CONFLICTING guidance — their
+  worked example is a system prompt carrying "leave documentation as appropriate"
+  alongside "DO NOT add comments" in one request. So a prune hunts a second class
+  beyond self-recheck scaffolding: **instruction PAIRS in tension.**
+- **Progressive disclosure is the vendor's own name for the who-loads-this test.**
+  For lengthy instructions the blog's concrete prescription is to *"create a
+  verification skill and reference it from your CLAUDE.md"* and rely on deferred
+  loading. Note what that means for a dosing pass: **the destination for a dosed
+  procedure is a SKILL, not the bin.** [INFERENCE — the blog prescribes a skill
+  for a lengthy instruction in general; it never addresses this repo's rule files
+  and never mentions deletion, so the not-the-bin half is ours. **Its falsifier
+  is concrete and 3b will hit it:** a skill loads on a user intent phrase, a rule
+  loads on a path. A procedure that must fire when an agent TOUCHES something —
+  `testing.md`'s mutation protocol is `paths: tests/**, src/**` — has no
+  intent phrase to hang on, so it cannot be rehomed to a skill and must either
+  stay put or be genuinely cut with a citation. Where this inference holds is
+  guidance a HUMAN or agent invokes deliberately; where it fails is guidance the
+  path glob has to deliver.]
+- **Repetition collapses to single placement.** Deliberate defense-in-depth
+  duplication is an old-generation pattern; keep it only where two AUDIENCES
+  need it, not where one reader needs two reminders. [POLICY — the second clause
+  is OURS, not the blog's, which says nothing about when duplication may stay:
+  it is the standard `workflow-discipline.md`'s deliberate gate duplication
+  meets, and the one D5's six per-agent Model Adapter sections were justified
+  against, an agent loading only its own definition.]
+- **Examples constrain.** *"Giving examples actually constrains them to a certain
+  exploration space."* Prefer expressive interfaces — what parameters does Claude
+  have, and can they be more expressive — over exhaustive worked examples.
+- **CLAUDE.md shape.** Keep it *"lightweight and briefly describe what your repo
+  is for, but spend most of the tokens on gotchas inside of the codebase."* Do
+  not state what Claude can discover from the file structure. (Already applied:
+  the 2026-07-26 restructure, and `.claude/rules/context-layer-guard.md`.)
+
+**⚠ The tension this source creates with the taxonomy above, stated rather than
+reconciled away.** Read alone, this blog licenses cutting much harder than the
+verification taxonomy permits — its 80%-removal result carries no carve-out for
+relay checks or reviewer gates. **Our type-2/type-3 keep is repo-local evidence,
+not vendor doctrine**: it rests on the 9 relay defects in E-276 planning, E-270's
+7, and the navigator's 3, which say this fleet does not self-verify INHERITED
+claims. Anyone citing the blog to cut relay discipline is citing a source that
+never addressed the question. Cite the local evidence when you keep something,
+and the blog when you cut something; do not let either speak for the other.
+
 ## Application checklist (CA)
 
 1. Per-agent: coaching matches pinned model per this reference. Calibration
@@ -199,9 +254,101 @@ standing obligation; see `agent-design.md` for the current per-agent table.
    provenance already by convention; add "effective model" to new entries
    recording behavioral lessons; the existing 90-day review + prune passes are
    the governance — no new schema.
-9. Dated fetch record: all four vendor pages fetched 2026-07-26. Re-fetch on
-   model release, harness major update, or when a claim tagged [VENDOR] is
-   load-bearing for a decision.
+9. Dated fetch record: **five vendor sources, not four** — the four per-model
+   prompting pages plus the context-engineering blog (see the method-rules
+   section above; it was absent from this record until D5 despite having
+   governed the layer pass's method). All fetched 2026-07-26, and the Opus 5,
+   Sonnet 5 and Fable 5 pages re-fetched later the same day during D5 (the
+   verbatim snippets below came from that second fetch). Re-fetch on model
+   release, harness major update, or when a claim tagged [VENDOR] is
+   load-bearing for a decision. **Use these URLs — the obvious guesses 404.**
+   The hub is `platform.claude.com/docs/en/build-with-claude/prompt-engineering/`
+   and the per-model pages hang off it as `prompting-claude-opus-5`,
+   `prompting-claude-sonnet-5`, `prompting-claude-fable-5`,
+   `prompting-claude-opus-4-8`, with `claude-prompting-best-practices` carrying
+   the all-model techniques. A `docs.claude.com` URL 302s to a *different host*,
+   which WebFetch reports as a redirect rather than following.
+
+## Verbatim vendor snippets (so a placement never needs a re-fetch)
+
+Transcribed 2026-07-26 from the per-model pages named in checklist item 9. These
+are the exact strings; quote them as quotes, and if you paraphrase, say you did.
+
+**Opus 5 — scope constraint.** The one installed in this repo's Opus 5 agent
+definitions:
+
+> Deliver what was asked, at the scope intended. Make routine judgment calls
+> yourself, and check in only when different readings of the request would lead
+> to materially different work. If the request seems mistaken or a better
+> approach exists, say so in a sentence and continue with the task as asked
+> rather than quietly narrowing, widening, or transforming it. Finish the whole
+> task, and stop short of actions that are clearly beyond what was asked.
+
+**Opus 5 — the type-1 removal directive, in the vendor's own words** (worth
+having exact, because its boundary is the thing people get wrong): *"If your
+prompt contains explicit verification instructions ('include a final
+verification step for any non-trivial task,' 'use a subagent to verify'), remove
+them: instructions like these cause over-verification on Claude Opus 5, and
+removing them reduces wasted tokens with no loss in quality. The same applies to
+legacy harness scaffolding that adds separate verification steps."* And under
+self-correction: *"Avoid instructing re-checks it already performs ('double-check
+your answer,' 're-verify before responding')."* **Note what the directive names:
+re-checks of the model's OWN work.** It says nothing about checking inherited or
+relayed claims, which is the taxonomy's type 2 and stays for every model.
+
+**Opus 5 — subagent cap** (applies to an orchestrator; no agent definition in
+this repo grants `Agent`, so this is currently unplaced):
+
+> Delegate to a subagent only for large tasks that are genuinely independent and
+> parallelizable, such as a wide multi-file investigation. Do not delegate work
+> you can finish yourself in a handful of tool calls, and do not use subagents to
+> verify or double-check your own work. If one subagent can complete the task,
+> use one rather than several, and keep spawn counts low.
+
+**Opus 5 — written deliverable length** (the PM/CA ratchet-pressure remedy that
+was [INFERENCE] in the draft is in fact vendor-stated): *"Match the length of
+written documents to what the task needs: cover the substance, but do not pad
+with filler sections, redundant summaries, or boilerplate."*
+
+**Opus 5 — review-bar literalism, exact:** *"If your review prompt says 'only
+report high-severity issues' or 'be conservative,' the model may follow that
+instruction literally and report less; ask it to report everything and filter in
+a separate pass instead."* The Sonnet 5 page says the same thing at length and
+supplies a coverage-stage prompt; both confirm the repo's existing two-tier
+code-reviewer floor rather than asking for a change.
+
+**Fable 5 — ground progress claims** (the clause `agent-routing.md` requires in
+every Fable spawn prompt; vendor-tested, *"nearly eliminated fabricated status
+reports"*):
+
+> Before reporting progress, audit each claim against a tool result from this
+> session. Only report work you can point to evidence for; if something is not
+> yet verified, say so explicitly. Report outcomes faithfully: if tests fail, say
+> so with the output; if a step was skipped, say that; when something is done and
+> verified, state it plainly without hedging.
+
+**Fable 5 — the reason-not-only-the-request shape:** *"I'm working on [the larger
+task] for [who it's for]. They need [what the output enables]. With that in mind:
+[request]."*
+
+## Two corrections from the D5 re-fetch
+
+1. **Sonnet 5's effort default is `high`, not something lower.** *"On Claude
+   Sonnet 5, effort defaults to `high`, the same as on Claude Sonnet 4.6."* This
+   closes the standing "three Sonnet agents have no effort field" item as a
+   non-defect — see `agent-design.md`'s register for the full disposition. The
+   under-thinking risk the same page describes is scoped to `low`: *"on
+   moderately complex tasks running at `low` effort there is some risk of
+   under-thinking."*
+2. **Opus 5's 1M context is the default AND the maximum** — *"Claude Opus 5 has a
+   1M token context window as both the default and the maximum"* — which raises a
+   question this reference cannot answer: whether the `opus[1m]` alias still
+   differs from bare `opus` at all, or is a vestige of when 1M was opt-in. Five
+   agents pin `opus[1m]` and api-scout pins `opus`. **Do not "harmonize" them on
+   the strength of this quote.** The vendor sentence is about the API model; the
+   alias is a harness selector, and the operator's standing feedback is that a
+   partial model override strips 1M context. Resolving it needs a spawn-time
+   observation, not an inference from a docs page.
 
 ## Deliberately NOT adopted (with reasons, so the next reader doesn't re-open)
 

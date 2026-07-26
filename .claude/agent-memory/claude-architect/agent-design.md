@@ -1,7 +1,5 @@
 # Agent Design -- Detailed Reference
 
-Last updated: 2026-03-02
-
 ## Subagent Architecture
 
 ### Configuration Format
@@ -11,7 +9,8 @@ Subagents are markdown files with YAML frontmatter in `.claude/agents/`:
 name: agent-name
 description: When Claude should delegate to this agent
 tools: Read, Grep, Glob, Bash
-model: sonnet | opus | haiku | inherit
+model: sonnet | opus | opus[1m] | fable | haiku | inherit   # aliases in use here: see the register below
+effort: low | medium | high | xhigh | max                    # omit to take the model's default
 permissionMode: default | acceptEdits | dontAsk | bypassPermissions | plan
 maxTurns: 50
 skills:
@@ -63,6 +62,65 @@ System prompt in markdown body...
 - Task produces verbose output (test results, exploration)
 - Want to enforce specific tool restrictions
 - Work is self-contained and can return a summary
+
+## Execution-Profile Register (per agent)
+
+Audited 2026-07-26 (D5 of the consolidated layer pass). Alias-to-model resolutions
+come from the dated register in `model-behavior-reference.md`; re-verify there
+rather than trusting this table's second column, which is a copy.
+
+| Agent | Alias | Resolves to | Effort | Adapter | Tool-surface note |
+|---|---|---|---|---|---|
+| api-scout | `opus` | claude-opus-5 | `medium` | Opus 5 | + Bash, WebFetch |
+| claude-architect | `opus[1m]` | claude-opus-5 | `high` | Opus 5 | + Bash, WebFetch |
+| code-reviewer | `opus[1m]` | claude-opus-5 | `high` | Opus 5 | read-only: no Write/Edit, has Bash |
+| data-engineer | `opus[1m]` | claude-opus-5 | `high` | Opus 5 | + Bash, WebFetch |
+| product-manager | `opus[1m]` | claude-opus-5 | `high` | Opus 5 | **no Bash, no WebFetch** (deliberate) |
+| software-engineer | `opus[1m]` | claude-opus-5 | `high` | Opus 5 | + Bash, WebFetch |
+| baseball-coach | `sonnet` | claude-sonnet-5 | *unset* | none | no Bash, no WebFetch |
+| docs-writer | `sonnet` | claude-sonnet-5 | *unset* | none | no Bash, no WebFetch |
+| ux-designer | `sonnet` | claude-sonnet-5 | *unset* | none | no Bash, no WebFetch |
+
+No agent pins `fable` or any 4.8 alias; the Fable path is an ad-hoc spawn-time
+override (`.claude/rules/agent-routing.md`), so its coaching lives in the spawn
+prompt, not in a definition. No definition sets a `thinking` field, and thinking
+is ON by default on both Opus 5 and Sonnet 5 [VENDOR, 2026-07-26] — so the
+absence is the intended state, not an omission. No definition grants `Agent`
+(see the spawner-only note below).
+
+**Three audit conclusions that are "leave it alone", recorded so the next pass
+does not re-open them:**
+
+1. **The three unset Sonnet efforts are correct as unset.** This was carried
+   forward as an open item from the Opus review (G2) on the assumption that an
+   unset field risked low-effort under-thinking. It does not: *"On Claude Sonnet
+   5, effort defaults to `high`, the same as on Claude Sonnet 4.6"* [VENDOR
+   "Prompting Claude Sonnet 5", fetched 2026-07-26]. The under-thinking risk the
+   same page describes is scoped to `low`, which is not where these agents run.
+   Writing `effort: high` would add three lines that change no behavior. If cost
+   ever needs trimming on the consultation agents, `medium` is the lever.
+2. **api-scout at `medium` on Opus 5 is correct.** *"use `low` and `medium`
+   liberally as your primary control for token cost and response time wherever
+   quality holds"* [VENDOR "Prompting Claude Opus 5"]. api-scout's work is
+   documentation-shaped rather than reasoning-dense. The vendor also says to
+   re-run an effort sweep on your own evals after carrying defaults over from a
+   prior model; we have no evals, so the standing posture is leave-and-observe,
+   not a speculative retune.
+3. **The delegation cap does not apply to any agent here.** The Opus 5 page's
+   subagent-damping snippet governs an orchestrator, and no definition grants
+   `Agent`. Adding it would be coaching against a behavior the tool surface
+   already makes impossible — the over-constraint the same vendor guidance warns
+   about. Revisit only if the `Agent` grant changes.
+
+**One finding that is NOT fixed here, because fixing it is outside D5's scope
+(a rule edit, not an execution profile) — route it deliberately:** the READY
+Freshness Gate in `.claude/rules/workflow-discipline.md` assigns PM a fallback
+staleness measurement of `git log -1 --format=%cs -- epics/E-NNN-slug/`, and
+**PM has no Bash tool**, by deliberate design (its own anti-pattern 1 says so).
+So the gate's primary path (read the READY date out of the epic file) is
+runnable by PM and its fallback path is not. The fix is one sentence in the rule
+— when the epic file carries no READY date, PM asks the main session for the
+commit date rather than estimating — not a tool grant.
 
 ## Agent Teams (Experimental)
 
