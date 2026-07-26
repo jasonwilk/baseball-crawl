@@ -34,7 +34,7 @@ Usage::
     conn = sqlite3.connect(str(resolve_db_path()))
     conn.execute("PRAGMA foreign_keys=ON;")
     crawler = ScoutingCrawler(client, conn)
-    result = crawler.scout_team("8O8bTolVfb9A")
+    result = crawler.scout_team("xXxXxXxXxXxX")
     print(result)
 """
 
