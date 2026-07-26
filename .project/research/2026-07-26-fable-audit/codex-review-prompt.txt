@@ -1,0 +1,19 @@
+You are reviewing a draft reference document that will govern how a multi-model Claude agent fleet (Claude Opus 5, Claude Fable 5, Claude Sonnet 5, legacy Claude Opus 4.8) is prompted and configured in a production repo. Read the draft at:
+
+/tmp/claude-1000/-workspaces-baseball-crawl/4aca143d-2d11-40ae-ae02-d8924803b063/scratchpad/model-behavior-reference-draft.md
+
+Its factual claims about model behavior cite Anthropic's four vendor prompting guides:
+- https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5
+- https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5
+- https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5
+- https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8
+Fetch them if you have network access; if not, mark vendor-fidelity items UNVERIFIABLE rather than assuming.
+
+Review dimensions, in priority order:
+1. SOUNDNESS of the core architecture rule ("facts in the shared layer, behavior in per-agent definitions, model+effort pinned in frontmatter; the main session is tuned by the harness, not the repo") for a fleet where a shared 450KB instruction layer is loaded by all models. Attack it: failure modes, edge cases (e.g., behavioral guidance that IS safety-critical for all models — where does it go?), maintenance hazards.
+2. INTERNAL CONSISTENCY of the draft (does any per-model delta contradict another, or contradict the draft's own application checklist?).
+3. VENDOR FIDELITY: any claim that misquotes, overclaims, or over-generalizes the guides.
+4. OMISSIONS AND RISKS from your outside perspective on multi-model agent systems: what would you add, what will bite in 6 months, what does the draft assume that a different-vendor perspective says is fragile?
+5. The "shared traps" section: is review-bar literalism handled correctly? Anything you know about instruction-following literalism across frontier models that changes the advice?
+
+Output: numbered findings, each with severity (BLOCKER/MAJOR/MINOR/NOTE), the draft line or claim at issue, and a concrete fix. End with a one-paragraph verdict: adopt as-is / adopt with edits / rethink.
