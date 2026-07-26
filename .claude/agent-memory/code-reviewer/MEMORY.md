@@ -15,6 +15,10 @@
 ## Closure-Pass Practice
 - [Re-diffstat at Step 1b/1d and compare to what you reviewed](closure_diff_growth_after_integration_review.md) — E-272: the closure diff grew 15→37 files AFTER my Step 1c APPROVED, `src/` included. Remediation + PM bookkeeping land after the last review BY DESIGN. Never let an approval stretch; state src/-reviewed vs context-layer-unreviewed precisely. Also check `git status` for `??`/`MM` — "everything is staged" was wrong twice.
 
+## Spec-Audit Frame Patterns
+- [Check REACHABILITY before adjudicating DIRECTION](check_reachability_before_adjudicating_direction.md) — a dispute hands you a framed question, so the cheapest decisive check is the one nobody runs (E-276: 4 agents, 3 rounds on the direction of an asymmetry that fires nowhere; one grep settled it). Also: give reasons not verdicts, record which axes a run held CONSTANT, and prefer a column that SHOWS a property over an inference that implies it.
+- [A churn inventory drawn over CONSUMER test files omits the primitive's own](inventory_frame_omits_the_primitives_own_tests.md) — recompute from the changed SYMBOL; if the headline test count equals the named files EXACTLY, that equality is the frame and what it excludes holds the unsatisfiable AC (E-276: 34+20+18=72, primitive's 19 tests invisible, one asserts the exact input the fix inverts). Item 5 carries my OWN falsified rule: shape-count vs combination-count is a unit error, and I verified the counterexample in the same session I generalised past it.
+
 ## Invariant Audit Patterns
 - [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).
 - [Spec audit: distrust "sole/canonical producer" claims](spec_audit_sibling_producer.md) — grep src/ for literal output forms + sibling `_derive_*`/`_ensure_*` helpers before trusting an epic's enumerated producer set (E-241: crawler `_derive_season_id` falsified "no code path produces YYYY-suffix" + broke migration durability).

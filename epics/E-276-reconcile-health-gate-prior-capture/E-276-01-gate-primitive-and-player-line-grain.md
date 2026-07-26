@@ -1,0 +1,150 @@
+# E-276-01: Shared Gate Primitive + Player-Line Grain
+
+## Epic
+[E-276: Reconcile-at-Load Health Gate — Capture the Prior Set Before the Run's Own Writes](epic.md)
+
+## Status
+`TODO`
+
+## Description
+
+After this story is complete, the reconcile-at-load health gate takes its prior id-set as a required input captured before the run's own writes, instead of reading it from the database after those writes. The shared authority check gains a vacuous-permit rule for an empty protected population. The player-line grain is the first consumer, and a full GameChanger `player_id` churn — the input that currently hard-deletes nine live batting lines — refuses instead.
+
+## Context
+
+The health gate is meant to ask "does the fresh payload still vouch for most of what we already had?" It cannot, because the prior set is read downstream of the upsert and therefore contains this run's own rows. Every row written this run lands on both sides of the floor ratio and relaxes it by half a row.
+
+This story delivers the shared primitive **and** its first consumer together. The primitive alone would be a no-op whose tests could only pin arithmetic, and it would leave the tree half-migrated with one grain on the new gate population and two on the old — see the Stories sequencing note in the epic.
+
+The player-line grain goes first because it is the grain the audit executed, the only grain with no absolute cap beneath the gate, and the one that demonstrated an uncapped mass delete.
+
+## Acceptance Criteria
+
+- [ ] **AC-1**: Given a payload whose player ids are all brand-new relative to the stored lines (9 stored, 9 fresh, zero overlap), when a re-scout runs through the real `ScoutingLoader.load_team`, then **zero** prior lines are hard-deleted, a refusal is recorded, and `LoadResult.errors == 0` — per Technical Notes TN-12 an absence assertion needs proof the mechanism completed cleanly.
+
+- [ ] **AC-2 (which-mechanism-refused — binding, per TN-11)**: The refusal assertion MUST identify which mechanism refused, asserted on a **structural record carried by the result dataclass rather than on WARN prose** — a test that greps log text passes when someone rewords the message. Assert `refused_by == "gate"`, `gate_permitted is False`, and that **the gate's prior count equals the pre-run population (9), not the post-upsert population (18)**. That count is the numeric tell; a surviving-row count alone can pass post-fix for a wrong reason.
+
+      **⚠️ ON THIS GRAIN THE RECORD IS NOT SCALAR, and a scalar assertion cannot satisfy this AC.** `retire_absent_player_lines` evaluates the gate inside a **double loop** — `for block in blocks:` × `for label, table in _PLAYER_LINE_TABLES:` — so there are **up to four independent gate evaluations per call** (2 blocks × 2 tables), each with its own prior count, comparable count and verdict. Per epic TN-11, **the gate-outcome record keys exactly as `.refusals` keys on that grain**, i.e. by `(table, team_id)` here. **A scalar `gate_prior_count` would capture only the last iteration**, and with both blocks present the "9, not 18" assertion would be unambiguous only by accident. **Assert against the keyed entry for the block and table under test.**
+
+      **And `refused_by` does not carry the whole answer even here.** It is **UNIT-level** — "did this grain refuse as a unit, and why?" Per-id protections live in `.refusals`. **A test asserting "0 retired" must check BOTH.**
+
+      This grain is the one where the 9-vs-9 shape genuinely discriminates, because it has no absolute cap beneath the gate. Do not carry that sizing to the roster grain — see TN-11 and story 03.
+
+      **The record is not reachable by default AND does not yet exist — read epic TN-17 before writing this test.** Two separate problems: the player-line wrapper returns only an int error increment and discards the result dataclass (reachability), **and no gate-outcome field exists on `PlayerLineRetireResult` at all** — its refusals are prose strings, the surface this AC forbids. **Adding the fields is a production change required under either sanctioned means**; the spy reaches the object but cannot conjure fields that are not on it.
+
+      **⚠️ If a spy is the means, the test MUST assert positively that the spy captured a result object.** Row survival alone is satisfied by a spy that never fired, so that positive assertion is the observable check that the assertion target was genuinely reached — load-bearing, not decoration. **The patch site differs by grain, this grain's differs from the other two, and getting it wrong fails silently. Epic TN-17's per-grain table carries the target and the reason it is load-bearing; read it before choosing one.**
+
+- [ ] **AC-3**: Given the zero-overlap boundary sweep encoded as parametrized cases (stale 9 / fresh 8, 9/9, 9/10), when each runs, then **every** case refuses. Pre-fix these produce refuse / delete-9 / delete-9 respectively, so the parametrization is the discriminating evidence.
+
+- [ ] **AC-4**: Given overlap-bearing cases that discriminate the honest gate from the polluted one per TN-12 — prior 10 with 5 survivors + 6 new ids (honest verdict: permit) and prior 10 with 4 survivors + 6 new ids (honest verdict: refuse) — when each runs, then the outcomes match the honest verdicts.
+
+      **The polluted arithmetic, corrected** [PM-VERIFIED 2026-07-25; an earlier version said "the polluted numerator is 10 in both", which is wrong]: the post-upsert prior is 16 (10 old + 6 new) so the floor is 8, and the polluted numerators are **11 and 10** respectively — survivors plus the six new ids. Both clear 8, so **the polluted gate permits both and the cases still discriminate exactly as intended**; only the stated number was wrong. Recorded rather than silently fixed because an implementer checking the arithmetic against a wrong stated numerator would reasonably conclude the fixture was mis-sized and change it.
+
+- [ ] **AC-5**: Given a first-ever load of a game, when the reconcile runs, then **it retires nothing and emits no refusal, because every live prior id is present in `fresh`.**
+
+      **⚠️ An earlier version of this AC said the pass "short-circuits without computing a gate (empty prior)". That was superseded residue and implementing it literally re-opens the TN-3 deadlock.** Under the settled design the candidate population is the **live** prior read, which on a first-ever load is **not** empty — those rows were written moments earlier. So the pass does not short-circuit, and a gate *is* computed (the corrected one, permitted vacuously). The empty-prior premise is true only of the **snapshot**. An implementer satisfying the old wording would gate the early return on the snapshot; on the roster grain that makes run 1 retire nothing, the 3 backfill-churn rows survive into run 2's snapshot, and the grain refuses permanently — exactly the deadlock TN-1(c) exists to prevent.
+
+      **Pair the absence with positive evidence**, per the same rule AC-1 applies: assert the mechanism was entered and returned empty — an empty result object (reached per TN-17) plus `LoadResult.errors == 0`. A bare "nothing was retired" is satisfied identically by the reconcile never running.
+
+- [ ] **AC-6**: The shared authority check implements the vacuous-permit rule of Technical Notes TN-1(c) — an empty protected population yields the fetch-ok value rather than a refusal — and **this grain's gate is the corrected gate ALONE**, computing the floor ratio over the **pre-upsert snapshot** population, per TN-1(b). The legacy live-population gate is **replaced, not conjoined**. Both the vacuous-permit rule and the corrected gate are covered by direct tests at the primitive level.
+
+      **⚠️ The CONJUNCTION is superseded and must not be implemented in any form** — not as a shape, not as the basis of a neutrality proof, and not as a value reaching `classify_absences`. An earlier version of this AC required it. There is **one gate per grain**.
+
+      **⚠️ Vacuous-permit MUST still be OPT-IN. An unconditional change to the shared check FAILS this AC**, because `crawl_is_authoritative` is shared with the roster grain's fetch-ok use and with the existing pinned assertion in `tests/test_reconcile_at_load.py`, which inverts by design (AC-12). Expose it as a keyword or a separate corrected-gate wrapper — the choice is the implementer's under TN-17's pattern.
+
+      **Calibration, so this is not over-read** (per TN-13): applying it unconditionally would not widen the gate *in production*, because all three helpers early-return on an empty live prior, so the gate is never reached with `prior_count == 0`. **The unit test still fails**, which is why the mechanism is specified. **The earlier form justified the conditionality by keeping a legacy conjunct at today's semantics; there is no legacy conjunct, and the calibration now stands on the early-return alone.**
+
+- [ ] **AC-7**: The prior-set input is a **required keyword parameter** with no default, per TN-1(a) and the evidence-parameter rule in `.claude/rules/python-style.md`. **A TEST demonstrates that the parameter cannot be omitted** — calling the helper without it raises `TypeError`, in the manner of the existing `test_floor_is_not_overridable_by_callers`, which pins the same class of contract with `pytest.raises(TypeError, match=...)`.
+
+      **"or a review note" is REMOVED from this AC.** A review note is not an observable verification target: it certifies that someone looked, not that the property holds, and it evaporates the moment the signature changes. **The property this AC protects is precisely the one a future edit restores by accident** — a default here silently reinstates the defect the whole epic exists to fix, which is why it needs a check that fails rather than a note that was true once.
+
+- [ ] **AC-8 (deletion-neutrality — player-line grain, STRUCTURAL given a named premise)**: **The fix never permits a DELETION that today's code refuses, on this grain.** This holds **by construction from the premise `W ⊆ fresh`** (epic TN-5's two-line proof: every row the run adds contributes 1 to the legacy numerator and 1 to its denominator, and `1 ≥ 0.5·1`) — **not** from a conjunction and **not** from a sweep. The result is scale-free. Assert the algebra at the primitive level; the ported sweeps are corroboration only.
+
+      **⛔ The blanket "on any grain and any input" form is STALE and must not be reinstated — it is FALSE on roster**, where `W ⊄ fresh` because the jersey backfill writes rows the fresh crawl never listed. That is a prediction of the same premise, not an exception to it.
+
+      **⚠️ SCOPE THE ASSERTION TO DELETIONS, NEVER TO PERMITS.** The two gates genuinely disagree in one region — at `P_pre = ∅` **and** `W = ∅`, the corrected gate permits vacuously while the legacy gate refuses on its `fresh_count > 0` check (**32 executed cases**). All 32 have an empty candidate set, so nothing is deleted either way. **A test phrased as "permits whenever today permits" would fail against a design that is correct.**
+
+- [ ] **AC-9a (precondition (c))**: Exactly one gate **value** reaches `classify_absences` — **the corrected gate's verdict**. Pin it with a test, not by inspection: this was the only one of SE's five attacks on the neutrality formulation that landed, so it is an implementation risk rather than a logic one. *(The object of this AC changed with the design — it previously named the conjunction. The requirement is unchanged: one value, not two, and no second gate composed at the call site.)*
+
+- [ ] **AC-9b (precondition (d) — the slip no other AC can catch)**: `classify_absences` receives the **live** prior set as its `prior_ids`. **This story's deliverable is the PRIMITIVE-LEVEL CONTRACT TEST, on the grain this story wires** — not a cross-grain assertion and not the executed two-run construction, which story 03 AC-8 owns (see epic TN-16, "Precondition-(d) OWNERSHIP"). An earlier version said "on all three grains", which claimed a deliverable this story's file list does not reach. The snapshot computes the corrected gate value ONLY and is **never** passed as the classification universe.
+
+      **Mechanism, stated because this is uncatchable downstream**: the classifier returns a classification covering exactly the ids it is handed, so that argument IS the candidate universe. The natural slip — *"the corrected gate uses the snapshot, so pass the snapshot to the classifier"* — reads as obviously correct while writing it, and makes the candidate set `snapshot − fresh`. Executed: run 1 then retires nothing where the correct form retires the 3 churn rows; run 2 those rows are pre-existing, trip the departure cap, and become **permanently** unretirable — the epic TN-3 deadlock re-entered through the classifier instead of the gate.
+
+      **Why AC-8 cannot catch it**: the slip only SHRINKS the candidate set, so it permits strictly fewer deletions and the neutrality absolute stays TRUE while the thing it guards breaks. Pin this with its own test, not by inspection.
+
+      **⚠️ Division of labour with story 03 AC-8, stated so the test is written ONCE.** Both stories previously claimed the precondition-(d) test outright. The split: **this story pins the CONTRACT at the primitive and player-line level** — that `classify_absences` is handed the live set, on the grain this story wires. **Story 03 ports the EXECUTED slip construction**, because the roster grain is the only one where the slip's consequence is demonstrable (run 1 retires nothing, run 2 the rows are pre-existing and trip the cap, permanently). Neither is redundant, but they are different tests and must not be written twice under two names.
+
+- [ ] **AC-10**: The pure classifier's contract is otherwise unchanged: it never receives the snapshot as its prior population (AC-9), and connection-in / no-commit / caller-owns-the-transaction still holds across the module. No `commit()` or `rollback()` is introduced.
+
+- [ ] **AC-11**: The prose sites assigned to this story in Technical Notes TN-9 are corrected in this same change — including `crawl_is_authoritative`'s docstring, which is **already false today, pre-fix**: it documents the fresh count as "size of the fresh payload" while all three callers have passed the overlap since E-267. The module docstring's invariant carries **both** the temporal clause and the necessary-but-not-sufficient note per TN-10.
+
+- [ ] **AC-12**: `python -m pytest tests/` reports 0 failed. The **72 tests in the three grain files** keep every assertion unchanged, with mechanical keyword-argument churn at the 9 direct call sites listed in TN-13.
+
+      **Exactly one existing assertion inverts, by design**: `tests/test_reconcile_at_load.py::test_empty_payload_refused_even_with_empty_prior` asserts `crawl_is_authoritative(fetch_ok=True, fresh_count=0, prior_count=0) is False` — the precise input AC-6's vacuous-permit rule inverts. Update it with its docstring and name, which currently say an empty payload is refused "independently of the (vacuous) ratio test." **An earlier version of this AC forbade any assertion change and was therefore unsatisfiable** — see TN-13 for how a count over three files came to stand for the whole reconcile suite.
+
+- [ ] **AC-13 (PRESERVE the operator-facing which-refuser discrimination)**: When this grain refuses, the WARN it emits MUST name the refusing mechanism and carry **that mechanism's own counts**, rendered from `refused_by` and the gate-outcome record.
+
+      **This is a preservation requirement, not a new capability** [PM-VERIFIED, clean read of `retire_absent_player_lines`]. The refusal path already emits a `fresh_comparable_count` / `prior_count` / `floor_ratio` triple. **The reason it needs naming is not the conjunction** — that is superseded — **it is that several mechanisms each produce "0 retired" on this path**, and an unlabelled triple cannot say which one is reporting.
+
+      Concretely: a refusal reading "not authoritative, comparable 18 of 18" tells an operator nothing about which population was measured, and **18-of-18 is exactly the shape the original defect produced while looking healthy** — the polluted prior counted this run's own writes on both sides. The corrected gate would have read 0-of-9 on the same input. A message carrying the refusing gate's own pair is the difference between a diagnosable log line and the one that hid this bug.
+
+      **This is not a duplicate of AC-2, and the two do not conflict.** AC-2 governs what a *test* asserts on and forbids the WARN as an assertion target. This governs the *message itself*, which in production is the operator's only signal. The gate-outcome record (epic TN-11) is the source and the WARN renders from it, never the reverse — so a test for this AC may assert on the message text, because here the message **is** the deliverable rather than a proxy for behaviour.
+
+## Technical Approach
+
+The fix shape, capture anchor, rejected alternatives, and contract impact are specified in the epic's Technical Notes — TN-1 (fix shape), TN-2 (capture anchors), TN-5 (deletion-neutrality), TN-6 (transaction verdict), TN-9 (prose sites), TN-10 (corrected invariant), TN-12 (test design), TN-13 (churn inventory), TN-14 (guardrails). Read those before starting; they carry rulings from three consultations and several rejected shapes that should not be re-derived.
+
+Two things specific to this story:
+
+The player-line capture anchor must sit after the canonical-id rebind and before any of this game's stat writes. The reason it cannot be hoisted to the start of the run is in TN-2: the canonical game id does not exist until mid-loop.
+
+The prose corrections belong in this same change rather than deferred to the context-layer story, per the same-commit rule in `.claude/rules/tool-output-integrity.md`.
+
+Reference material, read-only, both in ephemeral session scratchpads — reproduce what they demonstrate rather than depending on the paths surviving:
+- `/tmp/claude-1000/-workspaces-baseball-crawl/4aca143d-2d11-40ae-ae02-d8924803b063/scratchpad/recon_audit/` — the original audit harness. `t_playerline.py` carries an `upsert_fresh` toggle that isolates exactly this ordering, plus the boundary sweep already parametrized.
+- `/tmp/claude-1000/-workspaces-baseball-crawl/2728098f-4677-4ff3-a474-cda6aed92b4c/scratchpad/` — `divergence_plugin.py` and `divergence_game.py`, the read-only probes that recompute the gate both ways at every reconcile call and report divergences.
+
+## Implementer's Notes on the Preconditions
+
+Two attacks DE ran that SE had not, both verified, recorded here so they are not re-derived:
+
+- **The `fetch_ok` sources are unchanged and that still matters.** All three — the roster's non-empty-fresh signal, the player-line block's populated flag, and the game grain's schedule-fetch flag — are **identical to today**. Under one-gate-per-grain this is no longer about a "legacy half"; it is why `fetch_ok` transfers unmodified in TN-5's proof, which covers all three of `crawl_is_authoritative`'s conjuncts and not only the ratio.
+- **The exempt-filtered set is load-bearing at the roster grain, and the wrong choice LOOKS SAFE.** Today's roster prior set is already exempt-filtered. **It is now the candidate population rather than a gate input** — roster has no gate — so getting it wrong changes which rows are *retirable*, not merely which are counted. Precondition (e) is MOOT under the shipped design for exactly this reason, and carries its own wake-up triggers. Another true-looking construction; give it the same suspicion as the rest.
+
+## Dependencies
+- **Blocked by**: None
+- **Blocks**: E-276-02, E-276-03, E-276-04, E-276-05
+
+## Files to Create or Modify
+- `src/db/reconcile_at_load.py`
+- `src/gamechanger/loaders/game_loader.py`
+- `tests/test_reconcile_at_load.py` (the primitive's own test file — home for AC-6's vacuous-permit and corrected-gate tests; **holds the one assertion that inverts**, per AC-12)
+- `tests/test_player_line_reconcile.py` (this grain's tests, plus its **1** direct helper call site — `:934` — per TN-13)
+
+**NOT in this story's list, corrected 2026-07-25**: `tests/test_game_grain_reconcile.py` (6 sites) and `tests/test_roster_grain_reconcile.py` (2 sites) were previously listed here for "mechanical keyword-argument churn". TN-13's 9 sites is a **whole-epic** inventory, not this story's; the game and roster churn belongs to stories 02 and 03, in the same commit as the behaviour change it accompanies. Keeping them here overstated this story's already-largest footprint and put two files in two stories' lists with no ordering reason.
+
+## Agent Hint
+software-engineer
+
+## Handoff Context
+- **Produces for E-276-02 and E-276-03**: the shared prior-set parameter shape and the amended authority check including the vacuous-permit rule. Both consuming grains depend on that contract; a half-migrated gate is the state the sequencing exists to avoid.
+- **Produces for E-276-02 and E-276-03**: the **gate-outcome record**, defined once and carried by all three grain result dataclasses. Its field set is specified in epic **TN-11** ("THE RECORD ITSELF"). **The type's name is this story's to choose; the field set and the keying rule are not.** Three traps, all load-bearing:
+  1. **`gate_evaluated` is the fail-closed field.** A grain that never computed a gate — roster always, plus any early return — must be distinguishable from one that computed and permitted, and **must not read as a permit**. Do not represent it by nulling fields; a nulled field is indistinguishable from an unset one (`.claude/rules/python-style.md`).
+  2. **`refused_by` is UNIT-level and must not absorb per-id refusers**, which already live in `.refusals`. Folding them in loses *which* ids were held back.
+  3. **The record keys exactly as `.refusals` keys on that grain** — scalar on game and roster, **keyed by `(table, team_id)` on player-line**, which is this story's own grain. **A uniform shape is the defect, not the goal**: two reviewers each reached for one in a single pass, in opposite directions. This record is also what makes each grain's operator-facing refusal WARN nameable (AC-13 here, AC-10 in stories 02 and 03) — the WARN renders *from* the record, never the reverse.
+- **Produces for E-276-05**: the corrected invariant wording, which the CLAUDE.md replacement paragraph must carry per TN-10.
+
+## Definition of Done
+- [ ] All acceptance criteria pass
+- [ ] Tests written and passing. **The DISCRIMINATING tests — those in AC-1, AC-2 and AC-4 — demonstrably FAIL against pre-fix code and PASS after.** Scoped deliberately: several required tests here cannot fail pre-fix and it is not a defect that they cannot. AC-3's `9/8` case refuses under both regimes (it is a floor, and the parametrization is discriminating as a set, not case-by-case); AC-5 asserts behaviour identical to today; AC-6, AC-7, AC-8, AC-9a and AC-9b test code that does not exist pre-fix, so "fails before" is not even well-defined for them. **A blanket fail-before/pass-after line would make this story's own Definition of Done unsatisfiable**, and an implementer meeting it literally would have to manufacture discrimination where none is available — the failure this epic exists to stop.
+- [ ] Code follows project style (see CLAUDE.md)
+- [ ] No regressions in existing tests
+- [ ] `data/app.db` untouched; no network; synthetic DBs from `migrations/` only
+
+## Notes
+
+Two framings worth keeping in view while implementing, both from the consultations:
+
+The candidate/absent set is **already correct** today — this is a gate-population fix, not a delete-targeting fix. Widening it would be a mistake.
+
+The existing test suite cannot see this defect because every existing shrink test uses a fresh set that is a strict subset of prior. That is why the new tests must drive the real producer with genuinely new ids, and why a helper-level test would not have caught it.

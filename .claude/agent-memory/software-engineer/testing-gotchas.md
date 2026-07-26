@@ -57,6 +57,112 @@ the exact invocation you are using before relying on either answer.
    a temp file, `ls` and `git status` said clean; `find . -name '<pattern>'` found the leftover
    `.pyc`. Use `find` for cleanup verification.
 
+## Three more ways a grep reported zero — MARKUP moved, content did not (E-276, all verified)
+
+> **Read this first if you are about to write a measurement into a memory file.** *A handoff
+> artifact is at least read once, soon, by someone who might notice. A memory file is read cold,
+> months later, by someone with no thread to check it against.* So: **never write a number from a
+> live thread into memory — wait for it to settle, or record the mechanism instead of the
+> measurement.** Generalizes past greps to anything numeric arriving mid-revision. (This entry
+> shipped a retracted figure once; see the magnitude note below.)
+
+Same family as the three above, but the cause is different and none is a synonym problem, so
+`.claude/rules/doc-sweep.md`'s synonym-expansion step does **not** reach them. These are the *same
+words* with markdown interpolated. Three agents hit all three within an hour, and **each was one
+step from a fabricated finding** — #5 reads as "the preservation copy was deleted", #6 as "this
+section cites a docstring phrase that does not exist."
+
+4. **`**emphasis**` inside a quoted phrase breaks a literal-phrase grep.** Searching
+   `"adequate bound on pre-existing"` returned **2** hits repo-wide and missed
+   `epics/E-276-.../epic.md`, whose text is `an adequate **bound** on pre-existing loss`. An
+   emphasis-normalized sweep found **7**. The conclusion drawn from the 2-hit result ("no copy in
+   the epic") happened to be right — but *the grep was incapable of being right*, and it returned
+   the comfortable answer. Had a real assertive copy existed it would have been missed identically.
+
+5. **An anchored pattern silently narrows when blockquote nesting changes.** `^> A cap is not
+   sufficient` returned 1 match where it had returned 2 — exactly what a deleted section looks
+   like. Nothing was deleted: the text had moved from `> ` to `> > `. Read the section; do not
+   rule on the count.
+
+6. **A quoted phrase wrapped across a line break defeats a single-line pattern.** grep is
+   line-oriented; reflowed prose splits a phrase that is still fully present, and the search
+   returns **EMPTY** against text that is right there.
+
+7. **A finding-record carries EVERY token of the defect it records — and no normalization
+   separates them.** A sweep for a bad phrase hits the doc that *quotes it as a defect*, the
+   preservation appendix, and the retraction note, with strings **identical** to a live assertion.
+   Markup did not move; there is nothing to normalize. **Only reading the line distinguishes
+   "asserts X" from "quotes X while calling it false".** Hit this directly: an emphasis-normalized
+   sweep returned 7 `adequate bound` hits and **all 7 were quotations-as-defect or preservation
+   copies — zero assertive**. A tool cannot make this call; budget for reading every hit.
+
+> **⚠️ THIS LIST IS ITSELF A MISDIAGNOSIS HAZARD.** Having several narrowing cases catalogued makes
+> the *next* unexpected empty look like narrowing. It often is not. On 2026-07-25, three of four
+> "unexpected empty" events were narrowing and **the fourth was a MOVED FILE** — the content simply
+> did not exist yet when the grep ran, and the empty result was ACCURATE. The two etiologies produce
+> identical symptoms (`.claude/rules/tool-output-integrity.md`), and **a tally of narrowing cases is
+> not evidence about the next one.** The reflex below holds either way; the DIAGNOSIS needs the
+> `stat -c '%y %s'` differential, never the pattern-match.
+>
+> **And scope provenance PER OBSERVATION, not per message.** A write-up covering several calls
+> across several file states tends to carry ONE timestamp — usually the newest — so a stale read
+> ends up labelled with metadata from a later call that never covered it. **Quoting *a* timestamp
+> reads as rigour and is worth less than quoting *the* timestamp**: cite the state of the read that
+> produced each finding. Mirror-image obligation when you are the WRITER: do not edit a file while
+> someone is reviewing it — on 2026-07-25 a file moved under a reviewer four times mid-review, and
+> the fix on the reader's side (content-anchor, re-state the verified state) does not remove the
+> cost the writer created. **Answer such a dispute by quoting the LITERAL LINE, never a count** —
+> a count leaves both parties arguing about states.
+
+**The unifying reflex, and the part worth actually remembering (CR-2's wording, which is broader
+than mine was): an unexpected count is a CROSS-CHECK TRIGGER, never a finding — ANY count you did
+not predict, in EITHER direction.** One match where there were two looks exactly like a deletion;
+two hits where you expected none looks exactly like a live defect. **Both happened in one day.**
+Cost when ignored is not a missed hit but a *fabricated* one.
+
+**Which direction each one pushes — this is the operational half.** #5 and #6 return what a
+**deleted section** looks like, so they push toward a *false alarm*: alarming, investigated,
+self-correcting. #4 returns what a **clean tree** looks like, so it pushes toward a *false
+all-clear* — **and that is the direction that ships.** A sweep that under-reports and reports
+CLEAN is the dangerous member of the family; a sweep that screams gets checked. So when a
+literal-phrase sweep comes back clean over marked-up prose, **that** is the result to distrust,
+not the noisy one.
+
+**Do NOT attach a magnitude to this.** The asymmetry is a property of the FAILURE MODE, not a
+measurement: #4 *cannot* fail in the alarming direction, and that is what makes it dangerous —
+not how many hits it missed on any given run. A prior version of this entry cited "6 hits vs 15
+emphasis-tolerant" from a live sweep; **that comparison was retracted as confounded** — the two
+runs used different term lists, so it measured term-list expansion, not emphasis tolerance.
+Same-terms, the real delta was at most one and plausibly zero. The lesson never rested on the
+count and is stronger without it. Still mark such a CLEAN result superseded and uncitable, on the
+ground that **a method that cannot fail toward false-clean is not the same as one that happened
+not to.**
+
+> **Why that wrong number got here** — the surface is new and worth its own line. The figure
+> reached this file *before* its retraction did: inherited mid-flight from another agent still
+> revising it, and written straight into durable storage. **A memory file is the
+> highest-persistence, lowest-revisit artifact I have**, so a retired number does more damage here
+> than anywhere else — it outlives the thread that corrected it, and the next reader has no way to
+> know it was withdrawn. **Never write a number from a live thread into memory. Wait for it to
+> settle, or record the mechanism instead of the measurement.**
+
+**Mitigation for any literal-phrase sweep of this repo's prose** — strip emphasis and normalize
+quote depth before matching, then read the hits:
+
+```python
+flat = text.replace('**','').replace('__','')          # kills gotcha 4
+for line in flat.splitlines():
+    if pat.search(line.lstrip('> ')): ...              # kills gotcha 5
+```
+
+**Recovering an artifact that exists only in agent messages.** Related, and it is what made the
+above checkable: sent `SendMessage` payloads persist in
+`~/.claude/projects/<cwd-slug>/<session-id>/subagents/agent-<NAME>-<id>.jsonl`, as `tool_use`
+blocks with `name == "SendMessage"` and the text at `input.message`. Iterate the JSONL, filter on
+that, and you get **verbatim** text. Use this instead of reconstructing from memory whenever the
+question turns on exact wording — a reconstruction that happens to render the disputed word
+correctly is *worse* than one that gets it wrong, because it looks like evidence.
+
 ## `ruff` parses `# noqa` inside ordinary prose comments
 **Rule:** Never write the literal token `# noqa` inside an explanatory comment, even in prose or backticks. ruff's directive scanner does not care that you were *talking about* suppression.
 
