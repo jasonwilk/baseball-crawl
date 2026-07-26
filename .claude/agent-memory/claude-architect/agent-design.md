@@ -128,6 +128,6 @@ Without these tools, spawned teammates can do file work but cannot reply to assi
 Team formation is now implicit and teardown automatic (the explicit `TeamCreate`/`TeamDelete` tools were removed in Claude Code v2.1.178). The flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` gates the team-coordination surface: without it, both `SendMessage` and the shared `Task*` task list are unavailable and spawned agents are one-shot (consistent with TN-4 and the durable `CLAUDE.md` Agent Ecosystem note).
 
 Spawner-only tool (deliberately NOT granted to teammates):
-- `Agent` (Task tool) -- currently held only by the main session. This is our GRANT policy, not a platform capability limit; granting it to an agent would let that agent spawn (see the nesting correction above). Revisit deliberately, not by accident.
+- `Agent` (Task tool) -- currently held only by the main session. This is our GRANT policy, not a platform capability limit; granting it to an agent would let that agent spawn (see the nesting correction above). Revisit deliberately, not by accident. **Operator ruling 2026-07-26: keep the grants as they are and "decide later with data"** -- the P2/P3 handoff evals will count PM-escalation events, so the revisit happens against a number rather than an intuition.
 
 Any future new agent definition MUST include the 5 team-comms tools unless it is intentionally isolated from team dispatch.

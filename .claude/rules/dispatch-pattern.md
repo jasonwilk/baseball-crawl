@@ -14,6 +14,8 @@ paths:
 3. **Specialist agents (implementers)** -- Execute assigned stories in the epic worktree. Spawned per the epic's Dispatch Team section or the routing table in `/.claude/rules/agent-routing.md`.
 4. **Code-reviewer (quality gate)** -- Reviews every code story before DONE. Reviews via `git diff` in the epic worktree (unstaged = current story). Spawned as infrastructure.
 
+**Nobody verifies the orchestrator's sequencing unless someone is named to.** Every ARTIFACT role here has a verifier -- the implementer has the code-reviewer, the acceptance criteria have PM -- but the orchestrator's own PROCEDURE has none, which is how E-276 lost a whole review phase and then five closure steps in a single epic while able to quote both. When a navigator or sub-lead is present, **checking the orchestrator's sequencing is an explicit part of that role**: does the phase we are entering have its precondition satisfied, and did the last one actually finish? This is not hypothetical -- the navigator independently flagged an un-removed worktree before the operator asked. With no navigator, the Step 12 terminal gate is the only backstop, which is why it reads repository state instead of accepting a report.
+
 Both PM and code-reviewer must approve before the staging boundary advances. PM is authoritative on ACs -- see the implement skill for disagreement resolution.
 
 **Concurrency under load (advisory).** When the harness emits load/capacity notices during dispatch, prefer serializing agent activity (fewer simultaneously-active agents) until the notices clear -- this is the output-integrity cross-check/retry/escalate discipline applied to dispatch concurrency, not a numeric cap or a config setting.

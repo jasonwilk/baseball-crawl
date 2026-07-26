@@ -390,6 +390,8 @@ After Codex review completes (clean, remediated, skipped, or user override), pro
 
 When all stories are verified DONE (and the optional Codex review is complete), execute the following closure sequence in order.
 
+**Phase 5 entry precondition -- check the artifact, not your memory.** If the "and review" modifier is active, confirm the Codex findings artifact EXISTS before starting the Step 1c Closure CR Integration Review: `scripts/codex-review.sh` tees its output to a deterministic `/tmp/codex-review-<epoch>.txt`, so check for one with an mtime inside this session. **If it is absent, Phase 4 did not run -- run it now, before Step 1c.** In E-276 the hub skipped Phase 4 entirely and sent the code-reviewer straight into Phase 5 **while able to quote the step it had omitted**; the operator caught it in four words, no gate did. That is the whole reason this precondition names a file: **a precondition someone can satisfy from memory is not a precondition.** The ordering is not cosmetic -- Codex-first exists so the reviewer adjudicates one combined finding list instead of approving the epic and then reversing itself (E-239, E-251, E-253).
+
 ### Remediation Spawn Context
 
 Several closure passes remediate findings by spawning an implementer into the epic worktree: the Phase 4 Codex review, the Step 1a invariant audit, the Step 1c Closure CR Integration Review, the Step 1b full-suite green gate, and the Step 1d closure runtime smoke (post-preflight epic-FAILs only -- a Step 1d env-FAIL escalates to the user instead of remediating). They ALL use the single spawn context defined here -- defined once, at the start of Phase 5, so its definition does not live behind the now-conditional Phase 4. Every consumer references it by the name **"Remediation Spawn Context."**
@@ -704,6 +706,23 @@ PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMOR
 
 **Narrow carve-out, not a loophole**: identical scope to the plan skill's Step 2b -- a deliberate exception to the "do not commit automatically / require user approval" gate (Anti-Pattern 4 and Step 8 sub-step 9), limited to a late flush of the *same pre-approved artifact class* (`.claude/agent-memory/**`) completing the *same logical unit* already inside the approved closure commit. The root cause is a timing race (async memory flush vs. the staging snapshot), so this is a post-shutdown reconciliation sweep, not a replacement for the approval gate. New or unrecognized files still require the user-approval pause.
 
+### Step 12: The terminal gate -- closure is a checked END-STATE, not a step list
+
+**"Closure complete" may not be reported until command output shows all five of these.** Not "I ran the steps" -- the observed end state:
+
+```
+cd /workspaces/baseball-crawl
+git worktree list                    # main only; no baseball-crawl-E-NNN entry
+git branch --list 'epic/E-NNN'       # empty
+ls .project/archive/E-NNN-slug/      # the epic directory is archived
+git status --short                   # clean
+```
+plus PM confirmed shut down (Step 10).
+
+This extends the shape Step 9 already uses ("Verifiable: after this step...") across the whole of steps 7-11, because that is where the sequence actually breaks. In E-276 the hub skipped steps 7 through 11 outright -- the second procedure skip in the same epic -- and its own diagnosis names the cause: *"I treated the procedure as a list of things to report on rather than a sequence to execute."* A procedure recalled from ambient or post-compact memory is a RELAYED procedure, and the same rule applies to it as to any other relay: check it against the artifact. Here the artifact is the repository state, and these five commands are how you read it.
+
+If any check fails, closure is NOT complete: finish the missing step, then re-run the gate.
+
 ---
 
 ## Workflow Summary
@@ -734,7 +753,11 @@ Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1c Closure CR Inte
   -> closure merge and commit (patch -> dry-run -> apply -> archive mv -> PM memory -> approval gate -> single commit)
   -> worktree cleanup -> shut down PM (teardown automatic on session exit)
   -> post-shutdown reconciliation sweep (fold late `.claude/agent-memory/**` stragglers via --amend; narrow carve-out)
+  -> Step 12 TERMINAL GATE: closure is complete only when command output shows it
+     (worktree gone, branch deleted, epic archived, tree clean, PM shut down)
 ```
+
+Phase 5 has an entry precondition as well as an exit gate: if "and review" is active, the Codex findings artifact (`/tmp/codex-review-*.txt`, mtime in-session) must EXIST before Step 1c. Absent means Phase 4 did not run -- run it first.
 
 ---
 
