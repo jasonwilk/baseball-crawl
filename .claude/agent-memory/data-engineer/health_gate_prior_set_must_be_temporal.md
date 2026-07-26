@@ -1,6 +1,6 @@
 ---
 name: health-gate-prior-set-must-be-temporal
-description: A "same population on both sides" ratio-gate invariant is satisfiable by a polluted set; the load-bearing clause is WHEN the prior set was captured. Plus - an absolute cap masking a broken ratio gate is not evidence the gate works.
+description: A "same population on both sides" ratio-gate invariant is satisfiable by a polluted set; the load-bearing clause is WHEN the prior set was captured. Plus - an absolute cap masking a broken ratio gate is not evidence the gate works, and on the player-line grain refusing a delete does NOT preserve the status quo.
 metadata:
   type: project
 ---
@@ -25,6 +25,12 @@ Any gate that compares a FRESH payload against a PRIOR DB set (`comparable = pri
 **Any floor over a capped population is inert above a small roster.** With `cap = 2`, a floor can only refuse-where-the-cap-permits when `survivors < absent <= 2`, forcing a stored roster of <= 3. The cap therefore binds first at every realistic size — which is why removing the roster floor changed nothing above three rows, and why the inertness is CONTINGENT on the cap's value (`stored <= 2*cap - 1`).
 
 **`MAX_ROSTER_DEPARTURES` now sets a RATE, not a bound.** It caps pre-existing loss per retire invocation; cumulative exposure is unbounded in the number of invocations. Executed: a gently degrading crawl (11,9,7,5,3,1) empties 12 of a 13-row roster two at a time with the cap permitting every step, while a catastrophic drop to 1 loses nothing because the cap refuses. **The protection runs backwards with respect to severity** — and that is an accepted limit rather than a defect, because a real roster shedding two players a week is byte-identical to a slowly decaying crawl at every step.
+
+**Refusing a delete does NOT preserve the status quo on `player_game_*` — the gate covers the DELETE half of a REPLACE and the WRITE half is ungated.** A refused retire still leaves the fresh rows written by the same run, so the result is the UNION of stale and fresh, not the prior state. Executed (2026-07-26, R1): a corrupt full-size payload replacing 9 real lines with 9 wrong ones gives 9 rows / 27 team AB with no extra mechanism, and **18 rows / 54 AB — a permanent 2x inflation of the query-time season line — under a refusing cap**. `get_season_batting` sums per `player_id`, so every retained stale line is an extra player row carrying the same game's at-bats. So this grain is **"replace vs. accumulate", not "delete vs. keep"**: a mechanism that refuses the delete without also gating the write buys a duplicate, not a rescue, and the roster grain's "grid clutter, never a corrupted stat" residual does not transfer — here the retained row IS the corrupted stat. This is why R1 (2026-07-26) ruled **diagnostic only, no gate** on the player-line grain: no `extra_guard`, no cap. Do not propose one without re-deriving this table.
+
+**Deletion-neutrality on this seam is one-directional, and the algebra is one line.** Because everything a run writes comes from the fresh payload (`W ⊆ fresh`), each written row lands on BOTH sides of the polluted ratio — numerator `S + |W|`, denominator `P_pre + |W|` — so `today refuses ⇒ S < 0.5·|P_pre| ⇒ corrected refuses`, unconditionally in `|W|`. Each write relaxes the old floor by exactly half a row. Full executed sweep (2366 combinations, zero violations), the replace-vs-accumulate measurements, and the per-candidate counterexamples are in `.project/research/E-276-player-line-gate-invariant-sweep.md`.
+
+**A guard that RAISES inside `retire_absent_player_lines` is indistinguishable from a guard that REFUSED.** The broad `except Exception` in `GameLoader._retire_absent_player_lines` swallows it, the reconcile aborts, nothing is retired, and a surviving-row count reads as success. Two agents probing this seam independently in one session both got a false PASS this way. Gate every probe of it on the returned `LoadResult.errors == 0`, never on row survival alone (the general form is in `.claude/rules/testing.md`, "An absence claim needs proof the mechanism COMPLETED CLEANLY").
 
 **Two failure shapes from that session, worth keeping distinct:**
 
