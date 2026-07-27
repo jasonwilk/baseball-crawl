@@ -7,7 +7,9 @@
 # the volume observable per-story instead of invisible.
 #
 # Registered on TWO PreToolUse events (see .claude/settings.json):
-#   - SendMessage : increment a worktree-local send counter; warn at 15, deny at 25.
+#   - SendMessage : increment a worktree-local send counter; warn at WARN_AT, deny at
+#                   DENY_AT (values and provenance below -- deliberately NOT restated
+#                   here, where the previous copy said 15/25 long after both moved).
 #   - Bash        : when the command is a `git add` TARGETING the epic worktree (the
 #                   per-story staging boundary), append one dispatch-log row
 #                   (epic ID, staging-boundary sequence index, sends) and reset the
@@ -62,19 +64,34 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
-# No-op unless a dispatch worktree exists -- never interferes with non-dispatch sessions.
-WORKTREE_DIR=$(ls -d /tmp/.worktrees/baseball-crawl-E-* 2>/dev/null | head -1)
-if [ -z "$WORKTREE_DIR" ]; then
-  exit 0
-fi
-
-EPIC_ID=$(basename "$WORKTREE_DIR" | sed 's/^baseball-crawl-//')   # E-NNN
-LOG_DIR="$WORKTREE_DIR/.dispatch-log"
-COUNTER="$LOG_DIR/sends.count"
-LOG="$LOG_DIR/$EPIC_ID.tsv"
-
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
+CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
+
+# Resolve the worktree for THE SESSION MAKING THIS CALL. Never `head -1`: with two
+# dispatches live it handed the first worktree alphabetically to BOTH sessions
+# (2026-07-27 -- one machine-global counter, and E-277's first staging boundary would
+# have appended its row to E-275's TRACKED log, riding the sibling's closure patch).
+# Prints nothing unless attribution is certain; callers treat empty as "do not count".
+resolve_worktree() {
+  # 1. Exact -- the caller's cwd is inside a worktree.
+  if [ "${CWD#/tmp/.worktrees/baseball-crawl-E-}" != "$CWD" ]; then
+    local rest="${CWD#/tmp/.worktrees/}"
+    printf '%s' "/tmp/.worktrees/${rest%%/*}"
+    return
+  fi
+  # 2. Unambiguous -- exactly one worktree exists. Identical to the old `head -1`
+  #    for the single-dispatch case, the only case that code was right for.
+  set -- /tmp/.worktrees/baseball-crawl-E-*
+  if [ "$#" -eq 1 ] && [ -d "$1" ]; then
+    printf '%s' "$1"
+  fi
+  # 3. Otherwise (none, or >1 with an uninformative cwd) -- print nothing. A wrong
+  #    attribution is worse than no count: it denies the wrong session AND writes
+  #    one epic's row into another epic's tracked log.
+}
+
+WORKTREE_DIR=$(resolve_worktree)
 
 read_count() {
   local c=0
@@ -87,19 +104,24 @@ read_count() {
 
 case "$TOOL_NAME" in
   SendMessage)
+    # Unattributable send (no worktree, or several live and cwd does not say which).
+    # Do not count rather than count into a sibling epic.
+    [ -n "$WORKTREE_DIR" ] || exit 0
+    LOG_DIR="$WORKTREE_DIR/.dispatch-log"
+    COUNTER="$LOG_DIR/sends.count"
     mkdir -p "$LOG_DIR" 2>/dev/null
     NEW=$(( $(read_count) + 1 ))
 
     if [ "$NEW" -ge "$DENY_AT" ]; then
       # Hard stop. Pin the counter at the cap and deny with the operator-action message.
       printf '%s' "$DENY_AT" > "$COUNTER"
-      REASON="SendMessage BLOCKED — dispatch send cap reached (25 sends since the last staging boundary).
+      REASON="SendMessage BLOCKED — dispatch send cap reached ($DENY_AT sends since the last staging boundary).
 This is a HARD STOP and an OPERATOR decision point, not an in-session one: do NOT reinterpret,
 rephrase, or route around this rule to keep sending.
 To proceed, the operator must either:
-  (1) reset the count by deleting the counter file:  <worktree>/.dispatch-log/sends.count
-  (2) or raise the threshold in .claude/hooks/send-message-counter.sh (operator-owned;
-      see the provenance comment — 25 is a single-epic placeholder).
+  (1) reset the count by deleting the counter file:  $COUNTER
+  (2) or raise DENY_AT in .claude/hooks/send-message-counter.sh (operator-owned; see the
+      THRESHOLD PROVENANCE comment for how the current value was set).
 Until the operator acts, further SendMessage calls are denied."
       jq -n --arg reason "$REASON" '{
         hookSpecificOutput: {
@@ -137,8 +159,20 @@ Until the operator acts, further SendMessage calls are denied."
     # Accepted residual: Phase-5 remediation worktree adds also match -- harmless, and
     # consistent with the best-effort rounds/sequence posture.
     if [[ "$CMD" == *"/tmp/.worktrees/baseball-crawl-E-"* ]] && [[ "$CMD" =~ (^|[^[:alnum:]])git[[:space:]]+add([[:space:]]|$) ]]; then
+      # Derive the epic from the COMMAND, not the filesystem: this `git add` names the
+      # worktree it targets, so attribution stays exact with several dispatches live.
+      [[ "$CMD" =~ (/tmp/\.worktrees/baseball-crawl-E-[0-9]+) ]] || exit 0
+      WT="${BASH_REMATCH[1]}"
+      EPIC_ID="${WT##*/baseball-crawl-}"
+      LOG_DIR="$WT/.dispatch-log"
+      COUNTER="$LOG_DIR/sends.count"
+      LOG="$LOG_DIR/$EPIC_ID.tsv"
       mkdir -p "$LOG_DIR" 2>/dev/null
-      SENDS=$(read_count)
+      # Blank, NOT 0, when no counter file exists -- sends were not counted (parallel
+      # dispatch disables counting). Same doctrine as the `rounds` column above: a
+      # blank means "not recorded" and never "zero sends".
+      SENDS=""
+      [ -f "$COUNTER" ] && SENDS=$(read_count)
       # Staging-boundary sequence index = existing data rows + 1.
       SEQ=1
       if [ -f "$LOG" ]; then
@@ -149,7 +183,7 @@ Until the operator acts, further SendMessage calls are denied."
         printf 'epic\tseq\tsends\trounds\n' > "$LOG"   # rounds: no producer -- see header note
       fi
       printf '%s\t%s\t%s\t\n' "$EPIC_ID" "$SEQ" "$SENDS" >> "$LOG"
-      printf '0' > "$COUNTER"   # reset for the next story
+      [ -f "$COUNTER" ] && printf '0' > "$COUNTER"   # reset only a counter that exists
     fi
     exit 0
     ;;
