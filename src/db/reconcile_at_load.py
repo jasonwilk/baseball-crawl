@@ -57,8 +57,15 @@ Two contracts, deliberately split (AC-4):
   **no-commit**, caller-owns-the-transaction (mirroring
   :func:`src.db.game_merge.merge_duplicate_game` and
   ``merge_player_pair(manage_transaction=False)``). They also own the LOGGING --
-  one WARN per retire (what/why-REMOVED) and one WARN per refusal. This module
-  emits neither.
+  one WARN per retire (what/why-REMOVED), plus refusal WARNs whose cardinality
+  follows the CAUSE rather than the number of refused units: a PER-ID cause logs
+  once per unit, a WHOLE-SET cause logs once for the whole set carrying the
+  affected count. E-277-05 brought the GAME grain's whole-set causes to that
+  shape. The PLAYER-LINE grain is unchanged and still logs one WARN per refused
+  ``(table, team_id)`` entry, which is per-id there. The ROSTER grain was
+  ALREADY whole-set -- one WARN carrying ``absent_count`` before it retires
+  anything -- consistent with its refusal being a whole-set decision (below).
+  This module emits neither.
 
 The three grain result types model refusal DIFFERENTLY, and the divergence is
 deliberate -- do not "harmonize" it:
@@ -275,7 +282,10 @@ class AbsenceClass(str, Enum):
         TRANSIENT_ABSENT: The id is absent, but the fresh crawl could not be
             trusted to prove it (fetch failure, empty payload, catastrophic
             shrink, or a stricter per-grain guard). Keep the live data; the
-            caller retires nothing and logs one WARN per refusal.
+            caller retires nothing and logs a refusal WARN. The CARDINALITY is
+            the caller's: the game grain (E-277-05) and the roster grain each
+            emit ONE WARN covering the whole refused set with its count; the
+            player-line grain logs one per refused ``(table, team_id)`` entry.
     """
 
     PRESENT = "present"
@@ -522,7 +532,7 @@ def classify_absences(
     Bias to refuse (AC-2): when ``crawl_authoritative`` is False, or when
     ``extra_guard`` rejects the absent set, EVERY absence is classified
     :attr:`AbsenceClass.TRANSIENT_ABSENT` -- never :attr:`AbsenceClass.REMOVED`.
-    The classifier only classifies; the caller emits the WARN per refusal and
+    The classifier only classifies; the caller emits the refusal WARNs and
     performs (or declines) the hard delete.
 
     Args:
@@ -597,7 +607,9 @@ def roster_departure_guard(
 # The first caller of the classifier above. Connection-in, NO-COMMIT, caller
 # owns the transaction (the seam convention shared with ``merge_duplicate_game``
 # and ``merge_player_pair(manage_transaction=False)``), and it owns the LOGGING:
-# one WARN per retire and one WARN per refusal.
+# one WARN per retire, and refusal WARNs at one per CAUSE rather than one per
+# refused game -- a whole-set cause logs once with its count (E-277-05), a
+# per-id cause once per game.
 #
 # Delete surface (AC-1): the full child surface of the ``games`` row, with the
 # ``games`` row deleted LAST. No FK child of ``games`` carries
@@ -615,8 +627,11 @@ class GameRetireResult:
     Attributes:
         retired_game_ids: The ``game_id`` values hard-deleted this pass.
         refusals: ``{game_id: reason}`` for every prior-loaded game that was a
-            candidate but was NOT retired (bias to refuse). One WARN was emitted
-            per entry.
+            candidate but was NOT retired (bias to refuse). Populated per game
+            regardless of how the refusal was LOGGED: a PER-ID cause emits one
+            WARN per entry, a WHOLE-SET cause emits one WARN for the whole set
+            carrying its count (E-277-05). **Do not infer the WARN count from
+            ``len(refusals)``.**
         deleted_counts: Per-table count of child rows deleted across all
             retires (only non-zero tables appear).
         gate_outcome: The structural record of this pass's gate evaluation
@@ -866,18 +881,26 @@ def retire_absent_games(
     a game FULLY ABSENT from the full array IS a genuine removal/void rather than
     a postponement (AC-6) -- no extra per-game suspicion clause is needed.
 
-    Refusal cases, each logged as exactly one WARN:
+    Refusal cases. **The WARN cardinality follows the CAUSE, not the number of
+    absences** (E-277-05): a WHOLE-SET cause emits exactly ONE WARN carrying the
+    affected-game count, however many games it refuses, while a PER-ID cause
+    emits one WARN per game because WHICH games it applies to is decided
+    individually. Every refusal is recorded per game in
+    :attr:`GameRetireResult.refusals` either way -- only the logging differs.
+    The bullets below are not an exhaustive cause list: ``refused_by`` is the
+    structural record (see the comment at its assignment), and
+    ``boxscores_incomplete`` is a distinct member with no bullet here.
 
-    * The health gate failed (fetch error, empty payload, catastrophic shrink) --
-      every absence this pass is refused.
-    * More than :data:`MAX_GAME_RETIREMENTS` RETIRE-ELIGIBLE games are absent
+    * WHOLE-SET -- The health gate failed (fetch error, empty payload,
+      catastrophic shrink) -- every absence this pass is refused.
+    * WHOLE-SET -- More than :data:`MAX_GAME_RETIREMENTS` RETIRE-ELIGIBLE games are absent
       (E-270-01) -- the absolute cap on top of the floor ratio, since 8 of 30
       games is only a 27% shrink and would otherwise sail through. Refuses the
       whole pass. See the TN-1 note at the ``exempt`` precompute for why the
       count excludes cross-perspective-protected games.
-    * The prior-loaded game is present in the fresh array but NOT final
+    * PER-ID -- The prior-loaded game is present in the fresh array but NOT final
       (``not_final_game_ids``) -- postponed, in progress, or an unscored stub.
-    * The game also carries ANOTHER perspective's data -- either a foreign
+    * PER-ID -- The game also carries ANOTHER perspective's data -- either a foreign
       ``game_perspectives`` row, or (E-270-01) foreign CHILD stat rows that
       outlived a stripped junction row. Hard-deleting the ``games`` row would
       destroy a second team's load, and this grain deletes whole games; the
@@ -1122,6 +1145,11 @@ def retire_absent_games(
         permitted=(not unit_refused) if absent else authoritative,
     )
 
+    # E-277-05: ids refused by the WHOLE-SET cause, collected here and logged
+    # ONCE after the loop. Built from the same iteration that populates
+    # ``result.refusals`` so the logged count cannot drift from the recorded set.
+    transient_refused: list[str] = []
+
     for game_id in sorted(prior_ids):
         absence = classification[game_id]
 
@@ -1141,11 +1169,20 @@ def retire_absent_games(
 
         if absence is AbsenceClass.TRANSIENT_ABSENT:
             result.refusals[game_id] = transient_reason
-            logger.warning(
-                "Game-grain retire REFUSED for game %s (team %s, season %s): "
-                "%s; keeping the prior-loaded data.",
-                game_id, team_id, season_id, transient_reason,
-            )
+            # E-277-05: COLLECTED, not logged here -- one WARN for this whole-set
+            # cause is emitted after the loop. ``result.refusals`` stays per game
+            # (AC-3): only the LOGGING collapses, never the record.
+            #
+            # Why this branch and not the two per-id ones, stated because the
+            # obvious test picks the wrong set: it is NOT "does this WARN repeat
+            # an identical message". The not-final branch above also emits a
+            # byte-identical message every time -- its ``reason`` is a constant
+            # -- and collapsing it would violate AC-4. The discriminator is the
+            # CAUSE's SCOPE: ``transient_reason`` is settled ONCE above, outside
+            # this loop, from whole-pass facts, so every absence in the pass
+            # shares one reason and the set is refused as a unit. Whether a game
+            # is not-final, or cross-perspective protected, is decided per game.
+            transient_refused.append(game_id)
             continue
 
         # REMOVED -- but never delete a games row another perspective owns. The
@@ -1238,6 +1275,21 @@ def retire_absent_games(
             game_id, team_id, season_id,
             len(gate_comparable), len(gate_prior),
             counts or "none",
+        )
+
+    # E-277-05: ONE WARN for the whole-set cause, carrying the affected count --
+    # not one per absence. A single refusal used to emit one line per prior game
+    # (30 observed, 47 in a seeded run), burying the operator's signal in copies
+    # of itself. The ids are kept rather than reduced to a count: WHICH games
+    # were held is the storm's only real content, and TN-4 makes this WARN the
+    # operator's sole signal, so dropping them would trade noise for a genuine
+    # loss. It is still one line.
+    if transient_refused:
+        logger.warning(
+            "Game-grain retire REFUSED for %d game(s) (team %s, season %s): "
+            "%s; keeping the prior-loaded data. Games: %s",
+            len(transient_refused), team_id, season_id, transient_reason,
+            ", ".join(transient_refused),
         )
 
     return result

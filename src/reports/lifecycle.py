@@ -65,6 +65,18 @@ def _conn_scope(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]
     ``row_factory`` is caller-owned state.  Restoring it here -- rather than at
     each call site -- keeps the borrow non-destructive at the one place that
     knows whether the connection is borrowed at all (E-256-04, CR round 2).
+
+    **"Non-destructive" refers to ``row_factory`` ONLY.  This helper does NOT
+    make a borrow transaction-safe, and nothing here prevents a borrowed
+    connection from being COMMITTED.**  Every caller below commits on whatever
+    connection it is handed -- the reaper unconditionally, even at zero rows
+    reaped; :func:`cleanup_expired_reports` unconditionally after its expiry
+    loop; :func:`reclaim_orphan_reference_data` at the end of its own
+    ``BEGIN IMMEDIATE`` transaction.  That is why each of those entry points
+    calls :func:`_require_clean_connection` before doing anything: a borrowed
+    connection carrying uncommitted work would have that work committed and then
+    deleted as orphan data.  This scope restores one attribute; it is not a
+    transaction boundary (E-277-02).
     """
     if conn is not None:
         previous_row_factory = conn.row_factory
@@ -75,6 +87,55 @@ def _conn_scope(conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]
     else:
         with closing(get_connection()) as owned:
             yield owned
+
+
+def _require_clean_connection(
+    conn: sqlite3.Connection | None, entry_point: str
+) -> None:
+    """Refuse a BORROWED connection that already has an open transaction.
+
+    Defined ONCE and called from all three public entry points that accept a
+    caller's connection (E-277-02 AC-5a).  Three hand-maintained copies of this
+    check is the "second path to something that already has one" shape
+    ``.claude/rules/canonical-seams.md`` names as this codebase's recurring
+    defect -- the copies drift, and the one nobody updated is the one that runs.
+
+    WHY it raises rather than coping: every one of these entry points COMMITS on
+    the connection it is given.  Against a caller with uncommitted DML in flight
+    that commit is not merely rude -- it makes the caller's rows visible, the
+    reclamation then classifies them as orphans and DELETES them, and the
+    caller's later ``rollback()`` succeeds while recovering nothing.
+    Unrecoverable data loss with no error raised anywhere.
+
+    ``conn is None`` is NOT a violation and does not raise: that is the
+    owned-connection path (``bb report cleanup``, the app-startup reaper), where
+    the callee opens and closes its own connection and there is no caller
+    transaction to destroy.  ``bb report cleanup`` does not wrap its call in a
+    try/except, so a guard that fired on ``None`` would crash it outright.
+
+    A RuntimeError rather than an ``assert``: ``assert`` is stripped under
+    ``python -O`` / ``PYTHONOPTIMIZE``, and this guards data loss rather than
+    catching a development slip.  It matches the module's established
+    refuse-loudly shape -- :func:`reclaim_orphan_reference_data`'s fixed-point
+    self-assert raises a bare ``RuntimeError`` for the same reason.
+
+    Args:
+        conn: The caller's connection, or ``None`` for the owned path.
+        entry_point: Name of the calling public function, for the message.
+
+    Raises:
+        RuntimeError: If ``conn`` is not ``None`` and has an open transaction.
+    """
+    if conn is None or not conn.in_transaction:
+        return
+    raise RuntimeError(
+        f"{entry_point}() requires a connection with no open transaction, but the "
+        "connection passed has uncommitted work in flight. This entry point COMMITS "
+        "on the connection it is given, which would make that work visible and then "
+        "delete it as orphan data -- a subsequent rollback would recover nothing. "
+        "Commit or roll back before calling, or pass conn=None to let this call own "
+        "its own connection."
+    )
 
 
 @dataclass
@@ -132,13 +193,44 @@ def reap_stale_generating_reports(
     runs opportunistically at ``generate_report`` start and via ``bb report
     cleanup``) and the FastAPI app lifespan startup.
 
+    PRECONDITION -- a borrowed connection must have NO open transaction.  Passing
+    a connection with uncommitted DML in flight RAISES ``RuntimeError`` here,
+    before anything is committed: this function commits unconditionally on the
+    connection it is given (even when it reaps zero rows), which would make the
+    caller's uncommitted work visible and expose it to deletion as orphan data.
+    Passing ``conn=None`` does NOT raise -- that is the owned path, where this
+    call opens and closes its own connection.
+
+    What the raise means in production, in both directions: it stops the
+    destructive path, but no operator is paged.  THIS function's call sites are
+    exactly three, enumerated from the code rather than from any shared list:
+
+    * :func:`cleanup_expired_reports` -- wrapped; logs at WARNING and continues.
+    * :func:`reclaim_orphan_reference_data`, its Step 1 -- **NOT wrapped**, so
+      the raise propagates out of the reclaim to *that* function's callers and
+      is demoted by whichever of them catches it.  This is the one call site
+      where the raise is not absorbed here.
+    * ``src/api/main.py``, the app-lifespan startup reaper -- **EXEMPT, not a
+      demoting site.**  It calls this function with no argument, so ``conn`` is
+      ``None``, the guard SKIPS, and the raise cannot occur there at all.  Same
+      exemption as ``bb report cleanup`` on :func:`cleanup_expired_reports`.
+
+    Note this list does NOT include ``generate_report`` or the admin
+    report-delete path: neither calls this function.  "Refuses loudly" describes
+    a direct caller, not the deployed behaviour.
+
     Args:
-        conn: An open connection to use.  When ``None`` (the CLI and app-startup
-            callers) one is opened and closed here.  See :func:`_conn_scope`.
+        conn: An open connection to use, with no transaction in progress.  When
+            ``None`` (the CLI and app-startup callers) one is opened and closed
+            here.  See :func:`_conn_scope`.
 
     Returns:
         A :class:`ReaperResult` with ``reaped`` / ``files_removed`` / ``errors``.
+
+    Raises:
+        RuntimeError: If ``conn`` is not ``None`` and has an open transaction.
     """
+    _require_clean_connection(conn, "reap_stale_generating_reports")
     result = ReaperResult()
     threshold = (
         datetime.now(timezone.utc) - timedelta(seconds=STALE_GENERATING_SECONDS)
@@ -216,6 +308,31 @@ def cleanup_expired_reports(
     report is in flight (reap-then-gate guard), so an in-flight generation's data
     is never deleted.
 
+    PRECONDITION -- a borrowed connection must have NO open transaction.  Passing
+    a connection with uncommitted DML in flight RAISES ``RuntimeError`` at this
+    function's entry, before anything is committed and before the reaper runs.
+    This function commits unconditionally on the connection it is given, so
+    proceeding would make the caller's uncommitted work visible and then expose
+    it to deletion by the reclamation sweep below.  Passing ``conn=None`` does
+    NOT raise -- that is the owned path (``bb report cleanup``), where this call
+    opens and closes its own connection.
+
+    What the raise means in production, in both directions: it stops the
+    destructive path, but no operator is paged.  THIS function's call sites are
+    exactly two, enumerated from the code rather than from any shared list:
+
+    * ``generate_report`` (``src/reports/generator.py``) -- passes a dedicated
+      fresh connection; wrapped, logs at ERROR and continues generation.
+    * ``bb report cleanup`` (``src/cli/report.py``) -- passes ``conn=None``, so
+      the guard SKIPS and cannot fire.  That call has **no try/except at all**,
+      which is why the ``None`` skip is load-bearing rather than tidy: a guard
+      that fired there would crash the command outright.
+
+    Note this list does NOT include the admin report-delete path in
+    ``src/api/routes/reports_admin.py``: it does not call this function (it
+    calls :func:`reclaim_orphan_reference_data` directly).  "Refuses loudly"
+    describes a direct caller, not the deployed behaviour.
+
     File removal mirrors the ``_delete_report`` admin path: canonical
     ``_REPO_ROOT`` resolution plus an ``.is_file()`` guard. Each row's cleanup
     is wrapped in per-row error isolation so one unremovable file (e.g. a
@@ -226,15 +343,30 @@ def cleanup_expired_reports(
     and via the ``bb report cleanup`` CLI command.
 
     Args:
-        conn: An open connection to use.  When ``None`` (the ``bb report cleanup``
-            caller) one is opened and closed here.  ``generate_report`` passes the
-            connection it opened, so the sweep runs against the caller's database
-            rather than re-resolving one from this module's globals.  See
-            :func:`_conn_scope`.
+        conn: An open connection to use, with no transaction in progress.  When
+            ``None`` (the ``bb report cleanup`` caller) one is opened and closed
+            here.  ``generate_report`` passes a DEDICATED fresh connection it
+            opens for this call and closes immediately, so the sweep runs against
+            the caller's database rather than re-resolving one from this module's
+            globals.  See :func:`_conn_scope`.
 
     Returns:
         A :class:`CleanupResult` with ``files_removed`` and ``errors`` counts.
+
+    Raises:
+        RuntimeError: If ``conn`` is not ``None`` and has an open transaction.
     """
+    # E-277-02 AC-2.1: the clean-connection guard sits HERE -- at the function's
+    # entry, ahead of the reap call and DELIBERATELY OUTSIDE the try below.
+    # Inside that try it would be swallowed by the `except Exception` and
+    # execution would continue into this function's OWN unconditional
+    # `conn.commit()`, committing the caller's uncommitted DML and exposing it to
+    # deletion by the reclamation at the end -- the exact bypass this guards.
+    # Measured: with guards on the reap and the reclaim but not here, and even
+    # with the reap neutralized to a no-op entirely, that bypass reproduces in
+    # full. This function's own commit is sufficient on its own.
+    _require_clean_connection(conn, "cleanup_expired_reports")
+
     # E-252-08: also reap stuck 'generating' reports here, so the reaper rides the
     # SAME no-operator-action trigger as expired-file cleanup (opportunistic at
     # generate_report start + `bb report cleanup`). Isolated so a reaper failure can
@@ -796,9 +928,31 @@ _RECLAIM_CHUNK = 900
 """Max bound-variable count per ``... IN (?, ...)`` delete chunk.
 
 The orphan set can be large (681 teams / 14,326 players in the live backlog),
-so materialized-``IN`` deletes are chunked below SQLite's 999-variable limit
-(TN-8).  The producers themselves use correlated ``NOT EXISTS`` (never a
+so materialized-``IN`` deletes are chunked to stay under SQLite's bound-variable
+limit (TN-8).  The producers themselves use correlated ``NOT EXISTS`` (never a
 materialized ``NOT IN``) for the same reason.
+
+WHY 900, AND WHY A HIGH ``getlimit()`` HERE PROVES NOTHING (E-277-03).  That
+limit is BUILD-DEPENDENT, not a constant of SQLite: ``SQLITE_LIMIT_VARIABLE_NUMBER``
+defaulted to 999 before SQLite 3.32.0 and to 32,766 from 3.32.0, and a build may
+raise it further still -- the container these docstrings were written against
+reports 250,000.  900 sits under the lowest of those, so the chunking holds on
+any build whose limit is at least 900, which covers every documented SQLite
+default.  Stated in both directions, because only one of them is obvious: a
+build configured BELOW 900 would still raise, and this constant would have to be
+lowered with it.
+
+So do NOT read a generous ``getlimit()`` on the machine in front of you as
+evidence that the chunking is dead code -- the deployment target's SQLite is not
+necessarily the one you measured.  Pinned against exactly that misreading by
+``test_chunked_player_delete_spans_more_than_two_chunks`` in
+``tests/test_orphan_reclamation.py``, which lowers the test connection's limit
+so that an unchunked variant raises rather than quietly passing.  Its sibling
+``test_chunking_is_load_bearing_removing_it_raises`` is deliberate, not
+redundant: that one REMOVES the chunking and requires the raise, so it is what
+shows the first test's success is attributable to chunking at all.  The first
+proves the chunked path deletes the whole set under a lowered limit; only the
+second proves an unchunked path would not.
 """
 
 # --- Orphan-team predicate (composed from two reusable SQL fragments) --------
@@ -815,15 +969,96 @@ _TEAM_BASE_PRED = (
     # No games row references this team (home or away).
     "AND NOT EXISTS (SELECT 1 FROM games g "
     "                WHERE g.home_team_id = {t}.id OR g.away_team_id = {t}.id) "
-    # TN-7 root exclusions -- opponent_links (both columns) and user_team_access
-    # are reachability ROOTS (operator/user decisions), not pins to clear.  A
-    # team referenced by ANY of these is EXCLUDED from the orphan set, never
-    # deleted and never NULLed.  All three are provable no-ops on real data
-    # (a member/resolved/granted team is either not 'tracked' or otherwise out
-    # of the base set) and fire only in a bent-invariant case.
+    # Reachability ROOT exclusions: the THREE ROOTS from E-273 TN-7
+    # (operator/user decisions) plus the ONE ROOT added by E-277-01.  A team
+    # referenced by ANY of them is EXCLUDED from the orphan set, never deleted
+    # and never NULLed.  They are NOT pins to clear -- see _TEAM_PIN_TABLES.
+    #
+    # PER-ROOT VERDICT, and deliberately no blanket claim in either direction.
+    # The bullets below ARE the enumeration -- there is deliberately no summary
+    # count here to drift out of step with them.  Note only that
+    # ``opponent_links`` carries two of these roots, so a count of roots and a
+    # count of tables are different numbers; where a count is unavoidable
+    # elsewhere in this module it names its unit for that reason.  The
+    # previous version of this comment said "all three are provable no-ops on
+    # real data ... fire only in a bent-invariant case", which was false for the
+    # one root that is load-bearing.  It was OUTLIVED, not careless: E-273
+    # reasoned that ``our_team_id`` is always a member team because the morning
+    # run iterates the operator's own teams -- sound until E-239 removed the
+    # member sync.  ``src/db/teams.py`` now holds the ONLY ``INSERT INTO teams``
+    # in ``src/`` or ``scripts/`` and hardcodes ``membership_type='tracked'``,
+    # so own teams land squarely inside this predicate's base set.
+    #
+    #   * ``opponent_links.our_team_id`` -- LOAD-BEARING.  Production writer:
+    #     ``src/gamechanger/opponent_ladder.py`` (``_upsert_resolved_positive``
+    #     and ``_upsert_pending``, both self-committing) on the morning-run
+    #     path.  Until E-277-01 this was the ONLY thing keeping a morning-run
+    #     own team out of the orphan set, and that is no longer true: the
+    #     morning run's slot write is gated only on ``not dry_run and not
+    #     slot.suppress_persist``, NOT on the outcome, so an ordinary run
+    #     persists an audit row for EVERY slot -- resolved, unresolved and
+    #     placeholder alike -- and the audit root below pins the team too.
+    #
+    #     Neither root subsumes the other, but the overlap is the ordinary case
+    #     and the gaps are narrow.  A link with NO slot arises in exactly three
+    #     states: a ``--dry-run`` (``resolve_opponent`` self-commits its
+    #     ``opponent_links`` row before the dry-run check, and no slot is
+    #     written), the ``suppress_persist`` fresh-reservation skip, and a slot
+    #     write that RAISED (``sqlite3.Error`` is caught, rolled back and the
+    #     run continues, while the ladder's link is already committed).  Only
+    #     the audit root covers the converse -- a placeholder-only team with no
+    #     link ever, which is rung (b).
+    #   * ``scheduled_report_runs.own_team_id`` -- LOAD-BEARING.  Production
+    #     writer: ``_upsert_slot`` in ``src/reports/morning_run.py``.  Pins an
+    #     own team whose morning run produced ONLY placeholder deferrals -- the
+    #     one ladder rung that persists no ``opponent_links`` row, and therefore
+    #     the shape the clause above does not already cover.  Its audit rows are
+    #     the only non-regenerable data in this sweep's blast radius.
+    #   * ``opponent_links.resolved_team_id`` -- CANNOT FIRE.  Mechanism: no
+    #     site in ``src/`` or ``scripts/`` writes this column at all.  The only
+    #     SQL touching it is this module's own cascade, which NULLs it.  So no
+    #     production path can produce a row matching this clause.  (A grep for
+    #     the bare name also hits ``scripts/smoke_test.py``; those are a LOCAL
+    #     variable holding a GameChanger team id -- that file never mentions
+    #     ``opponent_links``.  Noted so the next reader's grep does not read as
+    #     counter-evidence.)
+    #   * ``user_team_access.team_id`` -- REACHABLE, and NOT provably dead.  An
+    #     earlier version of this comment claimed it could not fire because the
+    #     grant surface is member-only.  That is FALSE for two of the three
+    #     INSERT writers, and the error is recorded here because it is the same
+    #     shape as the one this whole comment repairs.  Only
+    #     ``src/api/auth.py::_assign_member_teams`` actually filters on
+    #     ``membership_type = 'member'``.  The admin form handlers
+    #     ``_create_user`` / ``_update_user`` in
+    #     ``src/api/routes/reports_admin.py`` insert whatever integer team ids
+    #     the POST supplies, with NO membership check --
+    #     ``_get_available_teams()`` only populates the checkbox OPTIONS at
+    #     render time and gates nothing on submit, and a POST is not restricted
+    #     to the options a form offered.  Executed: a grant row on a ``tracked``
+    #     team is accepted and removes that team from the orphan set.
+    #
+    #     BOTH HALVES, because either alone is misleading: this is REACHABLE
+    #     THROUGH THE ADMIN WRITE PATH, and NOT EXERCISED BY THE NORMAL UI FLOW.
+    #     The form offers only member teams as checkboxes, so routine operation
+    #     will not produce such a row; the handler accepts one anyway if the
+    #     submitted id names a tracked team.  So it is neither "fires on
+    #     ordinary data" nor "cannot fire" -- do not collapse it to either.
+    #     (The absent server-side validation is pre-existing and out of scope
+    #     here; it is named as the reason the verdict is REACHABLE, not as a
+    #     defect fixed.)
+    #
+    # The one CANNOT-FIRE clause is retained deliberately: it closes a latent
+    # footgun for the cost of one ``NOT EXISTS``, and the reason it cannot fire
+    # is a property of code in ANOTHER file that a future change could revoke
+    # without touching this one.  Do not delete it as dead code -- re-run the
+    # writer audit first, and note that the last two attempts to certify a root
+    # dead were both wrong (E-273's on ``our_team_id``, E-277-01's on
+    # ``user_team_access``).  A grep for writers is not enough on its own: for
+    # each writer found, establish what values it can actually supply.
     "AND NOT EXISTS (SELECT 1 FROM opponent_links ol_r WHERE ol_r.resolved_team_id = {t}.id) "
     "AND NOT EXISTS (SELECT 1 FROM opponent_links ol_o WHERE ol_o.our_team_id = {t}.id) "
-    "AND NOT EXISTS (SELECT 1 FROM user_team_access uta WHERE uta.team_id = {t}.id)"
+    "AND NOT EXISTS (SELECT 1 FROM user_team_access uta WHERE uta.team_id = {t}.id) "
+    "AND NOT EXISTS (SELECT 1 FROM scheduled_report_runs srr WHERE srr.own_team_id = {t}.id)"
 )
 # NOTE: ``is_active`` is a DEAD guard (TN-2) -- ``ensure_team_row_with_provenance``
 # hardcodes ``is_active=0`` on every INSERT, so a guard predicated on it protects
@@ -845,11 +1080,19 @@ _TEAM_BASE_PRED = (
 # corrupt that game) and (b) is not otherwise absent by the base predicate /
 # roots.  The full ``teams(id)`` FK-child audit (E-273 Codex-F1 remediation)
 # classifies all live children as base-absent (games/reports), root-excluded
-# (opponent_links x2, user_team_access), pin-deleted (team_rosters,
-# scouting_runs, crawl_jobs, coaching_assignments, scheduled_report_runs), or
+# (opponent_links -- via both its root columns -- user_team_access, and, since
+# E-277-01, scheduled_report_runs), pin-deleted (team_rosters, scouting_runs,
+# crawl_jobs,
+# coaching_assignments, scheduled_report_runs), or
 # game-child-excluded HERE (player_game_batting x2, player_game_pitching x2,
 # spray_charts x2, reconciliation_discrepancies x2, plays x2, and
 # ``game_perspectives`` -- the child the original grep-based sweep filtered out).
+#
+# ``scheduled_report_runs`` deliberately appears in TWO of those classes since
+# E-277-01, so the classes are no longer mutually exclusive.  It is
+# root-excluded (an audit-bearing team never reaches the team delete at all) AND
+# still listed in _TEAM_PIN_TABLES as a retained FK safety net -- see the
+# comment on that entry for why removing the pin entry is a hazard.
 _TEAM_STAT_EXISTS = (
     "("
     "EXISTS (SELECT 1 FROM player_game_batting s "
@@ -882,16 +1125,36 @@ _STAT_REFERENCE_PROBES: tuple[tuple[str, str], ...] = (
 )
 
 # Innocuous team-scoped pins deleted BEFORE the ``teams`` row (FK-safe order).
-# Deliberately EXCLUDES ``opponent_links`` and ``user_team_access`` (TN-7 roots)
-# -- this is the TAILORED cleanup (TN-4 mild preference over reusing the
-# monolithic ``_delete_team_scoped_data``): it never issues a no-op DELETE
-# against an operator/user-decision table.  Each pin's team column is listed so
-# the delete is a plain ``WHERE <col> IN (...)``.  ``teams`` is deleted LAST.
+# Deliberately EXCLUDES ``opponent_links`` and ``user_team_access``, the root
+# tables that are not pins.  This is the TAILORED cleanup (E-273 TN-4 preference
+# over reusing the monolithic ``_delete_team_scoped_data``): it never issues a
+# no-op DELETE against an operator/user-decision table.  Each pin's team column
+# is listed so the delete is a plain ``WHERE <col> IN (...)``.  ``teams`` is
+# deleted LAST.
+#
+# NOT a root/pin partition since E-277-01: ``scheduled_report_runs`` is now BOTH
+# a reachability root (above) and a retained pin entry (below).  The exclusion
+# above names the root tables that are not pins; it is NOT a claim that every
+# root is absent from this list.
 _TEAM_PIN_TABLES: tuple[tuple[str, str], ...] = (
     ("team_rosters", "team_id"),
     ("scouting_runs", "team_id"),
     ("crawl_jobs", "team_id"),
     ("coaching_assignments", "team_id"),
+    # RETAINED DELIBERATELY, and UNREACHABLE while the keep-root above stands
+    # (E-277 TN-10).  A team carrying ``scheduled_report_runs`` rows is excluded
+    # from the orphan set, so this DELETE can never match a row today.  That is
+    # exactly what makes it look like dead code, which is the reasoning this
+    # epic exists to correct elsewhere in this file -- so: DO NOT REMOVE THIS
+    # ENTRY unless the ``scheduled_report_runs.own_team_id`` keep-root is
+    # removed in the SAME commit.  Removing it alone was measured: the team
+    # DELETE then hits ``own_team_id INTEGER NOT NULL REFERENCES teams(id)``
+    # with no ``ON DELETE``, raising ``IntegrityError`` and ROLLING BACK THE
+    # ENTIRE SWEEP.  Retaining it also keeps the sweep compliant with migration
+    # 005's CASCADE MIRROR INVARIANT in every future state: if the keep-root is
+    # ever weakened or bypassed, this entry is what still carries a deleted
+    # team's audit rows away with it.  Same shape as the deliberately-retained
+    # vacuous clause in ``_TEAM_STAT_EXISTS`` above.
     ("scheduled_report_runs", "own_team_id"),
     ("teams", "id"),
 )
@@ -987,14 +1250,18 @@ def _warn_stat_referenced_gameless_teams(conn: sqlite3.Connection) -> None:
 
 
 def _orphan_team_ids(conn: sqlite3.Connection, *, warn: bool = False) -> set[int]:
-    """Return the ids of all orphan ``teams`` rows (TN-2, TN-8).
+    """Return the ids of all orphan ``teams`` rows (E-273 TN-2, E-273 TN-8).
 
     The ONE team predicate: ``tracked`` AND no ``reports`` AND no ``games`` AND
-    none of the three TN-7 roots (``opponent_links.resolved_team_id`` /
-    ``opponent_links.our_team_id`` / ``user_team_access.team_id``) AND the
-    belt-and-suspenders stat clause.  Built as correlated ``NOT EXISTS`` (never a
-    materialized ``NOT IN``) so a large orphan set never hits the 999-variable
-    limit.
+    none of the reachability roots -- ``opponent_links.resolved_team_id``,
+    ``opponent_links.our_team_id`` and ``user_team_access.team_id`` from
+    E-273 TN-7, plus ``scheduled_report_runs.own_team_id`` added by E-277-01 --
+    AND the belt-and-suspenders stat clause.  The per-root verdicts (which of
+    these fire on real data, and why) live on :data:`_TEAM_BASE_PRED`.
+    Built as correlated
+    ``NOT EXISTS`` (never a materialized ``NOT IN``) so a large orphan set binds
+    NO variables here at all and SQLite's build-dependent bound-variable limit
+    (see :data:`_RECLAIM_CHUNK`) is never in play on this path.
 
     Args:
         conn: Open connection (the pass's in-transaction connection, or any
@@ -1060,14 +1327,15 @@ def _orphan_roster_row_count(conn: sqlite3.Connection) -> int:
 
 
 def count_orphan_reference_data(conn: sqlite3.Connection) -> OrphanCounts:
-    """Return the ownership-invariant orphan counts (TN-8).
+    """Return the ownership-invariant orphan counts (E-273 TN-8).
 
     The single-source assertion helper: teams and players are ``len()`` of the
     SAME sets the pass deletes, plus the orphan-held roster-row count.  Because
-    the count derives from :func:`_orphan_team_ids` (which excludes the TN-7
-    roots), a legitimate ``opponent_links`` / ``user_team_access`` survivor is
-    NEVER flagged as a leak (TN-7 F5).  Consumers (E-273-04 batch test, E-273-05
-    one-shot) MUST call this rather than re-inlining the query.
+    the count derives from :func:`_orphan_team_ids` (which excludes every
+    reachability root), a legitimate ``opponent_links`` / ``user_team_access``
+    / ``scheduled_report_runs`` survivor is NEVER flagged as a leak
+    (E-273 TN-7 F5).  Consumers (E-273-04 batch test, E-273-05 one-shot) MUST call this
+    rather than re-inlining the query.
     """
     return OrphanCounts(
         teams=len(_orphan_team_ids(conn)),
@@ -1079,7 +1347,14 @@ def count_orphan_reference_data(conn: sqlite3.Connection) -> OrphanCounts:
 def _delete_where_in(
     conn: sqlite3.Connection, table: str, column: str, ids: list
 ) -> None:
-    """Chunked ``DELETE FROM {table} WHERE {column} IN (...)`` (999-safe)."""
+    """Chunked ``DELETE FROM {table} WHERE {column} IN (...)``.
+
+    Chunks at :data:`_RECLAIM_CHUNK` so no single statement binds more variables
+    than SQLite's bound-variable limit allows.  That limit is BUILD-DEPENDENT
+    (E-277-03), so a generous ``getlimit()`` on the build in front of you is NOT
+    evidence that this chunking is unnecessary -- see :data:`_RECLAIM_CHUNK` for
+    the range of documented values and why 900 is the safe choice across them.
+    """
     for start in range(0, len(ids), _RECLAIM_CHUNK):
         chunk = ids[start : start + _RECLAIM_CHUNK]
         placeholders = ",".join("?" for _ in chunk)
@@ -1122,15 +1397,42 @@ def reclaim_orphan_reference_data(
     the roster-only players correctly fall out.  A final zero-delta self-assert
     confirms the fixed point (no third pass deletes anything).
 
+    PRECONDITION -- the connection must have NO open transaction.  Passing one
+    with uncommitted DML in flight RAISES ``RuntimeError`` at this function's
+    entry, before the reap and before anything is committed.  There is no
+    ``conn=None`` path here: this parameter is REQUIRED, so unlike the other two
+    entry points every call reaches the guard.
+
+    What the raise means in production, in both directions: it stops the
+    destructive path, but no operator is paged.  THIS function's call sites are
+    exactly three, enumerated from the code rather than from any shared list:
+
+    * :func:`cleanup_expired_reports` -- wrapped; logs at WARNING and continues.
+    * The admin report-delete path in ``src/api/routes/reports_admin.py`` --
+      wrapped; logs at WARNING and the deletion still succeeds.
+    * ``scripts/reclaim_orphan_reference_data.py``, the one-shot -- wrapped, but
+      it does MORE than log: it logs at ERROR **and returns a non-zero process
+      exit code**.  So "demoted to a log line" is not true of every site, and
+      this is the one that differs.
+
+    "Refuses loudly" describes a direct caller, not the deployed behaviour.
+
     Args:
-        conn: An open connection the pass OWNS the transaction on.  The wiring
-            sites (E-273-02) pass a fresh ``get_connection()``; tests / the
-            one-shot inject their DB.
+        conn: An open connection, with no transaction in progress, that the pass
+            OWNS the transaction on.  The wiring sites (E-273-02) pass a fresh
+            ``get_connection()``; tests / the one-shot inject their DB.
 
     Returns:
         A :class:`ReclaimResult` with the per-tier deletion counts, or
         ``deferred=True`` (and zero counts) when the gate refused.
+
+    Raises:
+        RuntimeError: If ``conn`` has an open transaction, or if the two-phase
+            sweep fails to reach its fixed point.
     """
+    # E-277-02 AC-3: BEFORE the reap.  Below it the reap has already committed
+    # and the guard could never observe the dirty state it exists to catch.
+    _require_clean_connection(conn, "reclaim_orphan_reference_data")
     result = ReclaimResult()
 
     # Step 1: reap FIRST, in its own committed transaction (TN-5.2).
@@ -1146,7 +1448,29 @@ def reclaim_orphan_reference_data(
             "SELECT COUNT(*) FROM reports WHERE status = 'generating'"
         ).fetchone()[0]
         if generating:
-            conn.execute("ROLLBACK")
+            # E-277-02 AC-6b.  UNREACHABLE TODAY, and kept deliberately on a
+            # stated basis -- the same treatment as the vacuous clause in
+            # ``_TEAM_STAT_EXISTS`` above, and for the same reason: a
+            # never-fires clause shipped WITHOUT saying so is what invites a
+            # later reader to delete it as dead code.
+            #
+            # Why it cannot fire: a transaction is NECESSARILY active here, not
+            # merely usually.  ``BEGIN IMMEDIATE`` sits OUTSIDE this ``try``, so
+            # a failure there never reaches this branch at all; and if the gate
+            # ``SELECT`` above fails, control goes to the ``except`` handler
+            # rather than here.  There is no path on which this branch runs with
+            # the transaction already ended.
+            #
+            # Why it is kept anyway: the guard costs one attribute read and
+            # holds regardless of what the surrounding code does later.  Its
+            # absence would be a latent "cannot rollback - no transaction is
+            # active" that replaces a clean deferral with a spurious error, and
+            # the reachability argument above depends on the placement of a
+            # ``BEGIN IMMEDIATE`` three statements away -- exactly the "safe
+            # because of what happened two statements ago" reasoning this epic
+            # keeps finding wrong.  Guarded, not exempted, for that reason.
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             result.deferred = True
             logger.info(
                 "Orphan reclamation deferred: %d live 'generating' report(s) "
@@ -1161,8 +1485,14 @@ def reclaim_orphan_reference_data(
         result.roster_rows_deleted = _orphan_roster_row_count(conn)
 
         # Step 4: delete the team tier (innocuous pins + team rows), FK-safe,
-        # ``teams`` last.  Never touches opponent_links / user_team_access
-        # (TN-7 roots, excluded from the orphan set by construction).
+        # ``teams`` last.  This loop never touches ``opponent_links`` or
+        # ``user_team_access`` -- they are not in ``_TEAM_PIN_TABLES``.
+        # ``scheduled_report_runs`` IS in that list and so is reached, but never
+        # for an audit-bearing team: any team referenced by ANY root is excluded
+        # from ``team_ids`` by construction, so no root's rows are ever deleted
+        # here.  (No count of roots or tables is given -- this comment does not
+        # need one to say what the loop touches, and a count kept here is one
+        # more thing to keep in step with the root list.)
         if team_ids:
             id_list = list(team_ids)
             for table, column in _TEAM_PIN_TABLES:
@@ -1189,7 +1519,14 @@ def reclaim_orphan_reference_data(
 
         conn.execute("COMMIT")
     except Exception:
-        conn.execute("ROLLBACK")
+        # E-277-02 AC-6: roll back only if a transaction is still open.  On
+        # SQLITE_FULL / SQLITE_IOERR SQLite has ALREADY auto-rolled back, and an
+        # unconditional ``ROLLBACK`` then raises "cannot rollback - no
+        # transaction is active" -- which REPLACES the real failure as the
+        # propagated exception, leaving the true cause demoted to ``__context__``
+        # and the wrong type/message in front of any caller inspecting it.
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
         raise
 
     logger.info(

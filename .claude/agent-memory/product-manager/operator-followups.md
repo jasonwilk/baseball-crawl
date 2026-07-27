@@ -17,7 +17,17 @@ Migration 011 (E-259, dropped the stored `player_season_*` tables) applies to pr
 ## 2. `FEATURE_PREDICTED_STARTER` promote-to-default decision
 Unrecorded. Audit residual #12.
 
-## 3. CONTEXT-RATCHET BASELINE IS STALE AND COMPOUNDING — four deferrals
+## 3. ~~CONTEXT-RATCHET BASELINE IS STALE AND COMPOUNDING — four deferrals~~ ✅ **RESOLVED 2026-07-27 — DO NOT ACT ON THIS SECTION**
+
+**⚰ THE OPERATOR RE-SNAPSHOTTED THE BASELINE. This obligation is DISCHARGED and the framing it prescribes is now FALSE.** Baseline re-snapshotted at **`625940e`**; E-277 closed against it at **+445**, which arithmetic confirms is current — `16672 − 445 = 16227` closes to the line. **Zero inherited drift. E-277 owned all +445** (rules + agents +42 between them; agent-memory +403, ~91%, which loads only for its owning agent).
+
+**⛔ DO NOT USE THE "STALE FOR N EPICS" FRAMING BELOW. It is retired.** Telling the operator their baseline is stale is now a **false statement about their own re-snapshot** — and it nearly entered E-277's permanent record: it was relayed to claude-architect as a standing instruction and **claude-architect refused to write it**, which is the only reason it did not land in the History.
+
+**The section below is preserved as the dated record of a real obligation that was really carried** — the +972 across four deferrals was accurate for E-262 / E-270 / E-272 / E-273 — **not as live guidance.** A withdrawal is left visible so a later reader knows this was taken and then discharged, rather than never taken.
+
+**What a future closure should do instead:** run the ratchet, report the number against the CURRENT baseline, and split own-vs-inherited **from measurement**, not from this memory. **The inherited share may legitimately be zero, as it was here.**
+
+### Historical record (accurate when written, superseded 2026-07-27)
 
 **Why:** the 2026-07-13 baseline (12404) vs 13275 at E-270 closure = **+871**, of which only ~+30 was E-270's own. **+728 is `.claude/agent-memory` growth** across E-261/E-262/E-264/E-267/E-273. A fourth deferral landed at E-272 closure (own +101, total +972 — E-272 is 10.4% of the overrun; +22 of its own came from the trigger-8 codification itself, i.e. recording the context-growth lesson grew the context layer).
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import contextmanager
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -556,9 +557,12 @@ def _assert_nothing_retired(
     assert db.execute(
         "SELECT COUNT(DISTINCT game_id) FROM game_perspectives"
     ).fetchone()[0] == 4
+    # E-277-05: the health gate is a WHOLE-SET cause, so ONE WARN covers all
+    # four refused games and carries the count -- not one line per absence.
     warnings = _retire_warnings(caplog)
-    assert len(warnings) == 4, warnings
-    assert all("REFUSED" in w and "not authoritative" in w for w in warnings)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED for 4 game(s)" in warnings[0]
+    assert "REFUSED" in warnings[0] and "not authoritative" in warnings[0]
 
 
 def test_zero_completed_games_end_to_end_reconcile_never_runs(
@@ -685,9 +689,11 @@ def test_catastrophic_shrink_retires_nothing(
     assert db.execute(
         "SELECT COUNT(DISTINCT game_id) FROM player_game_batting"
     ).fetchone()[0] == 4
+    # E-277-05: one WHOLE-SET WARN with the count, not one per absence.
     warnings = _retire_warnings(caplog)
-    assert len(warnings) == 3, warnings
-    assert all("REFUSED" in w and "not authoritative" in w for w in warnings)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED for 3 game(s)" in warnings[0]
+    assert "REFUSED" in warnings[0] and "not authoritative" in warnings[0]
 
 
 def test_truncated_array_padded_with_upcoming_games_retires_nothing(
@@ -727,11 +733,13 @@ def test_truncated_array_padded_with_upcoming_games_retires_nothing(
     assert db.execute(
         "SELECT COUNT(DISTINCT game_id) FROM player_game_batting"
     ).fetchone()[0] == 4
+    # E-277-05: one WHOLE-SET WARN with the count, not one per absence.
     warnings = _retire_warnings(caplog)
-    assert len(warnings) == 3, warnings
-    assert all("REFUSED" in w and "not authoritative" in w for w in warnings)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED for 3 game(s)" in warnings[0]
+    assert "REFUSED" in warnings[0] and "not authoritative" in warnings[0]
     # The guard that fired must be the ratio, not the boxscore-coverage guard.
-    assert all("boxscores_complete=True" in w for w in warnings)
+    assert "boxscores_complete=True" in warnings[0]
 
 
 def test_shrink_at_the_floor_still_retires(db: sqlite3.Connection) -> None:
@@ -934,10 +942,15 @@ def _seed_games(
     db: sqlite3.Connection, team: int, count: int, *, prefix: str = "g"
 ) -> list[dict]:
     """Load ``count`` completed games on distinct dates and return the array."""
+    # Real date arithmetic rather than ``f"2026-04-{10 + i:02d}"``: at count > 21
+    # that formula emits 2026-04-31 .. 2026-04-56, which are not dates. Identical
+    # output for every i <= 20, so no pre-existing fixture moves; the E-277-05
+    # parametrization at N=30/47 is the first caller to reach past April.
+    start = date(2026, 4, 10)
     games = [
         _game(
             f"{prefix}-{i}",
-            start_ts=f"2026-04-{10 + i:02d}T18:00:00Z",
+            start_ts=f"{(start + timedelta(days=i)).isoformat()}T18:00:00Z",
             opponent=f"Opp {i}",
         )
         for i in range(count)
@@ -1039,10 +1052,12 @@ def test_cap_refuses_a_mass_retire_that_passes_the_floor(
     assert db.execute(
         "SELECT COUNT(DISTINCT game_id) FROM player_game_batting"
     ).fetchone()[0] == 8
+    # E-277-05: the cap is a WHOLE-SET cause, so ONE WARN with the count.
     warnings = _retire_warnings(caplog)
-    assert len(warnings) == 3, warnings
-    assert all("REFUSED" in w for w in warnings)
-    assert all(f"MAX_GAME_RETIREMENTS={MAX_GAME_RETIREMENTS}" in w for w in warnings)
+    assert len(warnings) == 1, warnings
+    assert "REFUSED for 3 game(s)" in warnings[0]
+    assert "REFUSED" in warnings[0]
+    assert f"MAX_GAME_RETIREMENTS={MAX_GAME_RETIREMENTS}" in warnings[0]
     # The floor did NOT fire -- otherwise this test would pass without a cap.
     assert not any("not authoritative" in w for w in warnings), warnings
 
@@ -1705,11 +1720,13 @@ def test_newly_completed_games_no_longer_authorize_retiring_stale_ones(
     )
     assert {"new-0", "new-1"} <= _game_ids(db)
 
+    # E-277-05: one WHOLE-SET WARN with the count, not one per stale game.
     refusals = [w for w in _retire_warnings(caplog) if "REFUSED" in w]
-    assert len(refusals) == 2
-    assert all("refused_by=gate" in w for w in refusals)
-    assert all("not authoritative" in w for w in refusals)
-    assert all("START of this run" in w for w in refusals)
+    assert len(refusals) == 1
+    assert "REFUSED for 2 game(s)" in refusals[0]
+    assert "refused_by=gate" in refusals[0]
+    assert "not authoritative" in refusals[0]
+    assert "START of this run" in refusals[0]
 
 
 def test_first_ever_load_evaluates_a_vacuously_permitted_gate_and_retires_nothing(
@@ -2053,3 +2070,136 @@ def test_at_the_twin_accumulation_boundary_the_GATE_is_what_refuses(
     assert gone[0]["id"] in live, "the genuine removal was retired at the boundary"
     for twin in shared:
         assert twin["id"] in live
+
+
+# ---------------------------------------------------------------------------
+# E-277-05: WARN cardinality follows the CAUSE, not the absence count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("prior_count", (1, 30, 47))
+def test_whole_set_cause_logs_one_warn_regardless_of_absence_count(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture, prior_count: int
+) -> None:
+    """AC-1: ONE WARN per cause carrying the count -- never one per absence.
+
+    The cause is held at exactly one (empty payload, ``fetch_ok=True``) and only
+    the prior-game count varies. Pre-fix this emitted ``prior_count`` identical
+    lines -- 30 and 47 are the counts actually observed in the field -- which is
+    the storm this story removes.
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, prior_count)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        result = retire_absent_games(
+            db,
+            team_id=team,
+            season_id=_SEASON,
+            fresh_game_ids=set(),
+            fetch_ok=True,
+            not_final_game_ids=(),
+            boxscores_complete=True,
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team, season_id=_SEASON
+            ),
+        )
+
+    assert result.retired_game_ids == []
+    # AC-3: the RECORD stays per game. Only the LOGGING collapses.
+    assert len(result.refusals) == prior_count
+
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 1, warnings
+    assert f"REFUSED for {prior_count} game(s)" in warnings[0]
+    assert "not authoritative" in warnings[0]
+    # The ids the storm used to carry survive, on the one line.
+    assert "g-0" in warnings[0]
+
+
+def test_whole_set_and_per_id_warns_coexist_neither_absorbing_the_other(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-2: a whole-set cause and a per-id cause fire in the SAME pass.
+
+    ``g-0`` is PRESENT but not final (per-id); ``g-1``..``g-3`` are absent under
+    a failed health gate (whole-set). Both WARNs must appear -- the collapse must
+    not swallow the per-id line, and the per-id line must not suppress the
+    collapsed one.
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, 4)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        result = retire_absent_games(
+            db,
+            team_id=team,
+            season_id=_SEASON,
+            fresh_game_ids={"g-0"},
+            fetch_ok=True,
+            not_final_game_ids=("g-0",),
+            boxscores_complete=True,
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team, season_id=_SEASON
+            ),
+        )
+
+    assert result.retired_game_ids == []
+    assert set(result.refusals) == {"g-0", "g-1", "g-2", "g-3"}
+
+    warnings = _retire_warnings(caplog)
+    assert len(warnings) == 2, warnings
+    per_id = [w for w in warnings if "NOT final" in w]
+    whole_set = [w for w in warnings if "REFUSED for 3 game(s)" in w]
+    assert len(per_id) == 1, warnings
+    assert len(whole_set) == 1, warnings
+    # The per-id line names its ONE game; the collapsed line names the other three.
+    assert "g-0" in per_id[0]
+    assert "g-0" not in whole_set[0], whole_set[0]
+    for absent_id in ("g-1", "g-2", "g-3"):
+        assert absent_id in whole_set[0]
+
+
+def test_success_log_still_fires_once_per_retired_game(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-7a: the hard-delete audit line is NEVER collapsed.
+
+    It is the sole per-game record of what this pass hard-deleted, and AC-1's
+    scenarios cannot protect it: every refusal branch ``continue``s before the
+    delete, so no success log fires in any of them and AC-1 would still pass with
+    this line destroyed.
+
+    Fails if the success log is collapsed, summarized, or made conditional.
+    """
+    team = _insert_team(db)
+    _seed_games(db, team, 8)
+    retired = {"g-6", "g-7"}
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        result = retire_absent_games(
+            db,
+            team_id=team,
+            season_id=_SEASON,
+            fresh_game_ids={f"g-{i}" for i in range(6)},
+            fetch_ok=True,
+            not_final_game_ids=(),
+            boxscores_complete=True,
+            prior_snapshot=snapshot_prior_loaded_game_ids(
+                db, team_id=team, season_id=_SEASON
+            ),
+        )
+
+    assert set(result.retired_game_ids) == retired
+    successes = [w for w in _retire_warnings(caplog) if "hard-deleted game" in w]
+    assert len(successes) == len(retired), successes
+    # Each line carries its OWN game id and its OWN deleted-row counts.
+    for game_id in sorted(retired):
+        own = [w for w in successes if game_id in w]
+        assert len(own) == 1, (game_id, successes)
+        assert "Rows deleted: {" in own[0], own[0]
+    # Nothing was refused here, so no refusal WARN of either shape appears.
+    assert not [w for w in _retire_warnings(caplog) if "REFUSED" in w]

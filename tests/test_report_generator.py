@@ -1018,13 +1018,23 @@ class TestGenerateReportFailures:
         from src.gamechanger.client import CredentialExpiredError
 
         _seed_team(db)
-        # E-273-02: generate_report's opportunistic cleanup_expired_reports now
-        # runs the orphan-reclamation pass at generation START. This fixture pins
-        # ensure_team_row to id=1 (below), so team 1 must survive that sweep;
-        # mark it a member team (reclamation never reclaims members). In
+        # E-273-02: generate_report's opportunistic cleanup_expired_reports runs
+        # the orphan-reclamation pass at generation START. This fixture pins
+        # ensure_team_row to id=1 (below), so team 1 must survive that sweep. In
         # production the target team is created fresh AFTER cleanup, so it is
         # never swept -- the pin is a test artifact this compensates for.
-        db.execute("UPDATE teams SET membership_type = 'member' WHERE id = 1")
+        #
+        # E-277-01: team 1 stays 'tracked' (the PRODUCTION shape) and is pinned
+        # by a reachability ROOT instead. E-273-02 flipped it to 'member', which
+        # kept the test green but stopped it covering the shape production
+        # actually uses. opponent_links is the pinning mechanism for all three
+        # restored fixtures in this file: it is the pre-existing load-bearing
+        # root, so a future epic revisiting the newer audit root cannot fail
+        # these tests for reasons unrelated to what they test.
+        db.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+            "VALUES (1, 'root-pin-cred', 'Pinned Opp')"
+        )
         db.commit()
 
         # Return a fresh (unclosed) connection for each get_connection() call
@@ -4020,14 +4030,22 @@ class TestQueryBeforeCleanup:
         from src.gamechanger.loaders import LoadResult
 
         _seed_team(db)
-        # E-273-02: the opportunistic cleanup at generate_report START now runs
-        # the orphan-reclamation pass. This test pins ensure_team_row to id=1, so
+        # E-273-02: the opportunistic cleanup at generate_report START runs the
+        # orphan-reclamation pass. This test pins ensure_team_row to id=1, so
         # team 1 must survive that sweep (its game is only created later, during
-        # load); mark it a member team (reclamation never reclaims members).
-        db.execute("UPDATE teams SET membership_type = 'member' WHERE id = 1")
+        # load).
+        #
+        # E-277-01: team 1 stays 'tracked' (the PRODUCTION shape), pinned by a
+        # reachability ROOT rather than by the 'member' flip E-273-02 used --
+        # see the note in test_credential_expired_sets_failed for why
+        # opponent_links is the mechanism for all three restored fixtures.
+        db.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+            "VALUES (1, 'root-pin-queries', 'Pinned Opp')"
+        )
         _seed_season(db)
         _seed_player(db, "p1", "Test", "Player")
-        # E-273-02: root p1 on the surviving member team so the generate-START
+        # E-273-02: root p1 on the surviving team so the generate-START
         # reclamation does not sweep it as a bare orphan player before the loader
         # writes its game stat row (the loader only creates players in reality).
         _seed_roster(db, 1, "p1")
@@ -4455,14 +4473,24 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, season_year, membership_type) "
             "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
         )
-        # Team 2: already owns the public_id we'd try to backfill.
-        # E-273-02: seeded as a member team so the orphan-reclamation pass that
-        # now runs at generate_report START does not sweep this gameless
-        # duplicate before the backfill runs -- preserving the UNIQUE collision
-        # this test exercises (reclamation never reclaims member teams).
+        # Team 2: already owns the public_id we'd try to backfill. The
+        # orphan-reclamation pass runs at generate_report START and would sweep
+        # this gameless duplicate before the backfill, destroying the UNIQUE
+        # collision the test exercises.
+        #
+        # E-277-01: team 2 stays 'tracked' -- the PRODUCTION shape for a
+        # duplicate opponent row -- and is pinned by a reachability ROOT
+        # instead. E-273-02 flipped it to 'member', which kept the test green
+        # but stopped it covering the shape a real collision has: a real
+        # colliding duplicate is 'tracked', and this test is the only coverage
+        # of the backfill's IntegrityError path.
         db.execute(
             "INSERT INTO teams (name, public_id, season_year, membership_type) "
-            "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'member')"
+            "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+            "VALUES (2, 'root-pin-collision', 'Pinned Opp')"
         )
         _seed_season(db)
         db.execute(
