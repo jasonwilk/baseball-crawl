@@ -10,6 +10,7 @@
 ## Calibration (findings of mine that were falsified)
 - [Never claim a ratio-gate population change is side-effect-free](ratio_gate_population_claims.md) — E-267-02: my "no false refusals" hand-derivation held at N=30 and broke at N=3. Enumerate fail-open AND fail-closed, evaluate at the smallest realistic N, say "verify empirically".
 - [Re-verify "the defect still persists" after a redesign narrows the code](stale_defect_characterization.md) — E-267-03: I carried a round-1 harm description into round 2 where the new `team_id` predicate had made it false. Quote the WHERE clause, walk the binding positionally.
+- [Never rule on gate coverage from a config constant or a rule file](gate_behavior_needs_the_executable.md) — E-275: I ruled the PII gate did NOT cover `epics/` from `SKIP_PATHS` + a stale rule file; `.githooks/pre-commit` runs a SECOND gate that does. A constant scopes one mechanism; a hook composes several. My proposed fix was the more alarming sentence.
 - ["Same branch" is not a reason to withdraw a test-coverage finding](finding_withdrawal_shared_branch_reasoning.md) — E-272-02: I withdrew a sibling case on shared-return reasoning; the four names route through four distinct patterns, so enumeration discriminates. Concede when the implementer's version is better.
 
 ## Closure-Pass Practice

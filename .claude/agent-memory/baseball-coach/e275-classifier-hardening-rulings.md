@@ -337,5 +337,269 @@ naming convention, or a constructed example?") is exactly this check, and per ID
 notes it was never run against api-scout's 18-team sample. E-275 should run that check
 before implementing, not assume my ruling substitutes for it.
 
+**[Correction, 2026-07-26 -- kept as a pointer, not a rewrite, since the paragraph above
+is a historical record of what I claimed at the time.]** "Api-scout's 18-team sample"
+did not exist as a name corpus and could never have answered this check -- it was an
+`age_group`-population sweep (`docs/api/endpoints/get-public-teams-public_id.md:121`).
+The paragraph above is wrong to imply that sample was a legitimate-but-unused resource;
+it wasn't a candidate at all. The check DID get run, against a different, real corpus
+api-scout separately assembled from stored proxy captures (563 names) -- see the RULING
+4 AMENDMENT immediately below for what that check actually found.
+
+## RULING 4 AMENDMENT (2026-07-26) -- narrowed to `legion`/`post N` only, on real-corpus evidence
+
+**Superseding note: RULING 4's original text above said "reorder the four Legion
+patterns ahead of `\bvarsity\b`." That is now NARROWED to two of the four.** The
+scope-boundary confirm I gave team-lead earlier the same day (varsity tier only, not
+sub-varsity) still stands unchanged -- this amendment narrows WHICH patterns move at
+the varsity boundary, not whether the boundary itself moves further down.
+
+**Evidence, from api-scout, sourced to a real corpus I did not have when I wrote the
+original ruling.** **[Corrected 2026-07-27, confirmed first-hand by api-scout directly
+(not via relay) -- supersedes the "12 capture sessions"/"2,518 raw response bodies"
+framing this bullet block originally used, which conflated two different counts]**:
+563 distinct team names harvested from 1,754 JSON-parseable response bodies (2,518
+stored, out of 16,665 logged requests), captured across 4 proxy sessions that store
+response bodies (of 12 total session logs -- the other 8 carry request metadata only,
+zero stored bodies, zero names) on 2026-03-11 and 2026-03-12, `proxy/data/sessions/` --
+superseding the abandoned "18-team sample" IDEA-172 pointed at, which api-scout
+confirmed was never a name corpus at all,
+`docs/api/endpoints/get-public-teams-public_id.md:121`:
+- The reorder is a behavioral no-op on every observed name today (0/563 divergences),
+  for both the full four-pattern move and the narrowed two-pattern move alike -- so
+  narrowing costs nothing measurable now, only removes a promotion with no
+  observed benefit and one observed cost (below).
+- `\bjuniors\b` matches 0 of the 563 distinct team names; the bare case-insensitive
+  substring `juniors` appears in 0 of 2,518 stored response bodies -- i.e. nowhere in
+  the captured dataset, in any field. **Confirmed first-hand by api-scout as a real
+  substring search run BEFORE the JSON-parse filter (so it covers all 2,518, not just
+  the 1,754 that parsed), stronger than a word-boundary claim since it also rules out
+  `juniors` occurring inside a longer word.** A SEPARATE, weaker claim answering a
+  DIFFERENT question: of the 22 real names carrying a hard Legion token, 0 use
+  `juniors` as a self-naming word -- a weak null (small denominator, asks "do Legion
+  teams call their divisions Juniors?"), not to be conflated with the strong
+  dataset-wide absence above (asks "does the word occur anywhere at all?"). Every
+  observed singular `Junior` occurrence (4 of 4, general population) is `Junior
+  Varsity`; zero are `Junior Legion`.
+- `seniors` has ONE CONFIRMED LIVE misfire on a non-Legion, school-family team,
+  verified from source by api-scout (`src/reports/starter_prediction.py:476-490`): a
+  team with `age_group=high_varsity`, no Legion token, no age bracket, carries
+  "Seniors" in its name (school-graduating-class sense, not Legion's Senior division)
+  and falls through to `_league_from_level_word` (since `high_varsity` matches neither
+  the bracket nor the range regex), where `\bseniors\b` matches and resolves `legion`.
+  Of four candidate names total (bare `seniors`, no Legion token, no bracket), this is
+  the ONLY confirmed live misfire -- one is caught upstream by `_AGE_RANGE_RE` before
+  the level-word path ever runs (`age_group="Between 13-18"` resolves `youth_travel`
+  directly, per the in-code comment at :478-480 -- not a misfire), and two are
+  unclassifiable for want of a captured `age_group` field (may or may not be misfires;
+  the corpus doesn't say). **[Corrected 2026-07-27: I originally described this as
+  confirmed in "TWO independent corpora," reasoning the prior E-274 instance was
+  probably the same program's sibling squad (both used a "Seniors N" numbering
+  convention). api-scout tested that reasoning directly and RETRACTED it -- this
+  corpus has exactly one `Seniors 1`-style name and no `Seniors 2`, and the E-274
+  instance survives only as an elided string with its program prefix never persisted,
+  so same-program is UNTESTABLE, not merely unproven. The independence claim now rests
+  on a simpler, certain fact instead: both observations come from the same operator's
+  network, which alone defeats independence regardless of whether they're the same
+  program. Correct statement: two observations, same operator network, occurrence
+  established, RATE not established.]** This is a PRE-EXISTING defect independent of
+  the reorder (no preceding pattern matches this name either way, so order doesn't
+  change its outcome) -- but it is direct evidence that `seniors` functions as a
+  generic English word in real team names more than as Legion's own division
+  convention, which undercuts the "still Legion's own division-naming convention, just
+  weaker" framing I gave `seniors`/`juniors` in the original ruling text above.
+- Of the 22 real names carrying a Legion token, 9 carry no tier word at all, 5 carry
+  `reserve(s)` (the Legion+Reserve collision this file rules on separately below), 4 a
+  bracket only, 3 `seniors`, 1 singular `Senior`, 0 `varsity` -- `legion`/`post N` are
+  well-attested (22 names) and clean; `seniors` is thin and already shown unreliable.
+  **[Corrected 2026-07-27, via team-lead relaying api-scout's re-derivation]: the
+  original "14 carry no tier word" figure omitted `reserve(s)` from the tier-word set it
+  checked against, so the 5 Legion+Reserve names were miscounted into the no-tier-word
+  bucket. Corrected to 9. This also independently CONFIRMS the Legion+Reserve collision
+  analysis below was reasoned about the right shape -- all 5 carry a hard Legion token,
+  not a softer `seniors` match as one audit pass worried -- so that guard row stands
+  unchanged.]**
+
+**CORRECTION (2026-07-26, same day, before this reasoning reached team-lead) -- the
+"0/563" framing below overstated the co-occurrence evidence. api-scout flagged this
+directly: my own stated sufficiency floor for the co-occurrence falsifier was 30-50
+names CONTAINING a seniors/juniors token; the corpus contains only 14 such names total
+(8 `seniors`, 2 singular `Senior`, 4 singular `Junior`, 0 `juniors`). 0/563 is the wrong
+denominator for that specific question -- the relevant base is 14, not 563, and 14 is
+under half my own floor. So: **the co-occurrence falsifier CANNOT be run on this
+corpus, not "was run and returned clean."** That distinction matters and is preserved
+below rather than smoothed over.**
+
+**Ruling (revised ground): narrow the reorder to `legion`/`post N` only. Leave
+`seniors`/`juniors` in their current position (after `\bvarsity\b`), unpromoted --
+but not for the co-occurrence-safety reason I originally reached for.**
+
+Team-lead raised the real counterargument, and it holds: PM and SE have since confirmed
+by measurement that `legion` requires equal-or-more rest than NSAA Varsity at every
+pitch count and strictly more at 46-50, 61-70 and 81-90 post-April; and at 46-50, 61-70
+and 81-upward WITH NO UPPER BOUND pre-April. **[Corrected 2026-07-27 via SE's
+execution, relayed by team-lead]: pre-April is not a bounded "top tier" divergence --
+both tables CLAMP rather than exclude above their own top tier, and the clamp values
+differ (NSAA pre-April locks at 3 days, Legion locks at 4 days), so the gap never closes
+no matter how high the pitch count runs; SE drove it to 130 and it persisted. The
+original spec seed wrote this band as bounded at 81-105 (Legion's declared cap), which
+is wrong for the same reason the already-dropped "110 vs 105 daily cap" clause was wrong
+-- neither cap is actually enforced by the exclusion gate, so neither bounds anything.]**
+-- so even a WRONG promotion-driven collision (a non-Legion team misread as
+Legion) fails toward over-rest, a bench-day cost, not an arm-safety one. **[Correction,
+2026-07-27, pointer not rewrite: "fails toward over-rest" overstates this -- SE's
+verbatim, now in the epic, is the accurate form: "never under-rests: in the three bands
+where the tables differ at all it costs a bench day, not an arm, and everywhere else it
+changes nothing." "Never under-rests" asserts the ABSENCE of the bad direction; "fails
+toward over-rest" asserts a POSITIVE one that's false across most of the pitch-count
+range, since the bands where the two tables agree produce no over-rest either. Read
+every "fails toward over-rest" / "fail toward over-rest" in this section as "never
+under-rests" -- the conclusions below are unaffected, only this phrase is wrong.]** That
+weakens, correctly, the safety-direction argument I originally leaned on for keeping
+`seniors`/`juniors` unpromoted -- if the co-occurrence sample had come back clean, I
+would no longer treat "it's still theoretically risky" as a reason to hold the line,
+given confirmed-safe failure direction.
+
+**What survives, and is enough on its own -- FINALIZED 2026-07-27, this is the settled
+position, superseding the framing below.** This isn't a safety argument (retired, see
+above) and it isn't primarily a misfire-count argument either -- that leg weakened
+across this session (co-occurrence sample too thin to run at all; the misfire count
+corrected from an implied "confirmed twice" down to one confirmed live instance, one
+operator network, independence unestablished) and I should not have let my own
+phrasing make it look load-bearing. **The argument that actually carries the ruling is
+structural, and it doesn't need a sample size at all.** It's the same concern in
+RULING 4's ORIGINAL falsifier text, written before any corpus work existed:
+`seniors`/`juniors` are plain English words carrying real non-Legion meanings that
+`legion`/`post N` essentially never do. The corpus work sharpened that argument with
+concrete FORM rather than replacing it with a count: real attested Legion usage in
+this dataset trends toward the SINGULAR adjective form ("Senior Legion," one
+instance), the classifier's patterns are PLURAL, plural `juniors` is entirely
+unattested anywhere in the 2,518-body dataset (the strong null, confirmed above), and
+the one word in that grammatical family that DOES appear at volume -- plural
+`seniors`, 8 attestations -- is exactly the one with a common, competing non-Legion
+meaning (graduating class). Widening either pattern to the singular form the data
+suggests is the real convention would manufacture false Legion signals against
+`Junior Varsity` (4 attestations, zero Legion co-occurrence) -- api-scout's own
+finding, and the reason not to "fix" the pattern-form problem by loosening it either.
+
+The one confirmed live misfire is corroborating color for this argument, not its
+foundation: it shows the failure mode is REAL, which the structural argument alone
+couldn't establish on its own. But the structural argument is what survives
+sample-size scrutiny, and it's the leg the epic's Technical Note should lead with.
+Precedence should track signal RELIABILITY (`varsity`: 31 clean attestations, zero
+known misfires; `seniors`: one demonstrated false-positive) as much as
+failure-direction safety, which is itself neutralized now that a wrong
+promotion-driven collision is confirmed to **never under-rest** (see the correction
+above -- costs a bench day in the three bands where the tables diverge, changes nothing
+everywhere else), not to fail toward over-rest as this section originally said.
+
+`juniors` has NO misfire evidence (0/2,518 raw bodies, entirely unattested) and no
+attested co-occurrence either way -- genuinely a coin flip on current evidence, harmless
+to move per team-lead's own read. I'd keep it paired with `seniors` rather than split
+the two: they're a singular family (Legion's own Senior/Junior division names, plural
+form), and `seniors`'s demonstrated ambiguity is suggestive -- not proof -- that its
+lexical cousin carries the same generic-word risk even without its own caught instance
+yet. This is a judgment call, stated as one, not a corpus finding.
+
+`legion`/`post N` have no misfire evidence against them (22 well-attested, clean names)
+and close a real masked under-rest hazard (IDEA-172/RULING 4's original case) -- keep
+those two promoted regardless of the above.
+
+**The bare-`seniors`-misfires-on-a-school-team defect itself is OUT of E-275's scope**
+(same discipline as the operator's MINOR-to-idea policy for this epic) -- it is not a
+precedence-ordering bug, it exists regardless of any reorder, and fixing it would mean
+making the `seniors` pattern itself more selective (e.g., requiring an adjacent numeric
+division marker or excluding known school-context co-signals), which is new work, not a
+guard-test fix. Flagging for an idea file: `seniors`-alone is an unreliable Legion
+signal and should get its own look, separate from this epic.
+
+**Legion + Reserve collision (api-scout's finding (b)) -- already covered, confirmed
+safe, no code change needed.** 5 of 563 real names carry a Legion token together with
+`\breserves?\b`. `reserve` sits at priority 3, ahead of `varsity` and ahead of Legion
+patterns in BOTH the original and the now-narrowed order, so these resolve to the
+sub-varsity CLASS either way -- this is the exact case my sub-varsity-tier scope
+confirm to team-lead already ruled out of the reorder (RULING 4 stays scoped to the
+varsity boundary, not the sub-varsity one). Working the mechanism through with the
+authoritative tables in [[league-pitch-rules]] (not asserting from memory, reading the
+sourced table): season then picks the FAMILY within the sub-varsity class per the
+Season x Level table there --
+- **Summer** (the realistic season for an actual Legion/Post-N program): resolves
+  `nrbl`. NRBL and Legion are BYTE-IDENTICAL curves today (both 30/45/60/80/105, same
+  source line: nrbl.net "adopts standard ALB pitching regulations") -- so a
+  Legion-named Reserve team gets IDENTICAL rest-day numbers whether it resolves
+  `legion` or `nrbl`. Zero safety stakes; only the internal label differs (matches the
+  file's own standing note that Legion/NRBL divergence is a labeling risk, not a
+  rest-day risk, until the two bodies' rules actually diverge).
+- **Spring or season-absent**: resolves `nsaa_subvarsity`. Point-by-point against the
+  Legion table (both tables sourced in [[league-pitch-rules]]): NSAA Sub-Varsity
+  requires 1/2/3/4 rest days at 30/50/70/90 pitches; Legion requires 0/1/2/3/4 at
+  30/45/60/80/105. At every pitch count NSAA Sub-Varsity's requirement is equal to or
+  GREATER than Legion's (strictly greater at the low end, equal in the middle bands,
+  and NSAA Sub-Varsity's own max cap of 90 is inside Legion's still-permitted range) --
+  never less. Confirms the same "at least as conservative" property SE verified by
+  execution for the general sub-varsity-vs-Legion/NRBL comparison, now traced through
+  this specific collision by hand against the sourced tables.
+
+So: no ruling change needed for Legion+Reserve, and no code fix required for it either
+-- the existing precedence (Reserve ahead of Legion, unaffected by the narrowed
+reorder) already resolves it to the safe side in every season branch. This closes
+api-scout's open question (b) definitively rather than leaving it as a follow-up.
+
+**Observability flag: keep it, widen its trigger.** Originally proposed as a condition
+on promoting `legion`/`post N` only. Widen it to fire on ANY name carrying a
+Legion-family token (`legion`, `american legion`, `post N`, `seniors`, `juniors`) beside
+ANY generic tier word (`varsity`, `jv`, `freshman`, `reserve`, `sophomore`), regardless
+of which patterns actually get reordered. **[Correction, 2026-07-27, pointer not
+rewrite: this five-word list is incomplete -- `frosh` is missing, a real alternate the
+classifier already matches (`\bfreshman\b|\bfrosh\b` is one pattern), so a name like
+"<sentinel> Legion Frosh" would not fire. Ruled since: add `frosh`, AND don't hand-list
+this set at all -- derive it from `_LEVEL_WORD_PATTERNS` (its sub-varsity/varsity
+alternates) so it can't drift the way this omission just proved it can. TN-5 should
+state the trigger set as the current membership of a rule, not a fixed list someone has
+to remember to update.]** -- the flag's job is "an ambiguous name exists,
+a human should sanity-check it," not "a name changed resolution." Its value doesn't
+depend on which patterns are promoted, and the `seniors` reliability finding argues FOR
+more observability on that pattern specifically, not less, even though it's not being
+given more decision authority.
+
+**`juniors`-vs-`Junior Varsity` read (flagged for PM to record, NOT an E-275 scope
+item):** my hypothesis, not a confirmed fact -- the plural `\bjuniors\b` pattern may be
+aimed at the wrong word FORM. Legion's own division naming (per ALB rules) uses
+"Junior"/"Senior" as adjectives describing the division ("Legion Junior division"), a
+form a coach naming a team would render as singular ("Post 9 Junior"), not plural
+("Post 9 Juniors" as a noun). That would explain why plural `juniors` is entirely
+unattested (0/2,518 raw bodies) while singular "Junior" appears 4 times, always as
+"Junior Varsity" (an HS/school-context pairing, not Legion). Plural `seniors` breaks
+this pattern (8 attestations, more common than I'd expect if the hypothesis were
+clean) -- likely because "Seniors" also has an ordinary, very common non-Legion English
+meaning (graduating class) that "Juniors" as a plural noun does not carry as readily.
+Worth a dedicated look outside this epic; not asserting the regex needs to change
+without a citation-grade check of actual Legion team-naming convention, same discipline
+as every other numeric/regex claim in this file.
+
+**Confirmed items from this round, recorded for the story writers:**
+- The stronger safety AC PM proposed ("no fixture row's post-fix league may require
+  strictly less rest than its pre-fix league, at any pitch count") is the right
+  encoding of the coaching standard -- confirmed, not over-constraining. It catches the
+  failure mode a plausible misreading of RULING 4 would produce (moving Legion patterns
+  to the FRONT of the whole list rather than just ahead of `\bvarsity\b`, which would
+  flip a Legion-plus-sub-varsity name from the conservative sub-varsity table to
+  Legion's looser one) even when no fixture row happens to encode that exact name.
+- Sub-varsity-tier non-extension: reconfirmed deliberate, not an omission (see the
+  full reasoning already delivered to team-lead the same day -- extending would flip a
+  currently-conservative resolution to a less-conservative one and manufacture a new
+  masked under-rest risk in the exact spot this epic exists to remove one from).
+- Bracket-floor AC narrowed to `\d+U` + the free-text range form, with `18O`/`NNO`
+  recorded as pending rather than implemented: confirmed correct. The coaching property
+  ("a confidently-known bracket beats every level word") is unchanged; only its
+  currently-testable extent shrinks, and implementing `NNO` would be scope expansion
+  the operator has already ruled out for this epic.
+- Tier 1 (executes) / Tier 2 (data block, ruled-but-unimplemented, cited not asserted)
+  fixture-pack split: no coaching-side objection to the data-block-only mechanism for
+  Tier 2. The content is already durably preserved in this file with full reasoning and
+  linked from the epic, which is what actually protects it from going stale -- a
+  self-announcing failing-test trick is an engineering call, not one I need to weigh in
+  on further.
+
 Related: [[league-pitch-rules]], [[e274-age-group-level-signal-consultation]],
 [[probable-starter-model]]

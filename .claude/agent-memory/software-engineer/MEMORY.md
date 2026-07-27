@@ -40,6 +40,7 @@ See `.claude/rules/testing.md`.
 
 - [dispatch-git-gotchas.md](dispatch-git-gotchas.md) -- `git rm` stages the deletion, hiding it from CR's unstaged `git diff` (hid 97 lines in E-256-03); new untracked files are invisible to `git diff --stat`; mid-epic the baseline is `git show :<file>`, never `HEAD:<file>`; **`TaskUpdate` with `owner` SENDS a real `task_assignment` — it is not a notepad; the body is the task's STORED description, frozen at creation and broadcast as current, so it rebroadcasts stale spec claims under a fresh timestamp (E-277: a false authorization incident, then a phantom "S03-6 not landed" that triggered a stop-work order). Never tidy a task list you do not lead; re-read a description before setting `owner`**
 - [feedback_dead_symbol_deletion.md](feedback_dead_symbol_deletion.md) -- A lint-flagged unused binding can be an unfinished intent (found the WebAuthn `exclude_credentials` gap, E-256-08). Check for evidence outside the code; delete by literal block, never by symbol name (two `all_dates`, one live)
+- [stale-open-questions.md](stale-open-questions.md) -- An artifact's recorded "unmeasured"/"never run"/"nobody has been asked" is DATED, not current; check for a later ruling before routing it as open (hit twice in one E-275 hour). Same rot hits FIGURES: re-run every number when a ruling narrows
 
 ## Topic File Index
 

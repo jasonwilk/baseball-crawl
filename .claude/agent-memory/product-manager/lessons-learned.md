@@ -3,6 +3,24 @@
 
 Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 
+## E-275 — Two AC-authoring lessons that outlive the epic (2026-07-27)
+
+**1. Against an ABSENT feature, an emission assertion discriminates and an absence assertion is VACUOUS — one sentence, opposite consequences.**
+
+I wrote a Definition of Done demanding a fail-first demonstration for six ACs, under a section header reading *"all DISCRIMINATE — no such record exists today."* That sentence was true of the one AC asserting the new record **is emitted** and false of the two asserting it is **not emitted for the wrong inputs**. Pre-change, no record is emitted for *any* input — so the absence ACs pass trivially, and the conditional one (*"given any name that emits the record…"*) holds vacuously because its antecedent is never satisfied. **There is no implementation of either that fails first.**
+
+**Why this matters beyond the instance: a DoD demanding the impossible does not fail loudly. It either stalls the story or gets waved through** — and the second is worse than never having demanded it, because the checkbox now certifies nothing while looking like rigor. Code-reviewer caught it; I had written it twice.
+
+**Practice:** before putting an AC in a fail-first list, ask what the code does with that input **today**. If the answer is "nothing, because the feature does not exist," then only an assertion that something now HAPPENS can discriminate. An assertion that something does NOT happen is a GUARD on the new thing's *precision* — it names a wrong implementation it catches, and it is verified, not demonstrated.
+
+**2. The excision that loses things is the one attached to a STRUCTURE rather than to CONTENT.**
+
+Lesson 1's sentence nearly died in E-275's trim. I was cutting a component, applied *relocate-don't-delete* faithfully to its Technical Note and every one of its ACs, and still almost dropped that analysis — **because it sat in a section header above the ACs, not inside a note or an AC.** My relocation map enumerated notes, ACs, figures and open questions. It did not enumerate headers, preambles, or the transitional sentences between sections. The team lead caught it.
+
+**This is the counterpart to E-272's derivative-sweep lesson above and the sharper half.** E-272 says a retired *claim* degrades into forms sharing none of its tokens. This says a cut *component* takes with it prose that was never about the component at all — general craft that happened to be introduced where the component needed it. **Practice: when cutting a section, read the connective tissue — headers, preambles, the sentence that sets up the list — and ask of each whether it says anything that survives the cut. Enumerate structural positions, not just content items.**
+
+**Meta-note worth keeping, because it is why I write these down rather than trusting care:** across E-275's planning and trim, ten instrument failures were catalogued and **two were committed by the authors of the rule against them, hours after writing it** — one by the reviewer applying the criterion-versus-evidence discipline, inside the audit commissioned to prevent exactly that error. **Awareness of a defect class confers no immunity. Only re-deriving does, and only from outside the claim's authorship.** Catalogue: `.project/research/E-275-planning-record.md` §2; codification proposed as IDEA-214.
+
 ## E-272 — Retiring a claim: sweep for DERIVATIVES, not restatements (2026-07-25)
 
 I wrote a false safety generalization into TN-4 at planning time ("the season-absent default over-rests, never under-rests" — true for sub-varsity, false for Varsity, because NSAA Varsity and Legion cross over in the middle tiers). CA caught it by refusing to restate a claim it had not checked against the constants. **Then I propagated it five times inside one epic across four structural positions, and found three of those myself only AFTER running a deliberate correction pass on the very file documenting the defect.**
