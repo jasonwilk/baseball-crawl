@@ -2,14 +2,26 @@
 # .claude/hooks/send-message-counter.sh
 # Claude Code PreToolUse hook: dispatch message-volume counter.
 #
-# Purpose: make dispatch SendMessage volume visible and bounded. The E-256 dispatch
+# Purpose: make dispatch SendMessage volume visible per-story. The E-256 dispatch
 # produced ~640k characters of agent-to-agent prose with no running count; this makes
 # the volume observable per-story instead of invisible.
 #
+# ⚰ RETIRED (2026-07-28, operator order): the WARN_AT/DENY_AT thresholds and their
+# enforcement. This hook previously warned at 40 sends and HARD-DENIED SendMessage at
+# 60 per staging boundary. Both are gone, for two operator-observed reasons:
+#   1. The deny killed the E-278 dispatch mid-build (2026-07-28) — a hard stop on the
+#      coordination channel halts the whole team, and the recovery cost exceeds any
+#      value the cap returned. The E-276-fitted cap (largest story = 41 sends) did not
+#      transfer to the next epic's largest story.
+#   2. Agent-visible budgets distort behavior (operator, 2026-07-26: agents "avoiding
+#      things because it 'costs a send' ... It changes base good behavior"). The warn
+#      advisory was the same mechanism at lower intensity.
+# What remains is PASSIVE TELEMETRY ONLY: a silent counter and the per-boundary TSV
+# log below, for operator review after the fact. This hook never emits JSON and never
+# blocks. Do not reintroduce a threshold here without an operator order.
+#
 # Registered on TWO PreToolUse events (see .claude/settings.json):
-#   - SendMessage : increment a worktree-local send counter; warn at WARN_AT, deny at
-#                   DENY_AT (values and provenance below -- deliberately NOT restated
-#                   here, where the previous copy said 15/25 long after both moved).
+#   - SendMessage : silently increment a worktree-local send counter.
 #   - Bash        : when the command is a `git add` TARGETING the epic worktree (the
 #                   per-story staging boundary), append one dispatch-log row
 #                   (epic ID, staging-boundary sequence index, sends) and reset the
@@ -31,33 +43,8 @@
 # 37 + 4. Any threshold conversation citing "37" is citing the FIRST row of a split
 # story, and a reader who reads rows as stories will under-count.
 #
-# THRESHOLD PROVENANCE (OPERATOR-OWNED). The operator is the SOLE person who may edit
-# either number below; agents MUST NOT change them.
-#   WARN_AT=40  set by the operator on E-276's data, with DENY_AT below.
-#   DENY_AT=60  set by the operator on E-276's data, REPLACING the E-256 placeholder of
-#               25. The "revisit with data" that stood here has been DONE -- do not
-#               start it again on the strength of this comment.
-#
-#   The data: E-276's five stories cost 41 / 18 / 32 / 11 / 8 sends (story 01's 41 was
-#   logged as 37 + 4 across a folded boundary -- see the note above, and the per-row
-#   figures in .dispatch-log/E-276.tsv). The cap is counted PER STAGING BOUNDARY, so it
-#   has to accommodate the LARGEST SINGLE story, never the average -- an average-fitted
-#   cap denies the one story that most needs the sends. WARN_AT moved up with it for a
-#   separate reason: a warn threshold far below the deny cap fires on nearly every
-#   story, and a signal that always fires carries none.
-#
-#   ⚠️ THIS BLOCK WAS FALSIFIED BY THE COMMIT THAT RAISED THE VALUES (2026-07-26), with
-#   nobody at fault and no sentence edited -- it simply stopped being true, and the
-#   edit that did it was correct and necessary. That is the argument for keeping a
-#   value and its provenance in one place: co-location is what makes the staleness
-#   visible at the moment of the change.
-#
 # Fail-open: if jq is unavailable, exit 0 (mirrors worktree-guard.sh). No-op when no
 # epic worktree is present, so non-dispatch sessions are never affected.
-# Denial/warning is communicated via JSON output; the hook always exits 0.
-
-WARN_AT=40
-DENY_AT=60
 
 # Fail open if jq is missing (same posture as worktree-guard.sh).
 if ! command -v jq &>/dev/null; then
@@ -110,44 +97,8 @@ case "$TOOL_NAME" in
     LOG_DIR="$WORKTREE_DIR/.dispatch-log"
     COUNTER="$LOG_DIR/sends.count"
     mkdir -p "$LOG_DIR" 2>/dev/null
-    NEW=$(( $(read_count) + 1 ))
-
-    if [ "$NEW" -ge "$DENY_AT" ]; then
-      # Hard stop. Pin the counter at the cap and deny with the operator-action message.
-      printf '%s' "$DENY_AT" > "$COUNTER"
-      REASON="SendMessage BLOCKED — dispatch send cap reached ($DENY_AT sends since the last staging boundary).
-This is a HARD STOP and an OPERATOR decision point, not an in-session one: do NOT reinterpret,
-rephrase, or route around this rule to keep sending.
-To proceed, the operator must either:
-  (1) reset the count by deleting the counter file:  $COUNTER
-  (2) or raise DENY_AT in .claude/hooks/send-message-counter.sh (operator-owned; see the
-      THRESHOLD PROVENANCE comment for how the current value was set).
-Until the operator acts, further SendMessage calls are denied."
-      jq -n --arg reason "$REASON" '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: $reason
-        }
-      }'
-      exit 0
-    fi
-
-    printf '%s' "$NEW" > "$COUNTER"
-
-    if [ "$NEW" -ge "$WARN_AT" ]; then
-      # Advisory only -- non-blocking, no operator-action text.
-      jq -n --arg msg "Dispatch send count: $NEW of $DENY_AT since the last staging boundary (advisory)." '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-          permissionDecisionReason: $msg
-        }
-      }'
-      exit 0
-    fi
-
-    # Below the warn threshold -- silent pass.
+    # Silent count only -- no warn, no deny, no JSON output (see RETIRED note above).
+    printf '%s' "$(( $(read_count) + 1 ))" > "$COUNTER"
     exit 0
     ;;
 
