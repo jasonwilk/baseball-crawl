@@ -1,7 +1,43 @@
 # IDEA-219: A third team's game was attributed to us because a free-text opponent string matched our name
 
 ## Status
-`CANDIDATE` — **a phantom game row, disproven against GameChanger by impossible simultaneity. The creating path is UNIDENTIFIED, which is the important half.**
+`CANDIDATE` — **a phantom game row, disproven against GameChanger by impossible simultaneity. ⚰ The creating path was UNIDENTIFIED; it is now IDENTIFIED (2026-07-28) — see "The creating path" below. That was the important half, and it is answered.**
+
+## The creating path (IDENTIFIED 2026-07-28)
+
+**Two hops, both in the canonical team seam:**
+
+1. **`_resolve_team_ids` branch 2 passes a free-text opponent NAME as the identifier.**
+2. **`ensure_team_row` Step 3** (`src/db/teams.py:167-175`) matches on
+   `WHERE name = ? COLLATE NOCASE AND season_year = ?` — a rung the module's own docstring
+   calls **"weakest / heuristic."**
+
+**Case-insensitive free-text name matching is the attachment mechanism: two distinct real
+teams sharing a name within one season collapse onto whichever tracked row exists first.**
+
+**Why this discharged the do-not-reset condition.** The evidence is **code plus
+identifier-coverage statistics** — it does not depend on retaining the phantom row. Before
+this, the row was the only known instance and had to be preserved; it no longer does.
+
+**⚠️ Two caveats that bound the finding, both from its own author.**
+
+- **The trace was read from the LOCAL CHECKOUT while the running prod image is ~8 days
+  old.** **Confirm both hops in the ingesting build before treating the line references as
+  exact.**
+- **The prod census found ZERO confirmed instances among the 23 checkable teams — but only
+  52 of 786 teams carry a `public_id`, leaving 142 of 192 games unverifiable. Zero-found is
+  NOT absence**, and the coverage gap is the reason.
+
+**Provenance:** relayed from a Live-side investigation whose full report lives on the prod
+box (`/ephemeral/scratch/E278-PROD-INVESTIGATION.md`) and is unreachable from the dev
+environment. Snapshot-dated 2026-07-28. There is no primary to check this against here.
+
+**Why no story was added to E-278 (PM call, 2026-07-28).** The fix touches
+`ensure_team_row`, a canonical seam with a wide blast radius, on the strength of zero
+confirmed live instances — and E-278 was at its final gate. That combination is squarely the
+operator's refine-before-build steer. **Promotion trigger is now sharper than "a second
+phantom anywhere": the path is known, so the question is only whether to tighten the
+name-only rung, and that is a scoping exercise rather than an investigation.**
 
 ## Summary
 

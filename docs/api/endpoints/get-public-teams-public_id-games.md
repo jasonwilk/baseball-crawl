@@ -23,7 +23,7 @@ response_shape: array
 response_sample: data/raw/public-team-games-sample.json
 raw_sample_size: "32 game records, 25.7 KB"
 discovered: "2026-03-04"
-last_confirmed: "2026-07-20"
+last_confirmed: "2026-07-27"
 tags: [games, team, public]
 caveats:
   - >
@@ -46,6 +46,24 @@ caveats:
     `game-summaries` (stable `event_id`/`game_stream_id` per game), this endpoint's
     `id` cannot be used to dedupe the same game across two teams' schedules. It
     still works as the boxscore/plays `event_id` for the perspective it came from.
+  - >
+    FULL-DAY EVENTS carry a DATE MARKER, not an instant: when `is_full_day` is
+    true, `start_ts` is midnight UTC with a 24-hour `end_ts` and a null
+    `timezone`, and localizing it as a real start instant shifts the calendar
+    date BACK one day. Read the raw date slice instead. Key on `is_full_day`,
+    never on the null `timezone` (a correlated proxy, n=6). See "Full-Day
+    Events" below. (2026-07-27)
+  - >
+    `timezone` IS NOT ALWAYS RESOLVABLE -- it is a per-event, operator-entered
+    value and legacy tzdata "backward" aliases (`US/Central`, `US/Pacific`)
+    appear in live data. They are absent from slim container images, so
+    `ZoneInfo(...)` raises and a catch-and-continue converter silently yields the
+    UTC date. Install `tzdata`; do NOT build an alias map. See "Timezone Values"
+    below. (2026-07-27)
+  - >
+    `end_ts` IS NOT AN IDENTITY DISCRIMINATOR -- two schedule listings of ONE
+    real game were observed two hours apart in `end_ts` while their `start_ts`
+    differed by under a second. (2026-07-27)
   - >
     ACCEPT IS STRICT -- a WRONG vendor resource type returns HTTP 415, not a
     fallback representation (verified live 2026-07-26). The plausible-looking
@@ -107,12 +125,12 @@ Bare JSON array of game records (completed and upcoming). 34 records in a single
 | `opponent_team` | object | Opponent team info. **Carries `name` and optional `avatar_url` ONLY -- no identity ID.** See Opponent Identity below. |
 | `opponent_team.name` | string | Opponent team name (free-text label; not guaranteed to match any GC team record). |
 | `opponent_team.avatar_url` | string or absent | Opponent avatar URL. Present on 11/34 records (2026-06-12). Absent (not null, not empty) when no avatar. |
-| `is_full_day` | boolean | Whether this is a full-day event. |
-| `start_ts` | ISO 8601 | Game start timestamp (UTC). |
-| `end_ts` | ISO 8601 | Game end timestamp (UTC). |
-| `timezone` | string | IANA timezone string. |
+| `is_full_day` | boolean | Whether this is an all-day calendar event (the scorekeeper recorded a date but no start time). **When `true`, `start_ts` is a DATE MARKER, not an instant** -- see Full-Day Events below. Observed on 6 of 1064 events (2026-07-27). |
+| `start_ts` | ISO 8601 | Game start timestamp (UTC). Present on 1064/1064 observed events (2026-07-27) -- the `end_ts` fallback some consumers implement has never been exercised. **On a full-day event this is a date marker at midnight UTC, NOT a real start instant** -- see Full-Day Events below. |
+| `end_ts` | ISO 8601 | Game end timestamp (UTC). **NOT a stable per-game property and NOT usable as an identity discriminator**: two schedule listings of one real game were observed carrying `end_ts` two hours apart (a 1-hour and a 3-hour event) while their `start_ts` differed by under a second (2026-07-27). An `end_ts` equality check would fail to recognize them as the same game. |
+| `timezone` | string or null | IANA timezone string -- **but not guaranteed to be a name your runtime can resolve.** It is a per-EVENT, operator-entered value (it varies within a single team's own schedule) and legacy tzdata "backward" aliases appear in live data. `null` on full-day events. See Timezone Values below. |
 | `home_away` | string | `"home"` or `"away"`. |
-| `score` | object or absent | Final score. **Present on completed games only**; absent on upcoming games. |
+| `score` | object or absent | Final score. Present on `"completed"` games; **absent on upcoming games**. Do NOT read presence as proof of completion -- a `"new"` (created-but-unscored) game carries a `score` of `{team: 0, opponent_team: 0}`, per the `game_status` row above. Gate on `game_status == "completed"`, not on the presence of `score`. |
 | `score.team` | int | This team's final score. |
 | `score.opponent_team` | int | Opponent's final score. |
 | `game_status` | string, null, or **absent** | `"completed"` for finished/scored games. For a game that is NOT finished the field is either **`null`** (observed 2026-06-12) or **entirely absent** (the key is omitted — observed 2026-07-19); treat both identically (`.get("game_status") == "completed"`). A third value **`"new"`** was observed live (2026-07-19): a game-stream stub was created but not yet scored — it carries a `score` object of `{team: 0, opponent_team: 0}`. **Not-final games (absent/null/`"new"`) REMAIN in the schedule array indefinitely** — including past-dated games that were never played/scored (confirmed 2026-07-19: April- and June-dated games with no status and no score still present in July). GC does NOT drop a postponed/cancelled/unplayed game from the array. See the Not-Final vs Removed caveat below. |
@@ -121,7 +139,9 @@ Bare JSON array of game records (completed and upcoming). 34 records in a single
 
 ### Not-Final vs Removed (schedule reconciliation)
 
-**Confirmed live 2026-07-19 across 17 teams (633 game records):** a game that is not finished — whether upcoming, in a created-but-unscored `"new"` state, or a past-dated game that was never played/scored — **stays in the schedule array**. `game_status` for these is `"completed"`-absent (either the literal string `"new"`, or `null`, or the key omitted) and there is no `score` object (except `"new"`, which carries a 0-0 `score`). Observed status distribution: 615 `"completed"`, 17 with `game_status` absent, 1 `"new"`. No `"postponed"`/`"suspended"`/`"in_progress"`/`"live"` status string was ever observed — GC does not emit a distinct postponed status here; a postponed/cancelled/unplayed game simply lacks the `completed` status and score while remaining in the array (multiple April- and June-dated unplayed games were still present in the July snapshot).
+**Confirmed live 2026-07-19 across 17 teams (633 game records):** a game that is not finished — whether upcoming, in a created-but-unscored `"new"` state, or a past-dated game that was never played/scored — **stays in the schedule array**. `game_status` for these is `"completed"`-absent (either the literal string `"new"`, or `null`, or the key omitted) and there is no `score` object (except `"new"`, which carries a 0-0 `score`). Observed status distribution: 615 `"completed"`, 17 with `game_status` absent, 1 `"new"`. GC does not emit a distinct postponed status here; a postponed/cancelled/unplayed game simply lacks the `completed` status and score while remaining in the array (multiple April- and June-dated unplayed games were still present in the July snapshot).
+
+> **⚰ CORRECTED 2026-07-27 — `"live"` IS emitted.** *Previously observed (2026-07-19, 633 records) and stated here as:* "No `"postponed"`/`"suspended"`/`"in_progress"`/`"live"` status string was ever observed." A wider sweep (**1064 events across 28 teams**, 2026-07-27) observed **`"live"` twice**, so that claim is false as written and is retired. Full distribution from that sweep: `"completed"` 1034, absent-or-null 27, `"live"` 2, `"new"` 1. `"postponed"`, `"suspended"`, and `"in_progress"` remain unobserved — but **treat the status set as OPEN, not closed**: it has now grown once under a wider corpus, and 28 teams is not a sample of GameChanger at large. Consumers MUST key on `== "completed"` rather than enumerating the not-completed values. *(Caveat on that sweep: it collapsed an ABSENT key and an explicit `null` into one bucket, so it does not re-confirm the absent-vs-null split documented above; the 2026-07-19 probe remains the authority for that distinction.)*
 
 **Consequence for any schedule-diff / reconcile logic:** "present in the schedule array but not `completed`" is a TRANSIENT/not-yet-final state, NOT a removal. Only a game **fully absent from the full schedule array** indicates a genuine removal/void. Therefore a reconcile MUST diff prior-loaded games against the **full** `/games` array (all `game_status` values), NOT a `completed`-only filtered subset — a `completed`-only subset would misclassify every legitimately-present not-final game (and every past unplayed game) as "removed."
 
@@ -144,6 +164,69 @@ Probed 15 additional team-seasons whose `public_id`s were captured in earlier se
 - **A team that does not exist returns 404, not an empty array.** `GET /public/teams/{unknown_slug}/games` → **404 `Not Found`**; a malformed (too-short) slug → **400 `Bad Request`**. A removed/re-registered team therefore surfaces as an HTTP error, not as a silently-empty success payload.
 
 **Consequence for schedule-diff / reconcile logic:** the "fresh schedule contains zero completed games while the team has prior completed games" shape has **no observed mechanism** — not season rollover, not team removal (404), not archival, not status reversion. Treat it as a defensive edge case, not an expected one. Its benign sibling — a genuinely new team early in a season with only scheduled games — is a real shape, but by construction has no prior-loaded games to reconcile against.
+
+### Full-Day Events (`is_full_day: true`) -- `start_ts` is a DATE MARKER, not an instant
+
+**Measured 2026-07-27 across 1064 events / 28 teams: 6 full-day events, all with the shape below.**
+
+When a scorekeeper records a game with a date but no start time, GC emits an **all-day calendar event**:
+
+- `is_full_day: true`
+- `start_ts` at **exactly midnight UTC** (`T00:00:00.000Z`)
+- `end_ts` **exactly 24 hours later**
+- `timezone: null`
+
+**The trap, and it is the whole reason this section exists: that `start_ts` looks like an ordinary timed event and is not one.** It encodes a calendar DATE, not a moment. Converting it to a local calendar date the way you would convert a real start instant shifts it **back one day** in every western-hemisphere zone, because midnight UTC is the previous evening locally. A full-day event dated `2026-05-31` localizes to `2026-05-30`.
+
+The correct read is the **raw date slice** of `start_ts` (`start_ts[:10]`), with no timezone conversion.
+
+**Key on `is_full_day`, never on a null `timezone`.** In the measured corpus the two correlate perfectly in both directions (all 6 full-day events have a null timezone; all 6 null-timezone events are full-day), which makes null-timezone a convenient way to FIND these records. It is **not** a safe rule to build on: n=6 is small, `is_full_day` is the field that carries the meaning, and nothing guarantees GC cannot emit a null timezone on a timed event.
+
+**And do NOT use "`start_ts` is at midnight UTC" as the proxy -- it is far worse, and the error is easy to make because the full-day shape includes it.** A 7:00pm start in US Central time IS midnight UTC, so ordinary evening games match. Measured over one 928-row corpus: **50 rows start at midnight UTC, and only 2 of them are full-day events** -- the other 48 carry real timezones (46 `America/Chicago`, 2 `US/Central`) and are `is_full_day: false`. That is a **25x over-count**. Two such rows were confirmed directly in live payloads (`start_ts` `...T00:00:00.000Z`, `timezone: "America/Chicago"`, `is_full_day: false`). Sizing a full-day population by midnight-UTC will therefore inflate it by more than an order of magnitude; use `is_full_day`, or null-timezone as the narrow proxy.
+
+Note the **authenticated** schedule endpoint (`GET /teams/{team_id}/schedule`) represents the same concept in a **DIFFERENT shape** -- there the flag is named `full_day` and `start`/`end` become `{"date": "YYYY-MM-DD"}` objects rather than midnight-UTC timestamps. Do not build a fixture for THIS endpoint from that one's shape.
+
+**Full-day event** (all-day calendar entry -- no start time recorded):
+
+```json
+{
+  "id": "00000000-REDACTED",
+  "opponent_team": {
+    "name": "Anytown Eagles 12U"
+  },
+  "is_full_day": true,
+  "start_ts": "2026-05-31T00:00:00.000Z",
+  "end_ts": "2026-06-01T00:00:00.000Z",
+  "timezone": null,
+  "home_away": "home",
+  "score": {"team": 9, "opponent_team": 1},
+  "game_status": "completed",
+  "has_live_stream": false
+}
+```
+
+### Timezone Values -- per-event, operator-entered, and not always resolvable
+
+**Measured 2026-07-27 across 1064 events / 28 teams.** Distribution:
+
+| Count | Value | Resolves via Python `zoneinfo` on a slim image? |
+|-------|-------|--------------------------------------------------|
+| 1005 | `America/Chicago` | yes |
+| 25 | `US/Central` | **NO** |
+| 17 | `America/Denver` | yes |
+| 6 | `(null)` | n/a -- full-day events (above) |
+| 6 | `America/New_York` | yes |
+| 4 | `US/Pacific` | **NO** |
+| 1 | `America/Phoenix` | yes |
+
+Every event carries the `timezone` key, so an absent value is always an explicit `null`, never a missing field.
+
+Two properties worth knowing before you consume this field:
+
+1. **It is per-EVENT, not per-team.** It appears to be whatever the event's creator entered -- one five-game window in a single team's own schedule carried `America/Denver`, `US/Central` x3, and `America/Chicago`. Do not model it as a team property or cache it per team.
+2. **`US/Central` and `US/Pacific` are legacy tzdata "backward" aliases.** They name the same zones as `America/Chicago` and `America/Los_Angeles`, but they are **absent from the tzdata shipped in slim container images** (`python:*-slim` omits the `backward` links, and `/usr/share/zoneinfo/US/` does not exist there). `zoneinfo.ZoneInfo("US/Central")` raises `ZoneInfoNotFoundError`. A converter that catches that and falls through **silently returns the UTC date**, which for an evening game past 00:00Z is the next day.
+
+**Do not "fix" this with an alias-to-canonical mapping table.** Two bad values were observed; that bounds what we have SEEN, not what GC can send -- the operator can enter any of several dozen backward links (`US/Eastern`, `US/Mountain`, `US/Arizona`, `Canada/Eastern`...). A two-entry map is a denylist that fails open on the first unseen alias. **Install the `tzdata` package instead**: verified 2026-07-27 that with `tzdata` present every one of those aliases resolves, including ones never observed here. An enum observed closed is not an enum proven closed.
 
 ### Opponent Identity
 
