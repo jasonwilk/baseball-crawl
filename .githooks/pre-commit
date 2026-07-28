@@ -10,7 +10,11 @@ if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   exit 0
 fi
 
-# Get staged files (Added, Copied, Modified only -- not Deleted).
+# Get staged files (Added, Copied, Modified, Renamed -- not Deleted).
+# R is load-bearing: without it a staged rename is invisible here, so a rename
+# carrying a content edit reaches no gate, and a rename-only staged set empties
+# the list and exits below before any gate runs. `--name-only` reports a
+# rename's destination path, which is the path to scan.
 # -z is the only safe enumeration: without it git C-quotes any path containing a
 # non-ASCII byte, a double-quote, or a backslash, and such a path matches no
 # prefix and names no readable file. core.quotePath=false covers only the
@@ -21,7 +25,7 @@ fi
 # inert (fail-open). This loop is bash 3.2+.
 STAGED_ARR=()
 while IFS= read -r -d '' _f; do STAGED_ARR+=("$_f"); done \
-  < <(git diff --cached --name-only -z --diff-filter=ACM)
+  < <(git diff --cached --name-only -z --diff-filter=ACMR)
 
 if [ ${#STAGED_ARR[@]} -eq 0 ]; then
   exit 0

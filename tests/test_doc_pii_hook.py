@@ -255,3 +255,59 @@ class TestGateNeverSilentlySkips:
         result = _commit(repo, denylist)
         assert result.returncode != 0, _output(result)
         assert "[doc-pii: BLOCKED]" in _output(result)
+
+
+@pytest.mark.integration
+class TestRenameEnumeration:
+    """The staged-file enumeration must include renames.
+
+    `--diff-filter=ACM` excludes `R`, so a renamed path never reached the
+    enumeration and was never scanned. When the rename is the only staged
+    change the list is EMPTY, and the hook returns 0 at the empty-list early
+    exit before any gate runs at all -- so a rename carrying a content edit
+    committed unscanned. Both tests stage only the rename, which is the
+    reachable shape: `git mv` a file and edit it in the same commit.
+    """
+
+    def test_rename_with_edit_introducing_credential_blocks(self, tmp_path: Path) -> None:
+        # Built at runtime: a literal credential-shaped assignment written into
+        # this source file would trip the scanner on this file itself.
+        credential = "GC_REFRESH_TOKEN=" + "z" * 40
+        body = "".join(f"line {n}\n" for n in range(10))
+
+        repo = _init_repo(tmp_path)
+        _stage_file(repo, "docs/notes.md", body)
+        _git(repo, "git", "commit", "-m", "seed")
+
+        _git(repo, "git", "mv", "docs/notes.md", "docs/renamed.md")
+        (repo / "docs" / "renamed.md").write_text(body + credential + "\n")
+        _git(repo, "git", "add", "-A", "docs")
+
+        # Precondition: git must classify this as R, not delete+add. If it ever
+        # scores below the rename threshold the staged set contains an `A`,
+        # which `ACM` already caught -- the test would pass without exercising
+        # the enumeration it exists to pin.
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--name-status"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=_base_env(),
+        ).stdout
+        assert status.startswith("R"), f"precondition: expected a rename, got: {status!r}"
+
+        result = _commit(repo)
+        assert result.returncode != 0, _output(result)
+        assert "[PII BLOCKED]" in _output(result)
+
+    def test_content_neutral_rename_still_passes(self, tmp_path: Path) -> None:
+        """No false positive: a rename that changes nothing must still commit."""
+        repo = _init_repo(tmp_path)
+        _stage_file(repo, "docs/notes.md", "line one\nline two\n")
+        _git(repo, "git", "commit", "-m", "seed")
+
+        _git(repo, "git", "mv", "docs/notes.md", "docs/renamed.md")
+        _git(repo, "git", "add", "-A", "docs")
+
+        result = _commit(repo)
+        assert result.returncode == 0, _output(result)
