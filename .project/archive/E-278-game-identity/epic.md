@@ -1,7 +1,7 @@
 # E-278: Game Identity — One Real Game, More Than One Row
 
 ## Status
-`READY` (2026-07-28)
+`COMPLETED` (2026-07-28; READY 2026-07-28, ACTIVE 2026-07-28)
 
 ## Overview
 
@@ -123,10 +123,10 @@ backfill**, which would otherwise fully populate a degraded duplicate row.
 
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-278-01 | Record header: count ties, pin games-played semantics | TODO | E-278-02 | - |
-| E-278-02 | Same-perspective duplicate detection at load | TODO | E-278-04 | - |
-| E-278-04 | Resolve timezone aliases; fail closed on an unresolvable zone | TODO | None | - |
-| E-278-05 | Rename the misleading derivation field; correct its docstrings | TODO | E-278-01, E-278-02, E-278-04 | - |
+| E-278-01 | Record header: count ties, pin games-played semantics | DONE | E-278-02 | se-e278 |
+| E-278-02 | Same-perspective duplicate detection at load | DONE | E-278-04 | se-e278 |
+| E-278-04 | Resolve timezone aliases; fail closed on an unresolvable zone | DONE | None | se-e278 |
+| E-278-05 | Rename the misleading derivation field; correct its docstrings | DONE | E-278-01, E-278-02, E-278-04 | se-e278 |
 
 Execution order is therefore **04 → 02 → 01 → 05**, and that order is FIXED — 01 and 05
 both modify `tests/test_loaders/test_game_dedup.py`, so 05 runs after 01. **01 is NOT
@@ -214,6 +214,31 @@ asked and how each closed.**
 - **Prod's phantom is a B-class date-split twin whose perspectives are DISJOINT**, so the
   existing `bb data merge-duplicate-games` primitive would accept it once detection finds
   it. That is an operator repair option, not epic scope.
+- ⚠️ **DO NOT generate a report against the un-reset production database between closure
+  and the data reset.** There are now **three independent reasons** a report produced in
+  that window is untrustworthy, and they compound rather than overlap:
+  1. **Dates are still wrong** until the image is rebuilt — `tzdata` is absent from the
+     running container, so aliased rows keep deriving UTC dates (see the paragraph below).
+  2. **The existing duplicate rows are still there.** This epic PREVENTS new ones; it
+     repairs nothing, by the operator's own ruling. A pre-reset report still
+     double-counts whatever is already stored.
+  3. **E-278-02 makes the stored stat content of an already-duplicated pair UNSTABLE**
+     (traced by code-reviewer during story 02's review; mechanism relayed, not
+     independently re-traced by PM). On a database that already holds the pair, the two
+     listings **cross-redirect and each overwrites the other's row**: the row COUNT stays
+     at 2, so no new duplicate appears, but which listing's stats survive can change from
+     one regeneration to the next. The path is pre-existing — the byte-equality and
+     score-total branches already redirect this way — so story 02 WIDENS it rather than
+     creating it, and `merge_duplicate_game` still correctly refuses and modifies zero
+     rows. **This is within spec**: the story scopes to prevention at load, historical
+     repair is an explicit non-goal, and the reset is unconditional.
+
+  **On a post-reset database none of this arises** — the fresh path is clean: the first
+  listing inserts, the second redirects with no twin to merge, one row results, and it is
+  stable on every later regeneration. **So the sequence is: rebuild the image → reset the
+  data → re-scout → then generate reports.** Recorded because it is obvious now and
+  invisible in three weeks, and because nothing in the code or the test suite will warn
+  anyone who generates a report in that window.
 
 **The `tzdata` fix does NOT reach production when the epic closes. It reaches production
 at the next image rebuild.** The gap is in the shipping image — `python:3.13-slim` omits
@@ -898,6 +923,197 @@ for the case that already works. PAIR-DELTA raises a separate forward question: 
 constant and toward letting a stronger corroborator carry it; that is a design call for
 E-278-02, not a settled decision.
 
+### TN-18 — Process lessons from dispatch (⚠️ OPEN LIST — EXTEND IT, do not close it)
+
+Accumulated during story **04's** dispatch (2026-07-28). **Stories 02, 01 and 05 had not run
+when this was written, so this list is expected to GROW.** Do not read it as a closed
+synthesis, do not retitle it "the N lessons of E-278", and append rather than renumber.
+Each entry carries its remedy, because the remedies differ — that is the reason these are
+kept separate rather than merged into one note about carefulness.
+
+**1. A plausible mechanism that explains an observed failure is not the mechanism.**
+(software-engineer.) Three tests failed with a `KeyError`; a causal story was written that
+fit the symptom without tracing which side raised it. The discriminating evidence — the
+traceback naming the raising side — had already been read. *Remedy: read the discriminating
+evidence you already hold before composing an explanation of it.*
+
+**2. Check where the claim IS, not where it is ABOUT.** (product-manager.) A false sentence
+about `src/cli/data.py` was living in `tests/test_cli_data.py` — the test that STUBS that
+CLI, one module away from its own subject. The check that missed it opened `data.py`,
+because that is what the claim was about. A false claim about module A characteristically
+lands in module B's prose: the test that fakes A, the docstring fronting A, the memory note
+summarizing A. *Remedy: search for the claim's WORDS, not for its SUBJECT.* See
+`.claude/rules/doc-sweep.md` step 2 (synonym expansion), which already governs this.
+
+**3. A TRUE clause welded to a FALSE inference. Premise-checking structurally cannot catch
+it — and this is the sharpest instance the epic produced.** The claim was *"the CLI reads
+every summary key by name, so adding a counter raises `KeyError`."*
+
+- The implementer had a **true premise** (the CLI reads seven keys; the backfill returns
+  those same seven — the sets are identical) and a **false inference** (⇒ adding a key
+  raises `KeyError`; it does not, since a consumer reading a subset is unaffected).
+- PM's refutation had a **true premise** (it IS a subset) and a **false inference**
+  (⇒ therefore "every key" is false — which does not follow for an IMPROPER subset).
+- **Neither party held a false premise. Premise-checking would have cleared both.**
+
+The inference reached three carriers, and **the topology is a TREE, not three independent
+sightings** (established by asking code-reviewer directly rather than inferring it):
+
+```
+implementer's belief
+├── the implementer's report to main            (carrier 1)
+└── the _game_dates_summary docstring           (carrier 2)
+        └── code-reviewer's Round 1 review      (carrier 3, DESCENDED from carrier 2)
+```
+
+Carriers 1 and 2 are siblings from one author. **Only the 2→3 edge is a genuine inheritance
+across agents — and it travelled through a DIFF**, which is lesson 4's mechanism operating
+on itself: code-reviewer read the docstring inside the `tests/` diff at the top of its
+review, never saw the implementer's report, and therefore had no sense of relaying anything.
+PM's misdiagnosis sits OUTSIDE this tree — same class, different claim. The `src/cli/data.py` edit it was invoked to justify
+is nonetheless CORRECT, on a different ground: without it two skip classes never reach the
+operator and `games_processed` stops reconciling against the reported categories.
+*Remedy: when a premise checks out and the conclusion still looks wrong, check the
+INFERENCE. "Was the premise true?" terminates too early.*
+
+**Coda, and it is the individual form of the same failure.** PM's first CONCESSION was
+itself wrong: it read *"my premise was about the wrong state,"* when the premise was about
+the right state and simply did not license the conclusion. Conceding felt like the
+disciplined move and produced a further false claim inside a thread about false claims.
+`.claude/rules/dispatch-pattern.md` names this — *am I yielding to evidence, or to the fact
+that yielding looks rigorous?* — and note that **every individual sentence in this whole
+episode was true**, which is why no truth-check anywhere would have flagged any of it.
+
+**4. A diff hunk is as much an inherited claim as a report is.** (code-reviewer, verbatim at
+its own request:)
+
+> The relay discipline is written around artifacts that announce themselves as relays —
+> briefs, reports, handoffs. A diff announces itself as *primary evidence*, and it is
+> primary evidence about the code. The prose inside it is someone else's claim, arriving
+> with the authority of the surrounding evidence and none of the suspicion a brief attracts.
+> The reader does not switch modes at that boundary, which is why the sentence gets restated
+> unchecked.
+
+The mechanism is the **mode switch that never happens**: one artifact carries primary
+evidence (the `+`/`-` lines) and hearsay (the prose between them) under a single apparent
+epistemic status. *Remedy: a sentence you first read inside a diff is INHERITED — check it as
+you would a brief before restating it.* Note "be more careful reading diffs" would not have
+caught it; the mode-switch framing is what transfers.
+
+**5. A TRUE measurement against the WRONG BASELINE yields a false finding.** (main session,
+caught and corrected before it became one.) A post-staging check diffed this worktree
+against `main` and surfaced an 85-line change to `.claude/hooks/send-message-counter.sh` —
+a context-layer file **no E-278 story authorizes**, which is exactly the shape that should
+stop a closure. It was a phantom: **`main` had moved ahead of the branch** (the operator
+retired the send-cap thresholds on `main` at `c990446` after the cap halted this dispatch;
+the epic branched at `c484a43`), and diffing against a moved `main` reports MAIN's own
+divergence as if it were ours. Every individual observation in the finding was accurate.
+*Remedy: the closure patch base is `$(git merge-base epic/E-NNN main)`, NEVER `main`.*
+Had `main` been used as the base, the closure patch would have carried a **reverse
+application of the operator's own hook change** — a silent revert of work nobody in this
+epic touched.
+
+**6. A probe confirms what you thought to check; the QUESTION finds what you did not.**
+(software-engineer, at closure — **an attribution correction made against its own
+interest.**) SE's mutation probes and input matrices were the epic's strongest verification
+instruments and they **verified fixes**. What found that **two of those fixes were not
+fixes** was code-reviewer asking *"what wrong implementation still passes this?"* — on
+assertions SE had already written and reported as done. Both instances are recorded above:
+story 01's replacement assertion and story 02's AC-10 test. *Remedy: a probe is scoped by
+the hypothesis that built it, so run it AND ask what a wrong implementation would still
+survive. The second question is not a stronger version of the first; it searches a different
+space.*
+
+**7. Unprompted near-miss disclosure is a property of how a dispatch is RUN, not of who is
+on it.** (software-engineer, at closure.) SE reported five near-misses nobody had asked
+about — an unapplied mutation, a malformed probe that produced a collection error rather
+than a test failure, a self-created regression, a reconstructed causal story, and a
+discarded working file. Its own account: *"not a habit I brought — they were a response to
+this team making them cheap."* Every disclosure was met with verification rather than blame,
+and **twice the correction ran the other way** (PM's unbracketed status claim; the hub's
+relay filtering) and was taken the same way. *Remedy: the practice is downstream of the
+response. An agent that has watched one disclosure be punished will stop, and the next
+near-miss becomes a defect nobody sees.*
+
+#### Candidates for the closure context-layer assessment (Step 3a) — for claude-architect to judge, NOT recommendations
+
+- **A rule GAP with a demonstrated defect: `.claude/rules/dependency-management.md`.** Its
+  "Add a runtime dependency" procedure reads *"3. Run `pip-compile`"* — **singular, and it
+  never states that a runtime dependency requires recompiling BOTH lockfiles.** The File
+  Layout table does mark `requirements-dev.txt` as generated, so it is inferable; the
+  procedure does not say it, and the CI gate that enforces it recompiles both. **This is
+  what happened here**: a five-artifact change shipped as three, and BOTH the implementer
+  and PM verified the three named in the story rather than deriving the set from the rule.
+  Caught only by code-reviewer.
+- **Lesson 3 → adjacent to Class A in `.claude/rules/tool-output-integrity.md`, not
+  standalone** (code-reviewer's ruling, adopted). That file's detection record defines
+  **"Class A -- a FALSE PREMISE under a CORRECT conclusion"**; lesson 3 is its mirror, and
+  the two are only legible together.
+- **Lesson 4 → an added MEMBER, not a gap.** The same file's "A claim you RELAY is a claim
+  you AUTHOR" enumerates its channels as *"an epic spec, a story, or an upstream doc"* —
+  which reads closed, and contains no diff. Verified against the file.
+- **A self-reference worth keeping** (code-reviewer): that enumeration reading as closed
+  when it was not is itself an instance of the **exhaustive-class problem** — the same shape
+  as story 04's AC-7 floor list, which the AC had to explicitly declare incomplete. Three
+  instances of one pattern inside a single story: a rule file, a spec, and a docstring.
+
+### TN-19 — Prose OUTSIDE this epic's domain that story 04 falsified (CLOSURE ROUTING)
+
+Surfaced by the story-04 AC-7 sweep and deliberately NOT edited: each sits in another
+owner's domain, and AC-7's clause is scoped to claims left standing **in the code**. Recorded
+here because the sweep that found them lives in a dispatch thread, not on disk.
+
+| Site | Owner | Ask |
+|---|---|---|
+| `.claude/rules/canonical-seams.md` (~:47) — describes `derive_local_date` as returning `None` only when `start_datetime` is absent; there are now **three** `None` cases | claude-architect | Correct, and record the fail-closed direction in the seam entry |
+| `docs/admin/operations.md` (~:93-99) — the three-tier re-derivation list; tiers 1 and 2 both gained a refusal and the command emits two new output lines | docs-writer | Update the tier list and the command output |
+| `docs/api/endpoints/get-public-teams-public_id-games.md` (~:227) | api-scout | ⚠️ **"Possibly ambiguous — add a clarifying clause," NOT "this is falsified."** See below |
+| Other agents' memory describing the pre-fix degradation as current — api-scout's and data-engineer's files and their `MEMORY.md`s | each owning agent | Own-memory carve-out; each agent corrects its own |
+
+⚠️ **The api-doc entry was DOWNGRADED by code-reviewer and the downgrade is the operative
+version.** The implementer characterized *"A converter that catches that and falls through
+silently returns the UTC date"* as falsified prose. CR disagrees: it is a **general
+conditional about a class of converter**, not a claim about ours, and the next paragraph
+already prescribes the fix this story implemented. Routing it to api-scout as "falsified"
+would ask for a correction to a sentence that is not wrong. The other three are genuinely
+stale with correct routing.
+
+**`product-manager/e278-game-identity.md` is PM's own** and is reconciled at closure, in the
+worktree copy so it rides the closure patch.
+
+### TN-20 — Why `_SCORE_TOLERANCE_RUNS` was NOT widened (story 02's AC-6 verdict)
+
+**Verdict: DECLINE to widen from 1 to 2. `src/db/game_merge.py` is unmodified.** Recorded
+here in the same genre as TN-6 ("why the collapse primitive is NOT here") — a decision NOT
+to act is invisible in a diff, and this one left no code comment because the correct action
+was to touch nothing.
+
+**Why it is written down at all.** AC-6 accepts "decline with reason" as a valid verdict, and
+the reason existed only in a dispatch thread. `game_merge.py` is correctly untouched, so
+there is no comment at the constant and **nothing in the repository would tell a later
+engineer that the question was asked and answered on evidence rather than never considered.**
+An omission and a considered decision look identical at the call site.
+
+**The three reasons, in the implementer's order of weight:**
+
+1. **It gates the wrong surface.** `_SCORE_TOLERANCE_RUNS` governs `is_offline_same_game`,
+   the OFFLINE operator repair predicate — not the load path. Story 02's load-time rule
+   requires **exact** per-team score agreement, so the load path has no dependency on the
+   constant and widening it would not change any behavior this epic ships.
+2. **It would loosen a DESTRUCTIVE predicate to serve an explicit non-goal.** The offline
+   predicate authorizes merges, and a wrong merge destroys one game's stats irreversibly.
+   Widening it buys only historical repair, which the operator's reset ruling puts out of
+   scope for this epic.
+3. **The evidence is n=1.** PAIR-DELTA is the only observed pair outside tolerance, and
+   **de-epicA independently leaned against widening** — toward letting a stronger
+   corroborator carry the case rather than loosening the threshold. Two parties reached the
+   same position from different directions.
+
+**What would reopen it** (so a later reader can act rather than re-derive): a second observed
+pair outside tolerance — n=1 is the weakest of the three reasons and the first to fall — or a
+corroborator strong enough to carry the case without loosening the threshold, which is the
+direction de-epicA preferred. Reasons 1 and 2 are structural and do not decay with more data.
+
 ## Open Questions
 
 - **OQ-1**: The triage file argues the record perspective clause is complementary
@@ -1060,8 +1276,102 @@ without anyone editing it. Re-date this line when the set of open questions chan
 - 2026-07-27: Created (DRAFT). Six code anchors verified against current main; two
   cross-findings independently re-derived before the triage file existed.
 - **2026-07-28: READY.** Review scorecard below.
+- **2026-07-28: ACTIVE.** Dispatch opened in worktree `/tmp/.worktrees/baseball-crawl-E-278/`.
+  Execution order 04 → 02 → 01 → 05 (FIXED). Dispatch Team: software-engineer.
+- **2026-07-28: ALL FOUR STORIES `DONE`** (04, 02, 01, 05 — E-278-03 was cut before
+  instantiation and its number is not reused). Both closure reviews clean: Codex raised 1
+  finding, dismissed as invalid; the Step 1c integration review over the full epic diff
+  raised no MUST FIX. Dispatch review scorecard below, kept separate from the planning-phase
+  one.
 
-### Review scorecard
+  ⚠️ **Combined user-visible outcome, stated because no single story's ACs say it:**
+  E-278-02 is **prevention only**, so **the record header stays wrong until the operator
+  reset runs.** That is in scope under the forward-accuracy ruling and it is what a coach
+  would see in the interim.
+
+### Documentation assessment (2026-07-28) — FIRES
+
+| Trigger | Verdict |
+|---|---|
+| 1. New feature or endpoint ships | **NO** — no new endpoint; behavior changed on existing surfaces |
+| 2. Architecture or deployment config changes | **YES** — `requirements.in`, `requirements.txt`, `requirements-dev.txt` and `pyproject.toml` all changed (the `tzdata` dependency) |
+| 3. New agent created or materially modified | **NO** |
+| 4. Database schema changes | **NO** — no migration; `migrations/` untouched by design (see Dispatch Team) |
+| 5. Changes how the system works or how users interact | **YES** — the record header is now W-L-T; the backfill gained two skip classes and two CLI output lines |
+
+**Dispatched to docs-writer**: `docs/admin/operations.md:93-99` (the three-tier re-derivation
+model is now five outcomes), and `docs/api/endpoints/get-public-teams-public_id-games.md`
+**as "possibly ambiguous — add a clarifying clause," NOT as "falsified"** (code-reviewer's
+correction of the original framing: it is a general conditional about a class of converter,
+not a claim about ours, and the following paragraph already prescribes this epic's fix).
+
+### Context-layer assessment (2026-07-28) — FIRES
+
+Explicit per-trigger verdicts, as the rule requires; a blanket "no impact" is not sufficient.
+
+| Trigger | Verdict |
+|---|---|
+| 1. New convention, pattern or constraint | **YES** — fail-closed date derivation; the load-path-vs-repair-path split |
+| 2. Architectural decision with ongoing implications | **YES** — the `tzdata` dependency chosen over a normalization map (OQ-4); `is_full_day` honoured at ingest with no stored column |
+| 3. Footgun, failure mode or boundary discovered | **YES** — the index-restore hazard class (see below); `data-model.md`'s now-false absolute |
+| 4. Agent behavior, routing or coordination changed | **NO** |
+| 5. Domain knowledge useful to future epics | **YES** — GC double-listing is perspective-ASYMMETRIC; the `game_status` value set is OPEN and grew once under a wider corpus |
+| 6. New CLI command, workflow or script | **NO** — two new output lines on an existing command are a documentation item |
+| 7. Net growth past the context ratchet baseline | **YES — OPERATOR-SIGNED EXCEPTION (2026-07-28)**, granted with the two figures kept split. See below for which of the three options was taken and what remains open |
+| 8. Reusable behavioral lesson, gated on citing a defect it caught | **YES** — TN-18's classes, each citing a defect it demonstrably caught |
+
+**Trigger 7 detail, kept split because the two figures are different populations.** The
+ratchet hook FAILS. **Pre-existing overhang before this epic: +1714** over the committed
+baseline (`.claude/rules` +26, `.claude/agents` +16, `.claude/agent-memory` **+1672**).
+**E-278's OWN contribution: +222** (228 added / 6 removed), entirely software-engineer's
+agent-memory, with closure adding more. **Do not reconcile the two into one number.** Net
+growth past baseline is not accepted on an agent's say-so and it blocks archival; the
+operator held three options (sign an exception with the split recorded / offset the growth /
+re-snapshot the baseline).
+
+✅ **RESOLVED 2026-07-28: the operator SIGNED AN EXCEPTION — option 1 of the three.** The
+growth was not offset and the baseline was **not** re-snapshotted, so **the committed floor
+is unchanged and the next epic measures against the same baseline this one exceeded.** A
+successor must not read this exception as having moved the floor. claude-architect's closure
+codification (A1, A2, the footgun class, the trigger-8 promotion) lands under this exception
+and its size is unconstrained by it.
+
+⚠️ **THE PRE-EXISTING +1714 REMAINS ITS OWN OPEN QUESTION AND IS NOT DISCHARGED BY THIS
+EXCEPTION.** That was the condition attached to the recommendation and the operator accepted
+it: **the overhang stays visible rather than being laundered through this epic's closure.**
+E-278 is accountable for its own +222; the +1714 predates it, is dominated by
+`.claude/agent-memory` (+1672 of it), and is a separate matter for whoever takes it up.
+**Do not cite this signed exception as precedent for the overhang, and do not fold the two
+figures together when reporting either one.**
+
+**Dispatched to claude-architect** (after the operator rules on 7, since the codification
+itself adds lines): **A1** `.claude/rules/data-model.md:24`, **A2**
+`.claude/rules/canonical-seams.md:47`, and the trigger 3 / trigger 8 codification.
+
+**A1 is the serious one and is not merely stale.** It states an ABSOLUTE — *"All queries
+across `src/` filter on `'completed'`"* — that is now false, and the false absolute names
+the exact remedy story 01's AC-6 **declined** after establishing the question three
+independent ways. `data-model.md` auto-loads for every agent touching `src/`, so a reader
+either believes `_query_record` filters (it does not) or "fixes" it to match — **believing
+they are correcting an oversight.** A stale rule misleads; this one RECRUITS. The carve-out
+must POINT AT the reasoning (the `_query_record` docstring) rather than merely naming an
+exception, or the next reader tidies it away. Note the dependency runs both ways and the
+rule is the wrong half: that docstring's claim *"every other game query in `src/` carries
+one"* is still TRUE.
+
+**Trigger 3's hazard is a CLASS with three spellings and only one named.**
+`.claude/rules/worktree-isolation.md` prohibits `git checkout -- <file>` **by spelling**.
+software-engineer hit the same hazard via `git checkout-index -f --`, and on verifying
+rather than listing from memory found a third: **`git restore <file>`**, where
+`-W/--worktree` is the default and `--source` defaults to the index. **The unnamed spelling
+that is the modern recommended form is where future traffic is heaviest.** Nothing was lost
+only because the discarded change was four reconstructible lines.
+
+### Review scorecard — PLANNING PHASE (spec review, pre-READY)
+
+⚠️ **Do not merge this with the DISPATCH scorecard below.** They count different things
+against different artifacts: this one counts findings raised **against the spec** before
+READY; that one counts findings raised **against the code** during dispatch.
 
 Counts are reconstructed from the per-pass triage summaries. **"Findings" counts what each
 pass raised against the spec**; the disposition columns are mine.
@@ -1077,6 +1387,76 @@ pass raised against the spec**; the disposition columns are mine.
 | Codex iteration 1 | 4 | 4 | — | — | 0 |
 | Codex iteration 2 | 3 | 3 | — | — | 0 |
 | **Total** | **51** | **48** | **2** | **1** | **0** |
+
+### Review scorecard — DISPATCH PHASE (code review)
+
+**Counts supplied by code-reviewer from its own records, NOT reconstructed by PM from
+dispatch messages.** That distinction is load-bearing: two figures PM held from relays
+(story 04 "three SHOULD FIX", story 02 "three") were **low**, because the relay tracked only
+the *SE-actionable* subset and silently dropped findings routed to other agents. PM's
+hypothesis for the discrepancy — "round 2 probably raised extras" — **was also wrong.** What
+prevented a wrong scorecard was not being right; it was declining to build one on a figure
+labelled "probably". Structured **per PASS**, which is what keeps the round-1/round-2
+difference visible instead of collapsed.
+
+| Pass | MUST FIX | SHOULD FIX | Accepted | Dismissed |
+|---|---|---|---|---|
+| E-278-04 round 1 | 3 | 5 *(3 SE-actionable, 2 routed elsewhere)* | 8 | 0 |
+| E-278-04 round 2 | 0 new *(3a narrowly reopened)* | 4 *(3 SE-actionable, 1 → api-scout)* | 4 | 0 |
+| E-278-02 round 1 | 2 | 4 *(3 CR's + 1 raised by PM, ruled by CR)* | 6 | 0 |
+| E-278-02 round 2 | 0 | 0 | — | 0 |
+| E-278-02 post-approval re-verification | 0 | 0 | — | 0 |
+| E-278-01 round 1 | 0 | 2 | 2 | 0 |
+| E-278-01 re-verification (moved bytes) | 0 | 0 | — | 0 |
+| E-278-01 final verification (moved bytes) | 0 | 0 *(+1 non-story)* | 1 | 0 |
+| E-278-05 round 1 | 0 | 2 | 2 | 0 |
+| Step 1a invariant audit | — | 9 items (A1-A9) | routed | 0 |
+| Step 1c integration review (full epic diff) | 0 | 0 | — | 0 |
+| Codex (headless, full staged diff) | 1 raised | — | 0 | **1** |
+| **TOTAL** | **5** | **17** *(+1 non-story)* | | **1** |
+
+**The two zero-finding re-verification rows are deliberate.** A scorecard that omitted them
+would imply the tree stopped moving after approval, which it did not — both were real
+verifications against moved bytes.
+
+**Four categories excluded from the 17, kept distinct because collapsing them would
+misrepresent all four.** The 17 are findings actually SENT.
+- **WITHDRAWN on the merits (1)** — code-reviewer's suggested `timezone IS NOT NULL`
+  discriminator, refuted by PM. A remediation suggestion inside a MUST FIX, not a separate
+  finding. **The one place this epic ran against the reviewer on the merits, and it is in
+  the record at the reviewer's own insistence.**
+- **DISSOLVED, never sent (1)** — a finding against story **04**'s AC-4b docstring that the
+  implementer's own rewrite removed before it was sent.
+- **WITHDRAWN before reporting (1)** — an indexing measurement that the moved-file
+  differential resolved.
+- **DELIBERATELY NOT RAISED (1)** — story 01's forward-bound residual. **A decline on cost
+  grounds is not a ruling on substance** and is not recorded as one.
+
+**On the single dismissal.** Codex's one finding was triaged invalid; every other finding in
+this epic was triaged valid. **That is code-reviewer's stated count, not a boast, and no
+dismissal was manufactured for balance** — the withdrawn suggestion above is the honest
+counterweight.
+
+**Attribution, as code-reviewer corrected it — including against itself.**
+- Story 02's AC-5 afternoon-instant finding: **PM found it, CR ruled it.** PM's accompanying
+  claim that an evening instant "would cost nothing" was WRONG — the helper derives the
+  instant *from* `game_date`, so it needed a parameter. Finding stands; cost claim corrected.
+- `have_both_score_pairs`: **PM.** CR read the guard without articulating why it was
+  load-bearing.
+- Story 01's header-site exposure: recorded **as CR claimed it at the time** — a
+  parenthetical about *future* loosening — not as "found the header gap". It was live, but
+  an agent under-rating its own finding is the rarer error and the record preserves what was
+  claimed rather than quietly upgrading it.
+
+**⚠️ METHOD, and it matters more than the totals.** The two most serious findings —
+story 04's un-regenerated `requirements-dev.txt` and story 02's `TypeError` path — were
+found by **constructing an input** and by **sweeping a file no diff touched**. *Neither came
+from reading the diff*, which is what every pass does by default. Likewise the Step 1a audit:
+token grep found A2, A3, A4's identifier hits and A9; **synonym expansion found A5 and A6;
+the semantic read found A1 and A4's section header** — the two carrying none of the tokens,
+and A1 is the consequential one. **Step 1 alone would have shipped a false clean.** A
+scorecard of counts invites the reading that more passes would have found more; what found
+these was a different METHOD, not another pass.
 
 **Honest labelling notes, because the table flatters the process if read alone:**
 

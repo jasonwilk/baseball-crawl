@@ -72,9 +72,11 @@ share of the raw count changes enough to be worth re-measuring.
 ## Notes
 
 Captured at baseball-coach's request during E-278 planning review: the OQ-2
-measurement lives in `epics/E-278-game-identity/epic.md`, which archives with the
-epic, and the 20-cases-across-12-teams figure is real measured material a future
-session would otherwise re-derive.
+measurement lives in `.project/archive/E-278-game-identity/epic.md` — **the epic
+has since COMPLETED and archived (2026-07-28), so that is the live path and the
+burial this sentence anticipated has actually happened** — and the
+20-cases-across-12-teams figure is real measured material a future session would
+otherwise re-derive.
 
 Deliberately NOT a story in E-278 — that epic fixes defects, and this is additive
 capability. It is the constructive counterpart to the rejected `EXISTS` gate:

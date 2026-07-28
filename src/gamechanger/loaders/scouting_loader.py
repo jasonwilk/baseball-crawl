@@ -764,12 +764,20 @@ class ScoutingLoader:
             if not game_id:
                 continue
             score = game.get("score") or {}
-            # Absent instant: leave last_scoring_update EMPTY so GameLoader routes
+            # Absent instant: leave date_source_instant EMPTY so GameLoader routes
             # it through its absent-instant path and preserves the "1900-01-01"
             # sentinel. Do NOT fabricate a "1900-01-01T00:00:00Z" string -- since
-            # E-253-04, GameLoader localizes any present instant via
+            # E-253-04, GameLoader localizes a present TIMED instant via
             # derive_local_date, and that UTC-midnight sentinel would shift back a
             # day (America/Chicago -> "1899-12-31"). (E-253-11 Round-1 remediation.)
+            #
+            # E-278-04: that shift-back reasoning was stated here for the
+            # SYNTHETIC sentinel and never extended to REAL all-day events, which
+            # have the identical shape -- midnight-UTC start_ts, 24-hour end_ts,
+            # null timezone -- and were losing a day for exactly this reason.
+            # ``is_full_day`` is now carried on the entry and GameLoader takes the
+            # raw date slice for those, so the comment above no longer describes
+            # every present instant.
             start_ts = game.get("start_ts") or game.get("end_ts") or ""
             entry = GameSummaryEntry(
                 # ⚠️ CROSS-MODULE COUPLING, unguarded by any signature
@@ -810,9 +818,14 @@ class ScoutingLoader:
                 owning_team_score=_opt_int(score.get("team")),
                 opponent_team_score=_opt_int(score.get("opponent_team")),
                 opponent_id="",
-                last_scoring_update=str(start_ts),
+                date_source_instant=str(start_ts),
                 start_time=game.get("start_ts"),
                 timezone=game.get("timezone"),
+                # Key the full-day behavior on the CAUSAL field, never on the
+                # null-timezone proxy that happens to correlate with it (n=6),
+                # and never on "starts at midnight UTC" (a 7pm US Central start
+                # is midnight UTC -- measured, it over-selects 25x).
+                is_full_day=bool(game.get("is_full_day")),
             )
             index[entry.game_stream_id] = entry
         logger.info("Built games index from in-memory data: %d entries", len(index))

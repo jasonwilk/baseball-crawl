@@ -396,7 +396,88 @@ def _query_team_info(conn: sqlite3.Connection, team_id: int) -> dict:
 def _query_record(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> dict | None:
-    """Query win/loss record from the games table."""
+    """Query win-loss-tie record from the games table.
+
+    Returns ``{"wins": int, "losses": int, "ties": int}``, or ``None`` when the
+    team has no scored games in the season. **The ``ties`` key was added in
+    E-278-01 and widened this contract** -- a game at equal scores previously
+    fell through both strict ``>`` and ``<`` arms and counted as neither, so it
+    vanished from the record entirely.
+
+    ⚠️ **This counts games PLAYED, not games we hold DATA for. Do NOT add a
+    stat-row ``EXISTS`` gate, a perspective filter, or any other coverage
+    condition here.** That was proposed as defence-in-depth and REJECTED by
+    domain review (epic TN-7): a win, loss or tie is derivable from a final
+    score alone, and the record is a statement about what happened on the field.
+    The rejection is backed by measurement, not preference -- **20 genuine
+    completed-and-scored games across 12 of 28 teams** (2.4%-15.8% per team)
+    carry no stat rows from their own perspective, 17 of them charted only from
+    the opposing side. A coverage gate would have silently deleted those 20 real
+    games from twelve coaches' records. ``test_record_ignores_stat_row_coverage``
+    goes red if such a condition is reintroduced anywhere in this query.
+
+    On the absent ``status = 'completed'`` filter -- deliberate, see E-278-01
+    AC-6. **This query is not an exception to its neighbours; it conforms to
+    them.** Every game query in this module -- this one, ``_query_recent_games``,
+    ``_query_runs_avg`` and ``_query_freshness`` -- gates completeness on
+    SCORED-NESS (``home_score IS NOT NULL AND away_score IS NOT NULL``) rather
+    than on ``status``, and none of the four carries a status predicate.
+
+    ⚠️ An earlier version of this paragraph claimed *"every other game query in
+    `src/` carries one, and this is a knowing exception"*. **That was false, and
+    false about three functions in this same file** -- it was a census over a
+    tree nobody re-counts, asserted rather than checked, and it survived a relay
+    chain in which every verdict was right and the premise underneath was wrong
+    the whole way down. The four siblings above are named deliberately instead:
+    a claim about one module is checkable in one file and rots VISIBLY if a
+    fifth query appears, which a tree-wide count does not.
+
+    **What is actually established.** The ingest path structurally cannot
+    CREATE a scored row under a non-terminal status:
+    ``_build_games_index_from_data`` skips any event whose ``game_status !=
+    "completed"``, and ``GameLoader._upsert_game`` -- the only ``INSERT INTO
+    games`` in ``src/`` -- hardcodes ``'completed'``. ⚠️ That bounds what can be
+    WRITTEN GOING FORWARD and says nothing whatever about rows already stored.
+
+    **So the guard's cost and its benefit rest on the SAME unaudited
+    population, and neither is measured.** For any legacy row holding real
+    scores under a non-terminal status, the guard would exclude it -- which is
+    at once the harm (a genuinely-played game silently dropped from a coach's
+    record) and the benefit (an unfinished game no longer counted as a win).
+    Whether such rows exist is unknown. Calling the benefit provably zero while
+    calling the cost real would be an asymmetry the evidence does not support:
+    if that population is empty the guard is free AND useless; if it is
+    non-empty the guard is both helpful and harmful, in proportions nobody has
+    counted.
+
+    **And the direction cuts against declining, which is worth saying plainly.**
+    This epic's founding defect is record INFLATION, and an unfinished game
+    counted as a win is inflation -- so the risk this guard would address is the
+    very class the epic exists to fix.
+
+    **The verdict is nonetheless to DECLINE**, on the fail-safe grounds AC-6
+    explicitly permits: adding an unauditable filter to a coach-facing number,
+    where the failure mode is silent deletion, is not a change to make against
+    an unmeasured population.
+
+    ⚠️ **Do not over-read the resemblance to TN-7.** The shape is similar --
+    a filter that could silently delete real games -- but TN-7's force was that
+    someone COUNTED: 20 genuine games across 12 teams, 2.4%-15.8% each. This
+    population is hypothetical and unreachable going forward. Same shape,
+    different evidential weight, and borrowing TN-7's authority for an unmeasured
+    case would be exactly the borrowed-authority move this repo keeps flagging.
+
+    **How this decays.** The cost half is legacy-data-dependent, and the
+    operator's reset removes that population. The verdict survives the reset --
+    but NOT because the benefit was independently established at zero. It
+    survives because afterwards BOTH halves are zero: no legacy rows remain for
+    the guard to help or harm, and the ingest path cannot create new ones. The
+    guard goes from unauditable to free-and-pointless.
+
+    **So a later reader weighing "it is free now, add it for defence in depth"
+    is making a real choice, not correcting an oversight.** This is settled on
+    current grounds, not closed permanently.
+    """
     row = conn.execute(
         """
         SELECT
@@ -409,7 +490,14 @@ def _query_record(
                 WHEN home_team_id = :tid AND home_score < away_score THEN 1
                 WHEN away_team_id = :tid AND away_score < home_score THEN 1
                 ELSE 0
-            END) AS losses
+            END) AS losses,
+            -- A tie needs no team-side branch: the WHERE clause already
+            -- restricts to games this team played, and equal scores are equal
+            -- from both sides.
+            SUM(CASE
+                WHEN home_score = away_score THEN 1
+                ELSE 0
+            END) AS ties
         FROM games
         WHERE season_id = :season_id
           AND (home_team_id = :tid OR away_team_id = :tid)
@@ -417,8 +505,12 @@ def _query_record(
         """,
         {"tid": team_id, "season_id": season_id},
     ).fetchone()
-    if row and (row[0] is not None or row[1] is not None):
-        return {"wins": row[0] or 0, "losses": row[1] or 0}
+    if row and any(value is not None for value in row):
+        return {
+            "wins": row[0] or 0,
+            "losses": row[1] or 0,
+            "ties": row[2] or 0,
+        }
     return None
 
 
@@ -2371,9 +2463,17 @@ class _ReportGeneration:
         # This is the third site of the finding E-252 and E-253 fixed elsewhere.
         #
         # `derive_local_date` is the canonical converter and takes an IANA NAME,
-        # so the operating-tz ZoneInfo is bridged via `.key`. It returns None only
-        # for an absent or unparseable instant; the fallback is venue-local
-        # "today", never a UTC slice -- reintroducing one here is the bug.
+        # so the operating-tz ZoneInfo is bridged via `.key`. The fallback below
+        # is venue-local "today", never a UTC slice -- reintroducing one here is
+        # the bug.
+        #
+        # It returns None for an absent instant, an unparseable one, and (since
+        # E-278-04) a PRESENT-but-unresolvable timezone. That third case cannot
+        # arise at THIS site: the zone comes from `get_operating_timezone()`,
+        # which has already resolved it -- `.key` on a live ZoneInfo is by
+        # construction a name this runtime resolves. The distinction matters
+        # because it does not hold at the loader, whose zone is operator-typed
+        # and arrives from a GameChanger payload.
         reference_date = (
             derive_local_date(generated_at, get_operating_timezone().key)
             or operating_today().isoformat()

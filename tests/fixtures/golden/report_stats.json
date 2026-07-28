@@ -3,7 +3,7 @@
     "basis": "seed.sql header math",
     "note": "Hand-reviewed against the seed.sql header math at creation. Regeneration is observable in git diff; re-review before commit.",
     "reviewed_by": "vscode",
-    "reviewed_date": "2026-07-18"
+    "reviewed_date": "2026-07-28"
   },
   "batting": [
     {
@@ -1020,6 +1020,7 @@
   ],
   "record": {
     "losses": 2,
+    "ties": 0,
     "wins": 5
   },
   "roster": [

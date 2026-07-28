@@ -312,6 +312,7 @@ def _sched_summary(
     *,
     ts: str = "2025-05-10T14:00:00.000Z",
     tz: str | None = "America/Chicago",
+    is_full_day: bool = False,
 ) -> GameSummaryEntry:
     """A minimal GameSummaryEntry for _build_schedule_counts key derivation."""
     return GameSummaryEntry(
@@ -321,9 +322,10 @@ def _sched_summary(
         owning_team_score=5,
         opponent_team_score=2,
         opponent_id="",
-        last_scoring_update=ts,
+        date_source_instant=ts,
         start_time=ts,
         timezone=tz,
+        is_full_day=is_full_day,
     )
 
 
@@ -419,6 +421,46 @@ def test_build_schedule_counts_date_key_uses_shared_seam(
     expected_date = _derive_game_date(summary)
     assert expected_date == "2025-05-10"  # venue-local, NOT the UTC "2025-05-11"
     assert list(counts.keys()) == [(expected_date, "Rival High")]
+
+
+def test_build_schedule_counts_full_day_key_is_the_date_marker(
+    loader: ScoutingLoader,
+) -> None:
+    """E-278-04: a full-day event's count key is its marker date, unlocalized.
+
+    The schedule-count key and the key ``_load_boxscore_data`` builds MUST be
+    byte-identical -- a mismatch key-misses silently and disables the tolerant
+    same-game signal (finding E(b)). Both go through ``_derive_game_date``, so
+    the full-day correction reaches both at once; this pins that it does, on the
+    shape where the two dates differ.
+
+    Localizing this midnight-UTC marker would produce 2026-05-30 -- so the
+    key would have named the wrong day AND the stored game_date the right one.
+    """
+    summary = _sched_summary(
+        "g1", ts="2026-05-31T00:00:00.000Z", tz=None, is_full_day=True
+    )
+    counts = loader._build_schedule_counts({"g1": summary}, {"g1": "Rival High"})
+
+    assert _derive_game_date(summary) == "2026-05-31"
+    assert list(counts.keys()) == [("2026-05-31", "Rival High")]
+
+
+def test_build_schedule_counts_unresolvable_tz_key_is_the_sentinel(
+    loader: ScoutingLoader,
+) -> None:
+    """E-278-04: an undated game keys on the sentinel, not on a UTC slice.
+
+    The key must track whatever ``_derive_game_date`` stores, whichever branch
+    it took -- including the fail-closed one. Asserting the literal (rather than
+    just equality with the seam) is what stops a UTC slice creeping back in on
+    one side of the pair.
+    """
+    summary = _sched_summary("g1", ts="2026-06-20T02:00:00.000Z", tz="Not/AZone")
+    counts = loader._build_schedule_counts({"g1": summary}, {"g1": "Rival High"})
+
+    assert _derive_game_date(summary) == "1900-01-01"
+    assert list(counts.keys()) == [("1900-01-01", "Rival High")]
 
 
 # ---------------------------------------------------------------------------

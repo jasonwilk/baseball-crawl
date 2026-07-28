@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 
 from src.db.game_merge import GameMergeError, merge_duplicate_game
 from src.db.players import ensure_player_row
@@ -49,7 +50,11 @@ from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import is_gc_uuid
-from src.util.timezone import derive_local_date, get_operating_timezone
+from src.util.timezone import (
+    derive_local_date,
+    get_operating_timezone,
+    resolve_timezone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +132,104 @@ _PITCHING_CANARY_KEYS: tuple[str, ...] = (*_PITCHING_MAIN, "IP")
 # ``own_team_id`` -- is the home != away invariant guard (E-245-04 / TN-6).
 _UNKNOWN_OPPONENT_NAME = "Unknown Opponent"
 
+# In-band sentinel for "this game's venue-local calendar date is not
+# determinable". ``games.game_date`` is ``TEXT NOT NULL`` and
+# ``_derive_game_date`` is annotated ``-> str``, so there is no out-of-band way
+# to say "unknown" at this seam.
+#
+# ⚠️ IT IS A DEDUP KEY, and that is the cost of using it. ``_find_duplicate_game``
+# gates candidates on ``game_date = ?``, so every sentinel-dated game sharing a
+# team pair is a dedup candidate for every other one. That is bounded (measured
+# 2026-07-27: zero stored rows carry it, and zero of 1064 reachable schedule
+# events lack a ``start_ts``) but it is real, and it lands hardest on
+# repeat-opponent and doubleheader cases. Widening what routes here is a
+# decision, not a detail.
+_UNKNOWN_GAME_DATE = "1900-01-01"
+
+# E-278-02. Two same-perspective listings whose start instants fall within this
+# window are ONE real game that GameChanger listed twice, never two games.
+#
+# The bound is physical, not fitted: one team cannot begin two games inside a
+# second, so a sub-second gap between two listings of the same pair on the same
+# date is not a schedule, it is a double-write. That is a stronger warrant than
+# the empirical separation, which is only corroboration -- the measured
+# doubleheader floor in dev is 90 minutes (3.75 orders of magnitude away), and
+# PROD's is 150-180, but neither number belongs in a criterion: they are
+# different populations and the observed floor could shift.
+#
+# ⚠️ SCOPE: this is a NARROWING condition, never a trigger. Score agreement
+# triggers; this only bounds it. A sub-second delta ALONE must not collapse
+# anything -- corpus-wide there are three other near-zero pairs, and they are
+# safe here only because they carry DISJOINT perspectives and are resolved in
+# the cross-perspective branch above, never reaching this one.
+_SAME_LISTING_MAX_DELTA_SECONDS = 1.0
+
+
+def _parse_instant(value: str | None) -> datetime | None:
+    """Parse a GameChanger wire timestamp to an AWARE datetime, or ``None``.
+
+    Deliberately local and deliberately narrow. It answers "how far apart are
+    these two instants", which is a different question from
+    ``derive_local_date``'s "what calendar date is this in that zone" -- and it
+    could not reuse that seam even if it wanted to: that seam returns a
+    ``"YYYY-MM-DD"`` STRING, and a sub-second delta is not computable from a
+    calendar date. A delta is also zone-independent, since both operands are
+    absolute instants, so that seam's E-278-04 contract of REFUSING on an
+    unresolvable zone would be inherited for nothing -- silently disabling dedup
+    for exactly the rows whose zone GameChanger spelled unusually.
+
+    **The one thing it DOES inherit from that seam is naive-datetime
+    normalization, and omitting it was a real defect.** A bare date
+    (``"2026-07-25"``) or a naive datetime PARSES cleanly, so it is neither
+    absent nor unparseable and no ``except ValueError`` can catch it -- and
+    subtracting a naive datetime from an aware one raises ``TypeError``. That
+    exception had no handler between here and ``ScoutingLoader``'s per-game
+    loop, which has no ``try``/``except`` around ``load_payload``; since
+    ``load_payload`` commits per game, it would have left earlier games
+    committed and ABANDONED every remaining game in that team's scout.
+    Unobserved on the wire today (GC renders ``...Z``) -- but this epic exists
+    because an unobserved shape in a GameChanger field is not a proven-impossible
+    one, and the cost here is an aborted crawl rather than a wrong answer.
+
+    Returns:
+        A timezone-AWARE ``datetime`` (naive input is read as UTC, mirroring
+        ``derive_local_date``), or ``None`` when *value* is absent or will not
+        parse. The return is aware unconditionally, so arithmetic on two of
+        these cannot raise.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_same_listing_delta(start_a: str | None, start_b: str | None) -> bool:
+    """True when two start instants are within :data:`_SAME_LISTING_MAX_DELTA_SECONDS`.
+
+    Fails CLOSED: an absent or unparseable instant on either side returns False,
+    leaving the caller on its pre-existing tiebreaker. Refusing to narrow costs
+    a duplicate row that a later pass can still collapse; narrowing on a value we
+    could not read would merge two games irreversibly.
+
+    Byte-equal instants are inside the window, so this does not COMPETE with the
+    exact-match tiebreaker below. ⚠️ It does NOT supersede it, and the difference
+    matters because the wrong reading points at deleting the tiebreaker as
+    redundant -- which would change behavior. The tiebreaker collapses byte-equal
+    instants UNCONDITIONALLY, with no score check; the rule above gates on score
+    agreement. So a byte-equal pair whose scores DISAGREE is collapsed only by
+    the tiebreaker, and it still has to run.
+    """
+    a = _parse_instant(start_a)
+    b = _parse_instant(start_b)
+    if a is None or b is None:
+        return False
+    return abs((a - b).total_seconds()) <= _SAME_LISTING_MAX_DELTA_SECONDS
+
 
 def _opt_int(value: object) -> int | None:
     """Coerce a score-like value to int, preserving MISSING as ``None``.
@@ -151,18 +254,140 @@ def _derive_game_date(summary: GameSummaryEntry) -> str:
     on the identical date string or the schedule-count lookup would silently
     key-miss and disable the tolerant same-game signal (TN-4 finding E(b)).
 
-    Uses the game's own timezone when present, else the operating-tz seam
-    (bridged to its IANA name via ``.key`` -- ``derive_local_date`` takes a NAME,
-    never a ``ZoneInfo``). Falls back to the raw UTC date slice only when the
-    instant is unparseable, and to the ``"1900-01-01"`` sentinel when absent.
+    Four cases, in the order they are decided (E-278-04):
+
+    1. **Full-day event** (``is_full_day``): ``start_time`` is a DATE MARKER, not
+       a moment, so its date slice is taken RAW with no conversion. GameChanger
+       encodes "a date but no start time" as an all-day calendar event -- midnight
+       UTC, a 24-hour end, and a null timezone -- and localizing that marker
+       shifts it BACK a day in every western-hemisphere zone (``2026-05-31`` ->
+       ``2026-05-30``). This branch keys on ``is_full_day`` and nothing else: a
+       null timezone correlates with it perfectly in the measured corpus but is a
+       PROXY, and "starts at midnight UTC" is a far worse one (a 7pm US Central
+       start IS midnight UTC -- measured, it over-selects by 25x).
+    2. **Absent instant**: the ``_UNKNOWN_GAME_DATE`` sentinel.
+    3. **Present but UNRESOLVABLE timezone**: the sentinel again, and this is the
+       fail-closed direction (see below).
+    4. **Otherwise**: the game's own timezone when present, else the operating-tz
+       seam (bridged to its IANA name via ``.key`` -- ``derive_local_date`` takes
+       a NAME, never a ``ZoneInfo``), falling back to the raw UTC date slice only
+       when the instant itself is unparseable.
+
+    **Why case 3 checks the zone here rather than leaning on the seam's return.**
+    Making ``derive_local_date`` return ``None`` is a NO-OP at this site, and the
+    two paths are identical BY CONSTRUCTION rather than by coincidence: when the
+    zone lookup fails the datetime keeps the tzinfo it was PARSED with, and
+    ``.date()`` on an aware datetime yields its own written wall-clock date --
+    exactly what ``[:10]`` slices off the front of the string. So the old
+    fail-open output and this function's unparseable-instant fallback are the
+    same bytes, and routing an unresolvable zone into that fallback would leave
+    every mis-dated row mis-dated. Resolving the zone FIRST is what separates the
+    two, and it is why the branches above are ordered rather than collapsed.
+
+    **The unresolvable case does not substitute a zone**, the operating zone
+    included: that would satisfy "the date is not the UTC slice" while silently
+    presenting an unverified guess as venue-local. A payload that supplied a zone
+    we cannot resolve gets no date, not a different zone's date. Note the
+    contrast with case 4's ABSENT timezone, which is a genuinely different
+    situation -- no signal was given, so the documented operating-tz default
+    applies.
+
+    **The degradation is observable without reading logs**, and the honest way to
+    say so is to separate two questions that a single query cannot answer at
+    once. WHICH ROWS ARE UNDATED is exactly answerable. WHY each one is undated
+    is not answerable from stored fields at all.
+
+    **1. Every undated row, no false negatives**::
+
+        SELECT game_id, start_time, timezone FROM games
+         WHERE game_date = '1900-01-01'
+
+    This is complete by construction: ``_UNKNOWN_GAME_DATE`` is the only value
+    ANY of the three refusing branches returns -- a full-day event with no date
+    marker, an absent instant, and an unresolvable zone -- and nothing else in
+    the codebase writes that literal into ``game_date``. Every row whose
+    venue-local date could not be determined is here, whatever refused it. **For AC-4b's purpose -- an
+    operator noticing degradation without reading logs -- this is the signal**,
+    and the ``timezone`` column on each row names the zone to investigate.
+
+    **2. The subset a backfill can repair**::
+
+         ... AND start_time IS NOT NULL
+
+    Exactly right for THIS question, and for a reason outside this module:
+    ``backfill_game_dates`` refuses every NULL-``start_time`` row before it
+    examines anything else (its tier-3 guard), so a sentinel row without an
+    instant is unreachable by repair no matter which zone the runtime later
+    learns -- it needs a re-crawl. A sentinel row WITH an instant is genuinely
+    re-derivable: once its zone resolves it takes tier 1, and the differ-only
+    UPDATE guard replaces the sentinel.
+
+    **3. Case 2 versus case 3 -- NOT determinable from the stored row.** Do not
+    add a predicate that claims to split them; neither stored field does, and
+    each fails in the opposite direction. Both escape routes are executed
+    counterexamples, not analysis, and both are pinned by tests:
+
+    - ``start_time IS NOT NULL`` **misses** a case-3 row.
+      ``_build_games_index_from_data`` fills ``date_source_instant`` from
+      ``start_ts or end_ts`` but sources ``start_time`` from ``start_ts``
+      ALONE, so an ``end_ts``-only event has a truthy instant and a NULL
+      ``start_time``; with an unresolvable zone it is case 3 and this predicate
+      drops it.
+    - ``timezone IS NOT NULL`` (even with a resolvability test) **admits** a
+      case-2 row, because ``timezone`` is populated independently of
+      ``start_ts`` -- an absent-instant payload can still carry a zone, and an
+      unresolvable one passes the test.
+
+    A third shape defeats any naive reading of either: ``ON CONFLICT`` sets
+    ``game_date = excluded.game_date`` UNCONDITIONALLY while ``start_time`` is
+    ``COALESCE(excluded.start_time, games.start_time)``, so a game loaded once
+    WITH an instant and re-loaded WITHOUT one ends as a case-2 sentinel over a
+    retained non-NULL ``start_time``.
+
+    All of these live in the corpus region the story's Notes flag as
+    real-but-unexercised (0 of 1064 events lack a ``start_ts``) -- and
+    "unexercised" is not "dead". If the cause ever needs to be machine-readable,
+    it has to be RECORDED at load, not inferred from the row afterwards.
     """
-    if summary.last_scoring_update:
-        tz_name = summary.timezone or get_operating_timezone().key
-        return (
-            derive_local_date(summary.last_scoring_update, tz_name)
-            or summary.last_scoring_update[:10]
-        )
-    return "1900-01-01"
+    if summary.is_full_day:
+        # A date marker -- slice it, never localize it. Read it from
+        # ``start_time`` (the raw ``start_ts``) and from NOWHERE else.
+        #
+        # ⚠️ THIS IS THE ONE PATH THAT DOES NOT USE ``date_source_instant``,
+        # despite that being exactly what the field is named for -- so the
+        # exception is called out rather than left to look like an oversight.
+        # The reason is its FALLBACK, not its primary value: upstream fills it
+        # from ``end_ts`` when ``start_ts`` is absent, and on a full-day event
+        # ``end_ts`` is exactly 24 hours later, so its slice is TOMORROW. A
+        # full-day event with no ``start_ts`` therefore has no marker we can
+        # read, and gets the sentinel rather than a date that is off by one.
+        # (Unexercised: zero of 1064 reachable events lack a ``start_ts``. Zero
+        # observed is not unreachable, which is why it is handled rather than
+        # assumed away.)
+        return summary.start_time[:10] if summary.start_time else _UNKNOWN_GAME_DATE
+
+    if not summary.date_source_instant:
+        return _UNKNOWN_GAME_DATE
+
+    if summary.timezone:
+        if resolve_timezone(summary.timezone) is None:
+            logger.warning(
+                "Unresolvable timezone %r on game %s; storing the %r sentinel "
+                "rather than a UTC-sliced date that would be wrong by a day. "
+                "The row keeps this timezone; start_time=%r (re-derivable by "
+                "backfill only if that is not None).",
+                summary.timezone, summary.event_id, _UNKNOWN_GAME_DATE,
+                summary.start_time,
+            )
+            return _UNKNOWN_GAME_DATE
+        tz_name = summary.timezone
+    else:
+        tz_name = get_operating_timezone().key
+
+    return (
+        derive_local_date(summary.date_source_instant, tz_name)
+        or summary.date_source_instant[:10]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +408,37 @@ class GameSummaryEntry:
             :func:`_opt_int`).
         opponent_team_score: Score for the opponent team, or None when absent.
         opponent_id: UUID of the opponent team.
-        last_scoring_update: ISO 8601 timestamp string.
-        start_time: ISO 8601 datetime string from schedule/public endpoint, or None.
+        date_source_instant: The instant ``_derive_game_date`` derives the
+            game's calendar date from -- ISO 8601, always a string (possibly
+            empty). ⚠️ **Despite the resemblance, this is NOT the same value as
+            ``start_time``, and the difference is the fallback.** On the public
+            scouting path ``_build_games_index_from_data`` fills BOTH from
+            ``start_ts``, but this field falls back to ``end_ts`` and then to
+            ``""`` while ``start_time`` takes ``start_ts`` ALONE and is ``None``
+            without it. So an ``end_ts``-only event gives a truthy value here
+            and ``None`` there. **Renamed in E-278-05.** Its former name
+            was borrowed from the authenticated game-summaries endpoint's own
+            field of that name (see
+            ``docs/api/endpoints/get-teams-team_id-game-summaries.md``, where
+            the GameChanger field still legitimately carries it -- THAT one is
+            not renamed and must not be); our file-reading loader entry points
+            for that endpoint died in E-256, so no live path has supplied a
+            book-touch instant since. **That stale name cost real diagnostic
+            time**: an investigation of a wrong ``game_date`` followed
+            ``start_time``, which is not what the date derives from, and had to
+            establish by execution that the fallback it suspected never fired
+            (epic TN-1; IDEA-218 records the refuted hypothesis).
+        start_time: ISO 8601 datetime string from schedule/public endpoint, or
+            ``None``. The raw ``start_ts`` with NO fallback -- see
+            ``date_source_instant`` above for why the two differ.
         timezone: IANA timezone identifier (e.g., ``America/Chicago``), or None.
+        is_full_day: ``True`` when the source event is an all-day calendar entry
+            (the scorekeeper recorded a date but no start time). Carried from the
+            public games payload's ``is_full_day`` key because it changes how
+            ``start_time`` MUST be read: on a full-day event that timestamp is a
+            DATE MARKER at midnight UTC, not a real start instant, so converting
+            it to a local date shifts it back a day. Defaults to ``False`` --
+            a timed event, the overwhelmingly common case.
     """
 
     event_id: str
@@ -194,9 +447,10 @@ class GameSummaryEntry:
     owning_team_score: int | None
     opponent_team_score: int | None
     opponent_id: str
-    last_scoring_update: str
+    date_source_instant: str
     start_time: str | None = None
     timezone: str | None = None
+    is_full_day: bool = False
 
 
 @dataclass
@@ -406,7 +660,12 @@ class GameLoader:
             summary, own_team_id, opp_team_id
         )
 
-        # Game date: the venue-LOCAL calendar date of the scoring instant
+        # Game date: the venue-LOCAL calendar date of the game's START
+        # instant -- NOT of a "scoring instant", which is what this
+        # comment said until E-278-05 and what the field's former name
+        # implied. No live path carries a book-touch timestamp; see
+        # ``GameSummaryEntry.date_source_instant`` for where the value
+        # really comes from.
         # (CE-3 / E-253-04). Deriving it from the raw UTC prefix files an
         # evening game under the next UTC day, skewing rest math, the 7-day
         # window, and cross-perspective dedup at UTC midnight. Factored into the
@@ -430,12 +689,26 @@ class GameLoader:
         # Pre-load dedup check: if a game already exists for this date and
         # team pair (in either home/away order), reuse the existing game_id
         # so all stat upserts merge into the canonical row.
-        canonical_id = self._find_duplicate_game(
-            summary.event_id, game_date,
-            home_team_id, away_team_id, home_score, away_score,
-            summary.start_time,
-            incoming_schedule_count=incoming_schedule_count,
-        )
+        #
+        # An UNKNOWN date is NOT a dedup key (E-278-04). ``_find_duplicate_game``
+        # gates candidates on ``game_date = ?``, so without this guard every
+        # sentinel-dated game sharing a team pair becomes a dedup candidate for
+        # every other one -- and "neither game's date could be determined" is no
+        # evidence whatsoever that they are the same game. Declining is the safe
+        # direction, because the two failure modes are not symmetric: a missed
+        # merge leaves an extra row that a later pass can still collapse, while a
+        # wrong merge destroys one game's stats irreversibly. Reached by both
+        # sentinel producers -- the absent instant (pre-existing) and the
+        # unresolvable timezone (new here), which this guard stops from
+        # colliding with each other as well as within themselves.
+        canonical_id = None
+        if game_date != _UNKNOWN_GAME_DATE:
+            canonical_id = self._find_duplicate_game(
+                summary.event_id, game_date,
+                home_team_id, away_team_id, home_score, away_score,
+                summary.start_time,
+                incoming_schedule_count=incoming_schedule_count,
+            )
         preserve_scores = False
         if canonical_id is not None:
             # Capture the ORIGINAL source event id BEFORE replace() rewrites
@@ -1364,6 +1637,82 @@ class GameLoader:
             # perspective re-loads reach this branch when the whole-game
             # idempotency check doesn't cover the path (e.g., different
             # event_ids for the same real game from the same perspective).
+
+            # E-278-02: GameChanger double-lists ONE real game inside a single
+            # team's own schedule under two distinct event ids, sub-second
+            # apart. Both listings share a perspective, so the byte-equality
+            # tiebreaker below finds their start_times unequal and files them as
+            # a doubleheader -- inserting a second row and double-counting the
+            # game in season aggregates.
+            #
+            # SCORE AGREEMENT IS THE TRIGGER; the sub-second delta only NARROWS
+            # it. Never invert that. A delta-triggered rule would be unsafe
+            # corpus-wide (three other near-zero pairs exist), and a
+            # score-only rule is unsafe on its own because two genuine
+            # doubleheader games can share a scoreline.
+            #
+            # Scores are compared PAIRWISE, never by total: 11-1 and 10-2 both
+            # total 12 and are plainly different games. This is the same trap
+            # the cross-perspective branch above calls out, and the score-total
+            # fallback further down still carries it for the no-start_time case.
+            #
+            # ⚠️ What this rule must NOT consult, each ruled out on evidence:
+            #   * `plays` counts (AC-8) -- both rows have ZERO at first load, so
+            #     `0 == 0` reads as agreement for EVERY pair, leaving scores
+            #     alone to decide. That is the destructive direction. On
+            #     re-scout it is 0-vs-58 and never agrees, so the duplicate
+            #     would persist forever instead. Both directions fail.
+            #   * `end_ts` -- MEASURED non-discriminator: the real pair's end
+            #     instants are TWO HOURS apart (a 1-hour event vs a 3-hour
+            #     one), so any equality rule on it misses the very duplicate
+            #     this exists to catch. It is not exposed here in any case.
+            #   * `home_away` -- necessarily equal for two listings sharing a
+            #     perspective, so it cannot separate duplicate from doubleheader.
+            #   * player line-set equality -- the two real rows carry 18 vs 10
+            #     batting and 4 vs 1 pitching rows despite identical scores, so
+            #     an equality test would not fire on them.
+            #
+            # AC-9 VERDICT (E-278-02): no corroborator is available at this
+            # decision point -- all four candidates above are rejected on the
+            # measurements cited, not on taste -- so score agreement narrowed by
+            # a sub-second delta, scoped to this branch, is judged SUFFICIENT.
+            #
+            # RESIDUAL RISK, recorded because a verdict without one is not a
+            # verdict: a genuine doubleheader whose two games carry identical
+            # per-team scores AND start under a second apart would be wrongly
+            # collapsed. Physically that is not a schedule (see
+            # _SAME_LISTING_MAX_DELTA_SECONDS) -- but `start_time` is a RECORDED
+            # value, not an observed one, so a scorekeeper entering both games
+            # with one timestamp is the way it could happen. Note that case
+            # already collapses today via the byte-equality tiebreaker below,
+            # which applies no score check at all: this rule widens that window
+            # from 0s to 1s and adds a score gate, so it is NARROWER than the
+            # path it sits above. It does not create the exposure.
+            have_both_score_pairs = (
+                home_score is not None
+                and away_score is not None
+                and existing_home_score is not None
+                and existing_away_score is not None
+            )
+            if (
+                have_both_score_pairs
+                and (home_score, away_score)
+                == (existing_home_score, existing_away_score)
+                and _is_same_listing_delta(start_time, existing_start_time)
+            ):
+                if start_time != existing_start_time:
+                    logger.warning(
+                        "Same-perspective double-listing: game %s → %s on %s. "
+                        "GameChanger listed one real game twice under distinct "
+                        "event ids (start times %s vs %s, within %.1fs); "
+                        "per-team scores agree (%s-%s). Collapsing to one row.",
+                        game_id, existing_id, game_date,
+                        start_time, existing_start_time,
+                        _SAME_LISTING_MAX_DELTA_SECONDS,
+                        home_score, away_score,
+                    )
+                return existing_id
+
             if start_time is not None and existing_start_time is not None:
                 if start_time != existing_start_time:
                     # Different start times → distinct games (doubleheader).

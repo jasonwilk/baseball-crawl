@@ -4,7 +4,7 @@
 [E-278: Game Identity — One Real Game, More Than One Row](epic.md)
 
 ## Status
-`TODO`
+`DONE` (2026-07-28)
 
 ## Description
 After this story is complete, a team's record header renders W-L-T and matches
@@ -141,6 +141,42 @@ is not in question. The gap is that `_query_record`'s `WHERE` clause filters on
 and **nothing else** — there is no `status = 'completed'` condition, which makes
 it an exception to the convention in `.claude/rules/data-model.md` that every
 game query in `src/` filters on `'completed'`. Verified against the current file.
+
+> ⚠️ **ANNOTATED AT CLOSURE, 2026-07-28 (PM). The paragraph above is preserved as a
+> record of what was believed at planning time — but "Verified against the current
+> file" did NOT hold for the half of the claim that mattered, and that phrase is
+> exactly the sentence a later reader trusts most, so it is marked rather than left
+> to pass.**
+>
+> **What WAS verified and still holds:** `_query_record`'s `WHERE` clause carries no
+> `status` condition.
+>
+> **What was NOT verified and is FALSE:** that this makes it *an exception to a
+> convention the other queries follow.* `.claude/rules/data-model.md`'s census was
+> wrong. `_query_recent_games`, `_query_runs_avg` and `_query_freshness` **all gate
+> on scored-ness with no status filter**, and `generator.py` carries **zero**
+> `status = 'completed'` predicates (there are nine in `src/`, none in that file).
+> Established by claude-architect refusing a relayed instruction and checking, and
+> verified independently by code-reviewer.
+>
+> **This does not weaken AC-6 — it puts it on better ground.** `_query_record` is
+> not a lone deviant needing justification; it is **consistent with all three of its
+> siblings**, because that whole query family uses scored-ness as its completeness
+> predicate. The verdict moves from *"knowingly breaking a documented convention"*
+> to *"the convention's census was wrong and this query conforms to its family."*
+>
+> **Why this is annotated rather than preserved silently, since the paragraph is
+> otherwise evidence:** a planning-time BELIEF is evidence and is preserved. *"Verified
+> against the current file"* is a different kind of claim — it asserts a check was
+> performed, which **discharges a duty the reader would otherwise have.** It suppresses
+> re-verification, so it is criterion-shaped and gets corrected. The belief stays; the
+> false assurance is marked.
+>
+> The epic's own record of this class applies to its author here: a **correct
+> conclusion stopped the premise underneath it being checked.** code-reviewer made the
+> same error on the same sentence from the other direction — reporting the rule as
+> *newly* falsified by this story, when those three siblings had violated it all
+> along — and diagnosed it in the same words.
 Whether that matters depends on a fact about the loader that neither PM nor coach
 has established: can a score land on a game whose `status` is not terminal?
 Weather and curfew stoppages are the realistic case at this level, and pool-play
@@ -185,8 +221,15 @@ path.
 
 **code-reviewer then closed the remaining question: there is no other live `games`
 writer.** A sweep of `src/`, `scripts/`, and `migrations/` finds exactly **one**
-`INSERT INTO games` — `src/gamechanger/loaders/game_loader.py:1569`, the one that
-hardcodes `'completed'`. Note the DDL default is `status TEXT NOT NULL DEFAULT
+`INSERT INTO games` — in **`GameLoader._upsert_game`**
+(`src/gamechanger/loaders/game_loader.py`, at `:1843` as of 2026-07-28), the one
+that hardcodes `'completed'`. ⚠️ **This citation read `:1569` at planning time and
+had rotted by 274 lines** once E-278-04 and E-278-02 both inserted above it —
+navigate by the symbol, and expect `:1843` to move again when E-278-05 edits this
+module. **The claim itself was re-verified on 2026-07-28 and still holds: exactly
+one `INSERT INTO games` in `src/`, and the only two `UPDATE games` statements
+(`game_merge.py`, `backfill_game_dates.py`) touch `game_stream_id` and `game_date`
+respectively, neither writing `status`.** Note the DDL default is `status TEXT NOT NULL DEFAULT
 'scheduled'`, so a non-terminal scored row is **representable in the schema but
 unreachable through any current writer**.
 

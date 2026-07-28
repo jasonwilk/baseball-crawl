@@ -155,7 +155,8 @@ You are the code-reviewer subagent. Wait for review assignments from the main se
 Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use it when reading files and running git diff.
 Review the current story's changes via `cd [epic-worktree-path] && git diff` (unstaged changes = current story).
-Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached main` (staged = prior stories).
+Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached $(git merge-base epic/E-NNN main)` (staged = prior stories).
+The base is the merge base, NEVER bare `main`: `main` moves while the epic runs, and in this worktree `HEAD` is `epic/E-NNN`, so a bare-`main` diff mixes main's own post-branch commits into what reads as the epic's changes.
 Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree.
 ```
 
@@ -237,7 +238,7 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 **Pytest limitation**: a pytest run from the worktree exercises the *worktree's* own uncommitted `src/` (not the merged tree the epic closes against) -- `tests/__init__.py` puts the repo root on `sys.path[0]`, ahead of the editable-install finder. Run tests for verification, but understand a green worktree run is not evidence about the merged closure tree. Report results in your completion message.
 
-**Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached main` = prior stories' staged changes. Edit files via Write/Edit tools with absolute worktree paths.
+**Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached $(git merge-base epic/E-NNN main)` = prior stories' staged changes -- use the merge base, never bare `main`, which would fold main's own post-branch commits into the view. Edit files via Write/Edit tools with absolute worktree paths.
 
 **Expert recommendations are provisional until you trace scope.** When a story, spec, Technical Notes section, or relayed expert consultation names a specific file, function, signature, or schema change, treat that recommendation as a starting point -- not the final answer. Before committing the change, grep `src/`, `scripts/`, `tests/`, and `templates/` for all construction sites, callers, and consumers of the named entity, and verify the recommendation still holds across the actual surface area. Schema and structural recommendations made from a quick read often miss sites the expert did not see; the implementer is the one who finds them.
 
@@ -320,7 +321,7 @@ After both the code-reviewer approves and PM verifies ACs pass for a story (or P
 
 The staging boundary is the inter-story isolation mechanism. After staging:
 - `git diff` (unstaged) shows only the next story's changes
-- `git diff --cached main` shows the cumulative view (all completed stories)
+- `git diff --cached $(git merge-base epic/E-NNN main)` shows the cumulative view (all completed stories). The merge base, not bare `main` -- see Step 8 sub-step 3 for why.
 
 ### Step 6: Cascade
 
@@ -419,7 +420,7 @@ If the epic introduced a **cross-cutting invariant** -- a new NOT NULL column on
 
 **Mechanical trigger checklist** -- every trigger is evaluable from a **permitted artifact** (the diff or the Technical Notes), so the main session, which is barred from reading source, can fire the audit without inspecting code. The audit FIRES when any of the following holds:
 
-- a **NOT NULL or FK migration in the diff** -- a `migrations/*.sql` file in `git diff --cached main` that adds a `NOT NULL` column or a `FOREIGN KEY` / `REFERENCES` clause; OR
+- a **NOT NULL or FK migration in the diff** -- a `migrations/*.sql` file in `git diff --cached $(git merge-base epic/E-NNN main)` (merge base, not bare `main`, or another epic's migration landing on main could fire this trigger) that adds a `NOT NULL` column or a `FOREIGN KEY` / `REFERENCES` clause; OR
 - a **canonical-helper signature change declared in the epic/story Technical Notes** -- a Technical-Notes statement that a CLAUDE.md "canonical" seam function's signature changed (e.g. `ensure_team_row`, `ensure_player_row`, `resolve_db_path`, `ensure_season_row`); OR
 - a **new required field on a core INSERT, as declared in the epic/story Technical Notes** -- a Technical-Notes statement that every INSERT path into a stat/core table must now supply a new mandatory field.
 
@@ -440,10 +441,12 @@ This is the **last pre-merge review** and runs on **every** dispatch path -- unl
 Run from the epic worktree:
 
 ```
-cd <epic-worktree-path> && git diff main
+cd <epic-worktree-path> && git diff $(git merge-base epic/E-NNN main)
 ```
 
-If the diff is empty (no changes relative to main), report "No changes in epic worktree to review" and proceed to Step 1b.
+The base is the merge base, NEVER bare `main`. A bare-`main` diff here folds main's own post-branch commits into the review surface, and the reviewer has no way to tell them from the epic's work -- in E-278 exactly that produced an 85-line phantom finding against a file no story touched. See Step 8 sub-step 3.
+
+If the diff is empty (no changes relative to the merge base), report "No changes in epic worktree to review" and proceed to Step 1b.
 
 #### Build the story manifest
 
@@ -453,7 +456,7 @@ Assemble a story manifest from the epic's Stories table: list each story ID, tit
 
 Send the integration review assignment to the code-reviewer via `SendMessage` with: the epic worktree path, story manifest (IDs, titles, one-line summaries), full Technical Notes, Goals and Success Criteria, and the full epic diff. Include "Review round: 1 of 2 (circuit breaker)" and instructions to focus on cross-story interactions, naming consistency, import conflicts, and architectural issues. PM applies the same AC×surface enumeration described in the AC verification note (Phase 3 Step 5); see the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
 
-**Large epic handling**: If the diff exceeds ~3,000 lines, replace inline diff with a per-story file summary (file paths, modified/new status, +/- line counts). Generate from cross-referencing each story's `## Files Changed` with `git diff --stat main`. The reviewer can request specific file contents from the main session.
+**Large epic handling**: If the diff exceeds ~3,000 lines, replace inline diff with a per-story file summary (file paths, modified/new status, +/- line counts). Generate from cross-referencing each story's `## Files Changed` with `git diff --stat $(git merge-base epic/E-NNN main)` (merge base, not bare `main`). The reviewer can request specific file contents from the main session.
 
 #### Triage, remediation, and circuit breaker
 
@@ -577,7 +580,7 @@ PM checks `docs/vision-signals.md` for unprocessed signals. Advisory, not blocki
 
 ### Step 6: Present a summary to the user
 
-Before closure merge: epic ID/title, stories completed, review outcomes (per-story CR: N stories reviewed; CR integration: clean/N fixed/not run; Codex: clean/N fixed/skipped/not run), file list (`git diff --stat main` from epic worktree), key artifacts, follow-up work, promotable ideas.
+Before closure merge: epic ID/title, stories completed, review outcomes (per-story CR: N stories reviewed; CR integration: clean/N fixed/not run; Codex: clean/N fixed/skipped/not run), file list (`git diff --stat $(git merge-base epic/E-NNN main)` from the epic worktree -- merge base, not bare `main`, or the summary you show the user will list files main changed and this epic did not), key artifacts, follow-up work, promotable ideas.
 
 ### Step 7: Shut down implementers and code-reviewer
 
@@ -587,7 +590,9 @@ Send a `shutdown_request` to each implementer and to the code-reviewer. Wait for
 
 ### Step 7a: Ancillary file sweep
 
-Stage any main-checkout session artifacts before the closure merge. During dispatch, agents write to the epic worktree (those changes are captured by Step 8's worktree patch). This step stages main-checkout changes: vision signals from the main session, leftover planning artifacts, or idea captures. These staged files are included in Step 8's closure commit alongside the worktree patch -- no separate commit is made here, because committing on main would advance HEAD and cause Step 8's `git diff --cached main` to generate reverse patches for the committed files.
+Stage any main-checkout session artifacts before the closure merge. During dispatch, agents write to the epic worktree (those changes are captured by Step 8's worktree patch). This step stages main-checkout changes: vision signals from the main session, leftover planning artifacts, or idea captures. These staged files are included in Step 8's closure commit alongside the worktree patch -- no separate commit is made here. **Stage, do not commit**, for two reasons. First and binding: the closure is ONE atomic commit (`dispatch-pattern.md`), and a Step 7a commit would advance main's HEAD so these files land outside it. Second: a path present in both trees could then be clobbered or conflict when sub-step 4 applies the epic patch onto the advanced main.
+
+**Citation corrected in E-278**: this sentence used to say a Step 7a commit "would cause Step 8's `git diff --cached main` to generate reverse patches for the committed files." Sub-step 3 diffs against `$(git merge-base epic/E-NNN main)`, and **the merge base does not move when main advances** -- so that specific mechanism no longer fires, while the atomicity reason above binds unchanged. The instruction is the same; only its stated reason was stale.
 
 **Preflight**: Run `cd /workspaces/baseball-crawl && git status --porcelain` (without `-uall`). If the output is empty, skip this step silently and proceed to Step 8.
 
@@ -636,6 +641,12 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
 
 3. **Stage and diff the epic worktree:** `cd <epic-worktree-path> && git add -A` (stage all accumulated changes), then `git diff --binary --cached $(git merge-base epic/E-NNN main) > /tmp/E-NNN-epic.patch`.
 
+   ⚠️ **The base is `$(git merge-base epic/E-NNN main)`, NEVER `main` — and this is the one command in the sequence whose wrong form is SILENT and DESTRUCTIVE.** `main` moves while an epic runs (the operator commits to it; other epics close onto it). A diff against a moved `main` reports MAIN's own post-branch divergence as if it were the epic's, in the REVERSE direction — so applying that patch **silently reverts commits nobody in this epic touched**, and the resulting closure commit looks entirely normal. Nothing downstream tests for it: sub-step 4's `git apply --check` passes (the reversal applies cleanly), sub-step 5's full suite passes (main's reverted change is usually not what the epic's tests cover), and the staged diff you present at sub-step 8 shows the reversal as an ordinary hunk. **The merge base is the only base under which the patch contains exactly the epic's own changes.**
+
+   The failure is not hypothetical and it does not require using the wrong command *here*: at E-278's closure the main session ran a post-staging sanity diff against `main` instead of the merge base, and it surfaced an 85-line change to `.claude/hooks/send-message-counter.sh` — a context-layer file no story in that epic authorized, which is exactly the shape that should stop a closure. It was a phantom: the operator had committed that hook change to `main` (`c990446`) after the epic branched. Every individual observation in the finding was accurate; the BASELINE was wrong. **So the merge base binds every diff you take during closure, not just the patch-generating one** — a `main`-based sanity check manufactures phantom findings that halt a good closure, and a `main`-based patch ships a silent revert. Sub-step 2's clean-tree preflight does not catch either: it inspects the main checkout's working tree, and this defect is entirely in the patch's contents.
+
+   **The discriminator is WHICH TREE you are standing in, so do not "fix" every `main` in this file.** In the **main checkout**, `main` IS `HEAD`, so `git diff --cached main` there (sub-step 8's operator presentation) is a staged-vs-HEAD diff and is correct. In the **epic worktree**, `HEAD` is `epic/E-NNN` and `main` is a tip that has moved since the branch point — every worktree-relative `main` in a diff is the hazard above. Rule: **`main` as a diff base is safe only where it equals `HEAD`; everywhere else use `$(git merge-base epic/E-NNN main)`.**
+
 4. **Dry-run then apply the patch on main:** `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch`. If the dry-run succeeds, run `git apply --3way /tmp/E-NNN-epic.patch` to apply for real.
 
 4b. **Dependency-refresh reinstall (conditional -- Phase 5 Step 1d, AC-4c):** If the applied patch changed `requirements.txt` or `requirements-dev.txt`, reinstall the **main-checkout** Python env from the patched lockfile BEFORE sub-step 5 (and thus before the Step 1d smoke at sub-step 5b): `cd /workspaces/baseball-crawl && pip install -r requirements-dev.txt && pip install --no-deps -e .` (the editable install per the devcontainer convention). The epic worktree cannot install into the main checkout, so nothing else forces this -- without it, sub-step 5 would run the epic's code against the *pre-epic* dependency set and pass green. This is distinct from the Docker image rebuild the Step 1d preflight performs: the rebuild fixes the app that `curl /health` hits; this reinstall fixes the local interpreter that `bb`/pytest run on. Skip this sub-step when the patch changed neither lockfile.
@@ -656,7 +667,9 @@ Merge the epic worktree's accumulated changes into the main checkout and produce
 
 9. **Pause for explicit user approval.**
 
-   **Present staged changes**: Run `git diff --cached --stat main` and present the file count and insertion/deletion totals to the user.
+   **Present staged changes**: Run `git diff --cached --stat main` and present the file count and insertion/deletion totals to the user. No path filter -- `git diff` alone would miss the already-staged changes, which are most of the closure.
+
+   ⚠️ **`main` is CORRECT here and must NOT be "fixed" to a merge base.** This is the one closure diff taken in the **main checkout**, where `main` IS `HEAD`, so it is a staged-vs-HEAD diff and shows exactly what the pending commit contains. The merge-base rule in sub-step 3 applies to diffs taken in the **epic worktree**, where `HEAD` is `epic/E-NNN` and `main` is a tip that has moved since the branch point. The general rule: **`main` as a diff base is safe exactly where it equals `HEAD`.** (E-278 swept the worktree-relative sites to the merge base and deliberately left this one; do not include it in a future sweep.)
 
    **User approval**: Wait for the user to respond with exactly one of "yes", "commit", "approve", or "go ahead". Any other response -- including silence, questions, or ambiguous acknowledgments ("looks good", "ok", "sure", "👍") -- does NOT count as approval. Do not proceed to the `git commit` sub-step (sequence step 10) until an explicit approval word is received.
 

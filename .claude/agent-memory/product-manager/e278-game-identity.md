@@ -5,13 +5,25 @@ metadata:
   type: project
 ---
 
-**Canonical record is `epics/E-278-game-identity/epic.md`. Prefer pointing at it over
+**Canonical record is `.project/archive/E-278-game-identity/epic.md`. Prefer pointing at it over
 restating.** This file carries only what a cold reader would not get from the epic, plus the
 process findings that outlive it.
 
 ## State
 
-READY 2026-07-28. 4 stories, SE-only dispatch team. Planning ran through 8 review passes.
+**✅ COMPLETED + archived 2026-07-28.** All 4 stories DONE, SE-only dispatch team. Planning
+ran through 8 review passes; dispatch added per-story code review (2 rounds on 04 and 02),
+a Step 1a invariant audit, a Step 1c integration review over the full epic diff, and a Codex
+pass. **The epic file moved to `.project/archive/E-278-game-identity/` — it is a frozen
+record now, so cite it, never edit it.**
+
+⚠️ **TWO THINGS CLOSING THE EPIC DID NOT DISCHARGE, and both are operator-facing:**
+**`tzdata` does not reach production until the next app image rebuild** (the shipping image
+omits the tzdata backward links, so aliased rows keep deriving UTC dates until then), and
+**story 02 is PREVENTION ONLY, so the record header stays wrong until the operator reset
+runs.** A green suite at closure was never evidence that production was fixed.
+
+*(Historical, retained because the ordering rationale is reusable:)* READY 2026-07-28.
 
 **Execution order is FIXED at 04 → 02 → 01 → 05**, not a preference. Three stories share
 `tests/test_loaders/test_game_dedup.py`, and 04 moves the `game_date` that 02's dedup groups
@@ -31,9 +43,15 @@ originally listed as independent; that was false.**
    matching GC, and none may be added. What survives is the coach's **display-format**
    ruling (always show the trailing `-0`), which is about format, not about the number.
 3. **Fail-closed alone is a NO-OP at `_derive_game_date`.** Its existing fallback is
-   `last_scoring_update[:10]` — identical *by construction* to the fail-open output, for any
+   `date_source_instant[:10]` — identical *by construction* to the fail-open output, for any
    ISO-8601 string. Proved by execution across six instant shapes. A criterion phrased on the
    return value goes green while the mis-dated rows stay wrong.
+   **⚠️ This finding is LIVE, not historical** — verified 2026-07-28 against the shipped
+   code, which still reads `derive_local_date(...) or summary.date_source_instant[:10]`.
+   Same shape, same trap, new name. *(The field was called `last_scoring_update` when this
+   was found; renamed in E-278-05 because the old name described a different datum. The
+   old token is retained HERE deliberately: it survives nowhere in `src/` or `tests/`, so
+   this line is one of the few places a repo-wide grep of it lands on an explanation.)*
 
 ## Scope boundaries that were contested and settled
 

@@ -615,7 +615,10 @@
     <div class="report-meta">
       {% if team.season_year %}{{ team.season_year }}{% endif %}
       {% if team.season_year and team.record %} &middot; {% endif %}
-      {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }}{% endif %}
+      {# W-L-T, matching GameChanger's display convention: the trailing
+         tie count is ALWAYS shown, never conditionally suppressed
+         (E-278-01, baseball-coach ruling / epic TN-7). #}
+      {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }}-{{ team.record.ties }}{% endif %}
     </div>
   </div>
   <div>
@@ -626,7 +629,7 @@
 {# ===== EXECUTIVE SUMMARY STRIP (AC-2, TN-8, TN-10) ===== #}
 {% if team.record or game_count or freshness_date or runs_scored_avg %}
 <div class="exec-summary">
-  {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }} record{% endif %}
+  {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }}-{{ team.record.ties }} record{% endif %}
   {% if team.record and game_count %} &middot; {% endif %}
   {% if game_count %}{{ game_count }} game{{ "s" if game_count != 1 else "" }}{% endif %}
   {% if freshness_date %} &middot; through {{ freshness_date | format_date }}{% endif %}

@@ -131,6 +131,117 @@ def test_unparseable_start_time_untouched_and_counted(db: sqlite3.Connection) ->
     assert _game_date(db, "g4") == _UTC_DATE
 
 
+# ---------------------------------------------------------------------------
+# E-278-04 AC-5a / AC-5b: the two classes the repair path refuses to guess at
+# ---------------------------------------------------------------------------
+
+
+def test_alias_row_is_rederived_to_the_correct_local_date(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5a: a backfill over an alias row does not move it to a WRONG date.
+
+    ``US/Central`` names the same zone as ``America/Chicago``. Before ``tzdata``
+    was a declared dependency it raised ZoneInfoNotFoundError here, the shared
+    converter fell through with the datetime still in UTC, and this row would
+    have been "corrected" to the UTC date it already held -- the instrument
+    reproducing the very bug it was measuring, and reporting agreement.
+
+    Both spellings are asserted to land on the same venue-local date, and that
+    date is asserted to differ from the stored UTC one, so a no-op cannot pass.
+    """
+    _seed_game(db, "alias", game_date=_UTC_DATE, start_time=_EVENING_UTC,
+               timezone="US/Central")
+    _seed_game(db, "canon", game_date=_UTC_DATE, start_time=_EVENING_UTC,
+               timezone="America/Chicago")
+
+    summary = backfill_game_dates(db, dry_run=False)
+
+    assert summary["rows_updated"] == 2
+    assert summary["skipped_unresolvable_timezone"] == 0
+    assert _game_date(db, "alias") == _game_date(db, "canon") == _LOCAL_DATE
+    assert _LOCAL_DATE != _UTC_DATE  # AC-8: an evening instant, so this can fail
+
+
+def test_unresolvable_timezone_row_is_left_alone_and_counted(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5a: a zone this runtime cannot resolve yields no date, so no UPDATE.
+
+    Counted under its OWN key rather than folded into ``skipped_unparseable``,
+    whose name is a claim -- it would be asserting the start_time could not be
+    parsed, which is false here.
+
+    Note what is NOT done: the operating-tz default is not substituted. That
+    would write an unverified zone's answer over a row that told us which zone
+    it meant.
+    """
+    _seed_game(db, "badtz", game_date=_UTC_DATE, start_time=_EVENING_UTC,
+               timezone="Not/AZone")
+
+    summary = backfill_game_dates(db, dry_run=False)
+
+    assert summary["skipped_unresolvable_timezone"] == 1
+    assert summary["skipped_unparseable"] == 0
+    assert summary["rows_updated"] == 0
+    assert _game_date(db, "badtz") == _UTC_DATE  # untouched
+
+
+def test_midnight_utc_null_timezone_row_is_not_rederived(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5b: the stored shape of an all-day event is left alone.
+
+    ``games`` persists no full-day marker, so this row -- midnight-UTC
+    start_time, NULL timezone -- is INDISTINGUISHABLE here from a genuine
+    midnight-UTC start. Tier 2 would apply the operating zone to what may be a
+    date MARKER and shift it back a day, re-committing the -1-day defect
+    E-278-04 removed from the load path.
+
+    The stored date below is the marker's own date. A tier-2 re-derivation would
+    move it to 2026-05-30; the assertion is that it does not.
+    """
+    _seed_game(db, "fullday", game_date="2026-05-31",
+               start_time="2026-05-31T00:00:00.000Z", timezone=None)
+
+    summary = backfill_game_dates(db, dry_run=False)
+
+    assert summary["skipped_ambiguous_full_day"] == 1
+    assert summary["rows_updated"] == 0
+    assert _game_date(db, "fullday") == "2026-05-31"
+    assert _game_date(db, "fullday") != "2026-05-30"
+
+
+def test_guard_is_the_intersection_not_either_half(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-5b: the refusal is narrow, and both halves of the cut are load-bearing.
+
+    Measured over a 928-row corpus, midnight-UTC ALONE selected 50 rows for 2
+    real full-day events -- a 25x over-count, because a 7:00pm US Central start
+    IS midnight UTC. The intersection with a NULL timezone selected exactly 2.
+
+    So a midnight-UTC row that CARRIES a timezone is an ordinary evening game
+    and must still be repaired, and a NULL-timezone row at a non-midnight
+    instant is an unambiguous instant and must still be repaired. Only the
+    intersection is refused. Without this test the guard could quietly widen to
+    "skip every NULL timezone" or "skip every midnight UTC" and stay green.
+    """
+    # Midnight UTC, but a timezone is present -> a real 7pm Central start.
+    _seed_game(db, "evening-central", game_date="2026-05-31",
+               start_time="2026-05-31T00:00:00.000Z", timezone="America/Chicago")
+    # NULL timezone, but not midnight UTC -> an unambiguous instant.
+    _seed_game(db, "null-tz-timed", game_date=_UTC_DATE,
+               start_time=_EVENING_UTC, timezone=None)
+
+    summary = backfill_game_dates(db, dry_run=False)
+
+    assert summary["skipped_ambiguous_full_day"] == 0
+    assert summary["rows_updated"] == 2
+    assert _game_date(db, "evening-central") == "2026-05-30"
+    assert _game_date(db, "null-tz-timed") == _LOCAL_DATE
+
+
 def test_already_correct_row_is_unchanged(db: sqlite3.Connection) -> None:
     """A row already holding the venue-local date is a no-op (not counted as an
     update) -- the differ-only UPDATE guard."""

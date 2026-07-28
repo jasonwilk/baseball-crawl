@@ -146,3 +146,52 @@ Import semantics of such a directory (verified E-256-03):
 So they are inert, but a bare package name still resolves. Never report "removed the
 ghost directories" as a satisfied AC: it produces no diff, CR cannot verify it, and a
 `rm` in the main checkout violates worktree isolation.
+
+## The hazard is the OPERATION, not the command spelling: anything that rewrites a worktree file from the INDEX
+
+`.claude/rules/worktree-isolation.md` prohibits **`git checkout -- <file>`** by name. **I hit the identical hazard with `git checkout-index -f -- <file>`, having read and quoted that rule the same day** (E-278-01, 2026-07-28). I pattern-matched on the command SPELLING instead of on what the command DOES, so a different command with the same effect did not register as the same thing.
+
+**The real class: any git command that writes a working-tree file from somewhere other than your edits.** Verified from `git`'s own usage output rather than memory:
+
+- `git checkout -- <path>` — from the index (the one the rule names)
+- `git checkout-index -f -- <path>` — from the index, by definition
+- `git restore <path>` — **`-W/--worktree` is the DEFAULT and `--source` defaults to the index**, so the plain form is this hazard under the friendliest-looking spelling in modern git
+- `git reset --hard`, `git stash` — wider blast radius, same family
+
+**The test to apply, since the list will rot:** *does this command write the working tree from the index, a commit, or a stash?* If yes, it destroys uncommitted work, whatever it is called.
+
+**Why it is worse during dispatch than the generic warning implies.** Under the staging-boundary protocol the index holds the **PREVIOUS STORY's state**, not HEAD. So the restore does not "undo my recent edit" — it silently reverts the file to another story's content, mixing two stories' work. In my case it discarded the current story's second render site and an explanatory comment while leaving the first site intact, producing a **half-migrated file**: two test failures that looked like a mutant's result and were entirely my own damage.
+
+**Remedy, and it is the one the rule already gives:** `cp` the file to the scratchpad BEFORE mutating, restore from that copy, and `cmp` afterwards. I had used exactly that pattern for the six preceding mutation probes and reached for git only on the seventh, mid-flow.
+
+**After an accidental discard, verify TWO things, not one.** Code-reviewer did both and the second is the one I would have skipped: (1) the damaged file is byte-identical to its pre-damage state — it compared the `git diff` **post-image blob hash** (`df3dc3c`) against the hash from its earlier read, which is strictly stronger than "the diff looks right"; and (2) **nothing ELSE vanished** — it re-checked that all eight files were still in the diff and that every file it had not been told changed was unchanged. A restore you did not verify is not a restore, and the real risk after a discard is the collateral you did not think to look for.
+
+## A `SendMessage` receipt lies in BOTH directions, and there is a hard send cap
+
+**The cap first, because it is invisible until it fires.**
+`.claude/hooks/send-message-counter.sh` denies `SendMessage` at `DENY_AT=60` sends
+**per staging boundary** (`WARN_AT=40`). It is an explicit **operator decision point**:
+the remedy is deleting `.dispatch-log/sends.count` or raising `DENY_AT`, and the hook's
+own provenance block says agents must not do either. **Stop and surface it; do not route
+around it.** A story running several review rounds plus an adjudication thread can reach
+60 — E-278-04 did, mid-delivery of a blocking artifact.
+
+**Both failure directions bit in one story, ~40 minutes apart:**
+
+- **Success ≠ delivered.** Two sends returned `{"success": true, msg_id: ...}` and the
+  recipient reported nothing arrived.
+- **Denied ≠ not delivered.** After a hook denial I told main and the reviewer that the
+  artifact *"has never actually been transmitted."* **False** — an earlier, differently
+  shaped send had landed and the reviewer had already adjudicated from it. I had reasoned
+  from "this call was denied" to "the content never arrived", which does not follow when
+  the same content went out more than once.
+
+**The one check that worked was CONTENT, not receipts:** comparing what the reviewer
+quoted back against what I had written. `.claude/rules/dispatch-pattern.md` already says
+to verify by the effect in the artifact — the bound worth remembering is that a
+**delivery-status question is exactly the un-actionable class that method cannot reach**,
+so for those, ask the recipient to quote a distinctive line back.
+
+Practical: when re-sending something you believe failed, label it *"first transmission"* or
+*"resend"* **and say which**, so the recipient can discard a duplicate or flag a gap —
+and expect to be wrong about which it is.

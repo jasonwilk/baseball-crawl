@@ -88,15 +88,19 @@ The command exits 0 only when zero self-games remain after the run. A non-zero e
 
 ### Backfilling Game Dates (`bb data backfill-game-dates`)
 
-*Last updated: 2026-07-06 | Source: E-253 (E-253-11)*
+*Last updated: 2026-07-28 | Source: E-253 (E-253-11), E-278 (E-278-04)*
 
 `bb data backfill-game-dates` re-derives the venue-local `game_date` for existing `games` rows from the recoverable UTC instant (`start_time`), correcting a historical mis-derivation where an evening game filed under the *next* day's UTC date -- skewing rest-days math, the 7-day rolling window, and cross-perspective dedup at UTC midnight. E-253-04 fixed the derivation going forward for newly-loaded games; this command corrects existing rows.
 
-**Three-tier re-derivation model**:
+**Re-derivation model -- five outcomes.** The original three tiers (by what survives in the row) are still the backbone, but E-278-04 added two refusal classes so the command never guesses at a date it can't verify:
 
-1. `start_time` present + `timezone` present -> clean re-derivation via the venue-local converter (`derive_local_date`).
-2. `start_time` present, `timezone` NULL -> re-derive using the operating-timezone default (`OPERATING_TIMEZONE` env, default `America/Chicago`).
+1. `start_time` present + `timezone` present -> clean re-derivation via the venue-local converter (`derive_local_date`) -- **unless this runtime cannot resolve that timezone name**, in which case the row is left untouched and counted separately (see below).
+2. `start_time` present, `timezone` NULL -> re-derive using the operating-timezone default (`OPERATING_TIMEZONE` env, default `America/Chicago`) -- **unless the row is also a midnight-UTC `start_time`**, which is the stored shape of an all-day event and is refused rather than guessed at (see below).
 3. `start_time` NULL -> no recoverable instant. The row is left **untouched** and counted/reported as skipped -- the command never fabricates a date.
+4. **(E-278-04) Unresolvable timezone** -- the row's stored `timezone` is present but does not resolve in this runtime (e.g. a legacy alias like `US/Central` missing from a slim image's tzdata links). Previously this case fell back to the unconverted UTC date behind a warning; it now fails closed and is left untouched, because substituting a different zone would discard what the row actually says and present an unverified guess as venue-local. Installing `tzdata` as a declared dependency (this epic) makes the case rare; failing closed is what makes it safe when it happens anyway.
+5. **(E-278-04) Ambiguous all-day event** -- a row with `timezone` NULL **and** a midnight-UTC `start_time` (`...T00:00:00.000Z` or equivalent). The `games` schema carries no full-day marker, so a stored all-day event's date marker is indistinguishable here from a genuine midnight-UTC game start; applying the operating-timezone default would shift a real date marker back a day. This is the intersection of both conditions, not midnight-UTC alone -- over a 928-row corpus, midnight-UTC alone selected 50 rows for only 2 real full-day events (a 25x over-count, since a 7pm US Central start is also midnight UTC), while the NULL-timezone + midnight-UTC intersection selected exactly those 2. A midnight-UTC row that carries a timezone, or a NULL-timezone row at a non-midnight instant, is still repaired normally.
+
+The existing `skipped_unparseable` class is narrower than it was: now that unresolvable timezones and ambiguous all-day rows are split out into their own classes, `skipped_unparseable` only counts a `start_time` that fails to parse -- its name is accurate again rather than absorbing cases it didn't cause.
 
 **Default mode is dry-run** (previews changes, writes nothing):
 
@@ -110,7 +114,7 @@ bb data backfill-game-dates
 bb data backfill-game-dates --execute
 ```
 
-**Output:**
+**Output** (two additional lines as of E-278-04; exit codes are unchanged):
 
 ```
 game_date Backfill Summary (DRY-RUN):
@@ -119,6 +123,8 @@ game_date Backfill Summary (DRY-RUN):
   Rows already correct: 178
   Skipped (start_time NULL, un-correctable): 5
   Skipped (start_time unparseable): 0
+  Skipped (timezone unresolvable in this runtime): 0
+  Skipped (midnight-UTC + NULL timezone, may be an all-day date marker): 2
 
 Dry-run only. Re-run with --execute to apply the corrections.
 ```

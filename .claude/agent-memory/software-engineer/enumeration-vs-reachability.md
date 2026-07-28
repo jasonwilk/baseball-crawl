@@ -6,7 +6,11 @@ cannot catch it, because the enumeration is right.** Only asking "what INPUT rea
 branch, and does that input occur in live data?" catches it, and that question has to be
 answered by executing or querying, never by judging the input exotic.
 
-**Why (E-278 planning, 2026-07-27 — cost a full reversal to PM).** I enumerated
+**Why (E-278 planning, 2026-07-27 — cost a full reversal to PM).** *(The branch-C behavior
+described below is the code as it stood then; E-278-04 repaired it on 2026-07-28. Left as
+written because this is the RECORD of a mis-weighting, not a description of current
+behavior — editing it would falsify what was observed. See [[endpoint-parsing-notes]] for
+what the code does now.)* I enumerated
 `_derive_game_date`'s four reachable branches correctly and even flagged branch C
 (unresolvable timezone -> `derive_local_date` logs a WARNING and returns the **UTC** date
 through its SUCCESS return, not the caller's `or` fallback) as a correction to IDEA-218's

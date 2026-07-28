@@ -93,7 +93,7 @@ def _make_summary(
         owning_team_score=owning_score,
         opponent_team_score=opponent_score,
         opponent_id=opponent_id,
-        last_scoring_update="2025-05-10T19:39:58.788Z",
+        date_source_instant="2025-05-10T19:39:58.788Z",
     )
 
 
@@ -257,11 +257,11 @@ def test_game_record_has_correct_season_id(db: sqlite3.Connection) -> None:
 
 
 def test_game_record_has_correct_game_date(db: sqlite3.Connection) -> None:
-    """AC-1: game_date is the venue-LOCAL calendar date of last_scoring_update.
+    """AC-1: game_date is the venue-LOCAL calendar date of date_source_instant.
 
     Since E-253-04 the loader derives game_date via ``derive_local_date`` (the
     game's timezone, else the operating-tz seam) rather than slicing the raw UTC
-    ``last_scoring_update[:10]`` prefix. This fixture's afternoon-Chicago instant
+    ``date_source_instant[:10]`` prefix. This fixture's afternoon-Chicago instant
     resolves to the same local day (2025-05-10), so the asserted value is
     unchanged.
     """
@@ -762,7 +762,7 @@ def test_multiple_games_for_one_team(db: sqlite3.Connection) -> None:
         event_id="event-002", game_stream_id="stream-002",
         home_away="away", owning_score=3, opponent_score=1,
     )
-    summary2 = replace(summary2, last_scoring_update="2025-05-11T19:00:00Z")
+    summary2 = replace(summary2, date_source_instant="2025-05-11T19:00:00Z")
 
     result1 = loader.load_payload(_make_boxscore(), summary1)
     result2 = loader.load_payload(_make_boxscore(), summary2)
@@ -2189,14 +2189,14 @@ class TestMissingScoreNoCoercion:
                 event_id="dh-game-1", game_stream_id="dh-stream-1",
                 owning_score=None, opponent_score=None,
             ),
-            last_scoring_update="2025-05-10T13:00:00.000Z",
+            date_source_instant="2025-05-10T13:00:00.000Z",
         )
         summary_2 = replace(
             _make_summary(
                 event_id="dh-game-2", game_stream_id="dh-stream-2",
                 owning_score=None, opponent_score=None,
             ),
-            last_scoring_update="2025-05-10T18:00:00.000Z",
+            date_source_instant="2025-05-10T18:00:00.000Z",
         )
         loader.load_payload(_make_boxscore(), summary_1)
         loader.load_payload(_make_boxscore(), summary_2)

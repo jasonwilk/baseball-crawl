@@ -26,6 +26,7 @@ dependencies = [
     "brotlicffi>=1.0",
     "matplotlib>=3.9",
     "numpy>=2.0",
+    "tzdata>=2025.2",          # full IANA db incl. legacy aliases -- see requirements.in
 ]
 
 [project.scripts]

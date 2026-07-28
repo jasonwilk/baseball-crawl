@@ -1538,6 +1538,80 @@ class TestQueryHelpers:
         assert record is not None
         assert record["wins"] == 2
         assert record["losses"] == 1
+        assert record["ties"] == 0  # E-278-01 widened the contract
+
+    def test_query_record_counts_a_tie_for_both_teams(self, db):
+        """AC-1: equal non-null scores contribute 1 tie, 0 wins, 0 losses.
+
+        Before E-278-01 a tie fell through both strict `>` and `<` arms and
+        counted as NEITHER -- it vanished from the record entirely, so a coach
+        seeing a "T" in the last-five strip found no tie anywhere in the season
+        total above it. Asserted from BOTH sides because a tie is symmetric and
+        a team-side branch would be a natural way to get it wrong.
+        """
+        team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("tie-home", "2026", team_id, opp_id, 4, 4, "2026-03-20"),
+        )
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("win", "2026", team_id, opp_id, 5, 3, "2026-03-21"),
+        )
+        db.commit()
+
+        record = _query_record(db, team_id, "2026")
+        assert record == {"wins": 1, "losses": 0, "ties": 1}
+        # The same game is a tie from the opponent's side too -- 0 wins, 0
+        # losses, 1 tie. A per-team-side tie branch would break this half.
+        assert _query_record(db, opp_id, "2026") == {
+            "wins": 0, "losses": 1, "ties": 1,
+        }
+
+    def test_record_ignores_stat_row_coverage(self, db):
+        """AC-3 REGRESSION PIN: the record counts games PLAYED, not games with DATA.
+
+        ⚠️ If this test fails, do NOT make it pass by adjusting the fixture.
+        It goes red when a stat-row `EXISTS`, perspective, or coverage condition
+        is added to `_query_record` -- which domain review REJECTED (epic TN-7)
+        and which measurement condemned: 20 genuine completed-and-scored games
+        across 12 of 28 teams carry no stat rows from their own perspective (17
+        charted only from the opposing side), so such a gate would silently
+        delete 20 real games from twelve coaches' records.
+
+        The two databases here differ ONLY in stat-row presence: this one has
+        zero rows in `player_game_batting` and `player_game_pitching`, and its
+        record must equal the record computed for the identical games with stat
+        rows present.
+        """
+        team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
+        _seed_season(db)
+        for gid, hs, aws, date in [
+            ("s1", 5, 3, "2026-03-20"),
+            ("s2", 2, 4, "2026-03-21"),
+            ("s3", 6, 6, "2026-03-22"),
+        ]:
+            db.execute(
+                "INSERT INTO games (game_id, season_id, home_team_id, "
+                "away_team_id, home_score, away_score, game_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (gid, "2026", team_id, opp_id, hs, aws, date),
+            )
+        db.commit()
+
+        # Precondition: the stat tables really are empty, so this test cannot
+        # pass by accidentally having coverage.
+        assert db.execute("SELECT COUNT(*) FROM player_game_batting").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM player_game_pitching").fetchone()[0] == 0
+
+        assert _query_record(db, team_id, "2026") == {
+            "wins": 1, "losses": 1, "ties": 1,
+        }
 
     def test_query_recent_games(self, db):
         team_id = _seed_team(db)

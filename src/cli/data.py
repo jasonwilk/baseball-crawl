@@ -588,6 +588,12 @@ def backfill_game_dates(
     re-derived date DIFFERS are updated -- idempotent and re-runnable. Rows with
     start_time NULL have no recoverable instant and are left untouched + counted.
 
+    Two further classes are left untouched + counted rather than guessed at
+    (E-278-04): a row whose stored timezone this runtime cannot RESOLVE, and a
+    midnight-UTC start_time with a NULL timezone -- the stored shape of an
+    all-day event, whose start_time is a date MARKER rather than an instant, and
+    which `games` carries no flag to tell apart from a genuine midnight start.
+
     This corrects stored dates ONLY -- it does NOT re-run dedup. A corrected date
     that shifts 7-day-window membership is the intended correction.
 
@@ -619,6 +625,14 @@ def backfill_game_dates(
     )
     typer.echo(
         f"  Skipped (start_time unparseable): {summary['skipped_unparseable']}"
+    )
+    typer.echo(
+        f"  Skipped (timezone unresolvable in this runtime): "
+        f"{summary['skipped_unresolvable_timezone']}"
+    )
+    typer.echo(
+        f"  Skipped (midnight-UTC + NULL timezone, may be an all-day date "
+        f"marker): {summary['skipped_ambiguous_full_day']}"
     )
     if not execute and summary["rows_updated"]:
         typer.echo("\nDry-run only. Re-run with --execute to apply the corrections.")

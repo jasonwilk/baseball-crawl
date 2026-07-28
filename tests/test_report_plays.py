@@ -1083,7 +1083,7 @@ def _e244_summary(event_id: str) -> "object":
         owning_team_score=5,
         opponent_team_score=2,
         opponent_id=_E244_OPP_UUID,
-        last_scoring_update="2026-04-01T18:00:00.000Z",
+        date_source_instant="2026-04-01T18:00:00.000Z",
         start_time=_E244_START,
     )
 

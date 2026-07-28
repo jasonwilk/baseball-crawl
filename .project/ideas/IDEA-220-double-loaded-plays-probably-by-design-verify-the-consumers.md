@@ -1,7 +1,21 @@
 # IDEA-220: One game carries two perspectives' plays — probably by design; the open question is whether every consumer scopes
 
 ## Status
-`CANDIDATE` — **⚠ Filed with its own premise contested. Read the first section before treating this as a defect.**
+`CLOSED — CHECK DONE, PROMOTION CRITERION NOT MET` (2026-07-28, by E-278 TN-8). **Recorded so the consumer check is not re-run.** The original status line is preserved below because its caution was justified and the check vindicated it.
+
+> *(Original status: `CANDIDATE` — ⚠ Filed with its own premise contested. Read the first section before treating this as a defect.)*
+>
+> ## ✅ The consumer check was RUN. Result: no unscoped coach-facing consumer.
+>
+> Every `plays` / `play_events` reader in `src/` was enumerated — **11 files by SQL grep, cross-checked against 27 by name, with all extras hand-cleared.** Result: **every coach-facing plays-derived stat is perspective-filtered.** The five report-section queries in `generator.py` (FPS%, P-BF, QAB%, P-PA, team aggregates), `pitcher_outings.py`, and the reconciliation engine's chosen-perspective filter all scope correctly. `recon_scoreboard.py`'s aggregates carry no `WHERE` filter but `GROUP BY game_id, perspective_team_id, pitcher_id`, so **each perspective is its own group — structurally immune rather than accidentally correct.**
+>
+> **This capture's stated promotion criterion — *"promote only if the check finds an unscoped consumer"* — is therefore NOT MET, and the idea closes without becoming a defect.**
+>
+> **One operator-only counter behaves as this capture feared, and the characterization matters.** `recon_scoreboard.py`'s `dropped_pitch_events` counts a two-perspective game's stranded events twice. **It is NOT an omitted `WHERE`**: `play_events` **has no `perspective_team_id` column at all**, so it cannot be filtered without joining through `plays` — calling it "unfiltered" implies a one-line fix that does not exist. Settled position: **the COUNT is right and the DOCSTRING is what should change** — each stranded row is separately repairable, so counting both perspectives' rows is correct for a repair-surface measure, while the docstring describes it pitch-level. It never reaches a coach. Idea-sized wording fix, not a defect.
+>
+> **Also refuted and not carried forward:** an adjacent `team_rosters` fan-out hazard. `PRIMARY KEY (team_id, player_id, season_id)` means the join cannot fan out.
+>
+> **What survives and still binds:** this capture's warning against deleting either perspective's rows. And carry into any reconciliation work — **the engine reconciles a two-perspective game under ONE perspective only**, so the other perspective's plays are never corrected.
 
 ## Summary
 

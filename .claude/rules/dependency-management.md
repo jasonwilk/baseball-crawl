@@ -43,20 +43,22 @@ Dev dependencies are NOT declared in `pyproject.toml`. They remain in `requireme
 
 ## Common Operations
 
+> ⚠️ **A runtime dependency change recompiles BOTH lockfiles, and touches FOUR files.** `requirements-dev.in` constrains against `requirements.txt` (`-c`), so `requirements-dev.txt` pins the runtime deps too and goes stale the moment `requirements.in` moves. The File Layout table above makes this inferable — marking both `.txt` files "Generated" — but inferable is not stated, and in E-278 an implementer followed the singular "run `pip-compile`" literally, shipped three files, and left `requirements-dev.txt` stale: that would have failed CI's lockfile-drift gate (`.github/workflows/ci.yml` recompiles both and `git diff --exit-code`s both) **and silently stripped the new dependency from every fresh devcontainer**, which installs from `requirements-dev.txt`. **Derive the artifact set from this table, not from a story's "Files to Modify" list** — the reviewer caught it; both the implementer and PM had verified the story's three named files instead.
+
 **Add a runtime dependency**:
 1. Add to `pyproject.toml [project.dependencies]` with a `>=` range
 2. Add to `requirements.in` with a `~=` range (or `>=` where compatible-release doesn't fit)
-3. Run `pip-compile`
+3. Recompile **both** lockfiles: `pip-compile ... --output-file=requirements.txt requirements.in` **and** `pip-compile ... --output-file=requirements-dev.txt requirements-dev.in` (match CI's flags -- see `.github/workflows/ci.yml`)
 4. Run tests
-5. Commit `pyproject.toml`, `.in`, and `.txt` files
+5. Commit all four: `pyproject.toml`, `requirements.in`, `requirements.txt`, `requirements-dev.txt`
 
 **Upgrade a runtime dependency**:
 1. Update the range in both `pyproject.toml` and `requirements.in`
-2. Run `pip-compile`, run tests, commit all three files
+2. Recompile **both** lockfiles, run tests, commit all four files
 
 **Remove a runtime dependency**:
 1. Remove from both `pyproject.toml` and `requirements.in`
-2. Run `pip-compile`, run tests, commit all three files
+2. Recompile **both** lockfiles, run tests, commit all four files
 
 **Add a dev dependency**: Add to `requirements-dev.in` only (not `pyproject.toml`), run `pip-compile`, run tests, commit `.in` and `.txt` files.
 

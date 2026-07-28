@@ -4,7 +4,7 @@
 [E-278: Game Identity — One Real Game, More Than One Row](epic.md)
 
 ## Status
-`TODO`
+`DONE` (2026-07-28)
 
 ## Description
 After this story is complete, the field a game's calendar date is derived from is
@@ -86,6 +86,64 @@ GameChanger's wire format with ours and names the field in passing. A sweep that
 mechanically renames every match will damage both. (An earlier draft of this
 paragraph said "one" and omitted the `timezone.py` site entirely, which is also why
 that file is now in the Files list.)
+
+**⚠️ RE-MEASURED BY PM at story-05 assignment, after 04/02/01 landed and BEFORE any
+story-05 edit. The planning-time figures above are PRESERVED as evidence of what was
+true then; these are the current numbers, and they will move again as you work.**
+
+| | Planning time | Re-measured at assignment |
+|---|---|---|
+| `src/` sites | 8 — `game_loader.py` 5, `scouting_loader.py` 2, `timezone.py` 1 | **10** — `game_loader.py` **7**, `scouting_loader.py` 2, `timezone.py` 1 |
+| test occurrences | 22 across 7 files | **61 across 7 files** |
+
+**The test count nearly TRIPLED** — `test_game_start_time.py` alone now carries 40
+and `test_game_dedup.py` 11, because E-278-04 and E-278-02 both built their fixtures
+on this field. **Do not read 22 and conclude something is wrong; re-derive, as the
+paragraph above already instructs.**
+
+**⚠️ The "TWO of the `src/` hits are comments" warning above is now UNDERSTATED — it
+is FIVE, and the three new ones are the dangerous kind**, because E-278-04 wrote
+prose that *describes this field's semantics* rather than merely naming it. Current
+prose sites: `timezone.py:199`, `scouting_loader.py:767`, and **`game_loader.py:331`,
+`:355`, `:407`** (a docstring explaining what `_build_games_index_from_data` fills
+the field from; a comment saying the full-day marker must NOT be read from it; and
+the `GameSummaryEntry` attribute-block entry). The five genuine code references are
+`game_loader.py:365`, `:384`, `:385`, `:425` and `scouting_loader.py:821`.
+**A mechanical rename would damage five sites, not two** — and `:355` in particular
+would become self-contradictory, since it exists to warn a reader OFF this field.
+
+**Provenance, stated because a count is a status claim:** measured by PM with `grep`
+over the worktree at story-05 assignment. PM has no Bash and cannot timestamp its own
+measurement — treat these as accurate as of the assignment message and stale
+thereafter, and re-derive rather than citing them back.
+
+**⚠️ A TOKEN SWEEP ON THE IDENTIFIER IS NECESSARY AND NOT SUFFICIENT, and this
+epic has already produced a worked instance (added by PM, 2026-07-28, from
+E-278-04's dispatch).** AC-1 is scoped to surviving *references* — the identifier
+itself — but a rename also falsifies prose that DESCRIBES the field without ever
+naming it: "the ISO 8601 timestamp string", "the scoring instant", "the field the
+date derives from", a test NAME, an assertion message. None of those carry the
+token, so none appears in the enumeration above, and every one of them is a claim
+this story makes false.
+
+The instance, because it is exact rather than hypothetical: E-278-04 shipped a
+false claim ABOUT `src/cli/data.py`, and the sentence carrying it lived in
+`tests/test_cli_data.py` — the test that STUBS that CLI, one module away from its
+own subject. The sweep that would have caught it searched `data.py`, because that
+is what the claim was about. **Search for the claim's WORDS, not for its
+SUBJECT.** A false claim about module A characteristically lands in module B's
+prose: the test that fakes A, the docstring fronting A, the memory note
+summarizing A.
+
+`.claude/rules/doc-sweep.md` already governs this — its step 2, "synonym
+expansion", asks what words someone would use who described the concept without
+your search term, and its section "Retired Claims Survive in Forms Carrying None
+of Their Tokens" names the failure. Run step 2 against the field's DESCRIPTIONS,
+not only its name. Per this epic's established discipline, a surfaced site gets a
+written verdict, "no change needed" included.
+
+**This is guidance, not a new gate — it adds no acceptance criterion.** AC-1's
+`src/` scope is unchanged and I have not widened it mid-dispatch.
 
 **Boundary against E-278-04, so neither story assumes the other did it.**
 E-278-04's docstring criterion covers claims about how the derivation

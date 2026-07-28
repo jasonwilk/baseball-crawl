@@ -126,6 +126,12 @@ def _ready_result(slug: str = "rep-slug-1") -> GenerationResult:
 # derive_local_date (TN-9 / B3)
 # ---------------------------------------------------------------------------
 
+# The AC-8 discriminating instant (E-278-04): 02:00Z on 2026-06-20 is 21:00 on
+# 2026-06-19 in America/Chicago (CDT, UTC-5). Venue-local date 2026-06-19, UTC
+# date 2026-06-20 -- they DIFFER, which is the whole point. An afternoon instant
+# has local date == UTC date and certifies nothing.
+_EVENING_UTC_INSTANT = "2026-06-20T02:00:00.000Z"
+
 
 def test_derive_local_date_shifts_late_evening_game_back_a_day() -> None:
     """A 22:00 America/Chicago game stored as UTC next-day still has local date today."""
@@ -138,9 +144,63 @@ def test_derive_local_date_none_datetime_returns_none() -> None:
     assert derive_local_date(None, "America/Chicago") is None
 
 
-def test_derive_local_date_unknown_tz_falls_back_to_utc_date() -> None:
-    local = derive_local_date("2026-06-20T12:00:00.000Z", "Not/AZone")
-    assert local == "2026-06-20"
+def test_derive_local_date_unresolvable_tz_fails_closed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """E-278-04 AC-4a: an unresolvable zone yields None, NOT the UTC date.
+
+    This REVERSES the contract the previous version of this test pinned
+    (``... == "2026-06-20"``, named ``..._falls_back_to_utc_date``). Falling
+    through with the datetime still in UTC is what filed evening games under the
+    next UTC day, because two spellings of one real zone (``US/Central`` vs
+    ``America/Chicago``) then produced two calendar dates.
+
+    The instant is deliberately an EVENING one (AC-8). The old test used
+    ``12:00:00Z``, whose venue-local date and UTC date are the SAME day -- an
+    assertion built on it passes under every candidate fix, including doing
+    nothing at all. 02:00Z is 21:00 the previous evening in Chicago, so the two
+    dates differ and the assertion can actually fail.
+    """
+    with caplog.at_level(logging.WARNING, logger="src.util.timezone"):
+        local = derive_local_date(_EVENING_UTC_INSTANT, "Not/AZone")
+
+    assert local is None
+    # AC-8, stated as something that can actually fail: `local != instant[:10]`
+    # sat here and was VACUOUS -- None is unequal to every string, so it held
+    # under any implementation. What discriminates is that this instant's
+    # venue-local date and UTC date genuinely differ, so a fail-OPEN version
+    # would have returned "2026-06-20" rather than None.
+    assert _EVENING_UTC_INSTANT[:10] == "2026-06-20"
+    assert derive_local_date(_EVENING_UTC_INSTANT, "America/Chicago") == "2026-06-19"
+    assert any("Not/AZone" in r.getMessage() for r in caplog.records)
+
+
+def test_derive_local_date_resolves_legacy_backward_aliases() -> None:
+    """E-278-04 AC-1/AC-6: a legacy tzdata alias resolves to its canonical zone.
+
+    ``US/Central`` and ``America/Chicago`` name ONE zone. Before ``tzdata`` was a
+    declared dependency the alias raised ``ZoneInfoNotFoundError`` on this
+    runtime (``python:*-slim`` omits the ``backward`` links), so the two
+    spellings disagreed by a day on an evening instant. The assertion is
+    equality between the spellings, not a hard-coded date, because the property
+    under test is that they agree.
+
+    ``US/Pacific`` is included because the corpus carries it too, and because a
+    fix scoped to a two-entry alias map would be a denylist -- this passes for
+    every backward link tzdata ships, not just the two we happened to observe.
+    """
+    assert (
+        derive_local_date(_EVENING_UTC_INSTANT, "US/Central")
+        == derive_local_date(_EVENING_UTC_INSTANT, "America/Chicago")
+        == "2026-06-19"
+    )
+    assert (
+        derive_local_date(_EVENING_UTC_INSTANT, "US/Pacific")
+        == derive_local_date(_EVENING_UTC_INSTANT, "America/Los_Angeles")
+    )
+    # AC-8: the venue-local date differs from the UTC date for this instant, so
+    # the equality above is not satisfiable by returning the UTC slice.
+    assert _EVENING_UTC_INSTANT[:10] == "2026-06-20"
 
 
 # ---------------------------------------------------------------------------
@@ -1059,8 +1119,15 @@ def test_get_operating_timezone_reads_env_override(
 def test_get_operating_timezone_invalid_value_falls_back_with_warning(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC-4: an unknown/invalid tz degrades to the default WITH a logged WARNING
-    (mirrors derive_local_date), never crashing.
+    """AC-4: an unknown/invalid tz degrades to the default WITH a logged WARNING,
+    never crashing.
+
+    E-278-04 removed the "(mirrors derive_local_date)" clause this docstring
+    carried: the two DIVERGED and must not be re-aligned. ``OPERATING_TIMEZONE``
+    is our own configuration with a documented default, so falling back to it is
+    honest. ``derive_local_date``'s zone arrives operator-typed in a GameChanger
+    payload, so falling back there would present an unverified substitute as a
+    venue-local date -- it now returns None instead.
     """
     monkeypatch.setenv("OPERATING_TIMEZONE", "Not/AZone")
     with caplog.at_level(logging.WARNING, logger="src.util.timezone"):

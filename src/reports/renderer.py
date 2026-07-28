@@ -648,7 +648,7 @@ def render_report(data: dict[str, Any]) -> str:
         data: Report data dict with the following keys:
 
             - ``team``: dict with ``name`` (str), ``season_year`` (int|None),
-              ``record`` (dict with ``wins``, ``losses``) or None
+              ``record`` (dict with ``wins``, ``losses``, ``ties``) or None
             - ``generated_at``: str, ISO datetime of report generation
             - ``expires_at``: str, ISO datetime of report expiration
             - ``freshness_date``: str|None, date of most recent game in data

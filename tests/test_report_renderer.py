@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -94,7 +96,7 @@ def _make_full_data(**overrides) -> dict:
         "team": {
             "name": "Test Tigers",
             "season_year": 2026,
-            "record": {"wins": 15, "losses": 5},
+            "record": {"wins": 15, "losses": 5, "ties": 0},
         },
         "generated_at": "2026-03-28T12:00:00Z",
         # The venue-local generation date. E-256-05 AC-6: the header and footer
@@ -1397,7 +1399,7 @@ class TestRenderReportPlaysIntegration:
     def plays_data(self) -> dict:
         """Data dict with plays stats for render_report."""
         return {
-            "team": {"name": "Test Team", "season_year": 2026, "record": {"wins": 5, "losses": 3}},
+            "team": {"name": "Test Team", "season_year": 2026, "record": {"wins": 5, "losses": 3, "ties": 0}},
             "generated_at": "2026-04-01T00:00:00Z",
             "expires_at": "2026-04-15T00:00:00Z",
             "freshness_date": "2026-03-30",
@@ -1787,3 +1789,77 @@ class TestEraBasisDisclosure:
         assert "7-inning basis" in html  # footnote spells it out
         assert "innings_per_game" not in ERA_ASSUMED_FOOTNOTE
         assert "game length" in ERA_ASSUMED_FOOTNOTE.lower()  # not the field name
+
+
+# ---------------------------------------------------------------------------
+# E-278-01 AC-2: the rendered record is three dash-separated integers
+# ---------------------------------------------------------------------------
+
+
+def test_rendered_record_shows_three_parts_including_a_zero_tie_count() -> None:
+    """AC-2: BOTH coach-facing sites render W-L-T, trailing `-0` included.
+
+    The trailing tie count is ALWAYS shown, never conditionally suppressed --
+    baseball-coach's ruling (epic TN-7) that we adopt GameChanger's DISPLAY
+    convention. Note TN-16: this is a ruling about FORMAT, not about matching
+    GC's NUMBER, which is a raw count of schedule listings and is not a target
+    anywhere in this epic.
+
+    Scoped to both sites deliberately. A header reading `15-5-0` beside a
+    summary line reading `15-5 record` would manufacture a new on-page
+    contradiction of exactly the shape this epic exists to cure -- two numbers
+    on one report that disagree.
+
+    ⚠️ This test also covers a gap nothing else did: Jinja renders a MISSING
+    `ties` key as the empty string, so a half-migrated data dict produces
+    `15-5-` and every prior assertion still passed.
+    """
+    html = render_report(_make_full_data())
+
+    assert "15-5-0" in html, "header/summary must render W-L-T with a literal -0"
+    assert "15-5-0 record" in html, "the summary line must match the header format"
+    # The two-part form must not survive anywhere on the page.
+    assert "15-5 record" not in html
+    # And an EMPTY tie render must not be what produced the pass. Jinja emits
+    # the empty string for a missing `ties` key, so a half-migrated data dict
+    # yields `15-5-` with nothing after it.
+    #
+    # One regex covering BOTH sites, deliberately. The pair this replaced was
+    # `"15-5-<" not in html and "15-5- " not in html`: the header renders
+    # `15-5-` followed by a NEWLINE, so `15-5-<` could never match and read as
+    # the header guard while guarding nothing -- leaving that site covered only
+    # by the `"15-5-0"` assertion above, and unguarded the moment anyone
+    # loosened it. Verified by rendering the half-migrated dict: the header
+    # gives `'15-5-\n    </div>'` and the summary `'15-5- record'`, and this
+    # pattern matches both.
+    assert not re.search(r"15-5-(?!\d)", html), (
+        "a tie count rendered as the empty string (missing `ties` key)"
+    )
+    # ⚠️ PER-SITE, and this is the assertion that actually guards the HEADER.
+    # Everything above is satisfied by the SUMMARY site alone: revert only the
+    # header to two parts and `"15-5-0" in html` still holds (the summary
+    # supplies it), `"15-5 record"` still does not appear, and the regex finds
+    # no trailing dash because the header then renders `15-5` with nothing
+    # after it. Measured by mutation -- reverting the header alone left all of
+    # the above GREEN. Two occurrences is the only thing that distinguishes
+    # "both sites render W-L-T" from "one site does".
+    assert html.count("15-5-0") == 2, (
+        f"expected the three-part record at BOTH the header and the summary "
+        f"site; found {html.count('15-5-0')}"
+    )
+
+
+def test_rendered_record_shows_a_nonzero_tie_count() -> None:
+    """AC-2: the tie column carries a real value, not a hardcoded zero.
+
+    Without this, `-0` could be a literal in the template and every assertion
+    above would still pass.
+    """
+    data = _make_full_data()
+    data["team"]["record"] = {"wins": 12, "losses": 4, "ties": 3}
+
+    html = render_report(data)
+
+    assert "12-4-3 record" in html          # summary site
+    assert html.count("12-4-3") == 2, "both sites must carry the real tie count"
+    assert "12-4-0" not in html

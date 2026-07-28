@@ -4,7 +4,7 @@
 [E-278: Game Identity — One Real Game, More Than One Row](epic.md)
 
 ## Status
-`TODO`
+`DONE` (2026-07-28)
 
 ## Description
 After this story is complete, when GameChanger double-lists a single real game in
@@ -418,6 +418,29 @@ software-engineer
 ## Handoff Context
 - **Produces for E-278-05**: the final state of `game_loader.py`'s
   same-perspective branch, which E-278-05's rename must sweep.
+- **⚠️ RECEIVED FROM E-278-04 (added by PM at 04's AC verification, 2026-07-28):
+  `_find_duplicate_game` IS NO LONGER CALLED AT ALL for a game whose date could
+  not be determined.** E-278-04 routed a second population — a present but
+  unresolvable timezone — to the pre-existing `_UNKNOWN_GAME_DATE` sentinel
+  (`"1900-01-01"`), which `_find_duplicate_game` would have grouped on like any
+  other date, making every sentinel-dated game with the same team pair a dedup
+  candidate for every other. 04 therefore guards the CALL SITE in
+  `_load_boxscore_data`: `canonical_id` stays `None` and the function is skipped
+  when `game_date == _UNKNOWN_GAME_DATE`. It was placed at the call site
+  deliberately, so as not to collide with the branch this story owns.
+  **Two consequences for this story, the second of which is a silent-vacuity
+  hazard:**
+  1. Your same-perspective rule is unreachable for sentinel-dated rows. That is
+     the intended and safe direction — "neither date could be determined" is no
+     evidence two games are the same — so do not undo it.
+  2. **A fixture that omits `start_time`/`last_scoring_update`, or gives an
+     unresolvable `timezone`, now lands on the sentinel and never reaches
+     `_find_duplicate_game` at all.** Such a test would pass while exercising
+     nothing, and it would look exactly like a test that ran. Give every fixture
+     for this story a resolvable timezone and a real instant, and pin an
+     anti-vacuity assertion that the branch was actually entered — per this
+     story's own AC-8 discipline. PAIR-ALPHA itself carries a real date, so the
+     story's target case is unaffected.
 
 ## Definition of Done
 - [ ] All acceptance criteria pass
@@ -427,6 +450,12 @@ software-engineer
 
 ## Notes
 
+**AC-6's verdict is recorded in epic TN-20** ("Why `_SCORE_TOLERANCE_RUNS` was NOT
+widened"): DECLINE to widen from 1 to 2, `src/db/game_merge.py` unmodified, with
+the three ranked reasons and the conditions that would reopen it. Pointed to from
+here because AC-6 is checkable only if a reader can find the verdict, and a
+decision NOT to act leaves no trace in the diff.
+
 The standing "six duplicate Freshman games" operator item is a **false positive**
 (epic OQ-5) — those six pairs are genuine doubleheaders with identical
 perspectives, exactly 7200-second start gaps, and materially different scores on
@@ -434,7 +463,25 @@ every pair. Running a merge against them would have been destructive; the
 existing planner groups them by date and then correctly refuses on the
 disjointness gate. AC-2 pins that they keep behaving that way.
 
-Epic OQ-3 is open and unrelated to this story's mechanism: IDEA-219's
-mis-attribution phantom has an unidentified creating path, and its row is
-currently the only known instance, so it must not be reset away before the path
-is identified.
+⚰ **Epic OQ-3 was a live constraint when this story was written and is DISCHARGED
+as of 2026-07-28. The paragraph below is retained as a record that the constraint
+existed — it is NOT an instruction, and must not be acted on.**
+
+> *"Epic OQ-3 is open and unrelated to this story's mechanism: IDEA-219's
+> mis-attribution phantom has an unidentified creating path, and its row is
+> currently the only known instance, so it must not be reset away before the path
+> is identified."*
+
+**What changed:** the creating path has since been identified from code plus
+identifier-coverage statistics rather than from the row itself, so retaining the
+row buys nothing and **the reset is unconditional again** (epic Operator Notes
+item 1, and OQ-3). The precondition is gone, not merely satisfied.
+
+**What did not change:** OQ-3 was unrelated to this story's mechanism when it was
+live, and it is not a constraint on this story now. Nothing in this story's
+acceptance criteria ever turned on it.
+
+(Preserved rather than deleted per the criterion-vs-evidence cut in
+`.claude/rules/tool-output-integrity.md`: the *instruction* was a criterion and is
+corrected; the *fact that the constraint once bound* is evidence a later reader may
+need when reconstructing why the epic was shaped as it was.)

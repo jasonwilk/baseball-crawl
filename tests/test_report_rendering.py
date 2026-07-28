@@ -25,7 +25,7 @@ from src.reports.starter_prediction import StarterPrediction
 def _base_data(**overrides: Any) -> dict[str, Any]:
     """Build a minimal valid data dict for render_report()."""
     data: dict[str, Any] = {
-        "team": {"name": "Test Team", "season_year": 2026, "record": {"wins": 10, "losses": 5}},
+        "team": {"name": "Test Team", "season_year": 2026, "record": {"wins": 10, "losses": 5, "ties": 0}},
         "generated_at": "2026-04-01T12:00:00Z",
         "expires_at": "2026-04-15T12:00:00Z",
         "freshness_date": "2026-03-31",

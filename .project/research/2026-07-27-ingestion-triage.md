@@ -94,6 +94,27 @@ prod backup and IDEA-208 to next season)
    standing 6-Freshman-games merge, one prod-side query (which phantom does prod
    carry — merge vs delete). Five faces of one defect — "one real game, more than one
    row"; splitting them across epics builds second-path drift. [Became E-278.]
+   > ⚠️ **ANNOTATION 2026-07-28 (E-278 closure). This item is EVIDENCE of what was
+   > recommended before two later rulings, and is deliberately NOT rewritten. Two of its
+   > clauses were superseded — do not act on them:**
+   > - **"the record-query perspective clause (IDEA-217) as story 1" — DOMAIN-REJECTED.**
+   >   baseball-coach ruled (E-278 TN-7, binding) that the record reflects games PLAYED,
+   >   not games we have DATA for, and that the stat-row `EXISTS` gate must NOT be added to
+   >   `_query_record`. Measured basis: 20 genuine completed-and-scored games across 12 of
+   >   28 teams carry no stat rows from their own perspective and would have been silently
+   >   deleted from those coaches' records. E-278-01 shipped the tie component instead.
+   > - **"Data repairs inside: …" — VOID under the operator's ruling** (2026-07-27): *"We
+   >   can reset all prod data. We don't have to repair anything historically. We only need
+   >   to ensure we are accurate moving forward."* E-278 shipped forward prevention only and
+   >   repaired nothing. Two entries on that list also dissolved on their own evidence: the
+   >   **standing 6-Freshman-games merge is a FALSE POSITIVE** (genuine doubleheaders,
+   >   identical perspectives, exactly 7200-second gaps, materially different scores —
+   >   merging them would have been the destructive mistake), and the **prod-side phantom
+   >   question was answered** (a B-class date-split twin with DISJOINT perspectives, which
+   >   the existing merge primitive accepts once detection finds it).
+   >
+   > **What held:** the MERGE judgment itself. Five faces of one defect, one epic, no
+   > second-path drift — E-278 delivered four stories against one `game_loader` seam.
 4. **Epic B — envelope & identity fidelity (MERGE)**: §2 identity-based key
    classification (+ §2.6 ordering pin, §2.8 fixture decision) → §2 backfill via
    regeneration (after Epic A per §5.5) → §6 team_players flat lookup → §3

@@ -24,3 +24,12 @@ typer[all]>=0.9      # CLI framework for operator commands (rich + shellingham e
 brotlicffi~=1.0     # Brotli decompression for httpx (mobile profile uses br encoding)
 matplotlib~=3.9     # Spray chart rendering (PNG generation via Agg backend)
 numpy~=2.0          # Required by matplotlib; used in chart calculations
+tzdata>=2025.2      # The FULL IANA database for `zoneinfo`, including the legacy
+                    # "backward" alias links (`US/Central`, `US/Pacific`, ...).
+                    # NOT optional here: `python:*-slim` omits those links, so
+                    # `ZoneInfo("US/Central")` raises ZoneInfoNotFoundError and a
+                    # game whose GameChanger payload carries that (operator-typed)
+                    # spelling loses its venue-local date (E-278-04). `~=` is wrong
+                    # for a CalVer-ish YYYY.N package -- `~=2025.2` would pin the
+                    # whole 2026 series out and freeze the zone data (E-256-07's
+                    # "some packages use >= where compatible-release doesn't fit").

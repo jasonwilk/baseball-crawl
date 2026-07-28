@@ -120,15 +120,45 @@ def _surviving_player_ids(db_file: Path) -> set[str]:
         conn.close()
 
 
+def _derive_game_dates_summary_keys() -> dict[str, int]:
+    """The real backfill's summary shape, run once over an empty table.
+
+    Computed at IMPORT time (below), deliberately: the helper that consumes it
+    runs inside a ``patch`` of ``sqlite3.connect`` that counts calls, so opening
+    a connection there would be captured as a second call and fail the very
+    assertion those tests make.
+    """
+    from src.db.backfill_game_dates import backfill_game_dates
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        load_real_schema(conn)
+        return backfill_game_dates(conn, dry_run=True)
+    finally:
+        conn.close()
+
+
+_GAME_DATES_SUMMARY_SHAPE = _derive_game_dates_summary_keys()
+
+
 def _game_dates_summary() -> dict[str, int]:
-    """Minimal summary dict the backfill-game-dates command prints (values irrelevant)."""
-    return {
-        "games_processed": 0,
-        "rows_updated": 0,
-        "rows_unchanged": 0,
-        "skipped_no_start_time": 0,
-        "skipped_unparseable": 0,
-    }
+    """The summary dict the backfill-game-dates command prints (values irrelevant).
+
+    DERIVED from the real implementation rather than transcribed.
+
+    The rot is one-directional, and getting the direction right matters if you
+    are deciding whether this helper needs to be derived at all. Adding a key to
+    the backfill's return dict breaks NO consumer -- the CLI looks keys up by
+    name and never iterates the dict, so a key it does not name is simply never
+    read. (Today it happens to name all seven the backfill returns; nothing
+    requires that, and nothing breaks if it stops being true.) What breaks is a
+    STUB that supplies fewer keys than the CLI READS: this function feeds the
+    CLI in place of the real backfill, so every `summary[...]` lookup in
+    `backfill_game_dates`'s output block must find something here. E-278-04 added
+    two counters AND two echo lines reading them, and the hand-written literal
+    that used to live here raised `KeyError` on the second pair.
+    """
+    return dict(_GAME_DATES_SUMMARY_SHAPE)
 
 
 def _invoke_db_path_capturing_connect(

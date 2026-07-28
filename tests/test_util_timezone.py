@@ -1,4 +1,5 @@
-"""Tests for the UTC-iso half of ``src/util/timezone.py`` (E-256-03).
+"""Tests for the UTC-iso half of ``src/util/timezone.py`` (E-256-03), plus the
+``resolve_timezone`` predicate (E-278-04).
 
 ``get_operating_timezone`` / ``operating_today`` / ``derive_local_date`` are
 exercised in ``tests/test_morning_run.py``.  This module pins ``utcnow_iso``
@@ -14,12 +15,83 @@ violated.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from src.util.timezone import UTC_ISO_FORMAT, utcnow_iso
+import pytest
+
+from src.util.timezone import (
+    UTC_ISO_FORMAT,
+    get_operating_timezone,
+    resolve_timezone,
+    utcnow_iso,
+)
 
 _EXACT_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+class TestResolveTimezone:
+    """E-278-04: stage one of the two-stage timezone criterion.
+
+    You cannot compute an offset for a zone that does not resolve, so "do these
+    two zones agree?" has to ask "does this zone resolve HERE?" first. Stage one
+    is where the live defect lived: two strings naming one real zone behaved
+    differently because one of them was a link the runtime did not ship.
+    """
+
+    def test_canonical_iana_name_resolves(self) -> None:
+        zone = resolve_timezone("America/Chicago")
+        assert zone is not None
+        assert zone.key == "America/Chicago"
+
+    def test_legacy_backward_alias_resolves(self) -> None:
+        """AC-6: this is what the ``tzdata`` dependency buys.
+
+        ``python:*-slim`` omits the tzdata ``backward`` links, so without the
+        declared dependency this returns None and every date derived through
+        such a zone silently degrades.
+        """
+        assert resolve_timezone("US/Central") is not None
+        assert resolve_timezone("US/Pacific") is not None
+
+    def test_unobserved_aliases_resolve_as_well(self) -> None:
+        """AC-6: the dependency removes the CLASS, not two instances.
+
+        None of these appears in the measured corpus. A normalization map built
+        from what was observed would fail here on the first one GameChanger
+        emits -- the zone field is per-event and operator-typed, so an enum
+        observed closed is not an enum proven closed.
+        """
+        for alias in ("US/Eastern", "US/Mountain", "US/Arizona", "Canada/Eastern"):
+            assert resolve_timezone(alias) is not None, alias
+
+    def test_unknown_zone_returns_none_and_does_not_raise(self) -> None:
+        assert resolve_timezone("Not/AZone") is None
+
+    def test_none_and_empty_are_not_zones(self) -> None:
+        assert resolve_timezone(None) is None
+        assert resolve_timezone("") is None
+
+    def test_is_silent(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A pure predicate: callers degrade differently and log their own message.
+
+        Logging here would double up on every call -- ``get_operating_timezone``
+        warns about a bad env var, ``derive_local_date`` warns about refusing a
+        date, and they are not the same event.
+        """
+        with caplog.at_level(logging.DEBUG, logger="src.util.timezone"):
+            assert resolve_timezone("Not/AZone") is None
+        assert caplog.records == []
+
+    def test_operating_timezone_key_always_resolves(self) -> None:
+        """The invariant three call sites rely on when they bridge via ``.key``.
+
+        ``get_operating_timezone`` returns a live ``ZoneInfo``, so its ``.key``
+        is by construction a name this runtime resolves -- which is why passing
+        it to ``derive_local_date`` can never hit the fail-closed branch.
+        """
+        assert resolve_timezone(get_operating_timezone().key) is not None
 
 
 class TestUtcnowIsoFormat:

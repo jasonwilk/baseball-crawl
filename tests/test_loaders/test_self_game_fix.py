@@ -133,7 +133,7 @@ def _make_summary(
         owning_team_score=5,
         opponent_team_score=2,
         opponent_id="",  # scouting_loader hardcodes this (TN-6 root cause)
-        last_scoring_update="2026-04-10T19:00:00.000Z",
+        date_source_instant="2026-04-10T19:00:00.000Z",
     )
 
 

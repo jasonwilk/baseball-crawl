@@ -1,7 +1,28 @@
 # IDEA-218: A cross-perspective twin whose two rows carry different `game_date` values can never be deduped
 
 ## Status
-`CANDIDATE` — **one confirmed instance on dev. The EFFECT is established; the stated MECHANISM does not match the code and must be established before a fix is designed.**
+`RESOLVED` (2026-07-28, by E-278) — **the mechanism was established BY EXECUTION, and it was none of the three candidates below as written. Forward prevention shipped in E-278-04; the existing rows are resolved by the operator's data reset.** Annotated rather than rewritten: the reasoning below is a record of what was and was not known, and its central instinct was right.
+
+> ## ✅ The mechanism, established by execution (E-278 TN-1)
+>
+> **One perspective's payload carries the timezone `US/Central`; the other carries `America/Chicago`. These name the same real zone — but `US/Central` is a legacy tzdata "backward" alias that DOES NOT RESOLVE in our runtime** (`python:*-slim` omits the backward links and `tzdata` was not a declared dependency). So `derive_local_date` raised `ZoneInfoNotFoundError`, logged a WARNING, and **fell through with the datetime still in UTC**, returning the UTC calendar date. For an evening game whose start instant has already crossed 00:00Z, that is the next day.
+>
+> **Two counterfactuals were EXECUTED, not reasoned:** repair only the alias and change nothing else → both perspectives yield the same date (**the alias failure is the necessary cause**); keep both aliases and equalize the instants → no split (**the 2.5-hour instant disagreement alone does not split**).
+>
+> **This capture's insistence on establishing the mechanism first was CORRECT and is the reason the fix landed on the right line.** Scoring the three candidates it named:
+> - **Candidate 1** (different `last_scoring_update` instants) — **REFUTED by counterfactual.** The instants did disagree, by 2.5 hours, and that alone produces no split.
+> - **Candidate 2** (different or absent `timezone` values) — **closest, but not for the stated reason.** It is not that "the same instant converts to different local dates"; it is that **one zone string fails to RESOLVE at all** and the conversion never happens.
+> - **Candidate 3** (one perspective hit a fallback path) — **REFUTED AS WRITTEN, and this is the trap.** `derive_local_date` returned a date STRING, not `None`, so `_derive_game_date`'s `[:10]` unparseable-instant fallback **never fired**. A *different* fallback fired, in a *different* function. **A fix aimed at the `[:10]` fallback would have been a no-op.**
+>
+> ## ⛔ The stated REMEDY is false for this capture's own case
+>
+> *"The offline corrective already exists (`bb data merge-duplicate-games` …), so this is a gap in the live prevention path rather than a missing capability."* — **`plan_duplicate_game_merges` groups by `(season_id, game_date, unordered pair)`, so the offline tool CANNOT REACH a date-split twin either.** The date gate this capture correctly identifies in the live path applies to the offline path as well. There was no working corrective on either surface.
+>
+> ## What shipped
+>
+> **E-278-04**: `tzdata` declared as a runtime dependency (resolving the entire alias namespace rather than two observed instances), plus fail-closed degradation — an unresolvable zone now yields a sentinel rather than a plausible wrong date. **A SECOND, independent mechanism was found in the same investigation** and shifts dates the OPPOSITE way (−1 day): a full-day calendar event's `start_ts` is a DATE MARKER that was being localized as an instant. Both are fixed; a uniform date-shift repair would have corrupted one population while fixing the other.
+>
+> ⚠️ **Line citations below have ROTTED** — `game_loader.py:1183` and `:146-165` both moved substantially across E-278's four stories. Navigate by symbol.
 
 ## Summary
 
@@ -42,7 +63,8 @@ Not urgent as a coach-facing matter once [[IDEA-217]] lands — the header stops
 - **Which of the three candidate causes is it?** See above. Unseparated.
 - **Should the natural key tolerate an adjacent date at all?** A ±1-day window would catch this class but is a real loosening — it puts genuine consecutive-day games against the same opponent (common in tournament play) into the same candidate pool, where they would then rest entirely on the `start_time` and score-total tiebreakers. **Widening a dedup key is a merge risk, and a wrong merge is destructive**, so this needs weighing against fixing the derivation instead. Fixing the derivation is the narrower change if the derivation is what is wrong.
 - **How many other twins are already persisted with this shape?** One was found because it landed in a record-header discrepancy. Nothing has swept for the general case, and a query for same-team-pair rows on adjacent dates with disjoint perspectives would answer it. That number decides whether this is one repair or a cleanup pass.
-- **Is `last_scoring_update` the right basis for a calendar date at all?** It is the instant a scorekeeper last touched the book, which for a game finishing late, or edited the next morning, is not the date the game was played. Raised, not answered — and possibly the whole finding.
+- ✅ **ANSWERED, and "possibly the whole finding" was closer to right than the question knew.** *Original text preserved:* **Is `last_scoring_update` the right basis for a calendar date at all?** It is the instant a scorekeeper last touched the book, which for a game finishing late, or edited the next morning, is not the date the game was played. Raised, not answered — and possibly the whole finding.
+  > **The field was misNAMED rather than misCHOSEN.** On the public scouting path it was never populated from a last-scoring instant at all — `_build_games_index_from_data` fills it from `start_ts`, falling back to `end_ts`. So the value was usually right and the name described a different datum, which is precisely what made this question unanswerable from the name alone. **E-278-05 renamed it to `date_source_instant`** and documented how it differs from the adjacent `start_time` (the fallback chain: this field falls back to `end_ts` then `""`, while `start_time` takes `start_ts` alone). The underlying date defect was real but had a different cause — see the mechanism block at the top.
 
 ## Notes
 

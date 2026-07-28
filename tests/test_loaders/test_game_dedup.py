@@ -23,7 +23,11 @@ import pytest
 
 from src.db.game_merge import GameMergeError
 from src.gamechanger.loaders import ensure_season_row
-from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
+from src.gamechanger.loaders.game_loader import (
+    GameLoader,
+    GameSummaryEntry,
+    _is_same_listing_delta,
+)
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.types import TeamRef
 from src.reports.generator import (
@@ -138,7 +142,16 @@ def _make_summary(
     opponent_score: int = 2,
     start_time: str | None = None,
     game_date: str = _GAME_DATE,
+    date_source_instant: str | None = None,
 ) -> GameSummaryEntry:
+    # `date_source_instant` is what the stored `game_date` DERIVES from, so it
+    # cannot be a constant swap at the call site (E-278-02 round 1). It defaults
+    # to an afternoon instant on `game_date` -- fine for tests that do not care
+    # about the derivation, and deliberately overridable by those that do, since
+    # an afternoon instant's local date equals its UTC slice and therefore
+    # cannot detect a UTC-slicing regression.
+    if date_source_instant is None:
+        date_source_instant = f"{game_date}T19:39:58.788Z"
     return GameSummaryEntry(
         event_id=event_id,
         game_stream_id=game_stream_id,
@@ -146,7 +159,7 @@ def _make_summary(
         owning_team_score=owning_score,
         opponent_team_score=opponent_score,
         opponent_id=_OPP_TEAM_UUID,
-        last_scoring_update=f"{game_date}T19:39:58.788Z",
+        date_source_instant=date_source_instant,
         start_time=start_time,
     )
 
@@ -1496,7 +1509,9 @@ def test_cc2_redirect_preserves_orientation_tuple_and_reports(
 
     # --- Reports must credit the right team on BOTH perspectives (AC-3). ---
     # Team A (won 5-3): record W, runs 5 for / 3 against, recent form W.
-    assert _query_record(db, team_a_id, season_id) == {"wins": 1, "losses": 0}
+    assert _query_record(db, team_a_id, season_id) == {
+        "wins": 1, "losses": 0, "ties": 0,
+    }  # E-278-01 widened this contract with a "ties" key
     assert _query_runs_avg(db, team_a_id, season_id) == (5.0, 3.0)
     recent_a = _query_recent_games(db, team_a_id, season_id)
     assert len(recent_a) == 1
@@ -1505,7 +1520,9 @@ def test_cc2_redirect_preserves_orientation_tuple_and_reports(
     assert recent_a[0]["is_home"] is True
 
     # Team B (lost 3-5): record L, runs 3 for / 5 against, recent form L.
-    assert _query_record(db, team_b_id, season_id) == {"wins": 0, "losses": 1}
+    assert _query_record(db, team_b_id, season_id) == {
+        "wins": 0, "losses": 1, "ties": 0,
+    }
     assert _query_runs_avg(db, team_b_id, season_id) == (3.0, 5.0)
     recent_b = _query_recent_games(db, team_b_id, season_id)
     assert len(recent_b) == 1
@@ -1581,3 +1598,301 @@ def test_upsert_game_correction_path_takes_incoming_orientation(
         "FROM games WHERE game_id = ?",
         (game_id,),
     ).fetchone() == (team_b_id, team_a_id, 7, 2)
+
+
+# ---------------------------------------------------------------------------
+# E-278-02: same-perspective double-listing collapsed at load
+# ---------------------------------------------------------------------------
+#
+# Fixture values are transcribed from the story's "Fixture specification"
+# table (AC-7), which is the durable in-repo source. NO live API call and NO
+# live DB query -- a dispatch worktree can reach neither, which is exactly why
+# the table exists. Identifiers are invented per epic TN-10; the real team
+# name, public_id and GC UUIDs must never appear here.
+#
+# ⚠️ ANTI-VACUITY, and it is a live hazard rather than a formality. Since
+# E-278-04, `_find_duplicate_game` is NOT CALLED AT ALL when the derived
+# `game_date` is the `1900-01-01` sentinel -- which is what an omitted
+# `start_time`/`date_source_instant` or an unresolvable `timezone` now
+# produces. A fixture with either defect would sail through every assertion
+# below while exercising nothing, and would look exactly like a passing test.
+# So every fixture here carries a real instant, and each test asserts the
+# stored `game_date` is a real date rather than the sentinel. That claim
+# was FALSE for three of these tests when first written -- the two
+# "stays two rows" tests were the exposed pair, since a sentinel fixture
+# makes them pass for the wrong reason -- so the assertions were added
+# rather than the sentence softened.
+
+_SENTINEL_DATE = "1900-01-01"
+
+# Story Fixture specification, listings 1 and 2. The 0.96-second delta is the
+# whole point; `end_ts` has no games column and is deliberately not modelled --
+# constraint 4 measured it as a NON-discriminator (two hours apart on the real
+# pair), so nothing here may key on it.
+_DL_DATE = "2026-07-25"
+_DL_START_1 = "2026-07-25T21:00:00.000Z"
+_DL_START_2 = "2026-07-25T21:00:00.960Z"
+
+
+def _load_listing(
+    loader: GameLoader,
+    *,
+    event_id: str,
+    stream_id: str,
+    start_time: str,
+    owning_score: int,
+    opponent_score: int,
+    game_date: str = _DL_DATE,
+    date_source_instant: str | None = None,
+) -> None:
+    """Load one schedule listing through the real load path."""
+    loader.load_payload(
+        _make_boxscore(),
+        _make_summary(
+            event_id=event_id,
+            game_stream_id=stream_id,
+            owning_score=owning_score,
+            opponent_score=opponent_score,
+            start_time=start_time,
+            game_date=game_date,
+            date_source_instant=date_source_instant,
+        ),
+    )
+
+
+def _stored_dates(db: sqlite3.Connection) -> list[str]:
+    return [
+        r[0] for r in db.execute(
+            "SELECT game_date FROM games ORDER BY game_id"
+        ).fetchall()
+    ]
+
+
+def test_same_perspective_double_listing_collapses_to_one_row(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-1: one real game listed twice, 0.96s apart, identical scores.
+
+    Both listings share a perspective, so before this story the byte-equality
+    tiebreaker found their start times unequal and filed them as a doubleheader.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DL_START_1, owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_DL_START_2, owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 1, f"expected one collapsed row, got {dates}"
+    # Anti-vacuity: a sentinel date would mean _find_duplicate_game was never
+    # reached and this test proved nothing.
+    # `_DL_DATE != _SENTINEL_DATE` used to be chained here and compared two
+    # module constants -- unconditionally true, and it READ as the guard.
+    # The real guard is that the STORED date is the fixture's date.
+    assert dates[0] == _DL_DATE
+
+
+def test_collapsed_pair_has_no_duplicated_stat_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-10: the safety-relevant half of the double-count harm.
+
+    A double-counted pitching appearance inflates pitch count, innings pitched
+    and appearance order -- the inputs to rest-day compliance and the Most
+    Likely Arms predictor. Asserting the `games`-row count alone does NOT cover
+    this, which is why it is a separate criterion.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DL_START_1, owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_DL_START_2, owning_score=0, opponent_score=3)
+    db.commit()
+
+    # ⚠️ THIS ASSERTION IS LOAD-BEARING AND WAS MISSING. Without it the test
+    # passed against the UNFIXED codebase: `SELECT game_id ... fetchone()`
+    # returns one of the two rows, and without a redirect the second listing
+    # writes its stats under its OWN game_id -- so "one stat row per player
+    # under this game_id" holds in the duplicated world too. The criterion that
+    # actually matters (no double-counted pitching appearance) is only tested
+    # once we know exactly one row survived.
+    game_ids = [r[0] for r in db.execute("SELECT game_id FROM games").fetchall()]
+    assert len(game_ids) == 1, f"expected one collapsed row, got {game_ids}"
+    game_id = game_ids[0]
+    assert _stored_dates(db) == [_DL_DATE]  # anti-vacuity: not the sentinel
+
+    for table in ("player_game_batting", "player_game_pitching"):
+        rows = db.execute(
+            f"SELECT player_id, COUNT(*) FROM {table} "  # noqa: S608 -- fixed literals
+            "WHERE game_id = ? GROUP BY player_id",
+            (game_id,),
+        ).fetchall()
+        assert rows, f"{table} should carry the surviving game's lines"
+        assert all(count == 1 for _, count in rows), (
+            f"{table} carries a duplicated line under {game_id}: {rows}"
+        )
+
+
+def test_genuine_doubleheader_with_differing_scores_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-2: the FRESH-1..6 shape -- 7200s apart, scores differ on every pair.
+
+    The predicate is exact score INEQUALITY, deliberately not expressed via
+    `_SCORE_TOLERANCE_RUNS`: that constant governs the OFFLINE repair predicate
+    and importing it here would couple the load path to a threshold AC-6 may
+    change on the other surface.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T17:00:00.000Z",
+                  owning_score=5, opponent_score=2)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T19:00:00.000Z",   # +7200s
+                  owning_score=3, opponent_score=4)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2, f"genuine doubleheader must stay two rows, got {dates}"
+    assert dates == [_DL_DATE, _DL_DATE]  # anti-vacuity: neither is the sentinel
+
+
+def test_agreeing_scores_far_apart_stay_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """The narrowing condition is load-bearing, not decoration.
+
+    Two genuine doubleheader games CAN share a scoreline, so score agreement
+    alone must not collapse anything. Without the sub-second bound this pair
+    would merge -- which is the destructive direction.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T17:00:00.000Z",
+                  owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T19:00:00.000Z",   # +7200s, same score
+                  owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2, (
+        f"identical scores two hours apart are a doubleheader, not a "
+        f"double-listing; got {dates}"
+    )
+    # Anti-vacuity, and this test is one of the EXPOSED ones: a fixture change
+    # routing these to the sentinel makes _find_duplicate_game unreachable, two
+    # rows persist for the wrong reason, and the assertion above still passes.
+    assert dates == [_DL_DATE, _DL_DATE]
+
+
+def test_sub_second_delta_with_differing_scores_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """The trigger is load-bearing too: a near-zero delta alone must not merge.
+
+    Score agreement TRIGGERS and the delta NARROWS; inverting that would make
+    the delta the discriminator, which epic TN-5 forbids corpus-wide.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DL_START_1, owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_DL_START_2, owning_score=7, opponent_score=1)
+    db.commit()
+
+    # Same exposure as the test above: two rows is the right OUTCOME, but only
+    # a real date proves the dedup branch was actually reached to produce it.
+    assert _stored_dates(db) == [_DL_DATE, _DL_DATE]
+
+
+# ⚠️ EVENING instants, and they sit a calendar day AHEAD of the dates the test
+# asserts. That is deliberate and must not be "corrected" back.
+#
+# 02:00Z is 21:00 the PREVIOUS evening in America/Chicago, so each instant's
+# venue-local date is one day EARLIER than its own UTC slice:
+#
+#     2026-07-26T02:00:00.000Z -> local 2026-07-25, UTC slice 2026-07-26
+#     2026-07-27T02:00:00.000Z -> local 2026-07-26, UTC slice 2026-07-27
+#
+# That gap is the whole point. The test previously used 19:39Z, where
+# localization is a NO-OP (local date == UTC slice), so its assertion held
+# identically under a regression to `date_source_instant[:10]` -- it could not
+# detect the very derivation change its docstring says it guards.
+_AC5_EVENING_INSTANT_DAY_1 = "2026-07-26T02:00:00.000Z"   # local 2026-07-25
+_AC5_EVENING_INSTANT_DAY_2 = "2026-07-27T02:00:00.000Z"   # local 2026-07-26
+
+
+def test_consecutive_day_listings_keep_distinct_dates(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5, cross-story regression guard with a REACHABLE red.
+
+    E-278-04 changed the derived `game_date`, which is the key
+    `_find_duplicate_game` groups candidates by. An over-correcting derivation
+    that collapsed a genuine consecutive-day pair onto one date would make them
+    dedup candidates for the first time -- and this goes red there.
+
+    The instants are EVENING ones so the guard is real in both directions: a
+    UTC-slicing regression yields ["2026-07-26", "2026-07-27"] and fails here,
+    and a collapse onto one date fails the length assertion. With the afternoon
+    instants this test shipped with, only the second half could ever fire.
+    """
+    # The venue-local dates below depend on the operating tz; pin it so the
+    # fixture cannot be silently re-interpreted by an ambient override.
+    monkeypatch.delenv("OPERATING_TIMEZONE", raising=False)
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_AC5_EVENING_INSTANT_DAY_1,
+                  date_source_instant=_AC5_EVENING_INSTANT_DAY_1,
+                  owning_score=0, opponent_score=3, game_date="2026-07-25")
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_AC5_EVENING_INSTANT_DAY_2,
+                  date_source_instant=_AC5_EVENING_INSTANT_DAY_2,
+                  owning_score=0, opponent_score=3, game_date="2026-07-26")
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2
+    assert sorted(dates) == ["2026-07-25", "2026-07-26"], (
+        "consecutive-day listings must retain DIFFERENT game_date values"
+    )
+
+
+def test_delta_helper_never_raises_on_any_parseable_shape() -> None:
+    """`_is_same_listing_delta` must fail closed for real, not just for its
+    docstring.
+
+    A bare date or a naive datetime PARSES cleanly, so it is neither absent nor
+    unparseable and `_parse_instant`'s `except ValueError` never sees it --
+    subtracting naive from aware then raised `TypeError`. There is no
+    `try`/`except` between `_find_duplicate_game` and `ScoutingLoader`'s
+    per-game loop, and `load_payload` commits per game, so that exception would
+    have left earlier games committed and ABANDONED the rest of the team's
+    scout: a silent partial crawl, not a wrong number.
+
+    Unobserved on the wire (GC renders `...Z`) -- pinned anyway, because this
+    epic exists because an unobserved shape in a GameChanger field is not a
+    proven-impossible one.
+    """
+    aware = "2026-07-25T21:00:00.000Z"
+    shapes = [
+        None, "", "not-a-time",
+        "2026-07-25",                 # bare date: parses, midnight, NAIVE
+        "2026-07-25T21:00:00",        # naive datetime
+        "2026-07-25T21:00:00.960Z",   # aware
+        "2026-07-25T16:00:00.000-05:00",  # aware, non-UTC offset
+    ]
+    for a in shapes:
+        for b in shapes:
+            result = _is_same_listing_delta(a, b)  # must not raise
+            assert isinstance(result, bool)
+
+    # Naive input is read as UTC, mirroring `derive_local_date`, so a naive
+    # instant 0.96s from an aware one is correctly INSIDE the window...
+    assert _is_same_listing_delta("2026-07-25T21:00:00", aware.replace("00.000", "00.960")) is True
+    # ...while a bare date really is hours away and is correctly outside it.
+    # (False here is a computed answer, not a swallowed error.)
+    assert _is_same_listing_delta("2026-07-25", aware) is False

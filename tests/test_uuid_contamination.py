@@ -81,7 +81,7 @@ def _make_summary(opponent_id: str = _OPP_BOXSCORE_KEY) -> GameSummaryEntry:
         owning_team_score=5,
         opponent_team_score=3,
         opponent_id=opponent_id,
-        last_scoring_update="2025-05-10T19:39:58.788Z",
+        date_source_instant="2025-05-10T19:39:58.788Z",
     )
 
 
