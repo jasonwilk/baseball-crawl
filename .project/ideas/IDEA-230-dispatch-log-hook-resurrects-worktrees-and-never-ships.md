@@ -1,7 +1,11 @@
 # IDEA-230: The dispatch-log hook can wedge the write guard for every agent, and its output has never once shipped
 
 ## Status
-`CANDIDATE` — **two defects in one mechanism (`.claude/hooks/send-message-counter.sh` + `.dispatch-log/`). Defect 1 is a live session-wide blocker with a proven one-command repro; defect 2 has been silently true since E-260.**
+`PROMOTED` — to **E-279 (closure machinery)** on 2026-07-28, bundled with [[IDEA-228]]. Defect 1 is story E-279-01 (sequenced FIRST, because dispatching the epic is itself what triggers the wedge). Defect 2 is story E-279-02, **BLOCKED on an operator delete-vs-keep ruling** (E-279 OQ-1) — routed to the operator rather than decided, because E-260 built this mechanism on an explicit operator decision.
+
+**Carried into E-279 rather than retired with this idea:** the `.git/info/exclude:19` residue is **not repo-fixable** — if the operator rules delete, that line survives in every existing clone and no commit removes it, so E-279 must report it as a manual per-clone item rather than imply the deletion was complete.
+
+**Originally: two defects in one mechanism (`.claude/hooks/send-message-counter.sh` + `.dispatch-log/`). Defect 1 is a live session-wide blocker with a proven one-command repro; defect 2 has been silently true since E-260.**
 
 ## Defect 1 — a PreToolUse hook creates worktree directories, and `worktree-guard.sh` reads directories as dispatch state
 
@@ -45,9 +49,19 @@ until the next agent tries to write.
 absent from `git log --all -- '.dispatch-log'`, and never added in any branch.
 
 **Root cause is not the hook.** `.git/info/exclude:19` contains `.dispatch-log/` — excluding the whole
-directory, so `git add -A` never stages the TSV. Meanwhile the committed `.gitignore:56-58` ignores
-only `.dispatch-log/sends.count` and states the TSV *"stays TRACKED so it rides the closure patch"*,
-and the hook header repeats it (*"TRACKED -> rides the closure patch"*).
+directory, so `git add -A` never stages the TSV. Meanwhile the committed `.gitignore` stanza at
+**55-58** ignores only `.dispatch-log/sends.count` (the rule itself is line **58**) while its comment
+states the TSV *"stays TRACKED so it rides the closure patch"* (line 57), and the hook header repeats
+it (*"TRACKED -> rides the closure patch"*).
+
+> ⚰ **Range corrected 2026-07-28 (was `56-58`).** The stanza starts at line **55**, not 56: line 55 is
+> `# Dispatch send-counter (transient; see .claude/hooks/send-message-counter.sh).`, which names the
+> hook **by path**. Acting on 56-58 would delete the assertion and the ignore rule while leaving line
+> 55 standing as a comment pointing at a deleted file — the exact surviving-claim defect this idea is
+> about. Found by PM during E-279 planning by reading the file; claude-architect confirmed and noted
+> it had relayed the original range without re-deriving it. **This is the idea's own lesson turned on
+> the idea: a claim you relay is a claim you author.** E-279 TN-13 and story E-279-02 carry the
+> corrected range.
 
 ⚠️ **The durable lesson is the SHAPE, not this file: a committed claim was falsified by an
 uncommitted, per-clone override that no repo grep and no code review can see.** `.git/info/exclude`

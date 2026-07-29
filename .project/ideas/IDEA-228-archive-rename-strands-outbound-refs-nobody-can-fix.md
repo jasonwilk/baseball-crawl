@@ -1,7 +1,9 @@
 # IDEA-228: The closure sequence has no window in which archive-rename fallout can be fixed
 
 ## Status
-`CANDIDATE` — **a sequencing gap in `.claude/skills/implement/SKILL.md`, hit for real at E-278 closure.**
+`PROMOTED` — to **E-279 (closure machinery)** on 2026-07-28, bundled with [[IDEA-230]]. The restructure is story E-279-03; the sweep script and its two call sites are E-279-04. **Originally: a sequencing gap in `.claude/skills/implement/SKILL.md`, hit for real at E-278 closure.**
+
+**What E-279 did NOT take, so it is not silently retired with this idea:** open question 2 below (references naming an epic without spelling its path) stays open BY DESIGN — a mechanical sweep sees literals, and E-279 records that bound in the skill rather than closing it. Separately, the measurement done during E-279 planning found this defect **already shipped 25 times**; one instance was fixed in E-279 and the other 24 are filed as [[IDEA-231]].
 
 ## Summary
 
