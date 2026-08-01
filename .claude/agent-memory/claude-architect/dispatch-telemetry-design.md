@@ -9,8 +9,10 @@ metadata:
 
 Designed 2026-07-29 by claude-architect (effective model `claude-opus-5`, alias
 `opus[1m]`, effort high), commissioned by the main session. E-279 was READY and
-undispatched at design time; nothing under `epics/E-279-closure-machinery/` was
-touched.
+undispatched at design time; nothing in the epic's own directory was touched.
+(Worded without spelling that pre-archive path: E-279-04's gate makes it
+unspellable outside `.project/archive/` once the epic is archived, and this line
+is EVIDENCE of what was observed, so it is reworded rather than repointed.)
 
 ## What this discharges, and what it CANNOT
 

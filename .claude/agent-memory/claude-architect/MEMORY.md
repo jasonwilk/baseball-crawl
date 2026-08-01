@@ -54,7 +54,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - Wants all architectural details preserved (stack decisions, metrics, collaboration patterns)
 
 ## Topic File Index
-- `epic-codifications.md` -- Per-epic record of what was codified where (E-077, E-228, E-235..E-241, E-246..E-262, E-264, E-267, E-270, E-272, E-273, E-276, E-277, E-278)
+- `epic-codifications.md` -- Per-epic record of what was codified where (E-077, E-228, E-235..E-241, E-246..E-262, E-264, E-267, E-270, E-272, E-273, E-276, E-277, E-278, E-279)
 - `claude-practices.md` -- CLAUDE.md design, context management
 - `agent-design.md` -- Subagent architecture, ecosystem patterns
 - `skills-and-hooks.md` -- Skills system, hooks patterns

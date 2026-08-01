@@ -17,6 +17,7 @@
 - ["Same branch" is not a reason to withdraw a test-coverage finding](finding_withdrawal_shared_branch_reasoning.md) — E-272-02: I withdrew a sibling case on shared-return reasoning; the four names route through four distinct patterns, so enumeration discriminates. Concede when the implementer's version is better.
 
 ## Closure-Pass Practice
+- [Run the shipped gate against its OWN epic](run_the_shipped_gate_against_its_own_epic.md) — E-279 shipped an archive-ref gate whose trigger E-279's own closure satisfies; one execution returned exit-1 BLOCKED, at the last point where the remedy was a reword not `--no-verify`. Prove the exclusion with a known-present control (E-243: 6 hits = ran, archive-tree dropped = filter works).
 - [Re-diffstat at Step 1b/1d and compare to what you reviewed](closure_diff_growth_after_integration_review.md) — E-272: the closure diff grew 15→37 files AFTER my Step 1c APPROVED, `src/` included. Remediation + PM bookkeeping land after the last review BY DESIGN. Never let an approval stretch; state src/-reviewed vs context-layer-unreviewed precisely. Also check `git status` for `??`/`MM` — "everything is staged" was wrong twice.
 
 ## Spec-Audit Frame Patterns

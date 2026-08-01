@@ -5,6 +5,89 @@
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# --- archive-reference gate --------------------------------------------------
+# PLACED FIRST BY REQUIREMENT, and the requirement is not stylistic. Every other
+# gate in this file sits below at least one unconditional `exit 0` -- the
+# missing-scanner skip immediately below returns 0 when
+# src/safety/pii_scanner.py is absent, and it takes every later gate with it,
+# including gates that have no dependency on the scanner at all. A gate placed
+# below it is inert in exactly the case it exists for. So this block depends on
+# REPO_ROOT and its own enumeration alone: not on the scanner, not on
+# STAGED_ARR, not on GATE_TREES.
+#
+# MISSING-DEPENDENCY POSTURE DIVERGES FROM ITS NEIGHBOUR, DELIBERATELY.
+# This gate BLOCKS when its script is missing or non-executable -- a gate that
+# never ran is INVALID, not a pass. A few lines below, the scanner check does
+# the OPPOSITE for its own missing dependency: it prints a skip and exits 0.
+# DO NOT HARMONIZE THEM. The pull will be to match the older neighbour because
+# matching the incumbent always looks like the conservative edit; here it would
+# convert a fail-closed gate into a fail-open one.
+ARCHIVE_REFS="$REPO_ROOT/scripts/check_archive_refs.sh"
+
+# OWN ENUMERATION -- deliberately NOT the STAGED_ARR built further down. That
+# array is --diff-filter=ACMR and carries no `D` at all, so a staged deletion is
+# structurally invisible to it; since the trigger below requires observing a
+# deletion, a version reusing it could never fire under any circumstances. The
+# ready-made array sitting a few lines away is the trap here, not a shortcut.
+#
+# --no-renames is what makes the trigger rename-shape-independent: `git apply
+# --3way` may land the archive move as delete+add rather than a rename when
+# similarity drops (plausible here -- the epic file is rewritten during its own
+# epic), and --no-renames normalizes BOTH representations to the same D-plus-A
+# pair. Never condition on `rename from` appearing in the diff.
+#
+# -z rather than the default: without it git C-quotes any path carrying a
+# non-ASCII byte, a double-quote or a backslash, and a quoted path would not
+# match the prefixes below -- the gate would fail OPEN on exactly the commit
+# that mattered, silently.
+_ARCH_DEL=""
+_ARCH_ADD=""
+while IFS= read -r -d '' _p; do
+  case "$_p" in
+    epics/E-[0-9][0-9][0-9]-*) _ARCH_DEL="$_ARCH_DEL ${_p:6:5}" ;;
+  esac
+done < <(git diff --cached --name-only -z --no-renames --diff-filter=D)
+while IFS= read -r -d '' _p; do
+  case "$_p" in
+    .project/archive/E-[0-9][0-9][0-9]-*) _ARCH_ADD="$_ARCH_ADD ${_p:17:5}" ;;
+  esac
+done < <(git diff --cached --name-only -z --no-renames --diff-filter=A)
+
+# BOTH HALVES REQUIRED, for the SAME epic id. Either half alone fires on
+# ordinary commits: annotating or adding a file under an already-archived epic
+# (the `A`/`M` side), or deleting a superseded story from a still-LIVE epics
+# directory (the `D` side) -- and that live directory's own internal
+# cross-references would then block a commit that archives nothing.
+ARCHIVING_IDS=""
+for _d in $_ARCH_DEL; do
+  case " $_ARCH_ADD " in
+    *" $_d "*)
+      case " $ARCHIVING_IDS " in
+        *" $_d "*) ;;
+        *) ARCHIVING_IDS="$ARCHIVING_IDS $_d" ;;
+      esac
+      ;;
+  esac
+done
+
+if [ -n "$ARCHIVING_IDS" ]; then
+  if [ ! -x "$ARCHIVE_REFS" ]; then
+    echo "[archive-refs: BLOCKED] scripts/check_archive_refs.sh is missing or not executable" >&2
+    echo "[archive-refs] A gate that never ran is INVALID, not a pass." >&2
+    exit 1
+  fi
+  for _id in $ARCHIVING_IDS; do
+    if ! "$ARCHIVE_REFS" "$_id" "$REPO_ROOT"; then
+      echo "" >&2
+      echo "[archive-refs] Commit blocked by the archive-reference gate." >&2
+      echo "[archive-refs] There is no override for this gate. \`git commit --no-verify\`" >&2
+      echo "[archive-refs] is the only escape, and it disables the PII scan as well." >&2
+      exit 1
+    fi
+  done
+fi
+# --- end archive-reference gate ----------------------------------------------
+
 if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   echo "[pii-hook] Scanner not installed yet. Skipping PII check."
   exit 0

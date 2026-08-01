@@ -4,7 +4,28 @@
 [E-279: Closure machinery](../E-279-closure-machinery/epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-08-01. All nine criteria verified by PM and approved by `cr-e279`; staging boundary advanced.
+<!-- AC-5 FAILED its first pass: the positioning half passed and the mid-dispatch path-move STATEMENT was absent (verified absence — control fired, five formulations returned zero). The quiet half of a two-clause AC, with every instrument pointed at the flashy one. -->
+<!-- AC-2 was UNSATISFIED at first pass and PM missed it: PM grepped `SKILL.md` while AC-2's text says "no closure passage" with NO file scope. Codex found `dispatch-pattern.md:42`. The criterion was right; the instrument was narrower than the criterion. -->
+<!-- AC-7 was NARROWED by PM: its "nothing else changed" bound had forbidden reconciling a passage this story falsifies. AC-2 governs — a scope bound cannot license shipping a falsified instruction. -->
+<!-- Codex returned the two highest-severity findings on this epic (both P1) against the most careful process of the five: pre-registered DoD, two independently-derived axes, 497 of 797 lines read, freeze before verification. Neither was found by checking harder. -->
+
+<!-- Superseded: `IN_PROGRESS` — assigned to `ca-e279`, 2026-08-01. -->
+<!-- Superseded: `TODO`. -->
+
+<!-- ⚠️ CARRY INTO THIS STORY — the method amendment adopted after story 02, in its STRONG form.
+     A pre-registered pass gets a SECOND AXIS whose file set is DERIVED INDEPENDENTLY of the first.
+     "Different from" is not enough: a second pass starting from the same sweep output inherits the
+     same eligibility set and the same blind spot, and "we did a second pass" will feel like
+     compliance without being it. -->
+<!-- ⚠️ WHY IT BINDS HERE SPECIFICALLY: this story restructures `.claude/skills/implement/SKILL.md`,
+     and epic TN-8a records that E-271's anchors into that same file are ALREADY STALE. A sweep
+     bounded by "lines mentioning sub-step 6" will miss the cross-references that describe the same
+     ordering WITHOUT naming it -- which is exactly what TN-8a's own correction found at `:629` and
+     `:660` after the first list missed them. The token-free half is the load-bearing half here. -->
+<!-- TN-2 also binds: E-279 closes under the OLD sequence, not the one this story ships. -->
+
+<!-- Superseded: `TODO`. -->
 
 ## Description
 After this story is complete, the archive rename happens in the epic worktree before the closure patch is generated, rather than in the main checkout after the patch is applied. Fallout from the rename can then be repaired in the worktree — where the guard already permits the owning agent to write — and those repairs ride the closure patch. The main-checkout rename step and the three rename-ordering rules that exist only to manage it are deleted, and both rollback paths collapse to a single ordering-free pair of commands.
@@ -32,7 +53,12 @@ Three conditions in the current closure sequence are jointly unsatisfiable whene
 - [ ] **AC-5** (mid-dispatch path move is stated): The skill states that after the rename at step (ii) of sub-step 3 the epic's own files live at the archive path, so a remediation round editing `epic.md` or a story file uses the archive path. **The rename is positioned late in sub-step 3 — immediately before the check (iii) and staging (iv)** — which is what keeps the window narrow.
   - **The earlier wording, "the last action before staging," CONTRADICTED AC-1 and understated the design.** Under AC-1's ordered list the rename is **(ii)**, followed by **(iii)** the archive-reference check and any repairs it forces, and only then **(iv)** `git add -A`. So the rename is *not* the last action before staging, and **the gap between (ii) and (iv) is not incidental — it IS the repair window this entire epic exists to create** (see the epic Overview and this story's Context: "The restructure's real product is not a tidier patch — it is a repair window"). **RED state:** a rewrite that satisfies "last action before staging" literally by placing the rename immediately before `git add -A`, squeezing out the window and leaving story 04's gate a dead end.
 - [ ] **AC-6** (repoint ceiling added as a tightening, not a grant): `.claude/rules/agent-routing.md` gains ONE sentence beside the existing own-memory carve-out bounding a closure archive-path repoint: **only the path literal may change**. Rewording, retiring a claim, updating a verdict or adjusting a rating remains the owning agent's, and a repoint that cannot be made without touching more is not a repoint — it routes to the owner or becomes an idea. The existing carve-out's wording is NOT restated or re-granted; verify by diff that the surrounding carve-out text is byte-identical.
-- [ ] **AC-7** (orchestration boundary): `.claude/rules/dispatch-pattern.md` gains one line in its permitted-orchestration list covering running the check script and routing its hits, and nothing else. Verify by diff that no other passage in that file changed.
+- [ ] **AC-7** (orchestration boundary): `.claude/rules/dispatch-pattern.md` gains one line in its permitted-orchestration list covering running the check script and routing its hits. Verify by diff that no **unrelated** passage in that file changed.
+  - ⚠️ **NARROWED BY PM 2026-08-01 (Codex P1-1). The earlier form read "and nothing else… no other passage changed," and that bound was FALSE-SAFE: it forbade reconciling a passage THIS STORY FALSIFIES.** `dispatch-pattern.md:42` describes the closure merge sequence as *"`git diff --binary --cached main` in epic worktree … **`git mv` for archive rename** …"* — the OLD sequence. **AC-7 does not govern this: AC-2 does, and AC-2 was never satisfied.** AC-2 requires *"no closure passage instructs a main-checkout `git mv` of an epic directory in either direction"* — **"closure passage", with no file scope.** `:42` is a closure passage and instructs exactly that.
+  - **Resolution, as AC owner: AC-2 GOVERNS. A scope bound cannot license shipping a falsified instruction.** AC-7 exists to prevent unrelated sprawl in that file; `:42` is not unrelated — **this story's restructure is what makes it false.** The principle AC-2 already embodies for sub-step 5's warning and reject path (c) extends here: **a story that falsifies a passage owns reconciling that passage.** AC-7 is narrowed to exclude passages AC-2 requires reconciled. This is a conflict resolution between two of PM's own criteria, not a scope widening.
+  - **BOTH defects in `:42` are in scope, and the second is not optional.** (1) the main-checkout `git mv` — AC-2. (2) **`git diff --binary --cached main`, a BARE `main` base** — which `SKILL.md:656` calls the one command whose wrong form is *"SILENT and DESTRUCTIVE"*, and `:660` resolves as merge-base-in-the-worktree. Leaving (2) while fixing (1) is corrected-where-it-surfaced-surviving-where-it-lives, in the file with the widest reach in the repository.
+  - **Why the reach asymmetry makes this P1 rather than tidying:** `dispatch-pattern.md` carries `paths: "**"` and loads into **every agent on every interaction**; `SKILL.md` loads on demand. **The stale copy has strictly wider reach than the corrected one**, so an orchestrator following the always-loaded rule reintroduces both failures this story removes.
+  - **PM's verification miss, recorded because the criterion was right and the instrument was not:** PM verified AC-2 by grepping `SKILL.md` alone. **AC-2's text has no file scope — "no closure passage" — so the instrument was narrower than the criterion it was testing.** Found by Codex, which read the rule file because nothing told it not to.
 - [ ] **AC-8** (no behavior claimed for the gate that this story does not deliver): This story wires no check. The skill text added here MUST NOT assert that outbound references are verified — that arrives in E-279-04. An AC-1 sequence whose step (iii) describes a sweep it does not invoke would ship a false claim about the sequence.
   - **AC-1's step (iii) is the SLOT, not the check.** Writing a live invocation there is the violation this criterion names. The two ACs are complementary, not in tension: AC-1 fixes the slot's POSITION (it must sit after the rename and before staging, which is what creates the repair window), AC-8 bounds its CONTENT (it may not claim a check runs). An implementer satisfying one while violating the other has misread both.
 

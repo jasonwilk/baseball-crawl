@@ -27,6 +27,8 @@ paths:
 
 **Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain or Agent Hint value. The sole exception is an agent editing files within its OWN agent-memory directory (`.claude/agent-memory/<agent-name>/`): each agent owns its own learned-knowledge directory, so such edits stay with that agent rather than routing to `claude-architect` (e.g., PM updating `.claude/agent-memory/product-manager/` during closure, or baseball-coach correcting a model doc in `.claude/agent-memory/baseball-coach/`). This carve-out covers an agent's OWN directory only -- a story touching a different agent's memory, or any non-memory context-layer path, still routes to `claude-architect`. It mirrors the own-memory carve-out already in `.claude/rules/workflow-discipline.md` (Consultation Mode Constraint).
 
+**Ceiling on a closure archive-path repoint (a tightening of the carve-out above, not a new grant):** when the closure archive rename strands a path reference in another agent's file, **the only bytes that may change are the path literal.** Rewording, retiring a claim, updating a verdict or adjusting a rating remains the owning agent's. **If the repoint cannot be made without touching more, it is not a repoint** — route it to the owner or capture it as an idea.
+
 ## Decision Routing
 
 When a decision arises during any workflow (planning, dispatch, consultation, or ad-hoc work), route it to the owning agent. Advisory consultants may be invoked for additional perspective but the owner has final authority in their domain.

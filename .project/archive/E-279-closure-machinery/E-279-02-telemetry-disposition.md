@@ -4,7 +4,18 @@
 [E-279: Closure machinery](../E-279-closure-machinery/epic.md)
 
 ## Status
-`TODO`
+`DONE` — 2026-08-01. All four ACs verified by PM and approved by `cr-e279`; staging boundary advanced.
+<!-- The pre-registered Files list held CLOSED at five files with zero growth; the one candidate that arose (`.dispatch-log/` live artifacts) was REPORTED, not actioned. -->
+<!-- Two story-01 artifacts were repaired under the same staging boundary as ROUTED REMEDIATION (post-review remediation exception), explicitly NOT this story's scope. Story 01's DONE was not reopened: neither defect violated any AC. -->
+<!-- Method limit found here and adopted for 03-05: a pre-registered pass bounded by FILE SET cannot find a class defined by the ABSENCE of its marker. A second axis, derived independently of the first, is now required. -->
+
+<!-- ⚠️ TWO PM CLOSURE ITEMS carried out of this story, both `.project/` and both PM-owned under TN-5 -- they are NOT this story's debt and were correctly left untouched:
+     1. IDEA-173 -- moot/close disposition. A whole idea built on the deleted mechanism; thesis, worked example and all four open questions now referent-less.
+     2. IDEA-161 -- its open question "epic History or a separate trail?" now has evidence: the separate trail was built, was never readable across nineteen epics, and was deleted. Evidence bearing on an open question, NOT a falsified judgement. -->
+
+<!-- Superseded: `IN_PROGRESS` — assigned to `ca-e279`, 2026-08-01. -->
+<!-- Superseded: `TODO`. -->
+<!-- Carry into this story: E-279-01's Codex finding landed in the two surfaces the in-loop instruments never instrumented (test harness, planning artifact). This story deletes a mechanism across three repo places -- the analogous uninstrumented surface here is any committed CLAIM that the mechanism works, which AC-1 and AC-3 exist to catch. -->
 <!-- OQ-1 RESOLVED 2026-07-28: operator ruled DELETE (verbatim option "Delete entirely"). AC-1 through AC-4 below are the delete criteria; the former KEEP branch is retired in place. No longer blocked. -->
 <!-- OQ-2 (E-271-03 reconciliation) was EXECUTED at planning time on 2026-07-28. It is not part of this story; it was briefly scoped here as an AC-5 and that placement was withdrawn. See epic TN-8(c). -->
 
@@ -53,6 +64,10 @@ Do not attempt to fix `.git/info/exclude` from a story. It is not in the working
 - `.claude/hooks/send-message-counter.sh` (delete)
 - `.claude/settings.json` (modify — remove both PreToolUse registrations, ~:30 Bash and ~:41 SendMessage; the removals are not symmetric, see AC-2)
 - `.gitignore` (modify — remove the whole 55-58 stanza: three comment lines plus the `sends.count` ignore rule)
+- `.claude/agent-memory/claude-architect/epic-codifications.md` (modify — **AC-3**, the two claude-architect hits). **ADDED by PM 2026-08-01: AC-3 instructed an edit to a file this list did not name.** Routing is unchanged — it is claude-architect's OWN memory, so `agent-routing.md`'s own-memory carve-out keeps it with `ca-e279` rather than routing elsewhere, and per `worktree-isolation.md` the edit goes to the WORKTREE copy so it rides the closure patch.
+- `.project/research/E-279-02-completion-report.md` (create) — durable home for AC-3's per-line verdict table and AC-4's residue statement. **Story 01 established that a verdict table does not survive a message summary**, and moving the report to an artifact was that story's single most effective structural fix; adopted here from the start rather than after a delivery failure.
+
+> **⚠️ AC-2's enumeration governs the `settings.json` edit, NOT the `~:30` / `~:41` hints above.** Those are approximate by design and this epic's line citations have rotted repeatedly. `ca-e279` re-derived the block independently and reports the four Bash hook objects at `:12`/`:18`/`:24`/`:30` with the SendMessage matcher sole-occupant at `:37`. **That is not in conflict with the `~:41` hint — they name different lines of the same block** (matcher line versus hook object), the same measuring-different-referents shape that produced a false disagreement on story 01's in-body site. **Do not "reconcile" them into one number.** Resolve against AC-2's named objects, which is a phrase-level enumeration and cannot rot.
 
 ## Agent Hint
 claude-architect

@@ -15,6 +15,16 @@ The mechanism is unscoped. Options span from lightweight (a per-epic orchestrati
 ## Timing / Blockers
 - No hard blocker. Revisit after E-271 lands (its Autonomy Gate is the decision-rule complement) and after at least one dispatch runs under the new gate, so a real "what would we have wanted recorded" example exists rather than a hypothetical.
 
+## ⚠️ E-279 SUPPLIES THE WORKED EXAMPLE THIS IDEA WAS WAITING FOR — updated 2026-08-01 at closure
+
+**The "what would we have wanted recorded" example is no longer hypothetical, and it arrived before E-271 rather than after.** E-279's dispatch produced a substantial record of main-session process behaviour **inside the epic History** — a sequencing error caught by PM, several relay corrections, a withdrawn precedent, and a four-instance label-to-quantity defect class (a git status `M` read as a magnitude, *"pre-branch"* read as *"inherited"*, a commit subject read as a file list, a concept read as a path). **All of it is durable, repo-visible, operator-visible in the closure diff, and rides the closure patch.**
+
+**So the LIGHTWEIGHT option — append orchestration decisions to the epic History at closure — has now been exercised de facto, and it works.** That materially narrows the design space this file called unscoped: the heavier structured-event-trail options need to justify themselves against a thing already demonstrated at zero mechanism cost.
+
+⚠️ **But the demonstration exposes the real gap, which is NOT the one this file was written around.** Those entries exist because **PM chose to write them.** There is no gate, no trigger, and no checklist item requiring the orchestrator's process to be recorded — and **PM is the wrong single point of failure for it**, since PM is a participant in most of the interactions it would be recording. **The record surface already exists; what is missing is anything that makes its use non-discretionary.** A dispatch where PM does not volunteer it produces exactly the invisibility P-10 describes, with no signal that anything is absent.
+
+**That reframes the open questions below**: the minimum-record question is largely answered by E-279's example, and the live question is now *who is obliged to write it, and how does a missing record announce itself?* — the second being the harder half, and the same unlabelled-null-result shape as [[IDEA-233]] and [[IDEA-173]].
+
 ## Open Questions
 - What is the minimum record that would have made the E-267 over-escalation incident visible to the audit?
 - Does it live in the epic History (operator-visible, rides the closure patch) or a separate trail?

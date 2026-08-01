@@ -18,12 +18,18 @@ If your cwd is NOT `/workspaces/baseball-crawl` (e.g., `/tmp/.worktrees/baseball
 
 A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) guards Write and Edit operations on the main checkout. Two modes:
 
-1. **Dispatch active** (epic worktree at `/tmp/.worktrees/baseball-crawl-E-*` exists): Blocks ALL Write/Edit to `/workspaces/baseball-crawl/` with no exception. This fails closed -- new paths are automatically protected without hook updates.
-2. **No dispatch** (no epic worktree): Blocks Write/Edit to implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). All other main-checkout writes are allowed.
+1. **Dispatch active** (`git worktree list` REPORTS an epic worktree at `/tmp/.worktrees/baseball-crawl-E-*`): Blocks ALL Write/Edit to `/workspaces/baseball-crawl/` with no exception. This fails closed -- new paths are automatically protected without hook updates.
+2. **No dispatch** (git reports no epic worktree): Blocks Write/Edit to implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). All other main-checkout writes are allowed.
+
+**A leftover DIRECTORY that git does not report is NOT a dispatch**, and deleting a directory is NOT how you clear dispatch mode. A crashed dispatch leaves the registry entry standing (git annotates it `prunable`) and mode 1 stays in force; clear it with **`git worktree remove <path>`**, which is scoped to that one entry. Removing the directory by hand leaves you blocked, which is the opposite of what it looks like it does.
+
+**`git worktree prune` is NOT an interchangeable alternative.** It takes **no path argument** -- it cannot be aimed -- and is repo-GLOBAL: one run removes **every** prunable entry at once, including other epics' under concurrent dispatch. Prefer `remove <path>`.
+
+⚠️ **Check, do not classify.** Run `git worktree list`: an entry annotated `prunable` is stale; an entry **without** that annotation is LIVE. **Do not reason from "the guard is blocking me" to "the dispatch must be stale"** -- being blocked is the NORMAL state during a live dispatch. Clearing is the operator's or the main session's action, never an agent's (hence the ban under Epic Worktree Constraints below): if you are an agent, write to the worktree instead and escalate. **The danger is not only deletion.** If a LIVE worktree's directory is even transiently missing, `prune` drops its registry entry, restoring the directory does **not** bring it back, and the guard then falls silently to mode 2 -- leaving the epic unprotected for the rest of the dispatch.
 
 Worktree writes (`/tmp/.worktrees/...`) always pass unconditionally in both modes. The hook intercepts Write and Edit tool calls only (not Bash commands), so git operations are unaffected.
 
-Note: mode 1 has NO agent-memory carve-out. During dispatch, own-memory writes -- dispatch-time deliverables AND closure-time writes (PM's Active→Archived flip and topic-file flushes, claude-architect's codification) -- go to the WORKTREE copy so they ride the closure patch and appear in the operator-approved diff. Consultation-mode own-memory writes are unaffected: they happen when no worktree exists (mode 2), where the hook does not guard `.claude/agent-memory/`.
+Note: mode 1 has NO agent-memory carve-out. During dispatch, own-memory writes -- dispatch-time deliverables AND closure-time writes (PM's Active→Archived flip and topic-file flushes, claude-architect's codification) -- go to the WORKTREE copy so they ride the closure patch and appear in the operator-approved diff. Consultation-mode own-memory writes are unaffected: they happen when git reports no epic worktree (mode 2), where the hook does not guard `.claude/agent-memory/`.
 
 ## Epic Worktree Constraints
 

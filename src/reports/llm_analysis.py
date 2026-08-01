@@ -41,10 +41,11 @@ class EnrichedPrediction:
 #
 # Validated "Variant A" bench-briefing prompt (E-243-04 / bake-off winner;
 # google/gemini-2.5-flash-lite scored 16/16).  Source of truth, reproduced
-# verbatim from epics/E-243-probable-starter-usefulness/E-243-04-narration-
-# prompt.md.  The JSON OUTPUT block below is the unchanged response contract
-# (the deterministic parser + response_format hardening require a JSON
-# envelope); the narration substance above it is Variant A as-validated.
+# verbatim from
+# .project/archive/E-243-probable-starter-usefulness/E-243-04-narration-prompt.md.
+# The JSON OUTPUT block below is the unchanged response contract (the
+# deterministic parser + response_format hardening require a JSON envelope);
+# the narration substance above it is Variant A as-validated.
 # This string has no .format() placeholders -- the literal JSON braces are
 # intentional and must not be doubled.
 _SYSTEM_PROMPT_TEMPLATE = """\

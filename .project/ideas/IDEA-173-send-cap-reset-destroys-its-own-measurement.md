@@ -1,7 +1,17 @@
 # IDEA-173: Clearing the send cap destroys the data that would justify raising it
 
 ## Status
-`CANDIDATE`
+⚰ **CLOSED — MOOT 2026-08-01 (E-279 closure). Its entire subject was deleted, not fixed.**
+
+**E-279-02 removed the send-cap mechanism outright** on an operator ruling — the hook file `.claude/hooks/send-message-counter.sh`, both `settings.json` registrations, and the `.gitignore` stanza. **There is no cap, no threshold, no counter, and no log.** Every question below is about an instrument that no longer exists, and the two corrupted E-272 rows are unrecoverable and no longer matter: the log they sat in was never committed in nineteen epics (`.git/info/exclude:19`, an untracked per-clone override) and was destroyed with each worktree.
+
+**Closed rather than deleted, because the reasoning generalizes past its subject — this is the part to keep:**
+
+> **A self-defeating instrument: the fastest way to unblock a live dispatch was precisely the action that erased the row's evidentiary value, taken under time pressure by an operator who wanted work to continue. So the data most likely destroyed was from the LONGEST, most send-heavy dispatches — exactly the runs that would have justified a change. The log systematically under-sampled its own strongest evidence, and did so SILENTLY: a cleared row looked like a LOW row, not like a MISSING one.**
+
+**That is the unlabelled-null-result family** — a destroyed measurement indistinguishable from a small one — and it binds any future instrument with a manual reset path. **The remedy it proposed is still the right shape for that class: make the reset non-destructive (record the pre-reset value, or mark the row "cleared at N") rather than making the reset harder.** Carried into E-279's codification record; see also [[IDEA-233]], the same family in a gate whose failure output is shape-identical to its success.
+
+**Do NOT reopen this to "fix the log."** There is nothing to fix. If a send-accounting instrument is ever rebuilt, start from the lesson above, not from this file.
 
 ## Summary
 The dispatch send cap has two unblock paths, and they are not equivalent: **raising the threshold preserves the measurement, clearing the counter destroys it.** During E-272 the operator cleared the counter mid-story twice to unblock the main session, and the send-cap log's seven staging-boundary rows for this epic now include two corrupted-low entries (rows 2 and 7 read 2 and 4 against true figures that are higher). If that log exists to accumulate evidence for revisiting the threshold, this epic contributed partly unusable data.

@@ -166,21 +166,37 @@ ghost directories" as a satisfied AC: it produces no diff, CR cannot verify it, 
 
 **After an accidental discard, verify TWO things, not one.** Code-reviewer did both and the second is the one I would have skipped: (1) the damaged file is byte-identical to its pre-damage state — it compared the `git diff` **post-image blob hash** (`df3dc3c`) against the hash from its earlier read, which is strictly stronger than "the diff looks right"; and (2) **nothing ELSE vanished** — it re-checked that all eight files were still in the diff and that every file it had not been told changed was unchanged. A restore you did not verify is not a restore, and the real risk after a discard is the collateral you did not think to look for.
 
-## A `SendMessage` receipt lies in BOTH directions, and there is a hard send cap
+## A `SendMessage` receipt lies in BOTH directions
 
-**The cap first, because it is invisible until it fires.**
-`.claude/hooks/send-message-counter.sh` denies `SendMessage` at `DENY_AT=60` sends
-**per staging boundary** (`WARN_AT=40`). It is an explicit **operator decision point**:
-the remedy is deleting `.dispatch-log/sends.count` or raising `DENY_AT`, and the hook's
-own provenance block says agents must not do either. **Stop and surface it; do not route
-around it.** A story running several review rounds plus an adjudication thread can reach
-60 — E-278-04 did, mid-delivery of a blocking artifact.
+⚰ **RETIRED (dated framing — there is no send cap, and nothing left to surface).** This
+section used to open with one: until 2026-07-28 a PreToolUse hook warned at 40 sends and
+hard-denied `SendMessage` at 60 per staging boundary, and this file told you to **stop and
+surface it** as an operator decision point. The operator retired both thresholds by hand at
+`c990446`, and E-279 deleted the mechanism outright — hook file, both `settings.json`
+registrations and the `.gitignore` stanza — so `.claude/hooks/send-message-counter.sh` is a
+**dead path, named here as evidence of what was, never as a pointer.** **Those two numbers
+were CORRECT for the mechanism as it stood** (the pre-`c990446` file literally read
+`WARN_AT=40` and `DENY_AT=60`); they died with the mechanism, not because they were wrong.
+Kept dated so a `DENY_AT` reference surviving elsewhere reads as residue, not as a live control.
+
+**What replaces "stop and surface it": nothing to surface — and do not self-ration.** No
+send is counted and no threshold exists. Do not budget sends, compress a message to save
+one, or skip a clarification because it "costs a send" — that distortion is the operator's
+own second reason for the retirement (2026-07-26, *"it changes base good behavior"*), and
+**a behavioral residue outlives the mechanism that trained it**, which is why deleting the
+hook does not by itself delete the habit. Send what the work needs.
+
+**Do not propose a replacement cap**, and the volume evidence that broke this one is why: a
+story running several review rounds plus an adjudication thread can reach 60 sends —
+E-278-04 did, mid-delivery of a blocking artifact — so a cap fitted to one epic's largest
+story does not transfer to the next, and a hard stop on the coordination channel halts the
+whole team at the moment the traffic proves the story needed it.
 
 **Both failure directions bit in one story, ~40 minutes apart:**
 
 - **Success ≠ delivered.** Two sends returned `{"success": true, msg_id: ...}` and the
   recipient reported nothing arrived.
-- **Denied ≠ not delivered.** After a hook denial I told main and the reviewer that the
+- **Denied ≠ not delivered.** After a denial from that hook I told main and the reviewer that the
   artifact *"has never actually been transmitted."* **False** — an earlier, differently
   shaped send had landed and the reviewer had already adjudicated from it. I had reasoned
   from "this call was denied" to "the content never arrived", which does not follow when

@@ -51,8 +51,3 @@ data/backups/
 !/ephemeral/scratch/
 /ephemeral/scratch/*
 !/ephemeral/scratch/.gitkeep
-
-# Dispatch send-counter (transient; see .claude/hooks/send-message-counter.sh).
-# The counter is per-worktree and reset each staging boundary; the E-NNN.tsv
-# dispatch log alongside it stays TRACKED so it rides the closure patch.
-.dispatch-log/sends.count
