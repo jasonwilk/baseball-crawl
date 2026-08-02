@@ -102,7 +102,7 @@ Epic completion requires a documentation impact assessment per `.claude/rules/do
 
 ## Context-Layer Assessment Gate
 
-Epic completion requires a context-layer impact assessment per `.claude/rules/context-layer-assessment.md`. The main session MUST evaluate all eight triggers with explicit per-trigger yes/no verdicts after all stories are DONE and before archiving the epic. All verdicts are recorded in the epic's History section. If any trigger fires, claude-architect is dispatched to codify the findings before the epic can be archived.
+Epic completion requires a context-layer impact assessment per `.claude/rules/context-layer-assessment.md`. The main session MUST evaluate every trigger in that file's numbered list with explicit per-trigger yes/no verdicts after all stories are DONE and before archiving the epic. All verdicts are recorded in the epic's History section. If any trigger fires, claude-architect is dispatched to codify the findings before the epic can be archived.
 
 ## Full-Suite-Green Closure Gate
 

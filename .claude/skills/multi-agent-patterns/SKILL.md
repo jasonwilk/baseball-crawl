@@ -1,17 +1,12 @@
+---
+name: multi-agent-patterns
+description: This skill should be used when dispatching a story via Agent Teams and verifying the context block is complete, when routing a request through agents (main session to implementing agent), or when debugging an implementing agent that completed a task incorrectly. Covers the telephone-game problem, verbatim relay, and the dispatch checklist. Loaded by the dispatching agent rather than triggered by a user phrase.
+---
+
 # Skill: multi-agent-patterns
 
 **Category**: Architectural
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when you are about to:
-
-- **Dispatch a story via Agent Teams** and need to verify the context block is complete
-- **Route a request through agents** (main session -> implementing agent)
-- **Debug an implementing agent that completed a task incorrectly**
 
 ---
 
@@ -52,7 +47,7 @@ Before spawning an implementer for a story:
 - [ ] Read the epic Technical Notes in full
 - [ ] Include full story file text + Technical Notes in the prompt (not a summary)
 - [ ] Route to PM to set story status to IN_PROGRESS
-- [ ] Execute stories **serially** -- one at a time -- letting the staging boundary (`git add -A` after each story passes review) isolate each story's diff. The implement skill (Phase 3) is authoritative on the dispatch loop.
+- [ ] Execute stories **serially** -- one at a time -- letting the **frozen tree** isolate each story's diff: the main session freezes on the completion report (`git add -A && git write-tree`), and review runs against that tree. The implement skill (Phase 3) is authoritative on the dispatch loop.
 
 ## When to Shorten the Chain
 

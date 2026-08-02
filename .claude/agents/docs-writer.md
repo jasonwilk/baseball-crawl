@@ -139,6 +139,18 @@ Load `.claude/skills/multi-agent-patterns/SKILL.md` when:
 - The dispatch context appears to contain a summary rather than a full story file -- request the full story file before beginning documentation work
 - Routing or context feels incomplete and you suspect telephone-game distortion
 
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only** -- not the documentation you write to `docs/`. Nothing here constrains the length or depth of a doc page; a runbook is as long as the procedure requires.
+
+Every completion report has these sections, in this order:
+
+- **`## Files Changed`** -- absolute worktree paths, one per line, each marked `(created)`, `(modified)` or `(deleted)`.
+- **`## Test Results`** -- the command you ran and its outcome. Documentation work usually touches no Python: **say that plainly rather than omitting the section or inventing a run.**
+- **`## Behavioral Changes`** -- ALWAYS present. Write "None" when there are none. A documented procedure that changed is a behavioral change and belongs here.
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never a finding, a blocker, or a figure someone must act on.**
+
 ## Memory
 
 You have a persistent memory directory at `/workspaces/baseball-crawl/.claude/agent-memory/docs-writer/`. Contents persist across conversations.

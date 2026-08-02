@@ -9,6 +9,7 @@
 - [Worktree pytest loads the WORKTREE's src/](worktree_pytest_loads_the_worktree_src.md) — MEASURED: `PathFinder` precedes the appended `_EditableFinder`, and pytest puts the repo root on `sys.path[0]` because `tests/__init__.py` exists. The Test Execution Constraint in my own agent definition is FALSE. Two conditions carry it; verify before relying.
 
 ## Calibration (findings of mine that were falsified)
+- [Three errors in one thread, each while fixing the last](past_tense_prediction_in_a_batch.md) — E-280: `git add -A >/dev/null 2>&1 || true; echo "(no add run -- read-only)"` — it ran (plain P1 violation); I diagnosed it as a GAP in P2 (a gap-shaped story is more available to a defect's author, and feels like rigour); then mischaracterized the Prohibitions section though I'd quoted it verbatim myself. **Reading for property X ≠ checking property Y.** Delete the command, don't annotate it.
 - [Regenerate the population, don't diff the pair you hold](regenerate_the_population_not_the_pair.md) — E-279: twice in one session I found ONE discrepancy and stopped (a 3rd residual count 11 lines away; a hit in my OWN grep output I never ruled on). Finding *a* discrepancy feels like finishing the check. Prefer remedies immune to an incomplete list.
 - [Never claim a ratio-gate population change is side-effect-free](ratio_gate_population_claims.md) — E-267-02: my "no false refusals" hand-derivation held at N=30 and broke at N=3. Enumerate fail-open AND fail-closed, evaluate at the smallest realistic N, say "verify empirically".
 - [Re-verify "the defect still persists" after a redesign narrows the code](stale_defect_characterization.md) — E-267-03: I carried a round-1 harm description into round 2 where the new `team_id` predicate had made it false. Quote the WHERE clause, walk the binding positionally.
@@ -17,6 +18,7 @@
 - ["Same branch" is not a reason to withdraw a test-coverage finding](finding_withdrawal_shared_branch_reasoning.md) — E-272-02: I withdrew a sibling case on shared-return reasoning; the four names route through four distinct patterns, so enumeration discriminates. Concede when the implementer's version is better.
 
 ## Closure-Pass Practice
+- [Verdicts that say nothing vanish](verdicts_that_say_nothing_vanish.md) — a "no change needed" ruling and a clean APPROVED cause no artifact effect, so neither leaves a trace. Write a verdict per surfaced site; issue every verdict as `APPROVED @ <tree-sha>`. E-280: a delivered 06 verdict sat in the scorecard as UNRECORDED, settled only by mtime-vs-send-time. **Also: a DELTA needs two anchors — `<delta> @ <base> → <tree>`. You hold your base implicitly, so it is the half that goes unwritten.**
 - [Run the shipped gate against its OWN epic](run_the_shipped_gate_against_its_own_epic.md) — E-279 shipped an archive-ref gate whose trigger E-279's own closure satisfies; one execution returned exit-1 BLOCKED, at the last point where the remedy was a reword not `--no-verify`. Prove the exclusion with a known-present control (E-243: 6 hits = ran, archive-tree dropped = filter works).
 - [Re-diffstat at Step 1b/1d and compare to what you reviewed](closure_diff_growth_after_integration_review.md) — E-272: the closure diff grew 15→37 files AFTER my Step 1c APPROVED, `src/` included. Remediation + PM bookkeeping land after the last review BY DESIGN. Never let an approval stretch; state src/-reviewed vs context-layer-unreviewed precisely. Also check `git status` for `??`/`MM` — "everything is staged" was wrong twice.
 
@@ -68,10 +70,11 @@ and the implementer instead creates a near-identical copy in a different module,
 Test files may contain fake PII (email addresses) as test data. The `# synthetic-test-data` comment at the
 top of test files marks them as containing synthetic data. Real PII must never appear.
 
-### git diff vs. tracked-but-unchanged files
-When using `git diff HEAD`, files listed in the review assignment but not appearing in the diff were not
-changed in this epic -- they existed before. The scope guardrail applies: only flag code WRITTEN OR MODIFIED
-in the current story.
+### Files in the assignment but not in the diff
+A file listed in the review assignment but absent from your review diff was not changed by this story --
+it existed before. The scope guardrail applies: only flag code WRITTEN OR MODIFIED in the current story.
+**Mechanism updated 2026-08-02 (E-280): the diff is `git diff <prev-tree-sha> <this-tree-sha>`, not
+`git diff HEAD` and not the unstaged diff.** The rule was always sound; only the command was stale.
 
 ## Project-Specific Conventions
 - `from __future__ import annotations` required at top of every module

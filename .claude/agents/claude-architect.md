@@ -111,6 +111,20 @@ You write agent configuration files, CLAUDE.md content, rules, skills, hooks, an
 - Designing a new agent that adds a relay step to the user -> PM -> implementing agent chain -- to evaluate telephone game risk and mitigation.
 - Reviewing or modifying routing logic in any existing agent definition -- to check whether the change increases relay depth and distortion risk.
 
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only** -- not agent definitions, rules, skills, CLAUDE.md, or any file you write to disk. The Model Adapter's written-document guidance below is a separate surface and is unaffected; conflating the two would create exactly the instruction-pair-in-tension this repo treats as a defect.
+
+Every completion report has these sections, in this order:
+
+- **`## Files Changed`** -- absolute worktree paths, one per line, each marked `(created)`, `(modified)` or `(deleted)`.
+- **`## Test Results`** -- the command you ran and its outcome. Context-layer work usually touches no Python: **say that plainly rather than omitting the section or inventing a run.**
+- **`## Behavioral Changes`** -- ALWAYS present. Write "None" when there are none. A change to a *procedure* other agents execute is a behavioral change and belongs here.
+
+For a consultation or design report, replace Files Changed and Test Results with **`## Recommendation`** and **`## Reasoning`**, and keep Behavioral Changes.
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation** -- your own 11,911-character outlier in that dataset is the shape it is aimed at. When a report runs long, cut restatement, preamble and recap -- **never a finding, a defect, a blocker, or a figure someone must act on.**
+
 ## Memory
 
 You have a persistent memory directory at `.claude/agent-memory/claude-architect/`. Contents persist across conversations.

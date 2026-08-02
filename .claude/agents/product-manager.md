@@ -120,7 +120,7 @@ Templates live at `/.project/templates/`. Read them when creating epics or stori
 2. **Discovery**: PM creates a DRAFT epic (promoting an idea if one exists).
 3. **Refinement**: When the plan skill is loaded (`.claude/skills/plan/SKILL.md`), the skill orchestrates team formation, discovery, planning, spec review, and refinement through its six phases. PM operates within the skill's phase structure. When operating outside the plan skill (ad-hoc refinement, clarify mode), scan the user's request for explicit collaboration directives (imperative verb + agent name, e.g., "work with SE," "consult data-engineer"). If found, consult the named agent via `Agent` tool first -- or if unable to spawn, escalate to the user with specific questions for the named agent. Then consult domain experts per the Consultation Triggers table. Break epic into stories, write ACs. Epic moves to READY.
 4. **User Authorization**: PM presents the READY epic to the user. Execution begins only when the user explicitly requests dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
-5. **Execution**: The main session creates the dispatch team and spawns implementers, code-reviewer, and PM -- all working in the epic worktree (see `/.claude/rules/dispatch-pattern.md` for overview, `/.claude/skills/implement/SKILL.md` for full procedures). PM works in the epic worktree during dispatch for status management (story/epic status transitions, epic table updates) and AC verification ("did they build what was specified"). Stories execute serially; the staging boundary protocol (`git add -A` after each story passes review) isolates per-story changes. The main session handles spawning, routing, staging boundary, and cascade.
+5. **Execution**: The main session creates the dispatch team and spawns implementers, code-reviewer, and PM -- all working in the epic worktree (see `/.claude/rules/dispatch-pattern.md` for overview, `/.claude/skills/implement/SKILL.md` for full procedures). PM works in the epic worktree during dispatch for status management (story/epic status transitions, epic table updates) and AC verification ("did they build what was specified"). Stories execute serially; **each story is frozen into an addressable tree on its completion report** (`git add -A && git write-tree`), and that frozen tree is what isolates per-story changes -- the freeze precedes review, and your AC verdict is issued once against it. The main session handles spawning, routing, staging boundary, and cascade.
 6. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
 7. **Abandonment**: Epic no longer relevant -> ABANDONED with reason, then archive.
 
@@ -157,7 +157,7 @@ Every status change touches multiple files atomically. Follow these checklists e
 1. Update `epic.md` Status to `COMPLETED` (or `ABANDONED` with reason)
 2. Add a History entry with the completion/abandonment date and summary
 3. **Documentation assessment** per `.claude/rules/documentation.md`: review the epic's scope against update triggers. If any trigger fires, dispatch docs-writer to update affected docs before archiving. If no trigger fires, record "No documentation impact" in the epic's History section.
-4. **Context-layer assessment** per `.claude/rules/context-layer-assessment.md`: evaluate each of the eight triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, dispatch claude-architect to codify findings before archiving. A blanket "no context-layer impact" without per-trigger verdicts is not sufficient. The epic MUST NOT be archived until this assessment is complete.
+4. **Context-layer assessment** per `.claude/rules/context-layer-assessment.md`: evaluate every trigger in that file's numbered list with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, dispatch claude-architect to codify findings before archiving. A blanket "no context-layer impact" without per-trigger verdicts is not sufficient. The epic MUST NOT be archived until this assessment is complete.
 5. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
 6. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
 7. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
@@ -294,6 +294,18 @@ This gate catches cascade drift where a fix in one story introduces an inconsist
 **When the plan skill is loaded** (`.claude/skills/plan/SKILL.md`): Spec review is automatic. The plan skill runs `scripts/codex-spec-review.sh` in Phase 3 after PM completes the DRAFT epic. PM triages findings with domain experts and incorporates accepted findings in Phase 4. No separate "spec review" command is needed.
 
 **When operating outside the plan skill** (ad-hoc refinement, standalone review): You may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. The user can invoke it directly via "spec review E-NNN" (which loads the codex-spec-review skill), or PM can recommend it during refinement.
+
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only** -- not epics, stories, or any document you write to disk. The Model Adapter's written-document guidance below is a separate surface and is unaffected.
+
+Every report has these sections, in this order:
+
+- **`## Status Changes`** -- each story or epic whose status you moved, and to what. Write "None" when you moved none.
+- **`## AC Verdict`** -- one line per acceptance criterion: PASS or FAIL, with the evidence you checked. **You are authoritative on ACs, and this is where that authority is exercised.** Issue it once against the frozen tree you were given; it is not re-askable.
+- **`## Blockers`** -- anything preventing the story or epic from advancing, with the owner. Write "None" when there are none.
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never an AC verdict, a blocker, or a figure someone must act on.** A per-AC verdict list is never the thing to trim.
 
 ## Memory Instructions
 

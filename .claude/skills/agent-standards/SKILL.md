@@ -1,18 +1,12 @@
+---
+name: agent-standards
+description: This skill should be used when creating a new agent definition, modifying an existing one, auditing agent definitions for quality or completeness, or reviewing the agent ecosystem for gaps, overlaps, or routing issues. Covers the design methodology, file format, frontmatter requirements, canonical section skeleton, and quality standards. Loaded by claude-architect rather than triggered by a user phrase.
+---
+
 # Skill: agent-standards
 
 **Category**: Agent Infrastructure
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when you are about to:
-
-- **Create a new agent** -- designing the frontmatter, system prompt, and section structure
-- **Modify an existing agent definition** -- updating responsibilities, tools, or prompt content
-- **Audit agent definitions** -- reviewing quality, completeness, or ecosystem fit
-- **Review agent ecosystem structure** -- checking for gaps, overlaps, or routing issues
 
 ---
 

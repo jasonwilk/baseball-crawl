@@ -1,20 +1,13 @@
+---
+name: filesystem-context
+description: This skill should be used when starting a task that requires reading context files, when deciding what to load at session start versus defer to a sub-task, when choosing between loading a full document and relying on memory, when writing a new context file (story, epic, research artifact, agent memory) and deciding what belongs in it versus what stays ambient, or when debugging an agent that lacked context available on the filesystem but never loaded. Covers file-based context delivery, progressive disclosure, and the ambient-versus-deferred tradeoff. Loaded by the working agent rather than triggered by a user phrase.
+---
+
 # Skill: filesystem-context
 
 **Category**: Architectural
 **Adapted for**: baseball-crawl
 **Source**: muratcankoylan Agent Skills for Context Engineering (E-008-R-02)
-
----
-
-## Activation Triggers
-
-Load this skill when you are about to:
-
-- **Start a new task** that requires reading context files before beginning work (story files, epic files, research artifacts, API specs, design docs)
-- **Decide what to load at session start** vs. what to defer until a specific sub-task needs it
-- **Choose between loading a full document or relying on memory** when a session's context window is partially consumed
-- **Write a new context file** (story, epic, research artifact, agent memory entry) and need to decide what belongs in it vs. what should stay ambient
-- **Debug an agent completing a task incorrectly** and suspect it was missing key context that was available on the filesystem but never loaded
 
 ---
 

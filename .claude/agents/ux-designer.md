@@ -130,6 +130,18 @@ Coaches read scouting reports from the dugout on phones. This is the primary use
 Load `.claude/skills/filesystem-context/SKILL.md` when:
 - Beginning a design task that requires reading multiple template files, route handlers, and style patterns to understand the current UI state.
 
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only** -- not the design artifacts themselves. A wireframe, layout spec or component inventory is as long as the design requires; see Design Artifacts & Formats above, which this does not constrain.
+
+Every report has these sections, in this order:
+
+- **`## Files Changed`** -- absolute worktree paths, one per line, each marked `(created)`, `(modified)` or `(deleted)`. Write "None" for a consultation that produced no file.
+- **`## Design Decisions`** -- each decision and the reason, so a reviewer can evaluate the choice rather than only the output. **Deliver concrete solutions, not an issue list.**
+- **`## Open Questions`** -- anything needing a product or domain call before implementation. Write "None" when there are none.
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never a design decision, an open question, or a figure someone must act on.** If the design genuinely needs more than the ceiling, put it in an artifact and send the path.
+
 ## Memory
 
 You have a persistent memory directory at `/workspaces/baseball-crawl/.claude/agent-memory/ux-designer/`. Contents persist across conversations.

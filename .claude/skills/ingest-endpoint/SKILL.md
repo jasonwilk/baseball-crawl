@@ -1,18 +1,12 @@
+---
+name: ingest-endpoint
+description: This skill should be used when the user says "ingest endpoint", "ingest the endpoint", "ingest-endpoint", "curl is ready", "new curl ready", "curl is updated", "I put a curl in the secrets file", "document this endpoint", or "new endpoint to analyze" -- or otherwise implies a fresh GameChanger API curl command is waiting in `secrets/gamechanger-curl.txt`. Runs the two-phase ingestion: api-scout executes the curl (time-sensitive -- the `gc-signature` header in POST requests expires within minutes), then claude-architect integrates the findings into the context layer.
+---
+
 # Skill: ingest-endpoint
 
 **Category**: Workflow Automation
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when the user says any of:
-
-- "ingest endpoint", "ingest the endpoint", "ingest-endpoint"
-- "I put a curl in the secrets file", "new curl ready", "curl is updated"
-- "document this endpoint", "new endpoint to analyze"
-- Any request that implies a fresh GameChanger API curl command is waiting in `secrets/gamechanger-curl.txt`
 
 ---
 

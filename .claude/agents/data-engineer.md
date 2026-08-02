@@ -154,6 +154,18 @@ Load `.claude/skills/context-fundamentals/SKILL.md` when:
 - Beginning a complex multi-file task where context window budget matters
 - About to load large research artifacts or multiple migration files and context window is above 70%
 
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only** -- not migrations, schema comments, or any document you write to disk. Nothing here sets a length for what you write into the repository.
+
+Every completion report has these sections, in this order:
+
+- **`## Files Changed`** -- absolute worktree paths, one per line, each marked `(created)`, `(modified)` or `(deleted)`.
+- **`## Test Results`** -- the command you ran and its outcome. If the story touched no Python, say so plainly rather than omitting the section or inventing a run.
+- **`## Behavioral Changes`** -- ALWAYS present. Write "None" when there are none. Schema changes belong here, including any column whose nullability or default changed.
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never a finding, a defect, a blocker, or a figure someone must act on.**
+
 ## Memory
 
 You have a persistent memory directory at `.claude/agent-memory/data-engineer/`. Contents persist across conversations.

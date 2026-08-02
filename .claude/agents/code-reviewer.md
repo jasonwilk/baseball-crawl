@@ -45,7 +45,11 @@ When assigned a review, execute these steps in order:
 
 Run tests as the first action before reading any changed files. Test failures are automatic MUST FIX findings.
 
-**Run `git status` too, because the review loop is structurally BLIND to an UNTRACKED file.** A new file that was never `git add`-ed appears in NEITHER `git diff` NOR `git diff --cached`, so every per-story review in an epic can pass while never having seen it -- this is a gap in the instrument, not carelessness, and the main session's closure `git add -A` is a backstop firing AFTER all reviews rather than a review seeing it. In E-276 this was caught pre-commit by one `git status`; committing from the index as it stood would have dropped an entire closure assessment block, including its per-trigger verdicts and its ARCHIVAL-IS-BLOCKED line, with every review green. Treat an untracked file in the worktree as in-scope for review, or say explicitly that it is not.
+**The untracked-file blindness is now CURED BY THE FREEZE, and the reason to keep reading is what it cost before.** The review loop used to be structurally blind to an UNTRACKED file: a new file never `git add`-ed appeared in NEITHER `git diff` NOR `git diff --cached`, so every per-story review in an epic could pass while never having seen it -- a gap in the instrument, not carelessness. **In E-276 this was caught pre-commit by one `git status`; committing from the index as it stood would have dropped an entire closure assessment block, including its per-trigger verdicts and its ARCHIVAL-IS-BLOCKED line, with every review green.**
+
+**What changed:** the main session now freezes with `git add -A && git write-tree` **before** review rather than staging after it, so untracked files enter the frozen tree and appear in your review diff. The backstop that once fired *after* every review is now the thing that *constitutes* the review surface. Untracked files are in scope automatically; you no longer have to go looking for them.
+
+**If the frozen tree and what you read disagree, that is a write landing AFTER the freeze -- a different failure, and it is the main session's to detect and re-freeze, not yours to chase.** The instrument is **THE FROZEN-STATE CHECK**, defined once in `.claude/skills/implement/SKILL.md` under Step 5, "Freeze the review surface FIRST"; it is run at the moment a verdict is issued. **Do not substitute a bare `git status`** -- in a dispatch worktree its first column is the index and it is never empty, so it carries no information about whether anything moved. Report the disagreement and let the main session re-freeze.
 
 **Test scope discovery**: Before running tests, verify that the test run covers all files that import from modified source modules. Follow this procedure:
 
@@ -92,6 +96,24 @@ When the main session assigns an **invariant audit pass** for an epic that intro
 
 Evaluate findings in this priority order. Every finding must be classified as MUST FIX or SHOULD FIX.
 
+### Review depth by tier
+
+The main session computes a story's **tier** from its file paths and states it in your assignment; the path-to-tier table lives in `.claude/skills/implement/SKILL.md`, which owns path classification. **The tier-to-rubric mapping is defined HERE** -- the routing seam says *which tier*, this file says *what that tier means*. **Do not classify paths yourself**, and do not infer a tier the assignment did not state.
+
+| Tier | Priorities you apply |
+|---|---|
+| **A** | **All seven** -- Priorities 1-7. |
+| **B** | **Priorities 1, 3, 4, 6 and 7**, plus prose-claim resolution. **Two priorities are skipped, each for its own reason: Priority 2** (bugs/regressions) -- a tier B diff adds no executable path, so there is no behavior that can regress; **Priority 5** (schema drift) -- a tier B diff performs no database writes, so there is no schema to drift from. (Docs routinely *mention* column names, and a mention is not a write.) **Priority 4 is RETAINED** -- see below. |
+| **C** | **No per-story code-reviewer pass is assigned** -- PM's AC verdict stands alone. You will not receive a tier C story *for a per-story verdict*; tier C content still reaches you at the **unconditional Phase 5 Step 1c Closure CR Integration Review**, which is where a context-layer epic gets its only combined-diff review. |
+
+Every priority appears in tier A, so no priority is silently retired by tiering.
+
+**Tiering governs PER-STORY review depth only. At the Phase 5 Step 1c Closure CR Integration Review, apply the FULL rubric -- all seven priorities -- regardless of the constituent stories' tiers.** This matters most where the table's own tier C row sends you: **in a context-layer epic every story is tier C, so the closure review is the only code review that happens at all.** The pass that sees the least per-story is the one that must see everything.
+
+⚠️ **Why tier B KEEPS Priority 4, when "it targets executable behavior" would suggest otherwise.** Priority 4's sensitive-path trigger requires **"PII across ALL artifact types -- not just source and logs, but also test fixtures, cached API responses, generated reports, error messages, and committed docs."** That is a **content** obligation, not an execution one -- and **documentation is reviewed only at whatever tier the seam assigns it to** -- tier B today -- so if that tier skips Priority 4, no per-story tier reviews a committed doc for PII at all. (The path-to-tier assignment is the seam's; it is cited here, not redefined, and this sentence does not go stale if the seam reassigns it.) The automated gates do not cover those trees: `.claude/rules/pii-safety.md` records that the pre-commit scanner **cannot regex-detect NAMES** (credentials/email/phone only) and the doc-PII byte-gate is **scoped to `docs/api/` alone** -- so `docs/admin/` and `docs/coaching/` have **no automated name coverage at all**. Skipping Priority 4 at tier B would remove the last remaining PII review from precisely the trees that have no other. **Infrastructure is not a compensating control for an application-layer obligation, and here the infrastructure does not even reach the path.**
+
+**Escalation is one-way.** You MAY escalate a story to a deeper tier when the diff shows something its tier did not anticipate, and you **MUST state that you escalated and why**. You may **NOT** de-escalate, and you may not escalate silently.
+
 **A disposition reached on a factual premise is only as good as that premise, and the cost argument is the premise nobody re-opens.** *A SHOULD FIX accepted (or downgraded, or closed) on a cost argument that turns out to be wrong is not a SHOULD FIX* -- the cost WAS the disposition, so the disposition does not outlive the cost being checked. In E-276 a finding was closed by scoping a docstring because the function "has no `season_id` in hand": true of the parameter list, **false of what is REACHABLE** (`games.season_id` is `NOT NULL` and the caller holds `game_id`). Everywhere else in that epic a false premise sat under a verdict that HELD, which is why re-reading kept confirming them; **here checking the premise FLIPS the verdict.** Note the detector, because it is a third act distinct from the other two: reproduction changed nothing (the mechanism was already granted) and re-reading had not caught it -- what moved it was **re-opening your own reasoning**. So before you write "not worth it", "not reachable", or "too invasive", verify the fact that sentence rests on; it is doing the whole work of the disposition and it will be read as settled.
 
 **Checklist delimiter contract**: The Bug Pattern Checklist (Priority 2) and the Security checklist (Priority 4) are each wrapped in an authoritative HTML-comment delimiter pair -- the `BUG-PATTERN-CHECKLIST` START/END pair and the `SECURITY-CHECKLIST` START/END pair (the literal markers appear at the checklist boundaries below, not here). These markers are the single source from which the Codex code-review prompt extracts these two checklists at prompt-assembly time (see `.claude/skills/codex-review/`); the content between the markers is what gets shared with the external reviewer. Contract: each token appears in this file **exactly once** (only as the real boundary marker -- do not reproduce the literal comment syntax anywhere else, or a literal extractor would match the wrong line), each pair has exactly one START and one END in that order, and the `SECURITY-CHECKLIST` pair spans the WHOLE of Priority 4 (START immediately before the "Priority 4: Security Review" heading, END immediately after the "Security Checklist Summary" block and before Priority 5). Edit the checklist content freely; never rename, remove, reorder, or duplicate the markers.
@@ -133,7 +155,7 @@ These checks target specific bug classes that have escaped prior reviews. Apply 
 
 **Function contract preservation**: When a function is rewritten or significantly modified, compare the new implementation against its docstring, type hints, and any documented behavioral guarantees. Specifically verify: (a) return type matches the type hint and docstring description, (b) all documented return value semantics are preserved (e.g., "returns empty dict when no data" must still hold), (c) documented side effects still occur (or are explicitly removed with docstring update), (d) documented error behavior is preserved (which exceptions are raised, when). If the docstring promises something the new code does not deliver, flag it -- either the code or the docstring must be updated, but silent divergence is a bug. *Catches: E-147 findings 10 (docstring promise dropped in rewrite), 11 (remediation broke function contract -- phantom teams from overly broad fix)*
 
-**Deploy-time safety**: For every new column reference in changed code -- in SQL queries (SELECT, INSERT, UPDATE, WHERE), ORM attribute access, or template renders (`{{ row.column_name }}`) -- verify the column exists in the current migration set. Build the schema baseline from the CUMULATIVE migration set -- every `migrations/*.sql` file present in the tree PLUS any migration added or edited in `git diff --cached main` (prior stories' staged migrations) and in the current unstaged diff. Self-load these per Step 2 item 8 (diff evidence obligates the load; do not wait for an assignment section to provide them). Specifically check: (a) every referenced column is defined in a CREATE TABLE or ALTER TABLE ADD COLUMN statement, (b) new migration file numbers are sequential with existing migrations (no gaps, no duplicates), (c) for new columns added via ALTER TABLE on existing tables, Python code handles NULL values (new columns default to NULL for existing rows unless a DEFAULT is specified in the migration). Flag any code that references a column not yet defined by any migration, or that assumes a non-null value for a new nullable column. *Catches: E-147 findings 9 (code references column before migration runs), 12 (CLI hard-depends on migration 004 without OperationalError guard), 13 (pre-migration test gap for CLI path)*
+**Deploy-time safety**: For every new column reference in changed code -- in SQL queries (SELECT, INSERT, UPDATE, WHERE), ORM attribute access, or template renders (`{{ row.column_name }}`) -- verify the column exists in the current migration set. Build the schema baseline from the CUMULATIVE migration set -- every `migrations/*.sql` file present in the frozen tree under review, which by construction already contains prior stories' migrations and this story's (the freeze stages everything before review). Self-load these per Step 2 item 8 (diff evidence obligates the load; do not wait for an assignment section to provide them). Specifically check: (a) every referenced column is defined in a CREATE TABLE or ALTER TABLE ADD COLUMN statement, (b) new migration file numbers are sequential with existing migrations (no gaps, no duplicates), (c) for new columns added via ALTER TABLE on existing tables, Python code handles NULL values (new columns default to NULL for existing rows unless a DEFAULT is specified in the migration). Flag any code that references a column not yet defined by any migration, or that assumes a non-null value for a new nullable column. *Catches: E-147 findings 9 (code references column before migration runs), 12 (CLI hard-depends on migration 004 without OperationalError guard), 13 (pre-migration test gap for CLI path)*
 
 **Migration scope + dry-run evidence (review-time DEMAND)**: WHEN a migration file appears in the diff, do NOT execute it yourself -- instead DEMAND that the implementer's completion report supplies (a) an explicit before/after scope assertion (which tables, columns, and rows the migration touches, and what it deliberately does NOT touch) and (b) evidence of a dry-run against a production-shaped copy of the database (row counts before/after, no unintended writes). Absent either, flag MUST FIX ("migration scope/dry-run evidence not provided"). This is a review-time obligation to demand evidence, never the reviewer running the migration.
 
@@ -281,6 +303,12 @@ Requirements:
 - The MUST FIX section is empty if and only if the verdict is APPROVED.
 - The verdict is always the last section.
 
+**Scope**: this schema governs your **`SendMessage` reports** -- what you send the main session. It does **not** govern documents you write to disk.
+
+**No length ceiling applies to your output, and the reason is a documented model failure mode rather than politeness.** Every other agent definition in this repo carries a 6,000-character report ceiling. **You are deliberately excluded.** You pin `claude-opus-5`, and the vendor documents that this model may follow a conservatism instruction literally and report *less* -- its stated remedy being to *"ask it to report everything and filter in a separate pass instead."* **A length ceiling is a conservatism instruction wearing different clothes.** Your report length is structurally driven by finding count, which makes you simultaneously the most tempting target for a cap and the role where truncation costs most: **a finding omitted to fit a budget is a defect shipped.** Report every finding you have; the main session's triage is the filtering pass.
+
+**And the exclusion is BLANKET rather than findings-only -- three reasons, each reaching the whole report and not just the findings in it.** *First*, capping the **prose** around your findings is machinery for a problem that was never measured: epic E-280's TN-19 found **no report-length regression at all**, so the ceiling other agents carry is a guardrail against future drift, and standing up a second, narrower instrument against inflation nobody observed is cost without a case. *Second*, any cap here lands on the one agent with a **documented literalism failure mode** -- instrumenting output is riskiest exactly where following an instruction too literally is the known hazard, and that risk does not politely confine itself to the sections a cap names. *Third*, a prose-only cap requires a boundary someone applies on every report. That boundary is **mechanically available** -- the three enumerated finding headings above make "everything outside them" checkable without judgment -- **so the objection is cost and standing risk, not impossibility**: a boundary cheap to state is not free to police, and it would need policing on every report forever.
+
 ## Circuit Breaker
 
 Maximum **2 review rounds** per story.
@@ -297,7 +325,7 @@ When reporting escalation, include:
 
 ## Worktree Review
 
-All implementing agents work in the **epic worktree** (`/tmp/.worktrees/baseball-crawl-E-NNN/`) during dispatch. Stories execute serially, and the staging boundary protocol isolates per-story changes.
+All implementing agents work in the **epic worktree** (`/tmp/.worktrees/baseball-crawl-E-NNN/`) during dispatch. Stories execute serially, and **each story is FROZEN into an addressable tree object before you review it** -- that frozen tree is what isolates per-story changes.
 
 ### Epic Worktree Path
 
@@ -305,17 +333,23 @@ The main session passes the epic worktree path in your spawn context. Use it for
 
 ### Reviewing Current-Story Changes
 
-The current story's changes are **unstaged** in the epic worktree. Prior stories' changes are staged. To review just the current story:
+**Your review surface is a FROZEN TREE, not working-directory state.** The main session freezes the story with `git add -A && git write-tree` when the implementer reports completion, and your assignment carries two tree SHAs: this story's frozen tree, and the previous story's (its review base). To review just the current story:
 
 ```bash
-cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff
+cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff <previous-tree-sha> <this-tree-sha>
 ```
 
-To see all accumulated changes (prior stories + current):
+For the epic's **first** story there is no previous frozen tree, so the base is `$(git merge-base epic/E-NNN main)`.
+
+To see all accumulated changes (the whole-epic view, used at closure -- **not** for a per-story verdict):
 
 ```bash
-cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff main
+cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff --cached $(git merge-base epic/E-NNN main)
 ```
+
+⚠️ **Never use bare `main` as a diff base in the epic worktree.** `HEAD` here is `epic/E-NNN` and `main` moves while the epic runs, so a bare-`main` diff folds main's own post-branch commits into what reads as the epic's work -- in E-278 that produced an 85-line phantom finding against a file no story touched.
+
+**Your verdict is issued ONCE against the frozen tree you were given, and is not re-askable.** If the tree moves under you, that is the main session's problem to re-freeze, not yours to chase: report it. A remediation produces a *new* frozen tree with a new SHA, and reviewing that is your first verdict on a different artifact -- not a second verdict on the same one.
 
 ### File Paths in Review Assignments
 

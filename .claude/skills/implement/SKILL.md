@@ -1,3 +1,8 @@
+---
+name: implement
+description: This skill should be used when the user says "implement E-NNN", "implement epic E-NNN", "start epic E-NNN", "start E-NNN", "execute E-NNN", "execute epic E-NNN", "dispatch E-NNN", "dispatch epic E-NNN", "run epic E-NNN", "kick off E-NNN", or the single-story forms "dispatch story E-NNN-SS", "implement story E-NNN-SS", "execute story E-NNN-SS" -- or otherwise implies dispatching an epic's stories for implementation. The user may append the modifier "and review" to any trigger to add the optional Codex pass (a variant naming Codex explicitly is accepted too). Covers team composition, serial story dispatch, the freeze/review/verdict loop, and the closure sequence.
+---
+
 # Skill: implement
 
 **Category**: Workflow Automation
@@ -5,19 +10,11 @@
 
 ---
 
-## Activation Triggers
+## Modifiers and Handoff
 
-Load this skill when the user says any of:
+The trigger phrases live in this skill's `description` frontmatter, which is the single source. Two operational consequences are carried here because they set state the workflow reads later:
 
-- "implement E-NNN", "implement epic E-NNN"
-- "start epic E-NNN", "start E-NNN"
-- "execute E-NNN", "execute epic E-NNN"
-- "dispatch E-NNN", "dispatch epic E-NNN"
-- "run epic E-NNN", "kick off E-NNN"
-- "dispatch story E-NNN-SS", "implement story E-NNN-SS", "execute story E-NNN-SS"
-- Any request that implies dispatching an epic's stories (or a single story) for implementation
-
-**Chaining modifier**: The user may append "and review" or "and codex review" to any trigger phrase (e.g., "implement E-NNN and review", "start E-NNN and codex review"). This adds the optional Codex review pass (Phase 4) after implementation completes. Note: the code-reviewer's Closure CR Integration Review (Phase 5 Step 1c) is **unconditional** and runs on every dispatch regardless of this modifier -- the modifier only gates the Codex pass. See Phase 4 and Phase 5 Step 1c.
+**Chaining modifier**: appending "and review" or "and codex review" to any trigger (e.g., "implement E-NNN and review") adds the optional Codex review pass (Phase 4) after implementation completes. Note: the code-reviewer's Closure CR Integration Review (Phase 5 Step 1c) is **unconditional** and runs on every dispatch regardless of this modifier -- the modifier only gates the Codex pass. See Phase 4 and Phase 5 Step 1c.
 
 **Plan skill handoff**: This skill may also be loaded by the plan skill's Phase 5 when the user used a compound trigger ("plan and dispatch"). In this case, `handoff_from_plan = true` and a planning team is already active. The implement skill reuses the existing team rather than creating a fresh one. See Phase 1 and Phase 2 for handoff-specific paths.
 
@@ -145,8 +142,6 @@ against those files before acting, and where they disagree, THE FILE WINS and my
 brief is wrong. Tell me when you find a conflict.
 ```
 
-Those last two paragraphs are not boilerplate to trim: **8 of 10 spawns in one audited session finished and went idle without delivering**, and E-276's planning shipped 9 relay defects, every one caught (when it was caught at all) by a receiver checking the brief against the artifact. See `.claude/rules/dispatch-pattern.md`, "Briefs, Channels, and Context".
-
 **Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. Code-reviewer spawn context:
 
 ```
@@ -154,8 +149,9 @@ You are the code-reviewer subagent. Wait for review assignments from the main se
 
 Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use it when reading files and running git diff.
-Review the current story's changes via `cd [epic-worktree-path] && git diff` (unstaged changes = current story).
-Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached $(git merge-base epic/E-NNN main)` (staged = prior stories).
+The review surface is a FROZEN TREE, not working-directory state. Each review assignment carries a tree SHA.
+Review the current story's changes via `cd [epic-worktree-path] && git diff <previous-tree-sha> <this-tree-sha>` -- the diff between two frozen trees. Both SHAs are in your assignment. For the epic's first story the base is `$(git merge-base epic/E-NNN main)`.
+Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached $(git merge-base epic/E-NNN main)` -- the whole-epic view, used at closure, not for a per-story verdict.
 The base is the merge base, NEVER bare `main`: `main` moves while the epic runs, and in this worktree `HEAD` is `epic/E-NNN`, so a bare-`main` diff mixes main's own post-branch commits into what reads as the epic's changes.
 Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree.
 ```
@@ -238,7 +234,11 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 **Pytest limitation**: a pytest run from the worktree exercises the *worktree's* own uncommitted `src/` (not the merged tree the epic closes against) -- `tests/__init__.py` puts the repo root on `sys.path[0]`, ahead of the editable-install finder. Run tests for verification, but understand a green worktree run is not evidence about the merged closure tree. Report results in your completion message.
 
-**Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached $(git merge-base epic/E-NNN main)` = prior stories' staged changes -- use the merge base, never bare `main`, which would fold main's own post-branch commits into the view. Edit files via Write/Edit tools with absolute worktree paths.
+**Permitted**: `git status/diff/log` from worktree. `git diff` = your own not-yet-frozen edits. `git diff --cached $(git merge-base epic/E-NNN main)` = everything frozen so far, this story included once it is frozen -- use the merge base, never bare `main`, which would fold main's own post-branch commits into the view. Edit files via Write/Edit tools with absolute worktree paths.
+
+**Your story is FROZEN when you report completion.** The main session runs `git add -A && git write-tree` on your report and reviews the resulting tree SHA. **Do not write to the worktree after reporting completion unless you are asked to remediate** -- a write during review is detected, voids the verdict in flight, and forces a re-freeze.
+
+⚠️ **If you discover a defect in your own work after reporting -- including one you are certain about and could fix in one edit -- REPORT IT AND STOP. Do not fix it.** Send it to the main session and let it decide whether to re-freeze now or fold it into a remediation round. This is a real path, not a formality: fixing it yourself voids whatever verdict is in flight, and on a large diff the reviewer's only correct response to a surface that moved under it is to discard a completed review. Reporting costs one message; fixing costs the review. **Doing the right thing for the work and the wrong thing for the protocol is the failure this clause exists to prevent** -- without it, the conscientious implementer is the one who keeps voiding verdicts.
 
 **Expert recommendations are provisional until you trace scope.** When a story, spec, Technical Notes section, or relayed expert consultation names a specific file, function, signature, or schema change, treat that recommendation as a starting point -- not the final answer. Before committing the change, grep `src/`, `scripts/`, `tests/`, and `templates/` for all construction sites, callers, and consumers of the named entity, and verify the recommendation still holds across the actual surface area. Schema and structural recommendations made from a quick read often miss sites the expert did not see; the implementer is the one who finds them.
 
@@ -255,11 +255,131 @@ When the implementer reports completion (with `## Files Changed`):
 
 **Post-story path verification**: Check every file path in the implementer's `## Files Changed` section. Every path MUST start with the epic worktree pattern (`/tmp/.worktrees/baseball-crawl-E-NNN/`). If any path starts with `/workspaces/baseball-crawl/` (main checkout) or any other unexpected prefix, STOP and escalate to the user before proceeding. This catches agents that accidentally worked in the wrong directory.
 
-**AC×surface enumeration**: When verifying a *conditional* AC -- one that applies "only when X" / "for Y" / a vocabulary mapping -- PM (and the code-reviewer, for code stories) applies the same per-surface enumeration: verify the AC holds at every render/call/error path, not just the first happy path. This is the AC-verification-side companion to the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
+#### Freeze the review surface FIRST
 
-1. **Check context-layer-only skip condition.** If the story modifies ONLY context-layer files (`.claude/agents/`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/`, `CLAUDE.md`) and no Python code, route to PM for AC verification and status update. The code-reviewer is skipped for context-layer-only stories -- PM verifies ACs alone. After PM confirms ACs pass, proceed to the staging boundary (Step 5a). If PM rejects ACs, route feedback to the implementer for revision.
+**The review surface is a frozen, addressable tree object -- never working-directory state.** Before any review or AC verification begins, the main session freezes the story:
 
-2. **Route code stories to the code-reviewer AND PM.** For stories that touch Python code or any non-context-layer files, send the work to both in parallel. Code-reviewer template:
+```
+cd <epic-worktree-path> && git add -A && git write-tree
+```
+
+`git write-tree` prints a **tree SHA**. Record it as this story's frozen state and put it in every review and AC-verification assignment **together with the previous story's frozen tree SHA** -- the pair is the review surface.
+
+**The per-story review surface is the diff BETWEEN THE TWO FROZEN TREES:**
+
+```
+cd <epic-worktree-path> && git diff <previous-tree-sha> <this-tree-sha>
+```
+
+For the epic's **first** story there is no previous frozen tree, so the base is `$(git merge-base epic/E-NNN main)`.
+
+⚠️ **Do NOT use the merge base as the review base for any later story.** The freeze stages everything, so a merge-base diff contains **every story frozen so far** -- handing the reviewer stories it has already verdicted, which is exactly the re-verdict this step exists to prevent. The cumulative merge-base diff is still the correct surface for the Phase 5 Step 1c closure integration review, which is a whole-epic pass by design; it is the wrong surface for a per-story verdict. **Retain each story's tree SHA when it passes -- it is the next story's review base.**
+
+**Why freeze before reviewing rather than stage after.** A reviewer reading unstaged working-directory state is reading a tree the implementer can still write. In E-267 story 03 two *accurate* reads eighteen seconds apart disagreed because the file was oscillating under a concurrent writer mid-review; the reviewer diagnosed a transport garble that had never happened. A frozen tree removes that failure mode instead of adding a rule against it, and it gives every verdict an address.
+
+#### THE FROZEN-STATE CHECK
+
+**Defined once, here. Every other site that needs it references it by this name rather than restating the commands** -- three independently-worded copies of this check drifted from each other, and from this story's own Technical Approach, inside a single story. The freeze command itself stays inline wherever it is executed; it is the *verification* that must not be retyped.
+
+**Run it at the moment any verdict is issued** -- per-story review verdict, PM AC verdict, and the Phase 5 Step 1c closure review verdict alike. Run **both** halves, **scoped to `<routed-paths>`**. They are blind in opposite directions and **neither is sufficient alone**:
+
+```
+# (1) worktree column, SCOPED -- must exit 0 AND print nothing
+cd <epic-worktree-path> && git diff --quiet -- <routed-paths> \
+  && git ls-files --others --exclude-standard -- <routed-paths>
+
+# (2) index vs frozen tree, SCOPED -- must exit 0
+cd <epic-worktree-path> && git diff --quiet --cached <frozen-tree-sha> -- <routed-paths>
+
+# (3) BOTH halves again with NO path filter -- for the outside-scope reading below.
+#     Both are required: an ADDED outside-scope write is invisible to (3a) and caught only by (3b).
+cd <epic-worktree-path> && git diff --quiet \
+  && git ls-files --others --exclude-standard                      # (3a) unfiltered worktree column
+cd <epic-worktree-path> && git diff --quiet --cached <frozen-tree-sha>   # (3b) unfiltered index vs frozen tree
+```
+
+⚠️ **`<routed-paths>` is *the paths this review was routed with*** -- the story's "Files to Create or Modify" list as sent in the assignment. **It is never an enumerated path list written into this file.** An enumeration rots the next time the repo gains a directory; the routed paths are already an input to every review assignment, so the scope travels with the review and cannot go stale.
+
+⚠️ **PATH-SET CONTROL -- run this BEFORE trusting any scoped reading, because a malformed pathspec reads CLEAN and says nothing:**
+
+```
+cd <epic-worktree-path> && git ls-files -- <routed-paths> | wc -l    # must equal the file count you expect
+```
+
+**A pathspec that matches nothing makes `git diff --quiet` exit 0** -- no error, no warning, a plausible answer. **Every scoped half then reads clean forever.** The commonest cause is shell word-splitting: `git ls-files -- $PATHS` passes the whole list as ONE argument in `zsh` (which does not word-split unquoted parameters), matching nothing. **Measured: `git ls-files -- $P` returned 0 where the same paths written out returned 3, with no error either way.** Write the paths out, or expand an array properly -- and confirm the count first regardless. **This is the positive-control rule one argument over: a control on the PATH SET, not on the pattern.**
+
+**The pair establishes ONE invariant: `working tree == index == frozen tree`.** Half (1) establishes `working tree == index`; half (2) establishes `index == frozen tree`. **Each half alone leaves one of those equalities unchecked** -- which is why no single command can be substituted for the pair, however well chosen.
+
+⚠️ **Half (1) is TWO commands and that is not optional -- `git diff` does not see untracked files at all.** A brand-new file that was never `git add`-ed leaves `git diff --quiet` exiting **0**, so `git ls-files --others --exclude-standard` is the only thing that catches it. **Reducing half (1) to a single command breaks the equality silently, for the write shape that looks least like a write.** The structure tells you there are two halves; it does not tell you how many commands each half takes, and that is exactly where an implementer reasoning from "two equalities, two checks" goes wrong. (`--exclude-standard` skips gitignored paths, so the invariant is over **version-controlled content** -- correct, since an ignored path can never enter the frozen tree.) Verified empirically in an isolated repo: an *unstaged* write is caught by (1) while (2) sees an unchanged index; an *added* write is caught by (2) while (1) reports the worktree clean again. Each shape is caught by exactly one half.
+
+**An observation that is red regardless of the condition carries no information about it.** The check must return its stated expected value in a **clean** worktree, or it is not an observation of anything -- see the prohibition immediately below, which is exactly that failure.
+
+⚠️ **Do NOT use `git status --porcelain` as this check.** Its **first column is the INDEX**, and the freeze is `git add -A` against a `HEAD` sitting at the merge base -- so every story frozen so far stays staged and the output is **never empty in a dispatch worktree** (measured: 8 lines with a clean worktree). Reading "empty" as "no write" discards every verdict forever and re-freezes to the identical tree -- **an unbounded loop with no terminating verdict**, which is exactly the failure the circuit breaker would then absorb on every story. If you want a single command, the worktree column is `git status --porcelain | grep -v '^[MARCD] '`.
+
+**This prohibition is scoped to the dispatch worktree's verdict check -- do not sweep the other `git status --porcelain` uses in this file.** Prerequisites item 3, the Step 7a preflight and the Step 11 reconciliation sweep all read the **main checkout**, where `HEAD` is a real commit and a clean tree genuinely gives empty output. **The discriminator is the same one the `main`-as-diff-base rule uses: which tree you are standing in.**
+
+**Why both, measured in both directions rather than reasoned:**
+
+| Write | Index | Check (1) worktree | Check (2) index vs frozen tree |
+|---|---|---|---|
+| **unadded** (edited, not `git add`ed) | untouched | **DETECTS** | **BLIND** -- the index is unchanged, so it exits 0 even with files modified in the worktree (measured) |
+| **added** (edited and `git add`ed) | moves | **BLIND** -- worktree column goes clean again | **DETECTS** -- the index now differs from the frozen tree |
+
+**Movement INSIDE `<routed-paths>` VOIDS the verdict in flight** -- it was issued against a state that no longer exists: **discard it, re-freeze (`git add -A && git write-tree`, yielding a new tree SHA), and re-issue against the new frozen state.** That is not a re-ask -- it is a first verdict on a different tree.
+
+**Movement OUTSIDE `<routed-paths>` does NOT void the verdict -- and it MUST still be reported.** Compare the scoped readings against the unfiltered ones (3a **and** 3b): any difference is movement outside the reviewed surface. **Run both unfiltered halves, for the same reason the scoped pair needs both** -- an outside-scope write that was `git add`-ed leaves the unfiltered worktree column clean and shows only in the unfiltered index comparison. Measured across all four outside-scope shapes, **two of the four (added, untracked-then-added) are caught by 3b alone**; a reader who runs only 3a is blind to exactly the case this reading exists for. It is one of exactly two things, and the whole value is in distinguishing them:
+
+- **PM performing its role** -- status flips and AC rulings land in `epics/`, outside every reviewed surface. **Expected; no action.**
+- **An implementer writing outside its Files list** -- **a finding**, and one nothing else in this procedure catches.
+
+**Never silently discard the unfiltered reading, and never collapse the two cases into one.** Reporting the first costs a sentence; swallowing the second loses the only signal that an implementer wrote where it should not have.
+
+⚠️ **Key on WHAT MOVED, never on WHO MOVED IT.** Authorship is not recoverable from a tree, so an actor-based exception -- *"PM's writes do not count"* -- is unverifiable by construction. Scope is a property of paths; authorship is not.
+
+**Why scoping rather than loosening, since loosening is the obvious fix and is wrong.** The unscoped check fires on **correct PM behavior**: across E-280's dispatch, **100% of half-(1) failures were PM's `epics/` writes with zero lines under the reviewed subtree.** Relaxing the check would trade away a real true positive -- the unfiltered reading is what catches an implementer writing outside its Files list. **The check was correct and its DOMAIN was wrong**, which is why the repair is scope plus a report rather than relaxation. An instrument whose every failure is a false positive is measuring the wrong scope, not the wrong thing.
+
+**If an implementer REPORTS a post-completion defect rather than fixing it** (see the spawn context), that is the designed path, not a problem: decide whether to re-freeze and re-verdict now or to fold it into a remediation round. The implementer must not act on it unilaterally.
+
+#### Determine the review tier (mechanical, from the Files list alone)
+
+Tier is computed by **matching the story's file paths**, never by judging the change. A story's tier is derivable from its "Files to Create or Modify" list alone: **no property of the change itself enters the computation -- only the paths it touches.** Two people with the same Files list must reach the same tier without discussing the work.
+
+| Tier | Path classes |
+|---|---|
+| **A** | `src/`, `tests/`, `migrations/`, `scripts/`, `.claude/hooks/`, `.githooks/`, `Dockerfile`, `docker-compose*.yml`, `requirements*.in`, `requirements*.txt`, `pyproject.toml`, `.python-version`, `.devcontainer/` |
+| **B** | `docs/` |
+| **C** | `.claude/**` except `.claude/hooks/`, `CLAUDE.md`, `epics/**`, `.project/**` |
+
+Tier A's rationale is uniform: **these execute, or they change what executes.**
+
+⚠️ **This table assigns tiers to PATHS and states no review depth.** What a tier *means* -- which rubric priorities apply, and how deep the pass goes -- is defined in **`.claude/agents/code-reviewer.md`, "Review depth by tier"**, and nowhere else. **Do not restate rubric content here.** Two places defining one classification is the restatement defect, and the seam's copy is the one that silently goes stale when the rubric is renumbered: this table previously named specific priority numbers, and they were wrong within the same epic that wrote them.
+
+Four rules govern the table:
+
+- **Default: any path matching no class above is tier A.** This is what makes the table total rather than an enumeration of today's repo, and it fails safe -- an unclassified path is one nobody has reasoned about, so it gets the deepest review, not the shallowest.
+- **Precedence:** `.claude/hooks/` is tier A and **overrides** the tier-C `.claude/**` entry. It is the only overlap in the table.
+- **Span: a story takes the HIGHEST tier present among its paths.**
+- **Escalation is one-way.** The code-reviewer MAY escalate a story to a deeper tier and **MUST state that it did, and why**. It may **NOT** de-escalate, and it may not escalate silently.
+
+**Worked example (spanning two tiers).** E-279-04 listed `scripts/check_archive_refs.sh` (A), `.githooks/pre-commit` (A), `src/reports/llm_analysis.py` (A), `tests/test_archive_refs_gate.py` (A), and `.claude/skills/implement/SKILL.md` (C). Highest present is **A**, so the story takes tier A.
+
+#### The three verdicts -- exactly one of each, per frozen state
+
+| Verdict artifact | Issued by | When |
+|---|---|---|
+| Completion report | the implementer | always |
+| **Review verdict** | **code-reviewer** | tiers A and B. Tier C gets no *per-story* review verdict; its content still reaches the reviewer at the unconditional Phase 5 Step 1c closure review |
+| **AC verdict** | **product-manager** | always, every tier |
+
+**Each verdict is issued once against a given frozen tree and is not re-askable.** Both PM and the code-reviewer must approve before the staging boundary advances -- **dual approval stands.** What is retired is asking either of them again about a tree they have already ruled on. **No two verdicts from the same agent may cite the same tree SHA.** If you are about to ask an agent to re-confirm, re-check or re-verify something it has already ruled on for this tree, the answer already exists: read it.
+
+**PM is authoritative on ACs; the code-reviewer is authoritative on code quality.** That division is unchanged by the one-of-each bound, and it is stated identically everywhere this file assigns verdict authority.
+
+**AC×surface enumeration -- owned by PM.** When verifying a *conditional* AC -- one that applies "only when X" / "for Y" / a vocabulary mapping -- **PM** applies a per-surface enumeration: verify the AC holds at every render/call/error path, not just the first happy path. On tier A and B stories the code-reviewer applies the same enumeration inside its own rubric pass. This is the AC-verification-side companion to the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
+
+1. **Apply the tier.** Compute the story's tier from its file paths using the table above, then route on it. **Tier C stories skip the code-reviewer FOR THE PER-STORY VERDICT** -- route the frozen tree to PM for the AC verdict and status update, and PM's AC verdict stands alone at this stage. **Tier C content is not unreviewed: it reaches the code-reviewer at the unconditional Phase 5 Step 1c closure review**, which for a context-layer epic is the only code review that happens at all. After PM confirms ACs pass, proceed to the staging boundary (Step 5a). If PM rejects ACs, route feedback to the implementer for remediation (Step 5 item 5). **This step decides WHETHER a per-story reviewer pass happens; it does not state how deep that pass goes -- see `code-reviewer.md`.**
+
+2. **Route tier A and tier B stories to the code-reviewer AND PM.** Send the frozen tree to both in parallel; each issues its own single verdict against it. Code-reviewer template:
 
 ```
 Review story E-NNN-SS: [Title]
@@ -267,7 +387,10 @@ Story file: [epic-worktree-path]/epics/E-NNN-slug/E-NNN-SS.md
 [Full story file text]
 Epic Technical Notes: [Full Technical Notes]
 Epic worktree path: [epic-worktree-path]
-Review via `cd [epic-worktree-path] && git diff` (unstaged = this story). Do NOT run pytest for this per-story worktree review -- verify through file inspection (a worktree pytest run exercises the worktree's own uncommitted `src/`, not the merged tree, so a green per-story run is not authoritative about the closure state). The one place you run `python -m pytest tests/` is the Phase 5 Step 1b closure gate, against the main checkout.
+Frozen tree SHA for this story: [tree-sha]
+Previous story's frozen tree SHA (the review base): [previous-tree-sha, or `$(git merge-base epic/E-NNN main)` for the epic's first story]
+Review tier: [A or B] (from the tier table -- escalation is one-way and must be stated; de-escalation is not permitted).
+Review via `cd [epic-worktree-path] && git diff [previous-tree-sha] [tree-sha]` -- this story's changes ONLY. Do not review against the merge base: the freeze stages everything, so a merge-base diff would include stories already verdicted. This tree is frozen: it will not change under you, and your verdict is issued once against it. Do NOT run pytest for this per-story worktree review -- verify through file inspection (a worktree pytest run exercises the worktree's own uncommitted `src/`, not the merged tree, so a green per-story run is not authoritative about the closure state). The one place you run `python -m pytest tests/` is the Phase 5 Step 1b closure gate, against the main checkout.
 Implementer files changed: [Files Changed section]
 Implementer test results: [Test Results section]
 [If applicable] ## API Endpoints Touched
@@ -276,7 +399,7 @@ Implementer test results: [Test Results section]
 [List of migrations/*.sql files -- include when Files Changed or Files to Create or Modify contains paths under src/api/, src/gamechanger/loaders/, src/db/, migrations/, or templates referencing database columns. Omit this section entirely when no database code is involved. See TN-4a heuristics.]
 [If applicable] ## Behavioral Changes
 [From implementer's completion report. List of functions whose signature, return type, or observable behavior changed. This supplements CR's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes the implementer may not have recognized. Omit this section when the implementer declared "None."]
-Review round: 1 of 2 (circuit breaker)
+Frozen state: 1 of at most 2 for this story (circuit breaker)
 Review against all ACs and the review rubric. Cross-reference Files Changed against "Files to Create or Modify" to flag missing/unexpected files.
 ```
 
@@ -292,15 +415,22 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
    The distinction between MUST FIX and SHOULD FIX is preserved in the code-reviewer's output (it signals severity), but the handling for all valid findings is the same: fix it. Every finding reaches a terminal state during the story: FIXED or DISMISSED. No deferral path exists.
 
-4. **If the reviewer returns APPROVED and PM verifies ACs pass** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all findings are invalid (dismissed) or there are none, proceed to the staging boundary (Step 5a), then route to PM to mark the story `DONE`. If any valid findings exist, route them to the implementer before the staging boundary. After the implementer fixes them, send the updated work back to the reviewer for re-review. The main session routes findings to implementers for resolution -- it NEVER creates, modifies, or deletes any file itself.
+4. **If the review verdict is APPROVED and PM's AC verdict passes** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all findings are invalid (dismissed) or there are none, proceed to the staging boundary (Step 5a), then route to PM to mark the story `DONE`. If any valid findings exist, they go to the implementer as a remediation round (item 5), which produces a **new frozen state**. The main session routes findings to implementers for resolution -- it NEVER creates, modifies, or deletes any file itself.
 
-   **If PM rejects ACs** (regardless of reviewer verdict): Route PM's AC feedback to the implementer alongside any valid code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. See Gate Interaction below.
+   **If PM's AC verdict rejects** (regardless of the review verdict): Route PM's AC feedback to the implementer alongside any valid code-review findings, as a single remediation round (item 5). See Gate Interaction below.
 
-   **PM-Reviewer AC Disagreement**: PM can override AC-related MUST FIX items (remove them from the valid findings list). Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override. If removing AC items empties the list, the story passes. PM fail always routes feedback to implementer regardless of reviewer verdict.
+   **PM-Reviewer AC Disagreement**: PM can override AC-related MUST FIX items (remove them from the valid findings list). Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override. If removing AC items empties the list, the story passes. A PM AC rejection always routes feedback to the implementer regardless of the review verdict.
 
-5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings to the implementer with "Round 1 of 2 -- items to fix below." The implementer fixes in the epic worktree and reports again. Send updated work to the reviewer for Round 2 using the same template as round 1, adding: updated Files Changed and Test Results (annotating which files are new or changed in the remediation vs. carried forward from Round 1, so CR can focus the remediation regression guard on the new/changed files), updated Behavioral Changes from the implementer's revised completion report, the same structured context sections (API Endpoints Touched, Migration Files) from Round 1, and "Review round: 2 of 2 (circuit breaker)" with instructions to focus on whether round 1 findings are resolved and whether fixes introduced new issues.
+5. **Remediation produces a NEW FROZEN STATE -- it never re-asks about the old one.** Route all valid findings to the implementer with "Frozen state 1 of at most 2 -- items to fix below." The implementer fixes in the epic worktree and reports again; the main session then **re-freezes** (`git add -A && git write-tree`, yielding a **new tree SHA**) and sends the new tree for its own single verdict, using the same template as the first, adding:
 
-6. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
+   - updated Files Changed and Test Results, **annotating which files are new-or-changed in this remediation versus carried forward from the previous frozen state**, so the reviewer can focus its remediation regression guard on the new/changed files;
+   - updated Behavioral Changes from the implementer's revised completion report;
+   - the same structured context sections (API Endpoints Touched, Migration Files) carried from the previous frozen state;
+   - "Frozen state: 2 of at most 2 (circuit breaker)", with instructions to focus on whether the previous state's findings are resolved and whether the fixes introduced new issues.
+
+   **This is a first verdict on a different artifact, not a second verdict on the same one** -- the tree SHA differs, which is exactly what distinguishes legitimate re-entry from the re-ask this step retires. A verdict is never issued twice against the same tree SHA by the same agent.
+
+6. **Circuit breaker.** **Max 2 frozen states per story.** If the second frozen state still has MUST FIX findings, escalate to the user with the findings summary and present options:
    - (a) Fix it themselves
    - (b) Tell the implementer to try again (resets the circuit breaker)
    - (c) Override the reviewer and proceed to staging boundary + PM closure (explicit user override)
@@ -309,18 +439,21 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
 ### Gate Interaction
 
-When PM rejects ACs, route PM's feedback to the implementer alongside any code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. If the circuit breaker fires, escalate to the user regardless of PM AC status.
+When PM's AC verdict rejects, route PM's feedback to the implementer alongside any code-review findings, as one remediation round. The implementer's revision produces a **new frozen state**, and PM and the code-reviewer each issue **one verdict against that new tree** -- not a re-evaluation of the old one. If the circuit breaker fires, escalate to the user regardless of PM AC status.
 
 ### Step 5a: Staging boundary
 
-After both the code-reviewer approves and PM verifies ACs pass for a story (or PM alone approves for context-layer-only stories), the main session runs the staging boundary protocol:
+After both the code-reviewer's review verdict and PM's AC verdict approve a story (or PM's AC verdict alone, for tier C stories), the main session advances the staging boundary:
 
-1. **Stage the story's changes**: `cd <epic-worktree-path> && git add -A`
-2. This story's changes are now staged. The next story starts with a clean unstaged diff.
+1. **The story's changes are ALREADY STAGED** -- the freeze at the top of Step 5 ran `git add -A`, and each remediation re-froze. The approved tree SHA *is* the staging boundary; there is nothing further to stage.
+2. **Run THE FROZEN-STATE CHECK** (defined once under Step 5, "Freeze the review surface FIRST") -- **both halves, scoped to `<routed-paths>`**: `git diff --quiet -- <routed-paths>` **and** `git ls-files --others --exclude-standard -- <routed-paths>` (half 1), **and** `git diff --quiet --cached <frozen-tree-sha> -- <routed-paths>` (half 2). Naming only one half here would privilege the very half the check warns you not to run alone: the index comparison **passes on a dirty worktree**, because an un-`git add`-ed write leaves the index identical, so the boundary would advance and PM would mark the story DONE with unreviewed content sitting outside every verdicted tree. **If either half fails inside `<routed-paths>`, do NOT advance**: re-freeze and re-verdict. **Movement outside `<routed-paths>` does not block the boundary but must be reported**, per the same section.
 3. Route to PM to mark the story `DONE`.
+4. **Carry the approved tree SHA forward -- it is the NEXT story's review base.** Record it alongside the story's DONE status. The next story's per-story review surface is `git diff <this-approved-tree-sha> <next-story-tree-sha>`; **without it the next review has no base short of the merge base, which would hand the reviewer this story again** -- the re-verdict the freeze exists to prevent. (Stated here, at the point of action, as well as at the freeze block above, which is the point of explanation.)
 
-The staging boundary is the inter-story isolation mechanism. After staging:
-- `git diff` (unstaged) shows only the next story's changes
+**This is the ordering change the freeze introduces**: staging now happens when the implementer reports, not after review. The boundary still isolates stories, but it is established *before* the reviewer reads rather than after it approves -- which is what makes the reviewed surface addressable and immutable.
+
+After the boundary advances:
+- `git diff` (the implementer's own not-yet-frozen edits) is empty until the next story starts writing
 - `git diff --cached $(git merge-base epic/E-NNN main)` shows the cumulative view (all completed stories). The merge base, not bare `main` -- see Step 8 sub-step 3 for why.
 
 ### Step 6: Cascade
@@ -414,7 +547,7 @@ Fix and report with ## Files Changed (absolute paths) and ## Test Results.
 
 ### Step 1: Validate all work
 
-Confirm all stories are DONE. Per-story AC verification was performed by PM during Phase 3 (for all stories), and code quality was verified by the code-reviewer (for code stories). This step confirms completion status -- it is not a re-review.
+Confirm all stories are DONE. PM issued the AC verdict for every story during Phase 3, and the code-reviewer issued the review verdict for every tier A and tier B story. This step confirms completion status -- it is **not** a re-review, and it does not re-ask either agent about a tree it has already ruled on.
 
 ### Step 1a: Invariant audit (conditional)
 
@@ -434,7 +567,7 @@ This is the **last pre-merge review** and runs on **every** dispatch path -- unl
 
 **Why unconditional, and why after Codex**: a plain "implement E-NNN" -- the documented default -- previously closed with NO combined-diff reviewer at all, because both the integration review and Codex were gated on "and review". Making this pass unconditional closes that gap. And because Codex (Phase 4) runs first, the code-reviewer adjudicates Codex's finding list plus the post-remediation diff in one pass, instead of approving the epic and then reversing itself when Codex surfaces issues (E-239 / E-251 / E-253).
 
-**Context-layer epics**: context-layer-only stories skip per-story CR by design (Phase 3 Step 5 item 1), so this unconditional closure pass is where a context-layer epic gets its combined-diff review. The doc-sweep rule (`.claude/rules/doc-sweep.md`) auto-loads for the code-reviewer whenever the diff touches matching doc/context-layer files (via CR's Step-2 rule-glob mechanism), requiring a semantic read plus synonym expansion rather than a token-grep-only sweep.
+**Context-layer epics**: tier C stories skip per-story CR by design (Phase 3 Step 5 item 1), and context-layer files are tier C, so this unconditional closure pass is where a context-layer epic gets its combined-diff review. The doc-sweep rule (`.claude/rules/doc-sweep.md`) auto-loads for the code-reviewer whenever the diff touches matching doc/context-layer files (via CR's Step-2 rule-glob mechanism), requiring a semantic read plus synonym expansion rather than a token-grep-only sweep.
 
 **Surface-removal epics**: when the epic DELETES a route, surface, or widely-used symbol, this review MUST repo-wide grep each removed route/symbol across ALL tests (not just story-touched files) — removed surfaces commonly leave generic usages in untouched test files (e.g. a deleted route used as an authenticated-200 probe) that per-story review cannot see, and that otherwise surface only at the full-suite-green gate.
 
@@ -456,7 +589,7 @@ Assemble a story manifest from the epic's Stories table: list each story ID, tit
 
 #### Route to code-reviewer
 
-Send the integration review assignment to the code-reviewer via `SendMessage` with: the epic worktree path, story manifest (IDs, titles, one-line summaries), full Technical Notes, Goals and Success Criteria, and the full epic diff. Include "Review round: 1 of 2 (circuit breaker)" and instructions to focus on cross-story interactions, naming consistency, import conflicts, and architectural issues. PM applies the same AC×surface enumeration described in the AC verification note (Phase 3 Step 5); see the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
+Send the integration review assignment to the code-reviewer via `SendMessage` with: the epic worktree path, story manifest (IDs, titles, one-line summaries), full Technical Notes, Goals and Success Criteria, and the full epic diff. Include "Frozen state: 1 of at most 2 (circuit breaker)" and instructions to focus on cross-story interactions, naming consistency, import conflicts, and architectural issues. PM applies the same AC×surface enumeration described in the AC verification note (Phase 3 Step 5); see the AC×surface matrix in `.claude/agents/code-reviewer.md` (Priority 1).
 
 **Large epic handling**: If the diff exceeds ~3,000 lines, replace inline diff with a per-story file summary (file paths, modified/new status, +/- line counts). Generate from cross-referencing each story's `## Files Changed` with `git diff --stat $(git merge-base epic/E-NNN main)` (merge base, not bare `main`). The reviewer can request specific file contents from the main session.
 
@@ -464,7 +597,7 @@ Send the integration review assignment to the code-reviewer via `SendMessage` wi
 
 Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings via the **Remediation Spawn Context** (defined at the start of Phase 5).
 
-PM records dispositions. If NOT APPROVED, send Round 2 to the code-reviewer with round 1 findings and the updated diff. Max 2 rounds -- if round 2 still has MUST FIX, escalate to the user: (a) fix, (b) retry (resets breaker), (c) override to Step 1b, (d) abandon.
+PM records dispositions. If NOT APPROVED, remediate, then **re-freeze the epic worktree (`git add -A && git write-tree`) and send the new tree SHA** to the code-reviewer with the previous state's findings -- one verdict per frozen state, never a second verdict on a tree already ruled on. Max 2 frozen states -- if the second still has MUST FIX, escalate to the user: (a) fix, (b) retry (resets breaker), (c) override to Step 1b, (d) abandon.
 
 After the Closure CR Integration Review completes (clean, remediated, or user override), proceed to Step 1b.
 
@@ -560,7 +693,7 @@ Route to PM, who performs:
 | **Total** | **N** | **N** | **N** |
 ```
 
-Only include rows for review passes that actually ran. Per-story CR rows show aggregated finding totals across all review rounds for that story (e.g., if round 1 had 3 MUST FIX and round 2 had 1, the row shows 4 findings total). The Closure CR Integration Review row shows findings from Phase 5 Step 1c (it is unconditional, so this row always appears); the Codex row shows findings from Phase 4. If the "and review" modifier was not specified, omit the Codex row only -- the Closure CR Integration Review still ran. Reconstruct finding counts from triage summaries recorded during each story's review loop and the closure review passes.
+Only include rows for review passes that actually ran. Per-story CR rows show aggregated finding totals across all frozen states for that story (e.g., if the first frozen state had 3 MUST FIX and the second had 1, the row shows 4 findings total). The Closure CR Integration Review row shows findings from Phase 5 Step 1c (it is unconditional, so this row always appears); the Codex row shows findings from Phase 4. If the "and review" modifier was not specified, omit the Codex row only -- the Closure CR Integration Review still ran. Reconstruct finding counts from triage summaries recorded during each story's review loop and the closure review passes.
 
 - Record any notable implementation details, decisions, or deviations in the epic's Technical Notes or History. Keep sensitive information out of epic files.
 
@@ -570,7 +703,7 @@ Per `.claude/rules/documentation.md`. If any trigger fires, spawn docs-writer be
 
 ### Step 3a: Context-layer assessment
 
-Per `.claude/rules/context-layer-assessment.md`. Eight triggers, explicit yes/no verdicts in epic History. If any fires, spawn claude-architect before archiving. claude-architect's codification -- including updates to its OWN `.claude/agent-memory/` files -- is authored in the **worktree copy** (the dispatch-active hook denies main-checkout Write/Edit with no agent-memory exception), so it rides the closure patch.
+Per `.claude/rules/context-layer-assessment.md`. Every trigger in that file's numbered list gets an explicit yes/no verdict in epic History. If any fires, spawn claude-architect before archiving. claude-architect's codification -- including updates to its OWN `.claude/agent-memory/` files -- is authored in the **worktree copy** (the dispatch-active hook denies main-checkout Write/Edit with no agent-memory exception), so it rides the closure patch.
 
 ### Step 4: Review ideas backlog
 
@@ -787,9 +920,12 @@ Phase 3: Serial coordination loop (one story at a time)
   Pick next eligible -> route to agent -> PM marks IN_PROGRESS -> assign with context block
   -> implementer works in epic worktree -> reports ## Files Changed
   -> post-story path verification (must match epic worktree pattern)
-  -> context-layer-only? PM verifies ACs alone : code-reviewer + PM in parallel
-  -> triage findings (valid=fix, invalid=dismiss) -> 2-round circuit breaker
-  -> staging boundary: `git add -A` -> PM marks DONE -> cascade to next story
+  -> FREEZE the review surface: `git add -A && git write-tree` -> tree SHA
+  -> compute tier from file paths (A/B/C; unmatched => A; highest present wins)
+  -> tier C? PM's AC verdict alone per-story (CR sees it at Step 1c) : CR review verdict + PM AC verdict in parallel
+  -> one verdict of each kind per frozen state, never re-asked
+  -> triage findings (valid=fix, invalid=dismiss) -> remediation re-freezes -> max 2 frozen states
+  -> staging boundary: already staged by the freeze; confirm the tree SHA -> PM marks DONE -> cascade
   |
   v
 Phase 4 (if "and review"): Codex code review only (headless -> prompt fallback)

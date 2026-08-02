@@ -35,7 +35,7 @@ The marker is there; it is simply not alone on the line. **The gate does not fir
 ## Dependencies & Blockers
 - [ ] **Owner is claude-architect** — `.claude/hooks/**` is context-layer machinery.
 - [ ] **Sequence after any E-271 hook work** if the two would touch the same file, to avoid a needless collision.
-- [ ] ⚠️ **Ratchet-aware.** At filing, the context-layer ratchet is FAILING and its disposition is an open operator decision. A fix here should be **line-neutral or negative** — a regex loosening, not a new block — or it inherits that question.
+- [ ] ⚰ **RETIRED 2026-08-02 — this blocker is DISSOLVED, not discharged.** ~~**Ratchet-aware.** At filing, the context-layer ratchet is FAILING and its disposition is an open operator decision. A fix here should be **line-neutral or negative** — a regex loosening, not a new block — or it inherits that question.~~ **The operator retired the context-layer size GATE outright at E-280** (*"I don't think gating and ratchets are working. I think we just need periodic refinement."*). There is no baseline to clear, nothing to offset and no exception to sign, so **a fix here inherits no size question at any magnitude** and is not constrained to be line-neutral. `context-ratchet.sh` survives as an on-demand diagnostic only. **Struck rather than deleted** because the constraint was a real input to this idea's shape and a later reader meeting the ghost would re-impose it; the regex loosening is still probably the right fix, but now **on its own merits and not because it is small.**
 
 ## Open Questions
 

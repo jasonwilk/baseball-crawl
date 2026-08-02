@@ -1,6 +1,6 @@
 ---
 name: operator-followups
-description: Open operator-owned obligations carried across epic closures — context-ratchet baseline drift, prod backup, feature-flag decision, doc sweeps
+description: Open operator-owned obligations carried across epic closures — prod backup, feature-flag decision, doc sweeps. (§3 context-ratchet baseline drift is DISSOLVED — E-280 retired the size gate outright; do not act on it.)
 metadata:
   type: project
 ---
@@ -17,7 +17,15 @@ Migration 011 (E-259, dropped the stored `player_season_*` tables) applies to pr
 ## 2. `FEATURE_PREDICTED_STARTER` promote-to-default decision
 Unrecorded. Audit residual #12.
 
-## 3. ~~CONTEXT-RATCHET BASELINE IS STALE AND COMPOUNDING — four deferrals~~ ✅ **RESOLVED 2026-07-27 — DO NOT ACT ON THIS SECTION**
+## 3. ~~CONTEXT-RATCHET BASELINE IS STALE AND COMPOUNDING — four deferrals~~ ✅ **RESOLVED 2026-07-27, then DISSOLVED ENTIRELY 2026-08-02 — DO NOT ACT ON THIS SECTION**
+
+⚰ **SUPERSEDING EVENT (E-280, 2026-08-02): THE OPERATOR RETIRED THE CONTEXT-LAYER SIZE GATE OUTRIGHT** — *"I don't think gating and ratchets are working. I think we just need periodic refinement."* **There is no gate, no baseline to keep fresh, no offset, no exception and no re-snapshot.** `context-ratchet.sh` survives as an **on-demand diagnostic** feeding a **periodic context-layer refinement pass, scheduled once per FIVE epic closures**; only the operator runs `--update-baseline`. **This whole section is now historical twice over — first discharged, then made moot.**
+
+**⛔ The one piece of forward guidance below is also RETIRED.** ~~*"What a future closure should do instead: run the ratchet, report the number against the CURRENT baseline, and split own-vs-inherited from measurement."*~~ **A closure now records the reading as a DIAGNOSTIC with its per-subtree causes, and NOTHING is split, offset or judged** — no per-subtree number can fail an epic. **⚠️ The instrument still prints `FAIL -- the context layer grew past baseline` against the frozen 2026-07-28 snapshot. That word is a fact about a stale baseline, not a verdict on any epic**, and a closure reading MUST say so or a later reader will reconstruct a gate that no longer exists.
+
+**Two things worth carrying forward, both still true:** never tell the operator their baseline is stale without measuring it; and **the gate fell for a STRUCTURAL reason, not a conduct one** — an unregistered diagnostic that accrues continuously and is charged to whichever epic closes next **fails an epic by construction** if it closes more than about a day after a snapshot (+286 in 22h33m), and agent-memory, ~89% of the overhang, grows as a function of doing work against a fixed total.
+
+**The 2026-07-27 resolution, preserved below as the dated record of the intermediate state:**
 
 **⚰ THE OPERATOR RE-SNAPSHOTTED THE BASELINE. This obligation is DISCHARGED and the framing it prescribes is now FALSE.** Baseline re-snapshotted at **`625940e`**; E-277 closed against it at **+445**, which arithmetic confirms is current — `16672 − 445 = 16227` closes to the line. **Zero inherited drift. E-277 owned all +445** (rules + agents +42 between them; agent-memory +403, ~91%, which loads only for its owning agent).
 
@@ -25,7 +33,7 @@ Unrecorded. Audit residual #12.
 
 **The section below is preserved as the dated record of a real obligation that was really carried** — the +972 across four deferrals was accurate for E-262 / E-270 / E-272 / E-273 — **not as live guidance.** A withdrawal is left visible so a later reader knows this was taken and then discharged, rather than never taken.
 
-**What a future closure should do instead:** run the ratchet, report the number against the CURRENT baseline, and split own-vs-inherited **from measurement**, not from this memory. **The inherited share may legitimately be zero, as it was here.**
+~~**What a future closure should do instead:** run the ratchet, report the number against the CURRENT baseline, and split own-vs-inherited **from measurement**, not from this memory. **The inherited share may legitimately be zero, as it was here.**~~ ⚰ **RETIRED 2026-08-02 — see the E-280 block at the top of this section. There is no gate to report against and no split is owed.**
 
 ### Historical record (accurate when written, superseded 2026-07-27)
 

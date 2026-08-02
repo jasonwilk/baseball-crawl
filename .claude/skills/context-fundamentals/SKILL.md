@@ -1,21 +1,13 @@
+---
+name: context-fundamentals
+description: This skill should be used when beginning a complex multi-file task, when context window usage is above 70%, when deciding whether to load a full research artifact or summarize from memory, before using /clear to start a new session, when compacting context mid-session, or when debugging an agent that missed a fact present in a file loaded earlier. Covers context window mechanics, budget management, and load-versus-defer decisions. Loaded by the working agent rather than triggered by a user phrase.
+---
+
 # Skill: context-fundamentals
 
 **Category**: Foundational
 **Adapted for**: baseball-crawl
 **Source**: muratcankoylan Agent Skills for Context Engineering (E-008-R-02)
-
----
-
-## Activation Triggers
-
-Load this skill when you are about to:
-
-- **Begin a complex multi-file task** where many documents will be loaded into the same session (multiple story files, research artifacts, API specs, design docs)
-- **Notice context window usage is above 70%** (the statusline shows yellow or red on the context bar) and you need to decide whether to load another large document
-- **Decide whether to load a full research artifact or summarize from memory** before beginning a task
-- **Use `/clear` to start a new session** and want to confirm you are doing so for the right reasons
-- **Compact context** mid-session and want to understand what is at risk of being lost
-- **Debug an agent that missed a key fact** that was present in a file loaded earlier in the session
 
 ---
 

@@ -1,3 +1,8 @@
+---
+name: plan
+description: This skill should be used when the user says "plan E-NNN", "plan an epic for X", "plan epic for X", "create an epic for X", "write stories for X", "let's plan X", or "design an epic for X" -- or otherwise implies creating a new epic with stories. Compound triggers that chain into dispatch afterwards: "plan and dispatch X", "plan and execute X", "plan and implement X", "create an epic and start it", "define and execute X". Guides discovery, planning, automatic specification review, refinement, and the READY gate. NOT this skill: spec-review requests (codex-spec-review skill), epic-dispatch requests (implement skill), clarify or refine requests (PM clarify mode), triage requests (PM triage mode).
+---
+
 # Skill: plan
 
 **Category**: Workflow Automation
@@ -5,29 +10,11 @@
 
 ---
 
-## Activation Triggers
+## Compound Dispatch Flag
 
-Load this skill when the user says any of:
+The trigger phrases live in this skill's `description` frontmatter, which is the single source. One operational consequence is carried here because it sets state the workflow reads later:
 
-- "plan E-NNN", "plan an epic for X", "plan epic for X"
-- "create an epic for X", "write stories for X"
-- "let's plan X", "design an epic for X"
-- Any request that implies creating a new epic with stories
-
-**Compound triggers** (plan then dispatch):
-
-- "plan and dispatch X", "plan and execute X"
-- "create an epic and start it", "define and execute X"
-- "plan and implement X"
-
-If the user used a compound trigger, set `compound_dispatch = true` for Phase 5 handoff.
-
-**Non-triggers** (do NOT load this skill):
-
-- "spec review E-NNN" -> codex-spec-review skill
-- "implement E-NNN" / "start E-NNN" / "dispatch E-NNN" -> implement skill
-- "clarify E-NNN" / "refine E-NNN" -> PM clarify mode (no skill needed)
-- "triage" -> PM triage mode (no skill needed)
+**If the user used a compound trigger** (the "plan and dispatch" family listed in the description), **set `compound_dispatch = true` for Phase 5 handoff.**
 
 ---
 
@@ -612,8 +599,9 @@ Planning is complete. You are transitioning from consultation to implementation 
 ```
 Planning is complete. Transitioning to dispatch mode. Your role is now per-story code review during implementation (not spec audit). Wait for review assignments from the main session via SendMessage. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list.
 Epic worktree path: [epic-worktree-path]
-Review the current story's changes via `cd [epic-worktree-path] && git diff` (unstaged changes = current story).
-Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached main` (staged = prior stories).
+The review surface is a FROZEN TREE, not working-directory state. Each review assignment carries a tree SHA.
+Review the current story's changes via `cd [epic-worktree-path] && git diff <previous-tree-sha> <this-tree-sha>` -- the diff between two frozen trees, both SHAs supplied in your assignment. For the epic's first story the base is `$(git merge-base epic/E-NNN main)`.
+Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached $(git merge-base epic/E-NNN main)` -- the whole-epic view used at closure, never bare `main`, and not the surface for a per-story verdict.
 ```
 
 If CR was NOT spawned during Phase 3 (`cr_spawned = false`), spawn fresh using the implement skill's code-reviewer spawn context.

@@ -1,18 +1,12 @@
+---
+name: workflow-help
+description: This skill should be used when the user says "/workflow-help", "workflow help", "what commands do I have", "what can I do", "show me the workflows", "list the workflows", "what are the trigger phrases", or "cheat sheet". Prints the workflow cheat sheet.
+---
+
 # Skill: workflow-help
 
 **Category**: Quick Reference
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when the user says any of:
-
-- "/workflow-help", "workflow help"
-- "what commands do I have", "what can I do"
-- "show me the workflows", "list the workflows"
-- "what are the trigger phrases", "cheat sheet"
 
 ---
 
@@ -59,13 +53,15 @@ CLI commands:  bb --help
 
 ## Maintenance
 
-When a workflow skill is added, renamed, or retired, update the cheat sheet above. The authoritative source for each workflow's trigger phrases is its own SKILL.md file:
+When a workflow skill is added, renamed, or retired, update the cheat sheet above.
 
-- Plan: `.claude/skills/plan/SKILL.md`
-- Implement: `.claude/skills/implement/SKILL.md`
-- Spec review: `.claude/skills/codex-spec-review/SKILL.md`
-- Code review: `.claude/skills/codex-review/SKILL.md`
-- Ingest endpoint: `.claude/skills/ingest-endpoint/SKILL.md`
-- Vision curation: PM agent definition (`.claude/agents/product-manager.md`, curate task type)
+**The cheat sheet is a RENDERING of the single source, never a second source.** The authoritative location for each workflow's trigger phrases is the **`description` frontmatter** of its own SKILL.md -- the cheat sheet displays an abbreviated selection of those phrases for the user, which is its whole function, and it must be re-derived from them rather than edited independently:
+
+- Plan: `.claude/skills/plan/SKILL.md` frontmatter
+- Implement: `.claude/skills/implement/SKILL.md` frontmatter
+- Spec review: `.claude/skills/codex-spec-review/SKILL.md` frontmatter
+- Code review: `.claude/skills/codex-review/SKILL.md` frontmatter
+- Ingest endpoint: `.claude/skills/ingest-endpoint/SKILL.md` frontmatter
+- **Vision curation: `CLAUDE.md`'s `## Workflows` section** -- it is the one workflow with no skill file, so CLAUDE.md carries it in full and is its single source
 
 Internal-only skills (context-fundamentals, filesystem-context, multi-agent-patterns, agent-standards) are omitted -- they load automatically and are never triggered by the user directly.

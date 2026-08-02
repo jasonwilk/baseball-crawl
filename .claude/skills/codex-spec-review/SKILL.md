@@ -1,22 +1,12 @@
+---
+name: codex-spec-review
+description: This skill should be used when the user says "spec review", "spec review E-NNN", "review the spec", "codex spec review", "codex spec review E-NNN", "spec review prompt", "codex spec review prompt", "generate spec review prompt", "review E-NNN spec", "check the spec for E-NNN", or "run spec review on E-NNN" -- or otherwise implies reviewing an epic's planning artifacts against the spec-review rubric. The word "spec" is the mode discriminator: a review request that LACKS it belongs to the codex-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
+---
+
 # Skill: codex-spec-review
 
 **Category**: Workflow Automation
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when the user says any of:
-
-- "spec review", "spec review E-NNN", "review the spec"
-- "codex spec review", "codex spec review E-NNN"
-- "spec review prompt", "codex spec review prompt", "codex spec review prompt for E-NNN"
-- "generate spec review prompt", "generate spec review prompt for E-NNN"
-- "review E-NNN spec", "check the spec for E-NNN", "run spec review on E-NNN"
-- Any request that implies reviewing an epic's planning artifacts against the spec-review rubric
-
-The word **"spec"** is the mode discriminator. If the user says "codex review" or "code review" without "spec", that is the `codex-review` skill, not this one.
 
 ---
 

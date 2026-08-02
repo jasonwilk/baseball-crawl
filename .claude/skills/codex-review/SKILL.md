@@ -1,23 +1,12 @@
+---
+name: codex-review
+description: This skill should be used when the user says "codex review", "review with codex", "codex review E-NNN", "code review", "code review E-NNN", "review epic", "review epic E-NNN", "post-dev review", "codex review prompt", "code review prompt", "generate codex review prompt", or "generate code review prompt" -- or otherwise implies running a Codex code review on implementation changes. The ABSENCE of the word "spec" is the mode discriminator: a review request CONTAINING it belongs to the codex-spec-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
+---
+
 # Skill: codex-review
 
 **Category**: Workflow Automation
 **Adapted for**: baseball-crawl
-
----
-
-## Activation Triggers
-
-Load this skill when the user says any of:
-
-- "review with codex", "codex review", "codex review E-NNN"
-- "code review", "code review E-NNN"
-- "review epic", "review epic E-NNN"
-- "post-dev review", "post-dev review E-NNN"
-- "codex review prompt", "code review prompt"
-- "generate codex review prompt", "generate code review prompt"
-- Any request that implies running a codex code review on implementation changes
-
-The absence of **"spec"** is the mode discriminator. If the user says "spec review" or "codex spec review", that is the `codex-spec-review` skill, not this one.
 
 ---
 
@@ -165,12 +154,12 @@ Use Bash to gather the diff content based on the mode. When an epic worktree pat
 
 **During "and review" chain (epic worktree available):**
 
-Run a single command to get all changes relative to main:
+Run a single command to get all changes relative to the epic's branch point:
 ```
-git -C <epic-worktree-path> diff main
+git -C <epic-worktree-path> diff $(git -C <epic-worktree-path> merge-base epic/E-NNN main)
 ```
 
-This produces the complete epic diff (all accumulated story patches against main).
+This produces the complete epic diff (all accumulated story patches). **The base is the MERGE BASE, never bare `main`** -- in the epic worktree `HEAD` is `epic/E-NNN` and `main` moves while the epic runs, so a bare-`main` diff folds main's own post-branch commits into what reads as the epic's work. In E-278 exactly that produced an 85-line phantom finding against a file no story touched.
 
 **Standalone invocation (no epic worktree):**
 

@@ -119,6 +119,18 @@ Plain English over jargon-heavy tables. If a coach has to decode it, it is not r
 5. **Think bench-ready.** Output should work on a B&W one-pager in the dugout. If it does not serve that moment, question whether it is essential.
 6. **Bubble up, never push.** Safety flags push (compliance). Everything else is "I noticed this" -- quiet, non-prescriptive, letting the coach stay in flow with the data.
 
+## Report Schema
+
+**Scope: this governs your `SendMessage` reports only.** It does not constrain the Output Standards above, which govern the substance of what you recommend; this governs the shape of the message that carries it.
+
+Every consultation report has these sections, in this order:
+
+- **`## Recommendation`** -- the coaching answer, prioritized MUST HAVE / SHOULD HAVE / NICE TO HAVE per Output Standards.
+- **`## Reasoning`** -- why, in coaching terms a non-domain reader can follow.
+- **`## Sample Size and Caveats`** -- ALWAYS present, per Output Standards item 4. Write the limitation plainly; **"insufficient sample" is a complete and useful answer.**
+
+**Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never a safety flag, a sample-size caveat, or a figure someone must act on.**
+
 ## Skill References
 
 Load `.claude/skills/filesystem-context/SKILL.md` when:

@@ -54,7 +54,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - Wants all architectural details preserved (stack decisions, metrics, collaboration patterns)
 
 ## Topic File Index
-- `epic-codifications.md` -- Per-epic record of what was codified where (E-077, E-228, E-235..E-241, E-246..E-262, E-264, E-267, E-270, E-272, E-273, E-276, E-277, E-278, E-279)
+- `epic-codifications.md` -- Per-epic record of what was codified where (E-077, E-228, E-235..E-241, E-246..E-262, E-264, E-267, E-270, E-272, E-273, E-276, E-277, E-278, E-279, E-280). **E-280 retired the context-layer size GATE** (operator, 2026-08-02) -- every prior `T7 ratchet` entry in that file is EVIDENCE of what was observed at that closure, not a criterion; do not sweep them.
 - `claude-practices.md` -- CLAUDE.md design, context management
 - `agent-design.md` -- Subagent architecture, ecosystem patterns
 - `skills-and-hooks.md` -- Skills system, hooks patterns
