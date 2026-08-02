@@ -3,6 +3,8 @@
 ## Status
 `CANDIDATE` — **live, shipped defect. baseball-coach has RULED (2026-07-25); this is implementation work, not a question awaiting an answer.**
 
+DEFERRED to next season (operator, 2026-07-27; recorded here 2026-08-02 — was previously only in the triage file §4).
+
 ## Summary
 
 `_league_from_age_bracket` (`src/reports/starter_prediction.py`) maps every `\d+U` bracket below 15 — the whole `8U`-`14U` range — to `youth_travel`, and `get_rules_for_league` routes `youth_travel` to `PITCH_SMART_15_18`: a 105-pitch curve whose own constant name says which age band it is calibrated for. The report renders it with `is_estimate=True`, producing an amber badge and a "treat as a directional read" banner.
