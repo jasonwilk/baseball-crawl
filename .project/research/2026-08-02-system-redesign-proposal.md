@@ -397,9 +397,15 @@ HOW WORK GETS DONE HERE
 4. Verification is a command the spec names. Code chunks (src/tests/
    migrations) also end with the FULL suite green before commit.
    No green, no done.
-5. Review on demand: /code-review each chunk; /security-review on auth,
-   serving, or PII surfaces; "codex review" for a second opinion; /simplify
-   optional.
+5. Review CHAIN, in this order, before the commit (not after):
+     spec phase:    codex spec review of the spec file (skip for small changes)
+     every chunk:   full suite green, then /code-review
+     add /security-review when the chunk touches auth, serving, PII, or
+       anything that deletes data
+     /simplify is optional polish -- if used, it runs BEFORE /code-review,
+       never after (its fixes need reviewing too; proven 2026-08-02)
+     codex review as a second opinion on request
+   Docs-only chunks need no chain beyond the PII hook.
 6. Operator approves all commits. The [pii-hook] line must appear.
 7. Subagents: Explore for search, api-scout for GameChanger API archaeology,
    baseball-coach for coaching semantics, /code-review's fork for review.
@@ -407,6 +413,10 @@ HOW WORK GETS DONE HERE
 8. Lessons go to memory; a lesson becomes a rule only after it bites twice.
    Destructive seams stay in CLAUDE.md: report generation DELETES;
    purge-scouting wipes 20 tables.
+9. Every session ends with a HANDOFF: (a) what landed (commits/files),
+   (b) what's carried forward and where it's written down, (c) the exact
+   message to paste into the next session. A session is not done until it
+   prints this. Only /clear on a clean tree or a written progress note.
 ```
 
 ---
