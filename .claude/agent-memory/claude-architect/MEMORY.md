@@ -63,7 +63,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - `boundaries.md` -- Operational boundary catalog (host vs container, auth vs public, PII, hallucinated identifiers)
 - `ingest-workflow-log.md` -- Per-endpoint integration history from ingest-endpoint skill executions (19 endpoints, 2026-03-04)
 - `codex-config.md` -- Codex CLI configuration, model, reasoning effort, available models
-- `dispatch-telemetry-design.md` -- The E-279 prune-falsification measurement (checklist item 4): steering/selfcorr definitions, the `.claude/hooks/dispatch-telemetry.py` scorer, measured pre/post-prune baselines, and why the rate is a guardrail while the targeted recurrence check is the verdict.
+- `dispatch-telemetry-design.md` -- Checklist-item-4 telemetry. **Reading TAKEN (E-279).** Baselines are RAW; the instrument is 89% false-positive and never measured steering. Also: how to measure report length (SendMessage payloads, NOT tok/turn).
 - `model-behavior-reference.md` -- Four-tier placement architecture, verification taxonomy, per-model adapters (4.8/Opus 5/Sonnet 5/Fable 5), dated alias-to-model register. Consult BEFORE any placement or agent-definition call.
 
 ## Claude Code Platform Facts

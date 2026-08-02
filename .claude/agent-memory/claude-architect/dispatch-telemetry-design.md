@@ -1,6 +1,6 @@
 ---
 name: dispatch-telemetry-design
-description: The steering/self-correction measurement designed for E-279's dispatch to discharge model-behavior-reference checklist item 4 (prune falsification) — operational definitions, the transcript-scoring instrument, pre/post-prune baseline readings, and why the rate metric is a guardrail rather than the verdict.
+description: The steering/self-correction measurement for checklist item 4 (prune falsification) — definitions, the transcript-scoring instrument, baselines (RAW/pre-adjudication, proven by re-run), the TAKEN E-279 reading with its 89%-false-positive adjudication, why the instrument was never measuring steering, and the SendMessage-payload method for measuring report length.
 metadata:
   type: project
 ---
@@ -105,6 +105,17 @@ All Opus 5. Rates are per 100 agent turns. The layer pass landed 2026-07-26
 
 (E-275 is a PLANNING session, listed for context and excluded from the dispatch band.)
 
+⚠ **CORRECTION 2026-08-02: every rate in this table is RAW — a pre-adjudication
+CANDIDATE count, not an adjudicated one.** The file did not say so, and the omission
+is a trap, because §(b) tells you to adjudicate every row before it counts. Proof by
+re-running the instrument: `32e9948e` returns 21 candidates / 483 turns = 4.35 against
+the 4.3 recorded here; `15538a3f` returns 20 / 690 = 2.90 against the recorded 2.9.
+Both reproduce exactly, so no adjudication was ever applied to the baselines.
+**Consequence: an adjudicated reading is NOT comparable to this table.** Compare raw to
+raw, or adjudicate all four baselines first (4x the work, for a band §(c) already says
+cannot discriminate). This is why the E-279 reading below records the raw rate as the
+comparable figure and treats its adjudication as a taxonomy rather than a rate.
+
 **The finding that shapes the whole design: STEER pre-prune spans 4.3-7.6 and
 post-prune spans 2.9-7.8 — overlapping, with the lowest reading of all five sitting
 POST-prune and the highest also post-prune.** SELFCORR spans 1.2-7.2 pre and
@@ -170,5 +181,60 @@ effective model.
 **Do not write a rate from a live dispatch into any memory file before the dispatch
 closes** — `context-layer-assessment.md`'s "never write a number from a live thread
 into a memory file" applies exactly here.
+
+## Reading — E-279 (taken 2026-08-01, dispatch closed; recorded 2026-08-02)
+
+Session `fd615ae6-f076-4675-8b8c-a2bf6321b47e`, 1,331 agent turns. Effective models
+re-verified from `message.model`: all five `opus[1m]` agents → `claude-opus-5`,
+`sonnet` → `claude-sonnet-5`. **Register unchanged; no drift.**
+
+Raw buckets: STEER? 79 · UPHELD 83 · SELFCORR? 180 · GATE 82 (excluded) · OP-STEER 0.
+**Comparable (raw) STEER rate = 5.94/100**, inside both the pre-prune (4.3–7.6) and
+post-prune (2.9–7.8) bands. The guardrail reads NO SIGNAL, exactly as designed.
+
+**Adjudicated, and the value is a TAXONOMY not a rate** (79 rows, disjoint,
+priority-ordered): wrong direction (agent→main, and STEER is defined main→agent) 8 ·
+assignment/spawn 7 · gate relay 7 · **freeze/release/hold/confirm choreography 32** ·
+UPHELD-shaped praise, orchestrator self-corrections, questions, refinements 16 ·
+**genuine steering 9** (8 firm, 1 weak). **89% false-positive rate.**
+
+**The instrument was never measuring steering, and this bounds every future reading.**
+The largest real class — 41% — is freeze/release choreography: coordination overhead,
+neither steering nor error. E-280 removes exactly that class, **so a post-E-280 STEER
+delta will move for reasons unrelated to steering.** Do not read one as evidence about
+steering. (Adjudicated on ONE session; the three big FP classes are structural — cue
+matching plus the dispatch protocol — so a similar rate in the baselines is expected
+but is INFERENCE, not measurement.)
+
+Recurrence verdicts: **1 (3b command menu)** — no counter-evidence; response-protocol
+vocabulary present across all agents. A presence signal, not proof of correct handling.
+**2 (CA's 8,554-byte bullet)** — PASS; CA worked from `epic-codifications.md`
+throughout, the designed post-collapse behavior, with no instance of reaching for a
+lost fact. **3 (CR's five Mandatory Review Checks)** — SPLIT, do NOT score as pass: the
+tombstone's pointer verifies (SQL query scope, return-value consumption, status
+lifecycle all present in fuller form in `code-reviewer.md`), but the behavioral half is
+UNCOVERED because E-279's stories were shell/markdown/memory. **4 (SE respx)** — OPEN,
+as predicted. Incidental Sonnet 5: `dw-e279` participated at 7 turns — far too small to
+discharge the Sonnet class; record as participated, not as a reading.
+
+## Report length: measure `SendMessage` payloads, not tok/turn
+
+Method note, because E-280 needed this and no prior measurement existed. **A report IS
+a `SendMessage` payload**; extract `input.message` from `tool_use` blocks named
+`SendMessage` across the session jsonl plus `<sid>/subagents/agent-*.jsonl`, attribute
+by the sibling `.meta.json` `customAgentType`, and measure characters per role.
+
+**Tokens-per-turn is NOT report length and does not transfer.** The 2x per-turn figure
+in the wallclock analyses averages over ALL turns; measured at the report grain, E-279
+(532 payloads, all-role p50 3,080) sits INSIDE the peak-4.8-week range (three sessions,
+p50 1,620 / 4,941 / 1,917) and below that era's heaviest on every statistic — where 4.8
+SE ran p50 7,760 and CR p50 8,191, roughly double E-279's. **There was no report-length
+inflation to cap.** Full tables are quoted in E-280's TN-19; this note records the
+METHOD and the population trap, which outlive the epic.
+
+Companion hazard: **a report-length cap on code-reviewer is a review-bar-literalism
+trap** — vendor-documented for Opus 5, which CR pins ("ask it to report everything and
+filter in a separate pass"). CR is the longest role in BOTH eras because length tracks
+finding count, making it the most tempting target and the worst one.
 
 Related: [[model-behavior-reference]], [[epic-codifications]], [[agent-design]].
