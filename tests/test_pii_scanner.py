@@ -526,11 +526,11 @@ class TestRfc2606DomainAllowlist:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: path exclusions for epics/ and .project/ (E-129-02 AC-5)
+# Unit tests: path exclusions (E-129-02 AC-5; .project/ un-skipped 2026-08-02)
 # ---------------------------------------------------------------------------
 
 class TestNewSkipPaths:
-    """AC-5/AC-7: epics/ and .project/ are excluded by SKIP_PATHS."""
+    """epics/ and the legacy .project/ subdirs are excluded; specs/ is not."""
 
     def test_epics_path_skipped(self) -> None:
         assert should_skip_path("epics/E-129-01-rfc2606-domain-allowlist.md") is True
@@ -538,11 +538,29 @@ class TestNewSkipPaths:
     def test_epics_nested_path_skipped(self) -> None:
         assert should_skip_path("epics/E-129-pii-scanner-allowlists/epic.md") is True
 
-    def test_project_path_skipped(self) -> None:
-        assert should_skip_path(".project/ideas/IDEA-042-foo.md") is True
+    def test_specs_not_skipped(self) -> None:
+        # Specs are the unit of work under the spec-based flow, so they must be
+        # scanned before they are committed. This is why the blanket `.project/`
+        # entry was narrowed to the legacy subdirs below.
+        assert should_skip_path(".project/specs/2026-08-03-example.md") is False
 
-    def test_project_archive_skipped(self) -> None:
-        assert should_skip_path(".project/archive/E-001/epic.md") is True
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".project/ideas/IDEA-042-foo.md",
+            ".project/archive/E-001/epic.md",
+            ".project/research/some-artifact.md",
+            ".project/templates/idea-template.md",
+        ],
+    )
+    def test_legacy_project_subdirs_still_skipped(self, path: str) -> None:
+        # Re-measured 2026-08-02: lifting these produced 43 shape false
+        # positives across 15 files, so the TN-2 noise rationale still holds.
+        assert should_skip_path(path) is True
+
+    def test_project_root_file_not_skipped(self) -> None:
+        # Nothing between `.project/` and the four legacy subdirs is excluded.
+        assert should_skip_path(".project/codex-review.md") is False
 
     def test_docs_not_skipped(self) -> None:
         # docs/ is intentionally NOT excluded -- could contain real PII
@@ -554,7 +572,7 @@ class TestNewSkipPaths:
 
 
 class TestEpicsPathExclusionIntegration:
-    """AC-1/AC-2/AC-7: Files under epics/ and .project/ are skipped during scan."""
+    """AC-1/AC-2/AC-7: epics/ and the legacy .project/ subdirs are skipped."""
 
     def test_epics_file_skipped(self, tmp_path: Path) -> None:
         """AC-1: epics/ file with real email produces no finding."""
@@ -566,6 +584,24 @@ class TestEpicsPathExclusionIntegration:
     def test_project_ideas_file_skipped(self) -> None:
         """AC-2: .project/ideas/ file with email address is skipped."""
         assert should_skip_path(".project/ideas/IDEA-042-foo.md") is True
+
+    def test_scan_file_does_not_skip_a_spec_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A finding in a spec file is reported rather than skipped.
+
+        The path must be RELATIVE and `.project/`-prefixed: `should_skip_path`
+        matches the path string, so an absolute tmp_path would pass this
+        assertion whether or not `.project/` is in SKIP_PATHS.
+        """
+        _write_file(
+            tmp_path,
+            ".project/specs/2026-08-03-example.md",
+            "contact: coach@realdomain.com\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        violations = scan_file(".project/specs/2026-08-03-example.md")
+        assert [v.pattern_name for v in violations] == ["email"]
 
     def test_scan_file_skips_epics_path(self, tmp_path: Path) -> None:
         """scan_file returns empty when the path string starts with epics/."""

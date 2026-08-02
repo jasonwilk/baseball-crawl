@@ -163,9 +163,17 @@ PII_OK_MARKER: str = "pii-ok"
 # starts with one of these prefixes is skipped without being read.
 SKIP_PATHS: set[str] = {
     ".git/", ".claude/", "node_modules/", "__pycache__/",
-    # Planning artifacts -- story and idea files frequently reference PII-like
-    # patterns as examples; scanning them produces only noise. (TN-2)
-    "epics/", ".project/",
+    # Planning artifacts reference PII-like patterns as examples; scanning them
+    # produces only noise. (TN-2) Measured 2026-08-02 with the skip lifted: 43
+    # such matches across 15 files -- API-spec key assignments, 10-digit runs
+    # reading as phone numbers -- so the noise is real and these stay skipped.
+    "epics/",
+    ".project/archive/", ".project/ideas/",
+    ".project/research/", ".project/templates/",
+    # `.project/` itself is NOT skipped, so `.project/specs/` -- the unit of
+    # work under the spec-based flow -- is scanned before it is committed.
+    # This buys credential/email/phone coverage there and NOTHING against
+    # NAMES, which remains the real gap in planning artifacts (IDEA-102).
     # pip-compile generated lockfiles contain SHA256 hashes that trigger
     # the us_phone pattern (10-digit sequences inside hex strings).
     "requirements.txt",
