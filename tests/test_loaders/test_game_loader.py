@@ -514,16 +514,16 @@ def test_same_game_from_two_teams_is_idempotent(db: sqlite3.Connection) -> None:
 
 # ---------------------------------------------------------------------------
 # AC-6: Team-key handling. Keys are classified by IDENTITY -- a key's slug-vs-UUID
-# form is a property of that TEAM (does it have a public GC presence?), not a marker
-# of which side it is. The cases below happen to use the common slug+UUID pairing;
+# form is not a marker of which side it is, and what decides the form is
+# unestablished. The cases below happen to use the common slug+UUID pairing;
 # the all-slug cases live in the envelope-identity section further down.
 # ---------------------------------------------------------------------------
 
 
 def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection) -> None:
     """AC-6: Own team identified by MATCHING its public_id, not by the key's shape."""
-    # The common pairing: our team has a public GC presence (slug key), the
-    # opponent does not (UUID key). Identity is what selects our key here.
+    # The common pairing: our key is a slug, the opponent's is a UUID.
+    # Identity, not that pairing, is what selects our key here.
     boxscore = _make_boxscore(own_key="y24fFdnr3RAN", opp_key=_OPP_TEAM_ID)
     loader = _make_loader(db)
 
@@ -929,12 +929,13 @@ def test_detect_team_keys_classification_byte_identical(
 
 
 # ---------------------------------------------------------------------------
-# Boxscore envelope identity: an opponent WITH a public GameChanger presence is
-# keyed by a public_id slug too, so "our team is the slug, the opponent is the
-# UUID" left opp_key None and discarded the opponent's whole envelope.
+# Boxscore envelope identity: an opponent can be keyed by a public_id slug too,
+# so "our team is the slug, the opponent is the UUID" left opp_key None and
+# discarded the opponent's whole envelope.  What decides a key's form is not
+# established -- only that the form does not mark which side it is.
 # ---------------------------------------------------------------------------
 
-_OPP_TEAM_SLUG = "z81QpLmv7BXK"      # opponent that also has a public GC presence
+_OPP_TEAM_SLUG = "z81QpLmv7BXK"      # slug-keyed opponent
 _UNRELATED_SLUG = "q47TvBnc8LWs"     # matches neither our public_id nor our gc_uuid
 
 

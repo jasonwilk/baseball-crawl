@@ -124,7 +124,7 @@ Single JSON object with three top-level keys.
 | Field | Type | Description |
 |-------|------|-------------|
 | `sport` | string | Always `"baseball"` |
-| `team_players` | object | Roster dict keyed by team identifier (each key is that team's `public_id` slug or its UUID -- classify by identity, not shape; see below) |
+| `team_players` | object | Roster dict keyed by team identifier (each key is a `public_id` slug or a UUID; the form does not mark which side it is -- classify by identity, not shape; see below) |
 | `plays` | array | Plate appearances in game order |
 
 ### `team_players` Dict
@@ -143,7 +143,7 @@ Each team key maps to an **array** of player objects (NOT a nested dict keyed by
 }
 ```
 
-**Key pattern (corrected 2026-08-02):** each key is that team's `public_id` slug if the team has a public GameChanger presence, else its UUID -- a property of the TEAM, not of which side it is. A slug (own) + UUID (opponent) pair is common but is NOT the rule: when the opponent was also scored on GC, both keys are slugs. Classify by IDENTITY (match your own `public_id`, then your `gc_uuid`; the remaining key is the opponent), never by shape. Reuse the boxscore's identity-based key detection if both endpoints are consumed in the same pipeline.
+**Key pattern (corrected 2026-08-02, narrowed 2026-08-03):** each key is either a `public_id` slug or a UUID, and the form does NOT mark which side it is. A slug (own) + UUID (opponent) pair is the common case but is NOT the rule -- both keys are slugs on a minority of payloads. What decides the form is not established; in particular a team with a public GameChanger presence can still be UUID-keyed (observed 2026-08-03), so do not derive a rule from that. Classify by IDENTITY (match your own `public_id`, then your `gc_uuid`; the remaining key is the opponent), never by shape. Reuse the boxscore's identity-based key detection if both endpoints are consumed in the same pipeline.
 
 **Player object fields:**
 
@@ -515,6 +515,6 @@ The two `at_plate_details` blocks above show the bare and annotated forms: the f
 - **Abandoned / in-progress PA edge case (empty `final_details` can still carry pitches):** A play with `name_template.template = "${uuid} at bat"` and empty `final_details` is an incomplete/abandoned plate appearance. The common case has empty `at_plate_details` too (the trailing "on deck" placeholder). BUT — confirmed against the test team `dw3a8qivTMvA` on 2026-06-28 — such a play **can carry charted pitches in `at_plate_details` while `final_details` is empty** (a PA scored pitch-by-pitch but not yet resolved to an outcome). The current parser rule "skip plays where `final_details` is empty" therefore **discards any pitches on an unresolved PA**. For completed-PA stats (FPS, P/PA, QAB) that is the correct, conscious choice — an unresolved PA has no batter outcome to attribute. Code relying on this rule should treat it as deliberate, not assume empty `final_details` implies empty `at_plate_details`.
 - **`messages` array:** Free-text scorekeeper notes. Usually empty; ~130 non-empty instances observed across 165 games. Common patterns: mound visit notes (~130), game time notes (~15), weather delays, and miscellaneous commentary. Store as raw JSON array; do not parse.
 - **Python client 500 history:** Our client previously received HTTP 500 on this endpoint. Root cause was using `game_stream.id` instead of `event_id` as the path parameter. Confirmed fixed by using `event_id`.
-- Reuse the boxscore's IDENTITY-based key detection for `team_players` keys -- not a slug-vs-UUID shape check, which mis-splits a payload where both teams have a public GC presence.
+- Reuse the boxscore's IDENTITY-based key detection for `team_players` keys -- not a slug-vs-UUID shape check, which mis-splits any payload whose two keys happen to share a form.
 
 **Discovered:** 2026-03-04. **Schema corrected and re-confirmed:** 2026-03-26. **Pitch-template grammar re-documented (three-form trailing parenthetical incl. MPH velocity), abandoned-PA edge clarified, BIP boundary and structured-events cross-reference added, ground-truthed against test team:** 2026-06-28.

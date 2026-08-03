@@ -9,13 +9,17 @@ supplies the parsed boxscore dict and a matching :class:`GameSummaryEntry`
 Key data decisions
 ------------------
 - **ID mapping**: DB primary key is the ``event_id`` carried on the summary.
-- **Boxscore keys are classified by IDENTITY, not shape**: each team's envelope
-  is keyed by that team's ``public_id`` slug when the team has a public
-  GameChanger presence and by its UUID otherwise -- so BOTH keys can be slugs.
+- **Boxscore keys are classified by IDENTITY, not shape**: a key is a
+  ``public_id`` slug or a UUID, and the form does NOT mark which side it is --
+  both keys are slugs on ~10% of payloads (14 of 140, measured 2026-08-03).
+  What DECIDES the form is NOT established: "the team has a public GC presence"
+  and "the opponent was linked via team lookup" were both refuted 2026-08-03.
   Match keys against our own ``public_id`` / ``gc_uuid``; the other key is the
   opponent.  The older "own = slug, opponent = UUID" shape rule silently
-  discarded the opponent's whole envelope whenever the opponent had also been
-  scored on GC.  See :meth:`GameLoader._detect_team_keys`.
+  discarded the opponent's whole envelope whenever the opponent's key was also
+  a slug.  A UUID-form OPPONENT key is a per-account local ``root_team_id``,
+  NOT a canonical ``gc_uuid`` -- never store it as one.
+  See :meth:`GameLoader._detect_team_keys`.
 - **IP to ip_outs**: boxscore stores IP as float decimal innings (e.g. 3.333...
   = 3⅓ innings = 10 outs).  The schema stores ``ip_outs`` (integer outs).
   Convert: ``ip_outs = round(float(IP) * 3)``.
@@ -1157,13 +1161,14 @@ class GameLoader:
     def _detect_team_keys(self, raw: dict) -> tuple[str | None, str | None]:
         """Identify the own-team key and opponent key in a boxscore response.
 
-        Classification is IDENTITY-based, not shape-based.  GameChanger keys a
-        team's envelope by that team's ``public_id`` slug when the team has a
-        public GameChanger presence and by its UUID otherwise -- so BOTH keys
-        can be slugs.  The older "our team is the slug, the opponent is the
-        UUID" inference therefore produced ``opp_key = None`` whenever the
-        opponent had also been scored on GameChanger, silently discarding the
-        opponent's entire batting and pitching envelope.
+        Classification is IDENTITY-based, not shape-based.  A key is a
+        ``public_id`` slug or a UUID, and the form does NOT mark which side it
+        is -- both keys are slugs on ~10% of payloads (14 of 140, measured
+        2026-08-03), and what DECIDES the form is not established.  The older
+        "our team is the slug, the opponent is the UUID" inference therefore
+        produced ``opp_key = None`` whenever the opponent's key was also a
+        slug, silently discarding that team's entire batting and pitching
+        envelope.
 
         Ladder, in order:
 

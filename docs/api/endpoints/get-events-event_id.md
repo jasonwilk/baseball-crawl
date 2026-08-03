@@ -77,7 +77,7 @@ Single JSON object with two top-level keys: `event` and `pregame_data`.
 | `id` | UUID | Same as `event.id` |
 | `game_id` | UUID | Same as `event.id` (redundant field) |
 | `opponent_name` | string | Opponent team display name |
-| `opponent_id` | UUID | Opponent team UUID (= `progenitor_team_id` for opponent endpoint lookups) |
+| `opponent_id` | UUID | The scoring team's **local opponent-registry id** for this opponent -- i.e. `root_team_id`, NOT `progenitor_team_id`. **CORRECTION 2026-08-03:** this row previously read "= `progenitor_team_id` for opponent endpoint lookups", which was wrong and contradicted `GET /teams/{team_id}/opponent/{opponent_id}`'s own caveat that its path param IS `root_team_id`. Measured 2026-08-03: `opponent_id` equalled the opponent record's `root_team_id` in **36 of 36** events, and `GET /teams/{opponent_id}` returned **404 in 16 of 16** attempts while the same call against four canonical `gc_uuid`s returned 200 **4 of 4**. Use it for `/opponent/{id}`, `/players`, and `/avatar-image`; it is NOT a canonical team UUID and MUST NOT be stored in `teams.gc_uuid`. |
 | `home_away` | string | `"home"` or `"away"` |
 | `lineup_id` | UUID | UUID of the pre-game lineup -- links to `GET /bats-starting-lineups/{event_id}` id field |
 

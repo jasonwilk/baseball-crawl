@@ -68,7 +68,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 **Input:** `id` from each game record in step 1 (this IS the `event_id` -- no bridge call needed)
 
 **Output:** Per-player batting and pitching lines for both teams. Key points:
-- Top-level keys are team identifiers. Each is a `public_id` slug (no dashes) or a UUID (with dashes) depending on whether that TEAM has a public GC presence -- a slug + UUID pair is the common case, not the rule. Match the scouted team's `public_id` (then its `gc_uuid`) to find its key; the remaining key is the other team's. Do not detect by regex.
+- Top-level keys are team identifiers. Each is a `public_id` slug (no dashes) or a UUID (with dashes); the form does NOT mark which side it is, and what decides it is not established. A slug + UUID pair is the common case, not the rule. Match the scouted team's `public_id` (then its `gc_uuid`) to find its key; the remaining key is the other team's. Do not detect by regex.
 - `players[]` array per team: `{id, first_name, last_name, number}` -- player identity lives here, not in stat entries.
 - `groups[category="lineup"]`: batting stats per player (`AB`, `R`, `H`, `RBI`, `BB`, `SO` main; sparse extras `2B`, `3B`, `HR`, `TB`, `HBP`, `SB`, `CS`, `E`).
 - `groups[category="pitching"]`: pitching stats per player (`IP`, `H`, `R`, `ER`, `BB`, `SO` main; sparse extras `WP`, `HBP`, `#P`, `TS`, `BF`).
@@ -78,7 +78,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 - Cross-reference: match `stats[].player_id` with `players[].id` for player names (do not use boxscore's `players[]` in isolation -- use roster from step 2 as primary).
 
 **Edge cases:**
-- Key detection is IDENTITY-based: the key equal to the scouted team's `public_id` (else its `gc_uuid`) is that team's; the remaining key is the other team's, whatever its form. Do NOT split on dashes -- an opponent that was also scored on GC gets a slug key too, and a shape check then reports no opponent key and drops that team's whole envelope. See [boxscore endpoint doc](../endpoints/get-game-stream-processing-event_id-boxscore.md) for detection details.
+- Key detection is IDENTITY-based: the key equal to the scouted team's `public_id` (else its `gc_uuid`) is that team's; the remaining key is the other team's, whatever its form. Do NOT split on dashes -- both keys are slugs on a minority of payloads, and a shape check then reports no opponent key and drops that team's whole envelope. See [boxscore endpoint doc](../endpoints/get-game-stream-processing-event_id-boxscore.md) for detection details.
 - Both teams' stats (batting and pitching) are present in a single call. No separate call needed for the opponent.
 - Player UUID from boxscore `players[].id` matches `id` in step 2 roster. Use for cross-referencing.
 
@@ -124,9 +124,9 @@ Skip. If `opponent_links.public_id` is NULL, the scouting chain cannot proceed. 
 
 ### Boxscore keys (identity, not shape)
 
-The boxscore response has two top-level keys. Each is that team's `public_id` slug (alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`) when the team has a public GameChanger presence, and its UUID (with dashes, e.g., `"72bb77d8-REDACTED"`) otherwise.
+The boxscore response has two top-level keys. Each is either a `public_id` slug (alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`) or a UUID (with dashes, e.g., `"72bb77d8-REDACTED"`).
 
-**Which form a key takes is a property of that TEAM, not of which side it is.** The scouted team's key is found by matching its `public_id` (then its `gc_uuid`); the remaining key is the other team's. A scouted-team-slug + opponent-UUID pair is the common case only because most scouted opponents were never scored on GC.
+**A key's form does NOT tell you which side it is, and what DOES decide the form is not established.** The scouted team's key is found by matching its `public_id` (then its `gc_uuid`); the remaining key is the other team's, whatever its form. A scouted-team-slug + opponent-UUID pair is the common case, but both keys are slugs on a minority of payloads -- and the reverse guess fails too: an opponent that has its own public GameChanger presence was still UUID-keyed in live payloads (observed 2026-08-03).
 
 Detection algorithm (identity, not shape):
 ```python
@@ -145,7 +145,7 @@ opp_key = next((k for k in keys if k != own_key), None) if own_key else None
 The canonical implementation is `GameLoader._detect_team_keys`
 (`src/gamechanger/loaders/game_loader.py`); prefer calling it over re-deriving this.
 
-When the scouted team's `public_id` slug is the key, the paired UUID key is the OTHER team's canonical UUID. Store it opportunistically (see UUID Opportunism below).
+⚠️ **A UUID-form opponent key is NOT the other team's canonical UUID -- do not store it in `teams.gc_uuid`.** Measured 2026-08-03: in 10 of 10 slug+UUID payloads the UUID key equalled `pregame_data.opponent_id` from `GET /events/{event_id}`, which in turn equalled the `root_team_id` of the scoring team's own opponent record (`GET /teams/{owner_gc_uuid}/opponent/{opponent_id}`) in 16 of 16 events checked. That is a **per-account local opponent-registry id**, a different namespace from `gc_uuid` (see CLAUDE.md). `GET /teams/{that UUID}` returned **404 in 16 of 16** cases, while the same call against four canonical `gc_uuid`s we hold returned 200 with the matching `public_id` **4 of 4** -- so the instrument works and the 404s are real. This is the E-211 `gc_uuid` contamination source; resolve `gc_uuid` through the `POST /search` bridge instead (`.claude/rules/gc-uuid-bridge.md`).
 
 ### Player UUID cross-referencing
 
@@ -153,7 +153,7 @@ Boxscore `stats[].player_id` = `players[].id` = step 2 roster `id`. Use this UUI
 
 ### UUID opportunism
 
-Save any UUID encountered during the scouting crawl to `teams.gc_uuid` (if column is currently NULL). The scouting chain does not require UUIDs to function, but opportunistically saving them enables future authenticated-path access. Never block the crawl waiting for UUID data.
+⚠️ **Retired 2026-08-03 -- do NOT save "any UUID encountered during the scouting crawl" to `teams.gc_uuid`.** The boxscore's UUID-form opponent key is a per-account local `root_team_id`, not a canonical `gc_uuid` (evidence and method in Boxscore keys above), and storing it is the E-211 contamination this rule caused. Only a UUID obtained from an authoritative resolution path -- the `POST /search` bridge filtered by `public_id`, or `progenitor_team_id` from `GET /teams/{team_id}/opponent/{opponent_id}` -- may be written to `teams.gc_uuid`. The scouting chain does not require UUIDs to function; never block the crawl waiting for UUID data.
 
 ---
 

@@ -18,12 +18,21 @@ response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-07"
-last_confirmed: "2026-03-07"
+last_confirmed: "2026-08-03"
 tags: [team, opponent]
 caveats:
   - >
     URL STRUCTURE: Uses /opponent/ (singular), not /opponents/ (plural). The singular
     form returns a specific opponent; the plural form (/opponents) returns the paginated list.
+  - >
+    WORKS FOR NON-MANAGED TEAMS (confirmed 2026-08-03): 200 OK with the full record
+    (is_hidden, name, owning_team_id, progenitor_team_id, root_team_id) for teams we
+    neither manage nor follow -- 34 of 36 attempts across 20+ scouted teams; the 2
+    non-200s were a bad input (a null opponent_id) and not an access refusal. This
+    makes it the only reachable source of the DUAL-ENTRY signal for a scouted team:
+    progenitor_team_id KEY PRESENT means the coach linked the opponent via GC team
+    lookup, key ABSENT means they typed it by hand. Test key presence, not truthiness.
+    The public schedule carries no such signal (see /public/teams/{public_id}/games).
   - >
     opponent_id IS root_team_id: The path parameter opponent_id must be the root_team_id
     from GET /teams/{team_id}/opponents -- NOT the progenitor_team_id.
