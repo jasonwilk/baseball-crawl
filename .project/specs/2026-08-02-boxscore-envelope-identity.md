@@ -1,7 +1,7 @@
 # Boxscore envelope identity — stop discarding the opponent
 
 **Date:** 2026-08-02 · **Source:** `.project/research/ingestion-fidelity-seed.md` §1
-**Status:** code landed; dev-DB backfill outstanding
+**Status:** COMPLETE — code committed (`10c32f3`), dev-DB backfill done 2026-08-03
 
 ## Goal
 
@@ -373,3 +373,34 @@ confirm which code path the CLI actually runs, and do **not** `--update-baseline
     a new hole. **Recorded as a known defensive gap for the operator to rule on, not
     silently closed.**
 - Gates: full suite **4409 passed, RC=0 @ 2026-08-03**.
+
+- **2026-08-03** — **Backfill steps 1–6 COMPLETE.** All figures stamped; none reused.
+  1. Backup `data/backups/app-2026-08-03T023142.db`, byte-size verified against source.
+  2. `user_team_access` = **0 @ 2026-08-03**, re-checked rather than trusting the stamped
+     value. Pre-existing (measured 0 on 2026-08-02, before this session), so the
+     grant-loss path was empty and no dump was needed.
+  3. BEFORE: **73 one-sided of 928 completed @ 2026-08-03**.
+  4. Affected scouted teams re-derived: **16 @ 2026-08-03** (matches the spec's figure);
+     **0** affected games had a NULL-`public_id` perspective team, so all were reachable.
+  5. 16 regenerations, ONE AT A TIME, count re-read between each. A rail was added beyond
+     the spec: abort if the count ever INCREASED. It never fired — **all 16 deltas ≤ 0**
+     (largest single −11; one team 0), rc=0 on all 16.
+  6. AFTER: **1 one-sided of 974 completed @ 2026-08-03.**
+  **The decrease is RECOVERY, not deletion** — checked explicitly, because a deleted game
+  leaves this query exactly the way a repaired one does. The denominator GREW: completed
+  games 928 → 974, `player_game_batting` 19,277 → **21,254 (+1,977)**,
+  `player_game_pitching` 4,378 → 4,826, `plays` 57,388 → 60,531, `teams` 475 → 487.
+  `users` 1 and `user_team_access` 0 both unchanged.
+- ⚠️ **This REFUTES the population claim this spec inherited from the seed.** The spec
+  argues zero is the wrong target because *"a genuinely one-sided game is the modal
+  opponent-scouting case."* The TARGET reasoning was right — we did not reach zero and
+  must not chase it — but **the population estimate behind it is wrong for this DB**: of
+  73 one-sided games, ~72 were DISCARDS, not genuine absences. The single residual is not
+  the predicted shape either: its empty side carries BOTH a `public_id` and a `gc_uuid`,
+  so it is not an opponent who never used GameChanger. Most likely a scored-but-empty
+  boxscore (envelope present, nothing charted) — legitimate and unrecoverable.
+  **Do not re-derive a "most one-sided games are genuine absences" claim from this spec.**
+- Confirming which it is needs a live API probe, which this spec puts out of scope
+  ("worth doing on a handful later"). One game is that handful — the natural follow-up.
+- **Status: this chunk is COMPLETE.** Code committed (`10c32f3`); dev-DB backfill done.
+  Prod is out of scope by the spec (standing sequence is rebuild → reset → re-scout).
