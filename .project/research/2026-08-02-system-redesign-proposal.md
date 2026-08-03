@@ -406,7 +406,13 @@ HOW WORK GETS DONE HERE
        never after (its fixes need reviewing too; proven 2026-08-02)
      codex review as a second opinion on request
    Docs-only chunks need no chain beyond the PII hook.
-6. Operator approves all commits. The [pii-hook] line must appear.
+6. Operator approves all commits. Before presenting a staged diff for
+   approval, run the PII scan on it (python3 src/safety/pii_scanner.py
+   --staged) -- the operator never reviews a diff that would bounce. Check
+   the scanned-file COUNT against the staged count: SKIP_PATHS makes the
+   scanner blind to whole trees (.claude/ among them), and skipped staged
+   files need a manual pass with a positive control. The [pii-hook] line
+   at commit time is the receipt, not the first check.
 7. Subagents: Explore for search, api-scout for GameChanger API archaeology,
    baseball-coach for coaching semantics, /code-review's fork for review.
    Don't delegate what a handful of tool calls finishes.

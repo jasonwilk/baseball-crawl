@@ -9,8 +9,13 @@ supplies the parsed boxscore dict and a matching :class:`GameSummaryEntry`
 Key data decisions
 ------------------
 - **ID mapping**: DB primary key is the ``event_id`` carried on the summary.
-- **Asymmetric boxscore keys**: own team key = public_id slug (alphanumeric, no
-  dashes); opponent key = UUID (lowercase hex with dashes, 36 chars).
+- **Boxscore keys are classified by IDENTITY, not shape**: each team's envelope
+  is keyed by that team's ``public_id`` slug when the team has a public
+  GameChanger presence and by its UUID otherwise -- so BOTH keys can be slugs.
+  Match keys against our own ``public_id`` / ``gc_uuid``; the other key is the
+  opponent.  The older "own = slug, opponent = UUID" shape rule silently
+  discarded the opponent's whole envelope whenever the opponent had also been
+  scored on GC.  See :meth:`GameLoader._detect_team_keys`.
 - **IP to ip_outs**: boxscore stores IP as float decimal innings (e.g. 3.333...
   = 3⅓ innings = 10 outs).  The schema stores ``ip_outs`` (integer outs).
   Convert: ``ip_outs = round(float(IP) * 3)``.
@@ -635,6 +640,30 @@ class GameLoader:
             )
             return LoadResult(errors=1)
 
+        # A multi-envelope payload carries BOTH sides. If EITHER side could not
+        # be named, the only way to proceed is to attribute envelopes by key
+        # shape and insertion order -- which loads one team's stats under the
+        # other's id. That misattribution is strictly worse than absence (it is
+        # the ordering hole this ladder exists to close), so refuse the payload
+        # and count the error rather than load a guess.
+        #
+        # The guard is deliberately SYMMETRIC. An unnamed OWN key is the more
+        # damaging direction, not the lesser one: it files our own envelope
+        # under the opponent's team id, so our report shows the other side's
+        # numbers. Counting the error also keeps a discarded envelope
+        # distinguishable from an opponent who never used GC scorekeeping,
+        # which is the modal and entirely legitimate case.
+        if len(raw) >= 2 and (own_key is None or opp_key is None):
+            logger.error(
+                "Boxscore for game %s carries %d team envelopes but the %s key "
+                "could not be identified; refusing to attribute stats by key "
+                "shape alone. (all_keys=%s)",
+                summary.event_id, len(raw),
+                "own-team" if own_key is None else "opponent",
+                list(raw.keys()),
+            )
+            return LoadResult(errors=1)
+
         # Past both parse guards: this payload will reach the dedup/redirect and
         # upsert stage, so whatever vouching it owes (its own id, or a redirect
         # entry onto a canonical row) is about to be recorded. Keyed on the
@@ -648,9 +677,13 @@ class GameLoader:
         # resolves to a DISTINCT team id -- by boxscore key/UUID, by name when
         # the opponent stat block is absent, or an "Unknown Opponent" sentinel
         # stub when truly unresolvable -- so a self-game (home == away) is never
-        # produced (E-245-04 / TN-6).  ``opp_data`` is already None whenever the
-        # boxscore lacks the opponent stat block (``opp_key`` is None); the
-        # opponent then simply has no per-player stat rows (truthful).
+        # produced (E-245-04 / TN-6).  ``opp_data`` is None whenever ``opp_key``
+        # is None, and past the guard above that means a SINGLE-envelope
+        # payload -- where it is truthful: the opponent was never scored on
+        # GameChanger, so there are no per-player rows to load.  A multi-
+        # envelope payload whose opponent key could not be named never reaches
+        # here; it was refused above rather than loaded with its opponent
+        # envelope silently dropped.
         own_team_id, opp_team_id = self._resolve_team_ids(
             summary, opp_key, opponent_name=opponent_name,
         )
@@ -777,10 +810,13 @@ class GameLoader:
         (``home_team_id == away_team_id``) is never produced (E-245-04 / TN-6):
 
         1. By the boxscore stat-block key / opponent UUID when present.
-        2. By NAME (``opponent_name``) when the opponent stat block is absent
-           (these opponents never used GC scorekeeping, so the boxscore carries
-           only the scouted team's key).  The opponent row gets no per-player
-           stat rows -- truthful, not fabricated.
+        2. By NAME (``opponent_name``) when the boxscore carries no opponent
+           stat block -- that opponent never used GC scorekeeping, so there are
+           simply no per-player stat rows to load (truthful, not fabricated).
+           A multi-envelope payload whose opponent key was PRESENT but could
+           not be classified does NOT reach here: ``_load_boxscore_data``
+           refuses it as an error, so a discarded envelope is never mistaken
+           for an opponent who was never scored.
         3. By an "Unknown Opponent" sentinel stub when truly unresolvable (no
            key, no UUID, no name) -- NEVER ``own_team_id``.
 
@@ -1121,10 +1157,29 @@ class GameLoader:
     def _detect_team_keys(self, raw: dict) -> tuple[str | None, str | None]:
         """Identify the own-team key and opponent key in a boxscore response.
 
-        Own team key = public_id slug (alphanumeric, no dashes, not 36 chars).
-        Opponent key = UUID (lowercase hex with dashes, 36 chars).
+        Classification is IDENTITY-based, not shape-based.  GameChanger keys a
+        team's envelope by that team's ``public_id`` slug when the team has a
+        public GameChanger presence and by its UUID otherwise -- so BOTH keys
+        can be slugs.  The older "our team is the slug, the opponent is the
+        UUID" inference therefore produced ``opp_key = None`` whenever the
+        opponent had also been scored on GameChanger, silently discarding the
+        opponent's entire batting and pitching envelope.
 
-        If all keys are UUIDs, fall back to matching the opponent_id.
+        Ladder, in order:
+
+        1. A key equal to our ``public_id`` (case-sensitive, as GC emits it) is
+           the own key.
+        2. Otherwise a key equal to our ``gc_uuid`` (case-insensitive) is the
+           own key.
+        3. Once one key is identified, any OTHER key is the opponent, whatever
+           its shape -- so a 2-key payload never yields ``opp_key = None``.
+        4. Only when neither identifier resolves does shape inference run, and
+           it logs a WARNING when it fires.
+
+        Identity also makes JSON insertion order irrelevant.  The former
+        ``slug_keys[0]`` pick selected by serialization order, so an all-slug
+        payload serialized opponent-first would have loaded the opponent's
+        stats as ours -- misattribution, strictly worse than absence.
 
         Args:
             raw: Top-level boxscore dict (keys are team identifiers).
@@ -1133,27 +1188,49 @@ class GameLoader:
             Tuple of ``(own_key, opp_key)``.  Either may be ``None`` if not found.
         """
         keys = list(raw.keys())
-        uuid_keys = [k for k in keys if is_gc_uuid(k)]
-        slug_keys = [k for k in keys if not is_gc_uuid(k)]
+        own_key: str | None = None
 
-        own_key: str | None = slug_keys[0] if slug_keys else None
-        opp_key: str | None = uuid_keys[0] if uuid_keys else None
+        # Rung 1: exact public_id match.
+        own_public_id = self._team_ref.public_id
+        if own_public_id:
+            own_key = next((k for k in keys if k == own_public_id), None)
 
-        # If all keys are UUIDs (opponent-vs-opponent data), pick own team by
-        # matching against the owned team's gc_uuid; the other is the opponent.
-        if own_key is None and len(uuid_keys) >= 2:
+        # Rung 2: gc_uuid match, compared CASE-FOLDED.  Every gc_uuid observed
+        # to date is lower-case, so the fold is defensive rather than known to
+        # be required -- it is kept because a stored/emitted casing difference
+        # would otherwise drop to rung 4 and SWAP own for opponent silently.
+        # Do not "simplify" it to rung 1's exact compare; a test pins the fold.
+        if own_key is None:
             owned_gc_uuid = self._team_ref.gc_uuid
-            if owned_gc_uuid is None:
-                logger.warning(
-                    "Cannot identify own team key in UUID-only boxscore: gc_uuid is None. "
-                    "own_key will be None."
-                )
-            else:
-                for k in uuid_keys:
-                    if k.lower() == owned_gc_uuid.lower():
-                        own_key = k
-                    else:
-                        opp_key = k
+            if owned_gc_uuid:
+                folded = owned_gc_uuid.lower()
+                own_key = next((k for k in keys if k.lower() == folded), None)
+
+        # Rung 3: the opponent is whatever else is in the payload.  The endpoint
+        # contract is exactly 2 keys; on a hypothetical 3+-key payload this takes
+        # the first other key and the rest are dropped, which the guard in
+        # _load_boxscore_data cannot catch (both keys come back non-None).
+        opp_key: str | None = None
+        if own_key is not None:
+            opp_key = next((k for k in keys if k != own_key), None)
+        elif keys:
+            # Rung 4: neither identifier resolved -- fall back to shape, which
+            # is a guess and is logged as one.  ``is_gc_uuid`` decides own-vs-
+            # opponent HERE and nowhere else, so its anchoring and IGNORECASE
+            # are load-bearing on this path only.  An EMPTY payload is not a
+            # fallback -- there is nothing to infer from, and the caller logs
+            # its own error -- so it skips the warning rather than raising a
+            # second alarm for one benign well-formed-but-empty 200.
+            uuid_keys = [k for k in keys if is_gc_uuid(k)]
+            slug_keys = [k for k in keys if not is_gc_uuid(k)]
+            own_key = slug_keys[0] if slug_keys else None
+            opp_key = uuid_keys[0] if uuid_keys else None
+            logger.warning(
+                "Boxscore key detection fell back to SHAPE inference: neither "
+                "public_id=%s nor gc_uuid=%s matched any envelope key. "
+                "own_key=%s opp_key=%s (all_keys=%s)",
+                own_public_id, self._team_ref.gc_uuid, own_key, opp_key, keys,
+            )
 
         logger.debug(
             "Boxscore key detection: own_key=%s opp_key=%s (all_keys=%s)",

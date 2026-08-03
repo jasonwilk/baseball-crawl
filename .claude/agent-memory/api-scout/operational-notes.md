@@ -14,7 +14,7 @@
 - **PLAYS URL param is `event_id`** (confirmed 2026-03-26 via fresh browser curl). `event_id` == `game_stream.game_id`, NOT `game_stream.id`. Our Python client was getting HTTP 500 because it used `game_stream.id`. Old doc caveat "NOT event_id" was wrong.
 - **Boxscore URL param**: CLAUDE.md says `event_id`. Operational notes previously said `game_stream.id` -- trust CLAUDE.md. Needs verification via live curl.
 - **Both endpoints share path pattern**: `/game-stream-processing/{event_id}/boxscore` and `/game-stream-processing/{event_id}/plays`
-- **Asymmetric team key format**: own team key = public_id slug; opponent key = UUID (same for both endpoints)
+- **Team key format** (corrected 2026-08-02): each key is that team's public_id slug or its UUID, depending on whether that TEAM has a public GC presence -- NOT own-vs-opponent (same for both endpoints). Both keys are slugs when the opponent was also scored on GC; classify by identity, never by shape.
 - **Plays `team_players`**: array of player objects (NOT nested dict keyed by UUID). Includes `number` (jersey number). Confirmed 2026-03-26.
 - **Boxscore groups**: `"lineup"` (batting: AB/R/H/RBI/BB/SO) and `"pitching"` (IP/H/R/ER/BB/SO)
 - Boxscore Accept: `application/vnd.gc.com.event_box_score+json; version=0.0.0`

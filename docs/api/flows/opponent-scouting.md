@@ -68,7 +68,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 **Input:** `id` from each game record in step 1 (this IS the `event_id` -- no bridge call needed)
 
 **Output:** Per-player batting and pitching lines for both teams. Key points:
-- Top-level keys are team identifiers: one `public_id` slug (no dashes), one UUID (with dashes). Detect via regex.
+- Top-level keys are team identifiers. Each is a `public_id` slug (no dashes) or a UUID (with dashes) depending on whether that TEAM has a public GC presence -- a slug + UUID pair is the common case, not the rule. Match the scouted team's `public_id` (then its `gc_uuid`) to find its key; the remaining key is the other team's. Do not detect by regex.
 - `players[]` array per team: `{id, first_name, last_name, number}` -- player identity lives here, not in stat entries.
 - `groups[category="lineup"]`: batting stats per player (`AB`, `R`, `H`, `RBI`, `BB`, `SO` main; sparse extras `2B`, `3B`, `HR`, `TB`, `HBP`, `SB`, `CS`, `E`).
 - `groups[category="pitching"]`: pitching stats per player (`IP`, `H`, `R`, `ER`, `BB`, `SO` main; sparse extras `WP`, `HBP`, `#P`, `TS`, `BF`).
@@ -78,7 +78,7 @@ How to go from an opponent's `public_id` to a complete scouting dataset: game sc
 - Cross-reference: match `stats[].player_id` with `players[].id` for player names (do not use boxscore's `players[]` in isolation -- use roster from step 2 as primary).
 
 **Edge cases:**
-- Asymmetric key detection: if key contains dashes → UUID (opponent); if no dashes → `public_id` slug (scouted team). See [boxscore endpoint doc](../endpoints/get-game-stream-processing-event_id-boxscore.md) for detection details.
+- Key detection is IDENTITY-based: the key equal to the scouted team's `public_id` (else its `gc_uuid`) is that team's; the remaining key is the other team's, whatever its form. Do NOT split on dashes -- an opponent that was also scored on GC gets a slug key too, and a shape check then reports no opponent key and drops that team's whole envelope. See [boxscore endpoint doc](../endpoints/get-game-stream-processing-event_id-boxscore.md) for detection details.
 - Both teams' stats (batting and pitching) are present in a single call. No separate call needed for the opponent.
 - Player UUID from boxscore `players[].id` matches `id` in step 2 roster. Use for cross-referencing.
 
@@ -122,19 +122,28 @@ For a typical high school team with 20--30 completed games: **22--32 API calls p
 
 Skip. If `opponent_links.public_id` is NULL, the scouting chain cannot proceed. The opponent must be resolved first via [opponent-resolution.md](opponent-resolution.md). About 14% of opponents require manual linking due to null `progenitor_team_id`. Do not block the overall crawl -- log the skip and continue to the next opponent.
 
-### Boxscore asymmetric keys
+### Boxscore keys (identity, not shape)
 
-The two top-level keys in the boxscore response are:
-- **Scouted team's key**: `public_id` slug (alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`)
-- **The other team's key**: UUID (with dashes, e.g., `"72bb77d8-REDACTED"`)
+The boxscore response has two top-level keys. Each is that team's `public_id` slug (alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`) when the team has a public GameChanger presence, and its UUID (with dashes, e.g., `"72bb77d8-REDACTED"`) otherwise.
 
-Detection algorithm:
+**Which form a key takes is a property of that TEAM, not of which side it is.** The scouted team's key is found by matching its `public_id` (then its `gc_uuid`); the remaining key is the other team's. A scouted-team-slug + opponent-UUID pair is the common case only because most scouted opponents were never scored on GC.
+
+Detection algorithm (identity, not shape):
 ```python
-import re
-UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
-own_key = next(k for k in boxscore if not UUID_RE.match(k))
-opp_key = next(k for k in boxscore if UUID_RE.match(k))
+# scouted_public_id / scouted_gc_uuid are OUR stored identifiers for the team
+# being scouted. Match one of them against the keys; the remaining key is the
+# other team's, whatever form it takes.
+keys = list(boxscore)
+own_key = next((k for k in keys if k == scouted_public_id), None)
+if own_key is None and scouted_gc_uuid:
+    own_key = next((k for k in keys if k.lower() == scouted_gc_uuid.lower()), None)
+opp_key = next((k for k in keys if k != own_key), None) if own_key else None
+# A 2-key payload that yields no own_key or no opp_key is UNCLASSIFIABLE.
+# Refuse it -- do NOT fall back to a slug-vs-UUID split, which attributes an
+# envelope by insertion order and can file one team's stats under the other.
 ```
+The canonical implementation is `GameLoader._detect_team_keys`
+(`src/gamechanger/loaders/game_loader.py`); prefer calling it over re-deriving this.
 
 When the scouted team's `public_id` slug is the key, the paired UUID key is the OTHER team's canonical UUID. Store it opportunistically (see UUID Opportunism below).
 

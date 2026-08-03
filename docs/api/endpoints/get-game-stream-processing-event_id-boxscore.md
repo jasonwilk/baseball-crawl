@@ -38,9 +38,14 @@ caveats:
     equals event_id (confirmed 2026-03-19) -- it is the public-endpoint equivalent
     of event_id from the authenticated flow.
   - >
-    ASYMMETRIC TOP-LEVEL KEYS: Own team key is the public_id slug (short alphanumeric,
-    no dashes); opponent key is a UUID (with dashes). Detect via regex or match against
-    known public_id from /me/teams.
+    TOP-LEVEL KEYS ARE NOT RELIABLY ASYMMETRIC (corrected 2026-08-02): each team's
+    envelope is keyed by that team's public_id slug when the team has a public
+    GameChanger presence, and by its UUID otherwise. A slug/UUID pair is the COMMON
+    case, not the rule -- when the opponent has also been scored on GC, BOTH keys are
+    slugs. Classify by IDENTITY (match a key against your own public_id, then your
+    gc_uuid; the other key is the opponent), NEVER by key shape. Shape-based detection
+    reads an all-slug payload as having no opponent key and discards the opponent's
+    entire batting and pitching envelope.
 related_schemas: []
 see_also:
   - path: /public/teams/{public_id}/games
@@ -94,11 +99,13 @@ No `gc-user-action` observed for this endpoint.
 
 ## Response
 
-Single JSON object. Top-level keys are team identifiers (exactly 2 -- one per team). Keys are asymmetric:
-- **Own team:** `public_id` slug (short alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`)
-- **Opponent:** UUID (with dashes, e.g., `"f0e73e42-f248-402b-8171-524b4e56a535"`)
+Single JSON object. Top-level keys are team identifiers (exactly 2 -- one per team). A key is either:
+- a `public_id` slug (short alphanumeric, no dashes, e.g., `"xXxXxXxXxXxX"`) -- used for a team that has a public GameChanger presence, or
+- a UUID (with dashes, e.g., `"f0e73e42-f248-402b-8171-524b4e56a535"`) -- used otherwise.
 
-Detect which key is which: check if the key matches UUID format (contains dashes) or slug format (alphanumeric only, no dashes).
+**Which form a key takes is a property of that TEAM, not of which side it is.** A slug (own) + UUID (opponent) pair is common, because most scouted opponents were never scored on GC -- but an opponent that *was* scored on GC gets a slug key too, so both keys are slugs.
+
+Detect which key is which by **identity, not shape**: find the key equal to your own `public_id`, else the key equal to your own `gc_uuid`; the remaining key is the opponent's, whatever its form. A shape-based check ("the one with dashes is the opponent") silently yields *no opponent key* on an all-slug payload and drops that team's whole envelope; it also picks the own key by JSON insertion order, which can load the opponent's stats as yours.
 
 ### Team Entry Structure
 
@@ -172,7 +179,7 @@ Each group contains:
 
 ## Known Limitations
 
-- Asymmetric top-level keys require detection logic. Match against known `public_id` from `/me/teams` or detect by UUID regex.
+- Top-level keys require detection logic, and it must be IDENTITY-based: match a key against your own `public_id`, else your own `gc_uuid`; the other key is the opponent. A UUID regex must NOT be used to decide which side is which (both keys are slugs when the opponent was also scored on GC) -- it is only a last-resort tiebreak when neither identifier is known.
 - `IP` is stored as **float decimal innings** (e.g., `3.3333...` for 3⅓ IP, `3.6666...` for 3⅔ IP). CORRECTION: earlier docs incorrectly stated IP was stored as integer outs. Confirmed float from /tmp/lsw-boxscore.json (2026-03-12).
 - `is_primary` field is only in the lineup group, not pitching group.
 - `player_text` encoding may be empty for subs.

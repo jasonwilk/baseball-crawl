@@ -83,7 +83,7 @@ Detailed parsing guidance for each GameChanger API endpoint discovered during th
 - Returns JSON object (NOT array); top-level keys are team identifiers (exactly 2)
 - Raw sample: `data/raw/boxscore-sample.json` (13 KB, both teams' batting and pitching lines)
 - **Critical ID mapping**: URL param is `game_stream.id` from game-summaries, NOT `event_id`, NOT `game_stream.game_id`. Must crawl game-summaries first to get this ID.
-- **Asymmetric top-level keys**: Own team key = `public_id` slug (short alphanumeric, no dashes); opponent key = UUID (with dashes). Detect via regex or match against known `public_id` from `/me/teams`.
+- **Top-level keys are classified by IDENTITY, not shape** (corrected 2026-08-02): each key is that team's `public_id` slug or its UUID depending on whether that TEAM has a public GC presence -- so BOTH keys are slugs when the opponent was also scored on GC. Match a key against our own `public_id`, then our `gc_uuid`; the remaining key is the opponent's. A UUID regex must NOT decide which side is which -- shape is a last-resort tiebreak only, and shape-based detection silently discarded the opponent's entire envelope on all-slug payloads.
 - **Player names embedded**: `players` array per team has `id`, `first_name`, `last_name`, `number` (string). No join to `/players` needed for display.
 - **Two stat groups**: `groups` array with `category: "lineup"` (batting) and `category: "pitching"`.
 - **Main stats** (always present per player): Batting: `AB`, `R`, `H`, `RBI`, `BB`, `SO`. Pitching: `IP`, `H`, `R`, `ER`, `BB`, `SO`. All int.
@@ -102,7 +102,7 @@ Detailed parsing guidance for each GameChanger API endpoint discovered during th
 - Returns JSON object (NOT array); top-level keys: `sport` (always "baseball"), `team_players` (roster dict), `plays` (array)
 - Raw sample: `data/raw/game-plays-sample.json` (37 KB, 58 plays, 6-inning game)
 - **Critical ID mapping**: Same as boxscore -- URL param is `game_stream.id` from game-summaries
-- **Asymmetric `team_players` keys**: Same slug/UUID pattern as boxscore top-level keys. Reuse boxscore key-detection logic.
+- **`team_players` keys**: same per-team slug-or-UUID pattern as boxscore top-level keys (NOT a side marker). Reuse the boxscore's identity-based key detection, never a shape check. The plays path never needed the split at all: `plays_parser.parse_game` does not read `team_players` (only its docstring names the key).
 - **Player UUID template pattern**: All player references are `${uuid}` tokens embedded in template strings. Must regex-extract (pattern: `\$\{([0-9a-f-]{36})\}`) and resolve against `team_players` dict.
 - **`at_plate_details`** (array of template objects): Pitch-by-pitch sequence ("Ball 1", "Strike 1 looking", "Foul", "In play") plus in-AB events (stolen bases, balks, pickoff attempts, wild pitches, lineup changes, courtesy runners). Each element has a single `template` string field.
 - **`final_details`** (array of template objects): Outcome narration ("${uuid} singles on a hard ground ball to shortstop ${uuid}"). May contain multiple entries for multi-event plays (runner scoring, advancing, errors).

@@ -109,10 +109,12 @@ The response has three top-level keys:
 
 ### `team_players`
 
-Roster dict used to resolve `${uuid}` tokens in template strings. Keys are team identifiers with an **asymmetric format**:
+Roster dict used to resolve `${uuid}` tokens in template strings. Each key is a team identifier in one of two forms:
 
-- **Own team**: Short alphanumeric `public_id` slug (e.g., `"xXxXxXxXxXxX"`)
-- **Opponent team**: UUID string (e.g., `"00000000-0000-0000-0000-000000000002"`)
+- a short alphanumeric `public_id` slug (e.g., `"xXxXxXxXxXxX"`) -- for a team with a public GameChanger presence, or
+- a UUID string (e.g., `"00000000-0000-0000-0000-000000000002"`) -- otherwise.
+
+**The form is a property of that TEAM, not of which side it is** (corrected 2026-08-02). Own-slug + opponent-UUID is the common pairing, not the rule: when the opponent was also scored on GC, both keys are slugs. Match your own `public_id` (then `gc_uuid`) to find your side; the remaining key is the opponent's.
 
 Each key maps to an **array** of player objects — NOT a nested dict keyed by player UUID:
 

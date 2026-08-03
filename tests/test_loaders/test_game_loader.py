@@ -9,7 +9,7 @@ Tests cover all acceptance criteria:
 - AC-3: LoadResult returned with correct counts
 - AC-4: Unknown player_id gets stub row + WARNING log
 - AC-5: Same game across multiple team directories produces same DB state
-- AC-6: Asymmetric key handling (slug vs UUID)
+- AC-6: Team-key handling (keys are classified by identity, not slug-vs-UUID shape)
 - AC-7: home_team_id / away_team_id set via home_away field
 - AC-8: FK prerequisite rows (teams, seasons) created automatically
 """
@@ -513,13 +513,17 @@ def test_same_game_from_two_teams_is_idempotent(db: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-6: Asymmetric key handling (slug vs UUID)
+# AC-6: Team-key handling. Keys are classified by IDENTITY -- a key's slug-vs-UUID
+# form is a property of that TEAM (does it have a public GC presence?), not a marker
+# of which side it is. The cases below happen to use the common slug+UUID pairing;
+# the all-slug cases live in the envelope-identity section further down.
 # ---------------------------------------------------------------------------
 
 
 def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection) -> None:
-    """AC-6: Own team identified by public_id slug (alphanumeric, no dashes)."""
-    # Own team uses a slug, opponent uses UUID (default boxscore)
+    """AC-6: Own team identified by MATCHING its public_id, not by the key's shape."""
+    # The common pairing: our team has a public GC presence (slug key), the
+    # opponent does not (UUID key). Identity is what selects our key here.
     boxscore = _make_boxscore(own_key="y24fFdnr3RAN", opp_key=_OPP_TEAM_ID)
     loader = _make_loader(db)
 
@@ -869,12 +873,17 @@ def test_detect_team_keys_uuid_only_gc_uuid_none(db: sqlite3.Connection) -> None
 
 
 # ---------------------------------------------------------------------------
-# E-247-03 AC-4: HARD GATE -- boxscore key classification must stay
-# byte-identical after _UUID_RE was swapped for is_gc_uuid. A botched anchor or
-# a dropped IGNORECASE flag would flip own-vs-opponent classification and pull
-# the wrong team's boxscore. This pins the uuid_keys/slug_keys split (which
-# drives own_key/opp_key) over a representative key set, calling the real
-# _detect_team_keys so it exercises whichever predicate the source uses.
+# E-247-03 AC-4: originally a HARD GATE on the uuid_keys/slug_keys split, pinning
+# is_gc_uuid's anchoring and IGNORECASE after _UUID_RE was folded into it.
+#
+# ⚠ It NO LONGER pins that. Since classification became identity-based, all three
+# cases below resolve at rung 1 (fixture public_id) or rung 2 (fixture gc_uuid),
+# so is_gc_uuid is never called here -- mutation-proven: stub the predicate to
+# always-False and these three still pass. The cases are kept because they are
+# the E-247 expected values and MUST NOT be re-baselined (an expected value
+# needing an edit means the ladder is wrong, not the gate). The predicate's
+# anchoring/IGNORECASE are re-pinned where they still decide anything:
+# test_shape_fallback_classification_is_driven_by_the_uuid_predicate.
 # ---------------------------------------------------------------------------
 
 
@@ -911,6 +920,251 @@ def test_detect_team_keys_classification_byte_identical(
 ) -> None:
     """AC-4: own/opponent key split is driven only by the UUID predicate."""
     loader = _make_loader(db)
+    raw = {k: {} for k in raw_keys}
+
+    own_key, opp_key = loader._detect_team_keys(raw)
+
+    assert own_key == expected_own
+    assert opp_key == expected_opp
+
+
+# ---------------------------------------------------------------------------
+# Boxscore envelope identity: an opponent WITH a public GameChanger presence is
+# keyed by a public_id slug too, so "our team is the slug, the opponent is the
+# UUID" left opp_key None and discarded the opponent's whole envelope.
+# ---------------------------------------------------------------------------
+
+_OPP_TEAM_SLUG = "z81QpLmv7BXK"      # opponent that also has a public GC presence
+_UNRELATED_SLUG = "q47TvBnc8LWs"     # matches neither our public_id nor our gc_uuid
+
+
+def _batting_team_id(db: sqlite3.Connection, player_id: str) -> int | None:
+    row = db.execute(
+        "SELECT team_id FROM player_game_batting WHERE player_id = ?", (player_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def test_all_slug_payload_splits_by_public_id(db: sqlite3.Connection) -> None:
+    """An all-slug 2-key payload splits by IDENTITY, and the opponent is read."""
+    loader = _make_loader(db)
+    boxscore = _make_boxscore(own_key=_OWN_TEAM_SLUG, opp_key=_OPP_TEAM_SLUG)
+
+    own_key, opp_key = loader._detect_team_keys(boxscore)
+    assert own_key == _OWN_TEAM_SLUG
+    assert opp_key == _OPP_TEAM_SLUG, "opponent envelope must not be dropped"
+
+    result = _load_game(loader, boxscore)
+    assert result.errors == 0
+
+    own_team = _batting_team_id(db, _PLAYER_OWN_1)
+    opp_team = _batting_team_id(db, _PLAYER_OPP_1)
+    assert own_team == loader._team_ref.id
+    assert opp_team is not None, "opponent batting rows must be loaded"
+    assert opp_team != own_team
+
+
+def test_all_slug_payload_opponent_serialized_first(db: sqlite3.Connection) -> None:
+    """Insertion order is irrelevant once classification is identity-based.
+
+    ``own_key = slug_keys[0]`` picked by JSON insertion order, so an all-slug
+    payload serialized opponent-first loaded the opponent's stats AS OURS --
+    misattribution, strictly worse than absence.
+    """
+    loader = _make_loader(db)
+    ordered = _make_boxscore(own_key=_OWN_TEAM_SLUG, opp_key=_OPP_TEAM_SLUG)
+    boxscore = dict(reversed(list(ordered.items())))
+    assert list(boxscore)[0] == _OPP_TEAM_SLUG, "precondition: opponent key is first"
+
+    own_key, opp_key = loader._detect_team_keys(boxscore)
+    assert own_key == _OWN_TEAM_SLUG
+    assert opp_key == _OPP_TEAM_SLUG
+
+    _load_game(loader, boxscore)
+
+    own_team = _batting_team_id(db, _PLAYER_OWN_1)
+    opp_team = _batting_team_id(db, _PLAYER_OPP_1)
+    assert own_team == loader._team_ref.id
+    assert opp_team is not None
+    assert opp_team != loader._team_ref.id, "opponent stats must not load as ours"
+
+
+def test_rung_two_matches_gc_uuid_across_a_casing_difference(
+    db: sqlite3.Connection,
+) -> None:
+    """Rung 2 compares gc_uuid CASE-FOLDED; rung 1 compares public_id exactly.
+
+    Nothing else pins the fold. Swapping rung 2 to rung 1's exact compare leaves
+    the whole suite green, yet on a payload keyed by our UUID in the other casing
+    it drops to rung 4 and SWAPS own/opponent at ``errors == 0`` -- every stat
+    filed under the wrong team, reported as ``completed``.
+    """
+    stored_uuid = _OPP_TEAM_ID.upper()
+    loader = _make_loader(db, gc_uuid=stored_uuid)
+    # Our public_id is absent from the payload, so rung 1 cannot fire; our
+    # envelope is keyed by the lower-case form of the UUID we stored upper-case.
+    raw = {_OPP_TEAM_ID.lower(): {}, _OPP_TEAM_SLUG: {}}
+
+    own_key, opp_key = loader._detect_team_keys(raw)
+
+    assert own_key == _OPP_TEAM_ID.lower(), "rung 2 must match across casing"
+    assert opp_key == _OPP_TEAM_SLUG
+
+
+def test_shape_fallback_fires_and_warns_when_no_identifier_matches(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Shape inference survives only as a last resort, and says so at WARNING."""
+    import logging
+
+    loader = _make_loader(db)
+    raw = {_UNRELATED_SLUG: {}, _OPP_TEAM_ID: {}}
+
+    with caplog.at_level(
+        logging.WARNING, logger="src.gamechanger.loaders.game_loader"
+    ):
+        own_key, opp_key = loader._detect_team_keys(raw)
+
+    assert own_key == _UNRELATED_SLUG
+    assert opp_key == _OPP_TEAM_ID
+    assert "SHAPE inference" in caplog.text
+
+
+def _stat_row_count(db: sqlite3.Connection) -> int:
+    batting = db.execute("SELECT COUNT(*) FROM player_game_batting").fetchone()[0]
+    pitching = db.execute("SELECT COUNT(*) FROM player_game_pitching").fetchone()[0]
+    return batting + pitching
+
+
+def test_unnamed_opponent_key_refuses_rather_than_guessing(
+    db: sqlite3.Connection,
+) -> None:
+    """A 2-envelope payload yielding no opp_key is an ERROR, and loads NOTHING.
+
+    Two slug keys, neither of them ours: no identity match AND no shape split.
+    Proceeding would attribute an envelope by insertion order, which is the
+    misattribution this ladder exists to close -- so the payload is refused,
+    not loaded with the opponent silently dropped.
+    """
+    loader = _make_loader(db)
+    boxscore = _make_boxscore(own_key=_UNRELATED_SLUG, opp_key=_OPP_TEAM_SLUG)
+
+    _, opp_key = loader._detect_team_keys(boxscore)
+    assert opp_key is None
+
+    result = _load_game(loader, boxscore)
+    assert result.errors == 1
+    assert _stat_row_count(db) == 0, "no stats may be attributed on a guess"
+    assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 0
+    # The refusal must WITHHOLD the vouch. `processed_event_ids` is what
+    # ScoutingLoader's `boxscores_complete` gate reads; if a refused game
+    # vouched for itself, that gate flips True and the game-grain retire is
+    # free to HARD-DELETE the canonical games row and its whole child surface.
+    # This pins the guard's PLACEMENT above the vouch, not just its verdict.
+    assert _EVENT_ID not in loader.processed_event_ids
+
+
+def test_unnamed_own_key_refuses_rather_than_guessing(
+    db: sqlite3.Connection,
+) -> None:
+    """The guard is SYMMETRIC: an unnamed OWN key is the more damaging direction.
+
+    Two UUID keys, neither ours. Shape inference names an opponent but not us,
+    so our own envelope would be filed under the OPPONENT's team id -- and with
+    a one-sided guard it would do so at ``errors == 0``, which the stage
+    classifier reports as ``completed``.
+    """
+    loader = _make_loader(db)
+    other_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    boxscore = _make_boxscore(own_key=other_uuid, opp_key=_OPP_TEAM_ID)
+
+    own_key, opp_key = loader._detect_team_keys(boxscore)
+    assert own_key is None
+    assert opp_key is not None
+
+    result = _load_game(loader, boxscore)
+    assert result.errors == 1
+    assert _stat_row_count(db) == 0, "our envelope must not be filed as the opponent's"
+    # Same vouch-withholding invariant as the opponent-side refusal above.
+    assert _EVENT_ID not in loader.processed_event_ids
+
+
+def test_empty_payload_does_not_report_a_shape_fallback(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A well-formed-but-empty 200 has nothing to infer from -- one alarm, not two."""
+    import logging
+
+    loader = _make_loader(db)
+
+    with caplog.at_level(
+        logging.WARNING, logger="src.gamechanger.loaders.game_loader"
+    ):
+        own_key, opp_key = loader._detect_team_keys({})
+
+    assert (own_key, opp_key) == (None, None)
+    assert "SHAPE inference" not in caplog.text
+
+
+def _make_unmatched_loader(db: sqlite3.Connection) -> GameLoader:
+    """Loader whose stored identifiers match NEITHER key in the payloads below.
+
+    Forces the rung-4 shape fallback, which after the identity ladder is the
+    ONLY path where ``is_gc_uuid`` still decides own-vs-opponent.
+    """
+    from src.gamechanger.types import TeamRef
+
+    stale_uuid = "stale-uuid-absent-from-payload"
+    stale_slug = "sTaLeSlUg999"
+    pk = _insert_own_team(db, gc_uuid=stale_uuid, public_id=stale_slug)
+    loader = GameLoader(
+        db, owned_team_ref=TeamRef(id=pk, gc_uuid=stale_uuid, public_id=stale_slug)
+    )
+    ensure_season_row(db, loader._season_id)
+    return loader
+
+
+@pytest.mark.parametrize(
+    "raw_keys, expected_own, expected_opp",
+    [
+        # Canonical lowercase UUID opponent + public_id slug own key.
+        (
+            ["y24fFdnr3RAN", "16d38cf9-4f73-438c-83e4-1c28fbb23628"],
+            "y24fFdnr3RAN",
+            "16d38cf9-4f73-438c-83e4-1c28fbb23628",
+        ),
+        # Uppercase UUID must still classify as a UUID (re.IGNORECASE): if the
+        # flag were dropped, this key would be read as a second slug and the
+        # payload would be refused as unclassifiable.
+        (
+            ["y24fFdnr3RAN", "16D38CF9-4F73-438C-83E4-1C28FBB23628"],
+            "y24fFdnr3RAN",
+            "16D38CF9-4F73-438C-83E4-1C28FBB23628",
+        ),
+        # A dashed-but-non-canonical key (wrong group lengths) is NOT a UUID and
+        # must be classified as the slug/own key -- full ^...$ anchoring.
+        (
+            ["team-uuid-jv-001", "16d38cf9-4f73-438c-83e4-1c28fbb23628"],
+            "team-uuid-jv-001",
+            "16d38cf9-4f73-438c-83e4-1c28fbb23628",
+        ),
+    ],
+)
+def test_shape_fallback_classification_is_driven_by_the_uuid_predicate(
+    db: sqlite3.Connection,
+    raw_keys: list[str],
+    expected_own: str,
+    expected_opp: str,
+) -> None:
+    """The UUID predicate's anchoring and IGNORECASE stay load-bearing.
+
+    ``test_detect_team_keys_classification_byte_identical`` above no longer
+    exercises ``is_gc_uuid`` at all -- the identity ladder resolves all three of
+    its cases at rung 1 or rung 2, so that gate passes even with the predicate
+    stubbed to always-False. This test re-pins the same key sets on the ONE path
+    where the predicate still decides: the rung-4 shape fallback.
+    """
+    loader = _make_unmatched_loader(db)
     raw = {k: {} for k in raw_keys}
 
     own_key, opp_key = loader._detect_team_keys(raw)

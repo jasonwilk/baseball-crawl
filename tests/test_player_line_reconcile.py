@@ -505,10 +505,13 @@ def test_half_populated_mirror_empty_own_block_is_not_retired(
     and deletes all three live OWN lines.
 
     Worth testing separately rather than assuming symmetry: own and opponent are
-    NOT interchangeable in this code path (own resolves from the slug key,
-    opponent from a UUID key, and they take different branches through
-    ``_resolve_team_ids``), so a fix that happened to special-case one side
-    would pass the primary test and fail here.
+    NOT interchangeable in this code path -- they take different branches through
+    ``_resolve_team_ids`` (own is the loader's own ``TeamRef``; the opponent is
+    resolved by identifier, then name, then a sentinel stub) -- so a fix that
+    happened to special-case one side would pass the primary test and fail here.
+    The branch split is NOT slug-vs-UUID: ``_detect_team_keys`` classifies by
+    IDENTITY, and both keys are slugs when the opponent was also scored on GC.
+    This fixture happens to use a slug own key, which is the common pairing.
     """
     team = _insert_team(db)
     own_full = _team_block(["p-1", "p-2", "p-3"])
