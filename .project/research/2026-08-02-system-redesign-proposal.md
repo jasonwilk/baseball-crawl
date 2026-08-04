@@ -394,9 +394,11 @@ just ask; skip to step 4 with "small change: no spec".
                  (≤1 page: goal, files, out-of-scope, verification
                  commands, progress log; person names never appear)
   2 SPEC-REVIEW  codex spec review (mandatory when big or destructive)
-  3 EXECUTE      FRESH session, from the spec. The spec, not the chat,
-                 carries state. Leave at boundaries: context bar yellow or
-                 two failed corrections → update progress log, step 9.
+  3 EXECUTE      FRESH session, from the spec. A spec is a CLAIM -- audit
+                 it against the repo before building on it. The spec, not
+                 the chat, carries state. Leave at boundaries: context bar
+                 yellow or two failed corrections → update progress log,
+                 step 9.
   4 VERIFY       the spec's named commands; code chunks (src/tests/
                  migrations) need the FULL suite green. No green, no done.
   5 REVIEW       /code-review; add /security-review on auth/serving/PII/
@@ -443,6 +445,9 @@ F. The per-3-chunk audit also does housekeeping: every spec in
    .project/specs/ must read COMPLETE, PARKED, or be owned by a live
    chunk -- anything else gets a decision; and any session older than
    the last audit gets closed.
+G. A clean result counts only with a POSITIVE CONTROL: prove the
+   instrument can fail before trusting its pass. A scan, probe, or
+   gate that cannot be shown failing proves nothing.
 ```
 
 ---
