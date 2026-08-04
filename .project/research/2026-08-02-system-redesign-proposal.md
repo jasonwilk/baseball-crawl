@@ -453,7 +453,9 @@ H. Worktrees are ISOLATION, not ceremony: use one only when this
    session cannot safely write the shared checkout (backgrounded, or
    a sibling session is writing). Enter → commit → land on main →
    remove worktree and branch, all in the same session. Never park
-   work in one.
+   work in one. Branches are worktree PLUMBING (a worktree needs its
+   own HEAD), never workflow: this repo is trunk-based, main is the
+   only long-lived branch, no feature branches or PRs.
 ```
 
 ---
