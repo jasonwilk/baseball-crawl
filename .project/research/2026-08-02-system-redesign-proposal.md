@@ -411,9 +411,15 @@ just ask; skip to step 4 with "small change: no spec".
   7 APPROVE      operator reads the staged diff. Stage by explicit PATH,
                  never add -A; re-diff after staging.
   8 COMMIT       the [pii-hook] line is the receipt, not the first check.
-  9 HANDOFF      what landed / what's carried and where it's written /
-                 the exact next-session prompt / literal last line:
-                 "Type /clear now, then paste the prompt above."
+  9 HANDOFF      flip the spec's Status line BEFORE staging, so it rides
+                 the chunk's own commit: "COMPLETE (this commit)" or
+                 "PARKED + why" -- no hash needed, git log on the spec
+                 file supplies it. Only post-commit steps (a backfill, a
+                 migration run) earn a second small results commit, and
+                 THAT one cites hashes. Then: what landed / what's
+                 carried and where / the exact next-session prompt /
+                 literal last line: "Type /clear now, then paste the
+                 prompt above."
  10 CLEAR        operator types /clear, on a clean tree or a written
                  progress note. A fork is never a substitute.
 
@@ -432,6 +438,10 @@ E. Lessons go to memory; a lesson becomes a rule only after it bites
    twice, promoted at the per-3-chunk audit, never mid-flight.
    Destructive seams stay in CLAUDE.md: report generation DELETES;
    purge-scouting wipes 20 tables.
+F. The per-3-chunk audit also does housekeeping: every spec in
+   .project/specs/ must read COMPLETE, PARKED, or be owned by a live
+   chunk -- anything else gets a decision; and any session older than
+   the last audit gets closed.
 ```
 
 ---
