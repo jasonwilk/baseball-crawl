@@ -419,7 +419,9 @@ just ask; skip to step 4 with "small change: no spec".
   7 APPROVE      operator reads the staged diff. Stage by explicit PATH,
                  never add -A; re-diff after staging.
   8 COMMIT       the [pii-hook] line is the receipt, not the first check.
-  9 HANDOFF      flip the spec's Status line BEFORE staging, so it rides
+  9 HANDOFF      enumerate every spec stub created this session, each
+                 with a one-line "why you should care". Flip the spec's
+                 Status line BEFORE staging, so it rides
                  the chunk's own commit: "COMPLETE (this commit)" or
                  "PARKED + why" -- no hash needed, git log on the spec
                  file supplies it. Only post-commit steps (a backfill, a
