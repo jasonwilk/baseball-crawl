@@ -394,7 +394,12 @@ just ask; skip to step 4 with "small change: no spec".
                  interview → .project/specs/<date>-<slug>.md (≤1 page:
                  goal, files, out-of-scope, verification commands,
                  progress log; person names never appear)
-  2 SPEC-REVIEW  codex spec review (mandatory when big or destructive)
+  2 SPEC-REVIEW  mandatory when big or destructive. HOW: headless
+                 codex exec against the spec file ("adversarially review
+                 this spec: <path> -- check claims against the repo").
+                 The legacy codex-spec-review skill needs an epic dir;
+                 do not use it. Skip only if this spec was already
+                 codex-reviewed at planning -- and cite that pass.
   3 EXECUTE      FRESH session, from the spec. A spec is a CLAIM -- audit
                  it against the repo before building on it. The spec, not
                  the chat, carries state. Leave at boundaries: context bar
