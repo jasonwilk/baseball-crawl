@@ -37,7 +37,27 @@ When you have a team's `public_id` (the slug used in public endpoints) but need 
 
 The bridge also runs in reverse. When you have a team's `gc_uuid` (UUID) but need its `public_id` (for public endpoints or report generation):
 
-- **Use `GET /teams/{gc_uuid}`** -- it returns the `public_id` directly. Verified 2026-06-12 to work for **non-managed** teams (you need only follow/fan access, not management).
+- **Use `GET /teams/{gc_uuid}`** -- it returns the `public_id` directly. **Association is not the gate.** It works for teams the account neither manages nor follows (verified 2026-06-12, re-verified 2026-08-03/04), so the earlier "you need only follow/fan access" wording overstated the requirement.
+
+### ⚠ `POST /search` returns TEAMS **and** ORGANIZATIONS -- filter on the envelope `type`
+
+**The single most important thing about the forward bridge.** A search hit's **envelope** carries `type` ∈ `{"team", "organization"}`. Feeding an organization's id to `GET /teams/{id}` **404s, because an organization is not a team** (2026-08-04).
+
+```python
+hits = search_teams_by_name(client, name)
+teams = [h for h in hits if h.get("type") == "team"]      # envelope type -- REQUIRED
+```
+
+- **Read the ENVELOPE `type`, not `result.type`.** `result.type` is present **only on organizations** and absent on teams, so testing it inverts the check.
+- **Orgs are not marginal:** **15.5%** of all search hits and **19.5%** of baseball hits (n=599).
+- **`public_id` does NOT discriminate** -- organizations carry one (93/93). Neither do `season`, `avatar_url`, or `location`. **Filtering hits by `public_id` alone can select an organization**, and an org `public_id` fed to the public pipeline 404s (3/3 measured).
+- Coextensive symptoms, usable as a cross-check but not the reason: `number_of_players` is null 93/93 on orgs and non-null 506/506 on teams; `staff` is present 506/506 on teams and null 93/93 on orgs.
+- **Predictive power:** on a stratified 58-org / 86-team set, **58/58 orgs 404 and 86/86 teams 200** (PPV/NPV 1.00). Honest bound: no counterexample yet is not proof -- the rule of three puts a ~5.2% / ~3.5% 95% ceiling on the error rate.
+- **NOT dead ids, NOT transience** (both refuted): the org ids return populated `/opponents` registries with identical counts ~5h apart, and `GET /organizations/{id}` returns **200 on 8/8** of them (vs 404 on 3/3 real teams, so the instrument discriminates). `GET /teams/{org_id}/opponents` even serves a byte-identical registry to `GET /organizations/{org_id}/opponents` (2/2) -- **the `/teams/` prefix serves org ids without validating entity class**, which is exactly why these ids look alive right up until you need team fields.
+
+**So a stored `gc_uuid` that 404s is usually not "dead" -- it is the WRONG ENTITY CLASS**, and that is detectable at resolution time from a field already in the search response, at zero extra cost.
+
+  - **The narrow claim the evidence does support:** a `progenitor_team_id` taken from an opponents registry resolves reliably -- **18/18** and **20/20** on two independent samples. Registry progenitors are teams.
 - **Do NOT use `GET /teams/{team_id}/public-team-profile-id`** for non-managed teams -- it returns **403** unless you manage the team. It is the wrong tool for opponent resolution.
 
 This reverse path is the rung-(a) auto-resolution mechanism in the report-generation and (future) scheduled-report flows: an authenticated opponents-list entry carrying a `progenitor_team_id` (its `gc_uuid`) resolves to a `public_id` via `GET /teams/{progenitor_team_id}`, which then feeds the public scouting pipeline.

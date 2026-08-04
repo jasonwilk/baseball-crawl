@@ -120,7 +120,7 @@ For a typical high school team with 20--30 completed games: **22--32 API calls p
 
 ### Opponents without `public_id`
 
-Skip. If `opponent_links.public_id` is NULL, the scouting chain cannot proceed. The opponent must be resolved first via [opponent-resolution.md](opponent-resolution.md). About 14% of opponents require manual linking due to null `progenitor_team_id`. Do not block the overall crawl -- log the skip and continue to the next opponent.
+Skip. If `opponent_links.public_id` is NULL, the scouting chain cannot proceed. The opponent must be resolved first via [opponent-resolution.md](opponent-resolution.md). **A median ~30-38% of a team's opponents require manual linking** because they carry no `progenitor_team_id` (the key is omitted, not null). **Per-team this ranges 0-100%** across two 2026-08 samples (teams only). Plan around that variance rather than a single rate; see [opponent-resolution.md](opponent-resolution.md) for why the record-weighted aggregate (~41% teams-only) is leverage-dominated and misleading as a criterion. Do not block the overall crawl -- log the skip and continue to the next opponent.
 
 ### Boxscore keys (identity, not shape)
 
@@ -201,7 +201,7 @@ If the public `/games` endpoint proves insufficient (e.g., very large game histo
 
 **When to use:** Only if public `/games` is insufficient. The public path is preferred for scouting because it requires no UUID and no auth for the schedule step.
 
-**Note:** This fallback requires the opponent's `progenitor_team_id` (UUID), which may not always be available (null for ~14% of opponents).
+**Note:** This fallback requires the opponent's `progenitor_team_id` (UUID), which is **absent on a median ~30-38% of a team's opponent records and ranges 0-100% by team** (2026-08, teams only — the key is omitted, not null, so test key presence).
 
 ---
 

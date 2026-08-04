@@ -39,6 +39,17 @@ last_confirmed: "2026-07-25"
 tags: [search, team]
 caveats:
   - >
+    HETEROGENEOUS RESULT SET -- FILTER ON THE ENVELOPE type (2026-08-04): hits are
+    NOT all teams. hits[].type is "team" OR "organization"; organizations are 15.5%
+    of all hits and 19.5% of baseball hits (n=599). Feeding an organization's
+    result.id to GET /teams/{id} returns 404 (58/58 orgs 404, 86/86 teams 200 on a
+    stratified set). public_id does NOT discriminate -- organizations carry one
+    (93/93) -- and neither do season, avatar_url or location, so any consumer
+    selecting hits by public_id alone can pick an organization. Test the ENVELOPE
+    type, NOT result.type: result.type is present only on organizations and absent
+    on teams, so testing it inverts the check. Coextensive cross-checks:
+    number_of_players and staff are null 93/93 on orgs, populated 506/506 on teams.
+  - >
     CONTENT-TYPE UNDERSCORE: The working Content-Type uses an underscore (`post_search`),
     not a hyphen (`post-search`). The underscore variant was confirmed to return 200 OK
     on 2026-03-29. The hyphen variant has not been tested.
@@ -150,7 +161,8 @@ Response Content-Type: `application/json; charset=utf-8`
 |-------|------|-------------|
 | `total_count` | int | Total number of matching results across all pages. |
 | `hits` | array | Array of search result objects for the current page. 25 per page. |
-| `hits[].type` | string | Result type. Observed value: `"team"`. |
+| `hits[].type` | string | **Entity class of the hit: `"team"` or `"organization"`.** ⚠ This is the field that decides whether `result.id` is usable as a team id — see the warning below. |
+| `hits[].result.type` | string or **absent** | Organization sub-type (`travel`, `tournament`, `league`, …). **Present ONLY on organizations; absent on teams.** Do not use it as the entity-class test — the check inverts. |
 | `hits[].result.id` | UUID | The `progenitor_team_id` -- canonical GC team UUID used with all `/teams/{team_id}/*` authenticated endpoints. |
 | `hits[].result.public_id` | string | Public slug for the team. Used with `/public/teams/{public_id}` endpoints. |
 | `hits[].result.name` | string | Team display name (typically includes year, e.g., "Team Name 2026"). |
@@ -166,7 +178,25 @@ Response Content-Type: `application/json; charset=utf-8`
 | `hits[].result.staff` | array of strings | Coach/staff names. Can be empty array `[]`. |
 | `next_page` | int or null | Next page number for pagination, or null if no more pages. |
 
-**The `result` key set above is COMPLETE and closed -- notably, there is NO level information.** Re-verified 2026-07-25: across 59 hits from 6 team-name queries, the union of all `result` keys was exactly `avatar_url, id, location, name, number_of_players, public_id, season, sport, staff`. In particular, **`age_group` and `competition_level` are absent from every hit** (zero occurrences of either key).
+> **⚠ HITS ARE NOT ALL TEAMS — FILTER ON THE ENVELOPE `type` (2026-08-04)**
+>
+> `POST /search` returns a **heterogeneous** result set. **Organizations are 15.5% of all hits and 19.5% of baseball hits** (n=599 hits: 506 team, 93 organization) — not a marginal case.
+>
+> ```python
+> teams = [h for h in hits if h.get("type") == "team"]   # REQUIRED before using result.id
+> ```
+>
+> **An organization's `result.id` is not a team id.** `GET /teams/{org_id}` returns **404** — measured 58/58 organizations 404 and 86/86 teams 200 on a stratified set (PPV/NPV 1.00). Honest bound: no counterexample **yet** is not proof; the rule of three puts a ~5.2% / ~3.5% 95% ceiling on the error rate.
+>
+> **`public_id` does NOT discriminate** — organizations carry one (93/93), as do `season`, `avatar_url` and `location`. **A consumer filtering hits by `public_id` alone can select an organization**, and an org `public_id` fed to the public pipeline 404s (3/3 measured).
+>
+> **Test the ENVELOPE `type`, not `result.type`.** `result.type` exists only on organizations, so a `result.type == "team"` test matches nothing and a truthiness test inverts. Coextensive cross-checks (symptoms, not the cause): `number_of_players` and `staff` are null 93/93 on organizations and populated 506/506 on teams.
+>
+> **The ids are live, which is what makes this deceptive.** Organization ids return populated registries and stable counts, and `GET /teams/{org_id}/opponents` serves a **byte-identical** response to `GET /organizations/{org_id}/opponents` (2/2) — the `/teams/` prefix accepts org ids **without validating entity class**. They look fine until something needs team fields.
+>
+> **They also skew statistics.** Organizations are **100% linked** (131/131 opponent records carry `progenitor_team_id`), so including them in any linked-share measurement biases it downward. See [`GET /teams/{team_id}/opponents`](get-teams-team_id-opponents.md) for a worked case where this produced a false distribution finding.
+
+**For TEAM hits, the `result` key set above is COMPLETE and closed -- notably, there is NO level information.** Re-verified 2026-07-25: across 59 hits from 6 team-name queries, the union of all `result` keys was exactly `avatar_url, id, location, name, number_of_players, public_id, season, sport, staff`. In particular, **`age_group` and `competition_level` are absent from every hit** (zero occurrences of either key). (Organization hits carry an additional `result.type`; the closed-set claim is scoped to teams.)
 
 This is a hard constraint on the `public_id`-to-`gc_uuid` bridge path: **search cannot tell you a team's level.** A caller needing the varsity / junior varsity / freshman tier -- or the travel age bracket -- must fetch the team profile, either the unauthenticated `GET /public/teams/{public_id}` (cheapest; carries `age_group`) or the authenticated `GET /teams/{team_id}` (also carries `competition_level`). See `get-public-teams-public_id.md` ("The `age_group` level field").
 
