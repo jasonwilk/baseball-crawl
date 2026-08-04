@@ -22,7 +22,7 @@ last_confirmed: "2026-03-07"
 tags: [organization, events]
 caveats:
   - >
-    EMPTY FOR TRAVEL BALL ORG: Returned [] for travel ball org (87452e66). Likely populated
+    EMPTY FOR TRAVEL BALL ORG: Returned [] for a `travel`-subtype org. Likely populated
     for organized league orgs (e.g., high school programs with league game calendars).
 related_schemas: []
 see_also:
@@ -48,6 +48,8 @@ GET https://api.team-manager.gc.com/organizations/{org_id}/events
 
 ## Investigation Status
 
-Response was `[]` for travel ball org `87452e66`. Endpoint likely populated for organized league orgs with league game calendars. Full response schema not captured.
+Response was `[]` for a `travel`-subtype org. Endpoint likely populated for organized league orgs with league game calendars. Full response schema not captured.
+
+> An empty `[]` here does **not** prove the org exists or that the account may read it. Most org list sub-resources return `200 []` for a team id and for a random UUID alike, so an empty list is ambiguous. Confirm entity class with `GET /organizations/{org_id}` (200 org / 404 team) and access with `/organizations/{org_id}/pitch-count-report` (200 related / 403 stranger).
 
 **Discovered:** 2026-03-07. **Confirmed (empty):** 2026-03-07.

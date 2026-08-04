@@ -1,6 +1,8 @@
 # Search returns two entity classes — filter for teams
 
-**Date:** 2026-08-04 · **Status:** STUB — needs planning before execution
+**Date:** 2026-08-04 · **Status:** UNPARKED — organizations are now understood well enough to
+decide rung (c), and the deciding evidence is a measurement, not an observation. Ready for the
+spec to be finished and executed. See Progress log.
 **Source:** live probes 2026-08-03/04 (~630 calls, read-only, web profile)
 
 ## Goal
@@ -90,8 +92,15 @@ The operator wants to probe this properly and view real examples in the UI. Know
 - Existing docs: `get-organizations-org_id-opponents.md`,
   `get-organizations-org_id-opponent-players.md`.
 
-Open: what else is org-scoped, whether org membership enumerates teams (a possible
-discovery path), and whether org registries are a better bulk source than per-team ones.
+**All three of those questions were ANSWERED 2026-08-04** — see
+`.claude/agent-memory/api-scout/organization-scope.md` and the endpoint docs corrected in the
+same pass. Summary: 12 live org sub-resources (22 team-analogs 404); **orgs DO enumerate their
+member teams, including for organizations we have no relationship with (27/27), with ids
+pre-resolved in both namespaces**; and org registries are **NOT** a better bulk source — the
+org `/opponents` list is the org's own membership roster, with ZERO overlap against member
+teams' real opponent registries (3/3). The bulk lever is `/organizations/{id}/opponent-players`,
+which routes around the roster 403. Follow-on work is stubbed in
+`2026-08-04-org-team-discovery-and-roster-ingest.md`.
 
 ## Also flagged, feeds the Tier 2 audit
 
@@ -106,3 +115,63 @@ on non-associated ids.** Flagged as needing re-verification, not asserted wrong.
   direct read of the two call sites. No code written. Needs planning: the skip-vs-refuse
   decision, and whether the shared predicate lives in `search.py` or alongside
   `is_gc_uuid`.
+- **2026-08-04 (later)** — **PARKED by the operator.** Planning reached a knowledge gate: the
+  rung-(c) policy cannot be chosen without knowing what an organization *is*, and the operator
+  ruled *"I want to look at orgs and tell you what they are. Then I want to probe the edges to
+  see if we can find our way in"* — declining both a spec-with-a-hole and a split that would
+  ship half the fix. Nothing in `src/` was touched.
+
+  **Two of the three planning questions are now SETTLED and must not be re-derived:**
+  1. **Where the predicate lives** — `src/gamechanger/search.py`, applied **per hit at each
+     call site**, and ⚠ **never inside `search_teams_by_name`**:
+     `resolve_gc_uuid_by_public_id` reads `len(hits) < _SEARCH_PAGE_SIZE` (25) as *"no more
+     pages"*, so at a 15.5% org rate a filtered full page returns ~21, reads as partial, and
+     **silently strands any team whose match sits on page 2+**. Filtering at the source would
+     also make an all-org page look empty and fire a spurious normalized retry.
+  2. **`resolve_gc_uuid_by_public_id` (site A) — skip-and-continue**, ordering the checks
+     `public_id` first and entity-class second, so the ~1-in-6 background org noise skips
+     silently while an org carrying the *exact* sought `public_id` is discarded with a WARNING.
+     This site does not depend on what orgs turn out to be.
+
+  **Still open — rung (c) only:** drop org hits then require one team / refuse whenever an org
+  appears / resolve *through* the org. The org research adds a consideration that did not
+  exist when this file was written: **an org hit is usually a NAME COLLISION, not the umbrella
+  of the team beside it** — only **4 of 70** co-occurring org hits had a same-page team in
+  their member list (`Showdown` 0/21, `League` 0/22). ⚠ That is a **LOWER bound, not a rate**
+  (the test only sees membership when the member team ranks on the same page), so it refutes
+  "orgs are umbrellas" without licensing the reverse claim that any given org is unrelated.
+
+  **No historical repair is owed** — re-measured this session: `opponent_links` holds 10 rows
+  (7 `progenitor`, 3 pending, **0 `search`**), so rung (c) has never written a durable row in
+  this DB. The original out-of-scope note covered `teams.gc_uuid` only and missed this store.
+- **2026-08-04 (later still)** — **UNPARKED. The gate was already closed when it was set.**
+
+  What an organization IS, now settled: GameChanger's **container for a group of teams**,
+  with a closed subtype enum read from the app's own source — `league`, `tournament`, `travel`.
+  It carries the cross-team surfaces (standings, team-records, events, game-summaries, users,
+  pitch-count-report) and enumerates its members. **Membership is many-to-many** — one team was
+  observed in a tournament org and a league org simultaneously, so "which org does this team
+  belong to" has no single answer.
+
+  **Why that closed the gate:** the rung-(c) question was never *"what is an organization"* —
+  it was *"when an org and a team come back from the same query, is the org that team's
+  umbrella?"* That is a fact about search results, and it was measured: **4 of 70**. Opening
+  the same orgs in a browser could not have moved that number. The park was set on a question
+  the evidence in hand had already answered.
+
+  **DECISION for rung (c): drop org hits, then require exactly one TEAM.** Refusing whenever an
+  org appears would punt the `Showdown`/`League`-shaped queries — 43 orgs, ~0 of them umbrellas
+  — to the operator queue for nothing, which is strictly worse than today. The team-side
+  uniqueness bar is unchanged, so no new wrong-auto-resolve mode is introduced. An all-org
+  result set filters to zero teams and falls to rung (d), exactly as a zero-hit does today.
+
+  ⚠ **Bound, carried deliberately:** 4-of-70 is a **LOWER bound on umbrella relationships**,
+  not a rate — the test only detects membership when the member team happens to rank on the
+  same 25-hit page. It refutes "an org hit is the umbrella"; it does **not** support the
+  reverse claim that a given org is unrelated to a given team. Both readings favor the decision
+  above, which is why the open bound does not reopen the decision.
+
+  **Third option, considered and NOT taken:** resolving *through* the org (an org hit is a lead
+  — enumerate its member teams and match by name). Real, and newly possible, but it is a new
+  ladder rung rather than an entity-class filter, and 4-of-70 says it would fire almost never.
+  Captured in `2026-08-04-org-team-discovery-and-roster-ingest.md`; do not build it here.

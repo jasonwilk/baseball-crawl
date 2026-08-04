@@ -95,3 +95,24 @@ Run `scripts/check_doc_pii.sh docs/api` and `.project` from the repo root before
 - **2026-08-04** — Parked. Funded by the operator during the entity-class investigation,
   deferred until after that work committed (`4c93754`, `9ac686d`). Written down because
   the ranking existed only in a conversation and would not have survived `/clear`.
+- **2026-08-04 (later)** — Still PARKED, but the org probe moved this file's ground. **Read
+  before starting it:** `.claude/agent-memory/api-scout/organization-scope.md`.
+
+  **The payoff case has been reached from a different direction, and it is better than the one
+  this file proposed.** This file bet on `root_team_id` being valid on team sub-resource paths
+  so unreachable opponents could still yield rosters. That bet is *not* how it paid out:
+  `/teams/{id}/players` is association-gated (403 on both orgs and teams) and did not open up.
+  Instead **`GET /organizations/{id}/opponent-players` routes around that gate entirely** —
+  460 players across 16 of 18 member teams in 2 calls on a *non-associated* org, per-team count
+  matching the public roster endpoint exactly, while `GET /teams/{gc_uuid}/players` 403s for
+  that same team. Stubbed in `2026-08-04-org-team-discovery-and-roster-ingest.md`.
+
+  **This file's design requirement was satisfied and is worth copying:** the producible refusal
+  control was `/organizations/{id}/pitch-count-report` — 200 on 4/4 related orgs, 403 on 28/28
+  strangers, same principal and session. Two-sided, so every 200 in that probe means something.
+
+  **Also settled from the six-file list:** the *resolvable / exists / permitted* distinction
+  this file demanded now has concrete instruments on the org side, recorded in
+  `docs/api/endpoints/get-organizations-org_id.md` — including the finding that **EXISTS has no
+  cheap test** (list sub-resources return `200 []` for a team id and a random UUID alike).
+  Files 2–4's mutual contradiction is **not** resolved; that remains this file's work.

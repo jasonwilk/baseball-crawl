@@ -17,11 +17,11 @@ The response body is always a **bare JSON array** -- pagination metadata is NOT 
 | `GET /teams/{team_id}/game-summaries` | 50 | Confirmed 2026-03-04. 92 total records across 2 pages (50 + 42). |
 | `GET /teams/{team_id}/opponents` | 50 | Confirmed 2026-03-04. 70 records across 2 pages (50 + 20). |
 | `GET /teams/{team_id}/users` | Unknown | Confirmed cursor pattern from page 2 capture (`start_at=100`). |
-| `GET /me/organizations` | 50 | Requires `?page_size=50` query param + `x-pagination: true` header. |
-| `GET /me/related-organizations` | 50 | Requires `?page_starts_at=0&page_size=50` + `x-pagination: true` header. |
-| `GET /organizations/{org_id}/teams` | 50 | Requires `?page_starts_at=0&page_size=50` + `x-pagination: true` header. |
+| `GET /me/organizations` | 50 | Send `x-pagination: true`. Whether the query params are *also* required is **unverified** -- see the org-level section below. |
+| `GET /me/related-organizations` | 50 | Send `x-pagination: true`. Query-param requirement **unverified** -- see below. |
+| `GET /organizations/{org_id}/teams` | 50 (server-capped) | **The `x-pagination: true` HEADER is the requirement; the query params are optional.** Params *without* the header → HTTP 500. Measured 2026-08-04. |
 | `GET /organizations/{org_id}/opponents` | 50 | Cursor-based, same pattern. |
-| `GET /organizations/{org_id}/opponent-players` | Unknown | HTTP 500 with web headers; suspected pagination params required. |
+| `GET /organizations/{org_id}/opponent-players` | 50 | Send `x-pagination: true`; the bare call still 500s (2/2, 2026-08-04). 460 records across 2 calls measured. The older "suspected pagination params required" reading was backwards -- it is the header. |
 
 ## Non-Paginated Endpoints
 
@@ -85,29 +85,45 @@ The cursor value (`136418700` in this example) is an integer sequence number. Th
 
 ## Org-Level Pagination Pattern
 
-Some organization endpoints require pagination parameters in the **query string** (not just the header), or they return HTTP 500:
+⚠ **On the two endpoints actually measured, the HEADER is the requirement and the query params are optional.** Measured 2026-08-04 on `/organizations/{org_id}/teams`: `x-pagination: true` alone → 200, while `page_starts_at` + `page_size` **without** the header → HTTP 500. Same on `/organizations/{org_id}/opponent-players` (bare call 500s, 2/2). An earlier revision of this section had the causation backwards -- it read as though the params were required and the header incidental.
+
+**Scope this claim honestly.** It rests on two endpoints. The `/me/*` pair below has **not** been re-measured, and their endpoint docs still assert the params are required:
+
+| Endpoint | Causation verified? |
+|---|---|
+| `/organizations/{org_id}/teams` | ✅ measured 2026-08-04 — header required, params optional, `page_size` capped at 50 |
+| `/organizations/{org_id}/opponent-players` | ✅ measured 2026-08-04 — bare call 500s 2/2 |
+| `/me/organizations` | ❓ **unverified** — same server and error message, so the same causation is *likely*, but likely is not measured |
+| `/me/related-organizations` | ❓ **unverified** — same |
+
+Practical rule either way: **send `x-pagination: true` always**; add params only when you want a specific offset. That is correct under both readings, which is why it is safe to state while the `/me/*` question is open.
 
 ```
-GET /me/organizations?page_size=50
+GET /me/organizations?page_size=50                                  # causation unverified
 Header: x-pagination: true
 ```
 
 ```
-GET /me/related-organizations?page_starts_at=0&page_size=50
+GET /me/related-organizations?page_starts_at=0&page_size=50          # causation unverified
 Header: x-pagination: true
 ```
 
 ```
-GET /organizations/{org_id}/teams?page_starts_at=0&page_size=50
+GET /organizations/{org_id}/teams                                    # header alone suffices
 Header: x-pagination: true
 ```
 
-The error message when pagination params are missing is: `"Cannot read properties of undefined (reading 'page_starts_at')"` or `"Cannot read properties of undefined (reading 'page_size')"`.
+The HTTP 500 body is: `"Cannot read properties of undefined (reading 'page_starts_at')"` or `"Cannot read properties of undefined (reading 'page_size')"`. Read it as *"the header was missing, so the server had no pagination object to read that key from"* -- **not** as "you forgot the query param." The message names the key it tried to read, which is what made the original diagnosis point at the params.
 
 ## End-of-Pagination Detection
 
-- **Correct:** `x-next-page` header is **absent** from the response
-- **Incorrect:** Do not rely on an empty response body -- the last page will have records but no `x-next-page` header
+**Terminate on an empty response body OR on `x-next-page` being absent -- whichever comes first.** Check both.
+
+⚰ **RETIRED 2026-08-04** -- the previous guidance said the opposite and is quoted here only so it is not reintroduced: *"**Correct:** `x-next-page` header is **absent** from the response. **Incorrect:** Do not rely on an empty response body -- the last page will have records but no `x-next-page` header."*
+
+**Why it was wrong: `x-next-page` OVER-REPORTS.** Measured 2026-08-04 on `/organizations/{org_id}/teams` -- the last **populated** page still carried an `x-next-page` header, and following it returned `200 []`. So header-absence is not a reliable stop signal on its own: a loop that waits for the header to disappear makes at least one extra request, and cannot distinguish "one more page" from "no more pages."
+
+The empty body is the authoritative terminator. Header-absence remains a valid *early* stop where it does occur -- it just cannot be the only one you check. Note the failure mode is quiet: an over-reported page returns `200` with an empty array, so nothing raises and a naive loop simply does redundant work rather than crashing.
 
 ## Page Size Notes
 

@@ -22,13 +22,18 @@ last_confirmed: "2026-03-07"
 tags: [organization, stats]
 caveats:
   - >
-    ALL-ZERO FOR TRAVEL BALL ORG: The org used for testing (87452e66) returned 6 teams
-    with all zeros. Schema is fully populated for org types that track standings (e.g.,
-    high school leagues with scheduled in-conference games).
+    ALL-ZERO FOR TRAVEL BALL ORG: the organization used for testing (a `travel`-subtype org)
+    returned 6 teams with all zeros. Schema is fully populated for org types that track
+    standings (e.g., high school leagues with scheduled in-conference games). The org's real
+    UUID prefix appeared here in prose until 2026-08-04; an 8-char prefix is an identifier and
+    the PII denylist cannot catch it, so it was removed by reading rather than by scanning.
 related_schemas: []
 see_also:
   - path: /organizations/{org_id}/team-records
-    reason: Returns identical schema -- may be same data with different semantic intent
+    reason: >
+      Returns identical schema. Re-checked 2026-08-04: still byte-identical on every org
+      tested, so the "may be same data with different semantic intent" question is STILL OPEN
+      -- five months on, no evidence has separated them.
   - path: /me/related-organizations
     reason: Source of org_id values for related organizations
 ---

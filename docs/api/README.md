@@ -52,11 +52,11 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/me/archived-teams](endpoints/get-me-archived-teams.md) | CONFIRMED | req | Past-season teams for the authenticated user |
 | GET | [/me/associated-players](endpoints/get-me-associated-players.md) | CONFIRMED | req | All player records across all teams the user is associated with |
 | GET | [/me/external-calendar-sync-url/team/{team_id}](endpoints/get-me-external-calendar-sync-url-team-team_id.md) | OBSERVED | req | iCal/Google Calendar subscription URL for a team |
-| GET | [/me/organizations](endpoints/get-me-organizations.md) | CONFIRMED | req | Organizations the user belongs to (requires pagination params) |
+| GET | [/me/organizations](endpoints/get-me-organizations.md) | CONFIRMED | req | Organizations the user belongs to. Send `x-pagination: true`; whether the query params are truly required is **unverified** -- the sibling org endpoints had that causation backwards (see `pagination.md`) |
 | GET | [/me/permissions](endpoints/get-me-permissions.md) | CONFIRMED | req | Permissions for a specific entity (requires entityId + entityType params) |
 | GET | [/me/permissions/bulk](endpoints/get-me-permissions-bulk.md) | CONFIRMED | req | Bulk permission check for child entities under a parent (plain text "No permissions provided" when called without params) |
 | GET | [/me/person-external-associations](endpoints/get-me-person-external-associations.md) | OBSERVED | req | External system associations for the user (legacy GC MongoDB IDs) |
-| GET | [/me/related-organizations](endpoints/get-me-related-organizations.md) | CONFIRMED | req | Organizations accessible via team membership (requires pagination params) |
+| GET | [/me/related-organizations](endpoints/get-me-related-organizations.md) | CONFIRMED | req | Organizations accessible via team membership. Send `x-pagination: true`; whether the query params are truly required is **unverified** (see `pagination.md`) |
 | GET | [/me/schedule](endpoints/get-me-schedule.md) | CONFIRMED | req | Cross-team unified schedule for all user teams |
 | GET | [/me/scoped-features](endpoints/get-me-scoped-features.md) | OBSERVED | req | Feature flags scoped to the authenticated user (empty observed) |
 | GET | [/me/subscription-information](endpoints/get-me-subscription-information.md) | CONFIRMED | req | Subscription tier summary (best_subscription + access_level) |
@@ -208,17 +208,17 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
-| GET | [/organizations/{org_id}](endpoints/get-organizations-org_id.md) | OBSERVED | req | Organization metadata (base endpoint; schema unknown -- 304 responses only) |
+| GET | [/organizations/{org_id}](endpoints/get-organizations-org_id.md) | OBSERVED | req | Organization metadata. **The entity-class discriminator** -- 200 on orgs (31/31), 404 on team ids (9/9). Behavior verified; schema only 4 of 12 fields transcribed |
 | GET | [/organizations/{org_id}/avatar-image](endpoints/get-organizations-org_id-avatar-image.md) | OBSERVED | req | Organization avatar/logo image URL |
 | GET | [/organizations/{org_id}/events](endpoints/get-organizations-org_id-events.md) | CONFIRMED | req | Cross-team event schedule at org level (empty for travel ball) |
 | GET | [/organizations/{org_id}/game-summaries](endpoints/get-organizations-org_id-game-summaries.md) | CONFIRMED | req | Aggregated game summaries across org teams (empty observed) |
-| GET | [/organizations/{org_id}/opponent-players](endpoints/get-organizations-org_id-opponent-players.md) | OBSERVED | req | Bulk opponent player roster at org level (107 players observed; HTTP 500 bug resolved as of 2026-03-11) |
-| GET | [/organizations/{org_id}/opponents](endpoints/get-organizations-org_id-opponents.md) | OBSERVED | req | Opponent registry at organization level |
+| GET | [/organizations/{org_id}/opponent-players](endpoints/get-organizations-org_id-opponent-players.md) | CONFIRMED | req | Bulk rosters for the org's **MEMBER teams** (not opponents faced). **Routes around the per-team roster 403.** Send `x-pagination: true` -- the bare call still 500s (the "500 resolved" claim is withdrawn) |
+| GET | [/organizations/{org_id}/opponents](endpoints/get-organizations-org_id-opponents.md) | OBSERVED | req | ⚠ The org's **MEMBERSHIP roster** in opponent shape -- NOT opponents faced (zero overlap with member teams' own registries, 3/3) |
 | GET | [/organizations/{org_id}/pitch-count-report](endpoints/get-organizations-org_id-pitch-count-report.md) | CONFIRMED | req | Pitcher pitch counts as CSV (not JSON) for the past 7 days |
 | GET | [/organizations/{org_id}/scoped-features](endpoints/get-organizations-org_id-scoped-features.md) | CONFIRMED | req | Feature flags scoped to organization (empty observed) |
 | GET | [/organizations/{org_id}/standings](endpoints/get-organizations-org_id-standings.md) | CONFIRMED | req | Current-season standings with run differential and streaks |
 | GET | [/organizations/{org_id}/team-records](endpoints/get-organizations-org_id-team-records.md) | CONFIRMED | req | Historical win/loss records for all org teams |
-| GET | [/organizations/{org_id}/teams](endpoints/get-organizations-org_id-teams.md) | CONFIRMED | req | All teams in an org (requires pagination params or HTTP 500) |
+| GET | [/organizations/{org_id}/teams](endpoints/get-organizations-org_id-teams.md) | CONFIRMED | req | All teams in an org, **including orgs you have no association with** (27/27). Rows carry `gc_uuid` + `public_id`. Needs the `x-pagination: true` HEADER; query params are optional |
 | GET | [/organizations/{org_id}/users](endpoints/get-organizations-org_id-users.md) | OBSERVED | req | Users associated with the organization |
 
 ---
