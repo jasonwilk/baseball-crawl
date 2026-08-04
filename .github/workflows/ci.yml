@@ -107,9 +107,21 @@ jobs:
       # pip-compile normalizes the recorded header, so flag ORDER does not
       # matter; a real dependency change is what produces a diff. pip-tools is
       # pinned so a tooling-version bump cannot manufacture false drift.
+      #
+      # pip is pinned too, and NOT for drift reasons -- pip 26.2 (2026-07-29)
+      # removed `pip._internal.utils.compat.stdlib_pkgs`, which pip-tools
+      # imports at module load via piptools/sync.py. So `pip-compile` dies with
+      # an ImportError before it compiles anything, and the step fails without
+      # ever comparing a lockfile. setup-python ships whatever pip is current,
+      # so pinning pip-tools alone left the other half of the pair floating.
+      # Bumping pip-tools does NOT fix this: 7.6.0 (latest as of 2026-08-04)
+      # crashes identically -- no released pip-tools works with pip 26.2, so
+      # the pin has to be on pip. Revisit when pip-tools ships a compatible
+      # release; the lockfiles themselves were verified drift-free when this
+      # pin was added, so a failure here after that is real drift.
       - name: Lockfile drift check
         run: |
-          pip install pip-tools==7.5.3
+          pip install "pip<26.2" pip-tools==7.5.3
           pip-compile --quiet --generate-hashes --strip-extras \
             --output-file=requirements.txt requirements.in
           pip-compile --quiet --generate-hashes --strip-extras \
