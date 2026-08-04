@@ -427,7 +427,8 @@ PRINCIPLES
 A. Operator approves all commits.
 B. A fork is the SAME BRAIN, not a second worker: never fork to
    parallelize; read-only tangents only, closed after. A finished session
-   answers no new questions -- new question, new session.
+   answers no new questions -- new question, new session. Discovered
+   work exits as a spec stub, not as more work in this session.
 C. Questions to the operator are SELF-CONTAINED: no terms, tiers, or
    options the operator hasn't been shown; subagent language is defined
    on relay.
