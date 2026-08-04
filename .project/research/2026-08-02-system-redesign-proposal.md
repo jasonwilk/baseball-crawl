@@ -390,9 +390,10 @@ HOW WORK GETS DONE HERE
 CHUNK LIFECYCLE -- every chunk walks these steps, and the session states
 its current step whenever it reports. Small change (one-sentence diff):
 just ask; skip to step 4 with "small change: no spec".
-  1 SPEC         plan mode → interview → .project/specs/<date>-<slug>.md
-                 (≤1 page: goal, files, out-of-scope, verification
-                 commands, progress log; person names never appear)
+  1 SPEC         ENTER PLAN MODE yourself if the operator hasn't set it →
+                 interview → .project/specs/<date>-<slug>.md (≤1 page:
+                 goal, files, out-of-scope, verification commands,
+                 progress log; person names never appear)
   2 SPEC-REVIEW  codex spec review (mandatory when big or destructive)
   3 EXECUTE      FRESH session, from the spec. A spec is a CLAIM -- audit
                  it against the repo before building on it. The spec, not
