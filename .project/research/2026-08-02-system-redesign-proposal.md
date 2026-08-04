@@ -449,6 +449,11 @@ F. The per-3-chunk audit also does housekeeping: every spec in
 G. A clean result counts only with a POSITIVE CONTROL: prove the
    instrument can fail before trusting its pass. A scan, probe, or
    gate that cannot be shown failing proves nothing.
+H. Worktrees are ISOLATION, not ceremony: use one only when this
+   session cannot safely write the shared checkout (backgrounded, or
+   a sibling session is writing). Enter → commit → land on main →
+   remove worktree and branch, all in the same session. Never park
+   work in one.
 ```
 
 ---
