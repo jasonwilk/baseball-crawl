@@ -386,43 +386,52 @@ which is what the current model generation is documented to want.
 
 ```
 HOW WORK GETS DONE HERE
-1. Small change (one-sentence diff): just ask. Claude implements and runs
-   the affected tests. No spec.
-2. Feature chunk: plan mode → interview → .project/specs/<date>-<slug>.md
-   (≤1 page: goal, files, out-of-scope, verification, progress log; no real
-   names). Big/destructive? run "spec review" first.
-3. Execute in a FRESH session from the spec. The spec, not the chat, carries
-   state. Leave sessions at boundaries: context bar yellow or two failed
-   corrections → update Progress, /clear, resume from spec.
-4. Verification is a command the spec names. Code chunks (src/tests/
-   migrations) also end with the FULL suite green before commit.
-   No green, no done.
-5. Review CHAIN, in this order, before the commit (not after):
-     spec phase:    codex spec review of the spec file (skip for small changes)
-     every chunk:   full suite green, then /code-review
-     add /security-review when the chunk touches auth, serving, PII, or
-       anything that deletes data
-     /simplify is optional polish -- if used, it runs BEFORE /code-review,
-       never after (its fixes need reviewing too; proven 2026-08-02)
-     codex review as a second opinion on request
-   Docs-only chunks need no chain beyond the PII hook.
-6. Operator approves all commits. Before presenting a staged diff for
-   approval, run the PII scan on it (python3 src/safety/pii_scanner.py
-   --staged) -- the operator never reviews a diff that would bounce. Check
-   the scanned-file COUNT against the staged count: SKIP_PATHS makes the
-   scanner blind to whole trees (.claude/ among them), and skipped staged
-   files need a manual pass with a positive control. The [pii-hook] line
-   at commit time is the receipt, not the first check.
-7. Subagents: Explore for search, api-scout for GameChanger API archaeology,
+
+CHUNK LIFECYCLE -- every chunk walks these steps, and the session states
+its current step whenever it reports. Small change (one-sentence diff):
+just ask; skip to step 4 with "small change: no spec".
+  1 SPEC         plan mode → interview → .project/specs/<date>-<slug>.md
+                 (≤1 page: goal, files, out-of-scope, verification
+                 commands, progress log; person names never appear)
+  2 SPEC-REVIEW  codex spec review (mandatory when big or destructive)
+  3 EXECUTE      FRESH session, from the spec. The spec, not the chat,
+                 carries state. Leave at boundaries: context bar yellow or
+                 two failed corrections → update progress log, step 9.
+  4 VERIFY       the spec's named commands; code chunks (src/tests/
+                 migrations) need the FULL suite green. No green, no done.
+  5 REVIEW       /code-review; add /security-review on auth/serving/PII/
+                 deletes; /simplify optional, always BEFORE /code-review
+                 (its fixes need reviewing too); codex review as a second
+                 opinion on request. Docs-only chunks: PII gates alone.
+  6 SCAN         PII-scan the staged diff (python3 src/safety/
+                 pii_scanner.py --staged); compare scanned-count to
+                 staged-count -- SKIP_PATHS blinds the scanner to whole
+                 trees (.claude/ among them); skipped staged files get a
+                 manual pass with a positive control.
+  7 APPROVE      operator reads the staged diff. Stage by explicit PATH,
+                 never add -A; re-diff after staging.
+  8 COMMIT       the [pii-hook] line is the receipt, not the first check.
+  9 HANDOFF      what landed / what's carried and where it's written /
+                 the exact next-session prompt / literal last line:
+                 "Type /clear now, then paste the prompt above."
+ 10 CLEAR        operator types /clear, on a clean tree or a written
+                 progress note. A fork is never a substitute.
+
+PRINCIPLES
+A. Operator approves all commits.
+B. A fork is the SAME BRAIN, not a second worker: never fork to
+   parallelize; read-only tangents only, closed after. A finished session
+   answers no new questions -- new question, new session.
+C. Questions to the operator are SELF-CONTAINED: no terms, tiers, or
+   options the operator hasn't been shown; subagent language is defined
+   on relay.
+D. Subagents: Explore for search, api-scout for API archaeology,
    baseball-coach for coaching semantics, /code-review's fork for review.
    Don't delegate what a handful of tool calls finishes.
-8. Lessons go to memory; a lesson becomes a rule only after it bites twice.
+E. Lessons go to memory; a lesson becomes a rule only after it bites
+   twice, promoted at the per-3-chunk audit, never mid-flight.
    Destructive seams stay in CLAUDE.md: report generation DELETES;
    purge-scouting wipes 20 tables.
-9. Every session ends with a HANDOFF: (a) what landed (commits/files),
-   (b) what's carried forward and where it's written down, (c) the exact
-   message to paste into the next session. A session is not done until it
-   prints this. Only /clear on a clean tree or a written progress note.
 ```
 
 ---
