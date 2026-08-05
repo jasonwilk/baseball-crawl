@@ -25,7 +25,10 @@ The ladder (TN-3), in order:
   BOTH entity classes); auto-resolves ONLY on an unambiguous single TEAM match;
   method ``search``. A zero-hit is ambiguous -> falls to rung (d), not a hard
   failure. See :func:`_resolve_via_search` for what dropping organizations
-  costs -- it widens the accept surface, and the result is terminal.
+  costs -- it widens the accept surface, and the result is terminal TO THIS
+  LADDER. A ``search`` row is the ONE method an operator can override via
+  ``bb report map-opponent`` (2026-08-05); the ladder itself still never
+  re-attempts it.
 * **Rung (d) -- operator queue.** Persists a not-resolved pending
   ``opponent_links`` row (``public_id`` NULL, ``resolution_method`` NULL) that
   ``bb report map-opponent`` (E-240-05) later UPDATEs. Outcome
@@ -40,6 +43,15 @@ resolved-positive AND the operator-declared ``no_presence`` row) short-circuits
 and is reused -- NEVER gated on ``public_id IS NOT NULL`` (a ``no_presence`` row
 has ``public_id`` NULL, so a public_id gate would re-attempt it every run -- the
 resurrection bug).
+
+⚠ Do NOT confuse this gate with ``bb report map-opponent``'s eligibility
+predicate. They are different questions over the same column and they diverged
+deliberately on 2026-08-05: this gate is about what the LADDER re-attempts
+(nothing with a method -- unchanged), while map-opponent is about what an
+OPERATOR may correct (a pending row, plus a ``search`` row). Widening THIS gate
+to match would re-attempt every resolution every run; widening map-opponent's
+to ``IS NOT NULL`` would resurrect a ``no_presence`` row. Neither predicate is
+the other's copy -- do not "align" them.
 
 This module is a PURE resolution seam: it does not generate reports, write
 ``scheduled_report_runs`` rows, or surface operator alerts -- that is E-240-07.
@@ -80,6 +92,20 @@ METHOD_PROGENITOR = "progenitor"
 METHOD_SEARCH = "search"
 METHOD_OPERATOR = "operator"
 METHOD_NO_PRESENCE = "no_presence"
+
+# ⚠ ADDING A NEW AUTOMATIC METHOD? One thing outside this file keys on this set:
+# `_MAPPABLE_ROW_PREDICATE` in ``src/cli/report.py`` decides which methods
+# ``bb report map-opponent`` may OVERRIDE, and it currently names METHOD_SEARCH
+# alone. A new auto-accept method is NOT overridable until you add it there.
+# Both sides of that, because only one of them is obvious: the drift fails
+# CLOSED (the operator gets "No mappable opponent" and has to fix the DB by
+# hand) rather than open, which is why this is a pointer and not a shared
+# frozenset -- a set of one, plus the dynamic IN-clause it would require, buys
+# machinery against a hypothetical second member. But fail-closed is not
+# harmless: it strands a wrong auto-resolve with no CLI recovery, which is the
+# exact gap `.project/specs/2026-08-05-rung-c-search-resolve-recoverable.md`
+# closed. If a second automatic method lands, hoist the policy here instead of
+# widening the literal there.
 
 # Placeholder name pattern (TN-3 rung b). Whole-word, case-insensitive. Event
 # names that ESCAPE this set are NOT chased -- they fall through by design.
@@ -271,13 +297,25 @@ def _resolve_via_search(
     auto-resolves where the raw count previously sent it to the operator
     queue. That is the deliberate trade -- refusing whenever an organization
     appears would punt the Showdown/League-shaped queries for nothing -- but it
-    is a real widening, not a no-op, and it is STICKY: :func:`resolve_opponent`
-    treats any ``opponent_links`` row with a non-NULL ``resolution_method`` as
-    terminal, so a wrong auto-resolve is never re-attempted and never
-    re-surfaces to the operator. Note also that the name-match and season-year
-    filters documented for this rung are NOT implemented (see
-    ``.project/specs/2026-08-04-rung-c-auto-accept-criteria-drift.md``), so the
-    single-team count is the ENTIRE gate.
+    is a real widening, not a no-op, and it is STICKY *to this ladder*:
+    :func:`resolve_opponent` treats any ``opponent_links`` row with a non-NULL
+    ``resolution_method`` as terminal, so a wrong auto-resolve is **never
+    re-attempted automatically**. Note also that the name-match and season-year
+    filters documented for this rung are NOT implemented, so the single-team
+    count is the ENTIRE gate. (Criterion 1, the name match, was rejected:
+    canonical names diverge in word order and punctuation from the free-text
+    schedule name we search with. Criterion 2, the season-year match, is still
+    OPEN -- ``.project/specs/2026-08-05-rung-c-season-year-filter.md``.)
+
+    ⚠ **What DID change (2026-08-05), because the sentence above used to say
+    "and never re-surfaces to the operator" and that is no longer true:** a
+    ``search`` row is now CORRECTABLE ON DEMAND via ``bb report map-opponent``,
+    which accepts ``resolution_method = 'search'`` alongside a pending row (see
+    ``src/cli/report.py::_apply_opponent_mapping``). That is an operator-driven
+    repair, NOT a re-attempt: nothing here re-runs, and the operator must
+    notice the wrong mapping first -- the ``--dry-run`` RESOLVED line prints the
+    method to make that possible. The stickiness that matters therefore stands:
+    an unnoticed wrong auto-resolve still feeds reports indefinitely.
     """
     hits = search_teams_by_name(client, opponent_name)
     # Drop organizations, THEN count. Search is heterogeneous and an

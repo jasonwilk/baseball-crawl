@@ -654,6 +654,46 @@ def test_terminality_gate_reuses_cached_positive_without_reattempt(
     client.post_json.assert_not_called()
 
 
+def test_terminality_gate_still_short_circuits_a_search_row(
+    db: sqlite3.Connection,
+) -> None:
+    """A `search` row stays TERMINAL to the ladder -- unchanged by the override.
+
+    `bb report map-opponent` can now correct a wrong `search` resolution
+    (`src/cli/report.py::_apply_opponent_mapping`), which makes it tempting to
+    assume the ladder re-attempts one too. It does NOT, deliberately: the gate
+    keys on `resolution_method IS NOT NULL` and was left alone, because widening
+    it is what would resurrect a `no_presence` row (see the test below).
+    Correction is operator-driven and on demand; it is not automatic.
+    """
+    db.execute(
+        "INSERT INTO opponent_links "
+        "(our_team_id, root_team_id, opponent_name, public_id, "
+        " resolution_method, resolved_at) "
+        "VALUES (?, ?, 'Cached', ?, ?, datetime('now'))",
+        (_OUR_TEAM_ID, _ROOT, _PUBLIC_ID, METHOD_SEARCH),
+    )
+    db.commit()
+    client = MagicMock()
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Cached",
+        registry=[_linked_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.public_id == _PUBLIC_ID
+    assert result.method == METHOD_SEARCH
+    assert result.from_cache is True
+    # No re-search, no re-bridge.
+    client.get.assert_not_called()
+    client.post_json.assert_not_called()
+
+
 def test_terminality_gate_no_presence_not_reattempted_resurrection_regression(
     db: sqlite3.Connection,
 ) -> None:

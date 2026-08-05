@@ -369,7 +369,7 @@ bb report morning-run --dry-run \
 **Example dry-run output:**
 
 ```
-RESOLVED Lincoln Southeast (opponent_id=abc123) -> Lincoln Southeast HS [public_id: lincoln-southeast-hs-2026] — record 8-4
+RESOLVED Lincoln Southeast (opponent_id=abc123) -> Lincoln Southeast HS [public_id: lincoln-southeast-hs-2026] [via search] — record 8-4
 UNRESOLVED Slumpbuster Tournament (opponent_id=def456) — needs `bb report map-opponent def456 <PASTE-GC-TEAM-URL>`
 deferred_placeholder BYE (opponent_id=ghi789)
 
@@ -377,6 +377,16 @@ Morning run complete (1 team(s)): 0 generated, 0 failed, 1 unresolved, 1 deferre
 ```
 
 **What to eyeball on a RESOLVED line**: confirm that the resolved team name and W-L record look right for the opponent you expect. If the mapping resolved to the wrong team, use `bb report map-opponent` to correct it (the ladder's auto-resolution may have matched a name-alike team).
+
+**`[via <method>]` tells you whether you CAN correct it.** The tag names the ladder rung that produced the mapping, and only one is correctable:
+
+| `[via ...]` | What it means | Correctable with `map-opponent`? |
+|---|---|---|
+| `via search` | Matched by name search on a single team hit — **no name or season corroboration**, so this is the one that can be confidently wrong | **Yes** — re-running `map-opponent` overwrites it |
+| `via progenitor` | GameChanger's own registry linked the opponent | No — refused |
+| `via operator` | Your own earlier mapping | No — refused |
+
+A wrong `progenitor` or `operator` mapping needs a database-level fix; there is no CLI path. **Check the `via search` lines first** — they are where a wrong auto-resolve is both most likely and cheapest to fix.
 
 ### Operator resolution queue (map-opponent)
 
@@ -405,15 +415,33 @@ bb report map-opponent <root_team_id> --no-presence
 
 This records an operator-declared "no presence" for the opponent. On future runs the ladder will recognize this and skip report generation without prompting again.
 
-**How many rows get updated**: `opponent_links` is keyed on `(our_team_id, root_team_id)` -- one row per LSB team that faces the opponent. A single `bb report map-opponent` call updates **all pending rows** for that `root_team_id` at once, across every LSB team. You do not need to run it separately per team.
+**Correcting a wrong `search` auto-resolution** (2026-08-05): `map-opponent` is not only for unresolved opponents. If a `[via search]` line resolved to the wrong team, run the same positive-mapping command against that `root_team_id` and it **overwrites** the bad mapping, recording it as `operator`:
+
+```bash
+bb report map-opponent <root_team_id> <PASTE-CORRECT-GC-TEAM-URL>
+```
+
+It prints a `Replaced the existing search mapping (public_id=...)` line so the overwrite is never silent. Two things to know before relying on this:
+
+- **You get one correction.** The overwrite records `operator`, and an `operator` mapping is itself refused by this command — a mistyped correction cannot be re-corrected from the CLI.
+- **It only works on `search`.** A `progenitor`, `operator`, or `no_presence` mapping is left alone and the command exits 1 with "No mappable opponent". This is deliberate: `no_presence` in particular must never be re-opened by a mapping command.
+
+**How many rows get updated**: `opponent_links` is keyed on `(our_team_id, root_team_id)` -- one row per LSB team that faces the opponent. A single `bb report map-opponent` call updates **every eligible row** for that `root_team_id` at once, across every LSB team -- pending rows and, as above, `search`-resolved ones. You do not need to run it separately per team.
+
+⚠ **Two flip sides, and they pull opposite ways:**
+
+- A correction reaches **all** eligible teams facing that opponent, not just the one whose line you were looking at.
+- But **eligible is not the same as all.** Rows for one opponent can be split by method -- rung (a) resolves from each team's *own* registry, so Varsity's row can be `progenitor` while JV's is `search`. Only the eligible rows move; the rest keep their existing mapping. When that happens the command prints a `Left unchanged: N row(s) ... are not mappable` line. Read it: a correction can be **partial**, and the success count alone does not tell you that.
 
 **Re-run after mapping**: the mapping takes effect on the next run. For same-day resolution, run `bb report morning-run` (without `--dry-run`) after mapping, or use `bb report generate <public_id>` to generate the report directly.
+
+**After correcting a wrong mapping, the re-run regenerates rather than skipping.** Worth stating because the opposite would be silent: morning-run normally treats an existing non-expired report for the same team/opponent/date as done and skips it. That check now also compares *which team* the report was for, so a corrected mapping no longer matches and a fresh report is generated. Without that you would correct the mapping, re-run, see `skipped`, and the coach would keep reading the wrong team's report until it expired.
 
 ### Expected operator queue size
 
 The operator map queue is larger than auto-resolution alone implies, for two reasons that are correct by design:
 
-**Per-team-opponent pairing.** `opponent_links` is keyed on `(our_team_id, root_team_id)`. One real opponent that faces multiple LSB teams (e.g. both Varsity and JV play Lincoln Northeast) must be mapped once per LSB team. The mapping command resolves all pending rows for that `root_team_id` in one call, but each pairing produces its own initial unresolved entry.
+**Per-team-opponent pairing.** `opponent_links` is keyed on `(our_team_id, root_team_id)`. One real opponent that faces multiple LSB teams (e.g. both Varsity and JV play Lincoln Northeast) must be mapped once per LSB team. The mapping command resolves all eligible rows for that `root_team_id` in one call (pending rows, plus `search`-resolved ones being corrected), but each pairing produces its own initial unresolved entry.
 
 **Tournament and bracket names.** Bracket entries (e.g. "Slumpbuster", "Pool A Challenge") that do not match the `BYE` / `TBD` placeholder pattern fall through to the operator queue by design. An unknown bracket opponent genuinely cannot be scouted -- there is no team to look up. Use `--no-presence` for these so the system stops prompting for them.
 

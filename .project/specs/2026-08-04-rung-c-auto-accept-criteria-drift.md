@@ -1,6 +1,12 @@
 # Rung (c) auto-accept: the flow doc documents two filters the code does not have
 
-**Date:** 2026-08-04 · **Status:** STUB — needs a product decision, not an implementation.
+**Date:** 2026-08-04 · **Status:** **COMPLETE (2026-08-05)** — resolved by
+`2026-08-05-rung-c-search-resolve-recoverable.md`, which took the third option below
+(make a `search` resolution correctable) rather than implementing either filter. Read the
+final Progress log entry before acting on anything above it: **one of this file's own
+rejection rationales was FALSE and is retired there.** Criterion 1 is rejected;
+**criterion 2 is OPEN, not rejected**, and moved to
+`2026-08-05-rung-c-season-year-filter.md`.
 ⚠ **Priority raised the same day**: `/code-review` established that this missing pair is now the
 *only* thing standing between a single wrong search hit and a **terminal** wrong auto-resolve.
 Read "What the entity-class filter changed" before triaging this as low-stakes cleanup.
@@ -91,6 +97,43 @@ Do not implement any direction from this stub alone.
 
 - **2026-08-04** — Stubbed. No code, no doc edit. Surfaced by spec review; both artifacts read
   directly to confirm the divergence is real and not a stale-doc misreading.
+- **2026-08-05 — RESOLVED. Direction taken: the third option (make it correctable), not either filter.**
+
+  **What shipped** (`2026-08-05-rung-c-search-resolve-recoverable.md`): `bb report map-opponent`
+  now accepts a `resolution_method = 'search'` row alongside a pending one, so a wrong rung-(c)
+  auto-resolve can be overwritten by the operator. The ladder's terminality gate was deliberately
+  **left alone** — widening it is what would resurrect a `no_presence` row, so the two predicates
+  now differ on purpose and must not be "aligned". `progenitor` / `operator` / `no_presence`
+  remain refused.
+
+  **Why this over implementing the filters:** this file's "What is needed" section already named it
+  and called it uncosted. Costing it settled the matter — the eval found the sharper fact, which
+  this file understated: a wrong auto-resolve was not merely *unnoticed until someone looked*, it
+  was **uncorrectable once noticed**, because `map-opponent` gated on `resolution_method IS NULL` in
+  both its SELECT and its UPDATE with no `--force`. Meanwhile `docs/admin/operations.md` had been
+  telling operators to use exactly that command to fix a wrong mapping. The gap was between the
+  docs and the code, and closing it costs one predicate.
+
+  ⚰ **RETIRED — a rationale in THIS file was wrong.** The "Why this was not just fixed" section
+  says a season-year filter *"assumes `result.season.year` is populated and comparable, which is
+  unverified on this path"*, and the successor spec initially hardened that into "never observed
+  here". **Both are false**, found by a codex spec review and confirmed by direct measurement:
+  `result.season.year` is populated on **15/15** hits in the repo's captured `/search` bodies
+  (`proxy/data/sessions/2026-03-11_032625/endpoint-log.jsonl`), and one capture returned a
+  `summer 2025` hit beside `spring 2026` hits — precisely what the filter would discriminate.
+  So **criterion 2 is OPEN on cost and semantics, not blocked on data**, and is tracked in
+  `2026-08-05-rung-c-season-year-filter.md`. Do not record it as rejected.
+
+  **Criterion 1 (exact name match) IS rejected**, but not for the reason first written either: the
+  claim that `result.name` "typically includes year" is contradicted **0/15** by the same capture
+  (a separate doc defect, stubbed as `2026-08-05-post-search-name-year-doc-defect.md`). The real
+  objection is that canonical names diverge from our free-text schedule names in **word order and
+  punctuation** — `Northampton Nighthawks Navy 10U` / `Northampton Nighthawks 9U Navy` /
+  `Nighthawks (Navy) 13U(AAA)` are all real — so exact matching would reject correct hits.
+
+  **Live exposure at resolution time was still zero** (`scheduled_report_runs` = 0 rows,
+  `opponent_links` = 10 rows with 0 `search`-method), which is why this was cheap to do now.
+
 - **2026-08-04 (post-`/code-review`)** — **Priority raised; scope unchanged.** The review of the
   entity-class chunk established that criterion 3's population narrowed, that the accept surface
   therefore widened, and that a `search` resolution is terminal — so these two missing filters

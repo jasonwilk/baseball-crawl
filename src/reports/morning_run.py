@@ -83,6 +83,13 @@ class SlotResult:
     # Display context for --dry-run / the summary (not persisted).
     resolved_team_name: str | None = None
     resolved_record: str | None = None
+    # Which ladder rung produced the mapping (`progenitor` / `search` /
+    # `operator` / `no_presence`). Display-only, NOT persisted here -- the
+    # durable copy is opponent_links.resolution_method. Surfaced on the RESOLVED
+    # line because it is what tells the operator whether a wrong mapping can be
+    # corrected: `bb report map-opponent` accepts a `search` resolution and
+    # refuses the rest, so without it they cannot tell before trying.
+    resolution_method: str | None = None
     # In-memory control flag (NOT a column, NOT persisted): when True, run_morning
     # SKIPS the _upsert_slot write for this slot. Set ONLY on the fresh-reservation
     # skip path (E-252-07 P1#1 fix) so it does NOT clobber a concurrent run's
@@ -210,6 +217,13 @@ class MorningRunResult:
                 f"\n    RESOLVED: {slot.resolved_team_name} "
                 f"[public_id: {slot.resolved_public_id}]"
             )
+            # The method belongs on THIS surface too, not just the dry-run
+            # console line: the summary email is what the operator actually
+            # reads after an unattended cron run, and `via search` is the tag
+            # that tells them a mapping is both the likeliest to be wrong and
+            # the only one `bb report map-opponent` can correct.
+            if slot.resolution_method:
+                base += f" [via {slot.resolution_method}]"
             if slot.resolved_record:
                 base += f" — record {slot.resolved_record}"
         if slot.delivery_status:
@@ -299,6 +313,7 @@ def _prior_success(
     own_team_id: int,
     root_team_id: str,
     game_date: str,
+    resolved_public_id: str | None = None,
 ) -> bool:
     """True when a prior SUCCESS slot exists for this (team, opponent, date).
 
@@ -306,6 +321,20 @@ def _prior_success(
     ``resolution_outcome='auto_resolved'`` AND a non-NULL, non-expired
     ``report_id``. A re-run treats this as a skip (``delivery_status='skipped'``)
     rather than regenerating.
+
+    ⚠ **And the prior report must be for the team we are resolving to NOW.**
+    ``resolved_public_id`` is compared against the slot's stored value, because
+    a mapping can CHANGE between runs: `bb report map-opponent` overrides a
+    wrong rung-(c) `search` resolution (2026-08-05), and without this comparison
+    the skip fires on the report generated from the OLD mapping -- so the
+    operator corrects the mapping, re-runs as the runbook tells them to, sees
+    "skipped", and the coach keeps reading the WRONG team's scouting report
+    until it expires. The correction would be silently inert, which is worse
+    than not offering one.
+
+    A stored value that is NULL or differs does NOT skip -- it regenerates.
+    That is the safe direction: the cost is a wasted regeneration, where the
+    other direction serves a report for the wrong team.
     """
     row = conn.execute(
         "SELECT s.report_id, r.expires_at "
@@ -313,8 +342,9 @@ def _prior_success(
         "LEFT JOIN reports r ON r.id = s.report_id "
         "WHERE s.own_team_id = ? AND s.opponent_root_team_id = ? "
         "AND s.game_date = ? AND s.resolution_outcome = 'auto_resolved' "
-        "AND s.report_id IS NOT NULL",
-        (own_team_id, root_team_id, game_date),
+        "AND s.report_id IS NOT NULL "
+        "AND s.resolved_public_id IS NOT NULL AND s.resolved_public_id = ?",
+        (own_team_id, root_team_id, game_date, resolved_public_id),
     ).fetchone()
     if row is None:
         return False
@@ -477,6 +507,7 @@ def _process_opponent(
         game_date=game_date,
         resolution_outcome=outcome,
         resolved_public_id=ladder.public_id,
+        resolution_method=ladder.method,
     )
 
     # For a resolved opponent, fetch the display name + record (the dry-run
@@ -498,7 +529,9 @@ def _process_opponent(
         return slot
 
     # Idempotency: a prior non-expired SUCCESS is a skip, not a regenerate (TN-9).
-    if _prior_success(conn, own_team_id, root_team_id, game_date):
+    if _prior_success(
+        conn, own_team_id, root_team_id, game_date, ladder.public_id
+    ):
         slot.delivery_status = "skipped"
         # Carry the prior report linkage onto the skip slot (F-H2). A skip is NOT
         # a regeneration; leaving report_slug None here would make _upsert_slot

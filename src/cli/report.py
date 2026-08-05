@@ -15,7 +15,11 @@ from rich.table import Table
 from datetime import date, datetime
 
 from src.gamechanger.exceptions import GameChangerAPIError, TeamNotFoundError
-from src.gamechanger.opponent_ladder import METHOD_NO_PRESENCE, METHOD_OPERATOR
+from src.gamechanger.opponent_ladder import (
+    METHOD_NO_PRESENCE,
+    METHOD_OPERATOR,
+    METHOD_SEARCH,
+)
 from src.gamechanger.team_resolver import resolve_team
 from src.gamechanger.url_parser import parse_team_url
 from src.reports.recon_scoreboard import (
@@ -356,21 +360,64 @@ def reconcile_scoreboard_cmd(
         )
 
 
+# Which opponent_links rows `bb report map-opponent` may write, as ONE predicate
+# shared by the SELECT that reports the prior state and the UPDATE that replaces
+# it -- see _apply_opponent_mapping's docstring for WHICH states and why.
+# Parameters, in order: root_team_id, then the overridable method.
+#
+# 🔒 The parentheses are LOAD-BEARING. `AND` binds tighter than `OR`, so without
+# them this reads as
+#     (root_team_id = ? AND resolution_method IS NULL) OR (resolution_method = ?)
+# which matches EVERY search-resolved row in the table -- including opponents the
+# operator never named, silently reassigning them. Pinned by
+# test_map_opponent_override_does_not_touch_a_different_opponent.
+_MAPPABLE_ROW_PREDICATE = (
+    "root_team_id = ? AND (resolution_method IS NULL OR resolution_method = ?)"
+)
+
+
 def _apply_opponent_mapping(
     conn: sqlite3.Connection,
     root_team_id: str,
     *,
     public_id: str | None,
     method: str,
-) -> int:
-    """UPDATE the pending opponent_links row(s) for a root_team_id.
+) -> list[tuple[str | None, str | None]]:
+    """UPDATE the pending OR search-resolved opponent_links row(s) for a root_team_id.
 
-    Locates EVERY pending not-resolved row (``resolution_method IS NULL``) keyed
-    on ``root_team_id`` -- there may be one per LSB team that faces the opponent
-    (the ``opponent_links`` key is ``(our_team_id, root_team_id)``) -- and
-    UPDATEs each to the operator-supplied state, deriving the NOT NULL
-    ``our_team_id`` / ``opponent_name`` from the existing rows rather than
-    inserting (the command's signature carries neither; B4). NEVER blind-INSERTs.
+    Locates EVERY eligible row keyed on ``root_team_id`` -- there may be one per
+    LSB team that faces the opponent (the ``opponent_links`` key is
+    ``(our_team_id, root_team_id)``) -- and UPDATEs each to the
+    operator-supplied state, deriving the NOT NULL ``our_team_id`` /
+    ``opponent_name`` from the existing rows rather than inserting (the
+    command's signature carries neither; B4). NEVER blind-INSERTs.
+
+    **Eligibility is two states, not one:**
+
+    * ``resolution_method IS NULL`` -- the rung-(d) pending row. Filling it is
+      this command's original job.
+    * ``resolution_method = 'search'`` -- an OVERRIDE of a rung-(c) automatic
+      resolution. Search auto-accepts on a single TEAM hit with no name or
+      season corroboration (see :func:`_resolve_via_search`), so it is the one
+      method that can be confidently WRONG; without an override the operator
+      had no supported way to correct it, while
+      ``docs/admin/operations.md`` already instructed them to use this command.
+
+    ``progenitor`` / ``operator`` / ``no_presence`` rows are NOT eligible and
+    are left alone -- a progenitor resolution came from GC's own registry link,
+    and the other two are the operator's own prior word. In particular a
+    ``no_presence`` row MUST NOT become eligible: widening this predicate to
+    ``resolution_method IS NOT NULL`` would resurrect it, the bug the ladder's
+    terminality gate exists to prevent.
+
+    ⚠ **State both sides.** This does NOT make a wrong resolution generally
+    recoverable -- it buys exactly ONE correction. The override writes
+    ``operator``, which is not itself eligible here, so a mistyped correction is
+    as stuck as the wrong auto-resolve was. And the key is ``root_team_id``
+    ALONE, not the ``(our_team_id, root_team_id)`` table key, so one call
+    rewrites the row for EVERY team facing this opponent -- which is the
+    intended convenience, but now reaches already-resolved rows and not just
+    pending ones. That is why the caller reports what it replaced.
 
     Args:
         conn: Open SQLite connection.
@@ -381,29 +428,60 @@ def _apply_opponent_mapping(
         method: ``"operator"`` (positive) or ``"no_presence"`` (negative).
 
     Returns:
-        The number of rows updated (one per LSB team facing this opponent).
-        Zero means no pending row existed -- the caller errors and writes
-        nothing.
+        The ``(public_id, resolution_method)`` of every row updated, in table
+        order -- one per LSB team facing this opponent. A ``(None, None)`` entry
+        is a pending fill; anything else is an OVERRIDE and the caller must say
+        so. An EMPTY list means no eligible row existed -- the caller errors and
+        writes nothing.
     """
-    # Locate the pending rows by root_team_id. Only NOT-yet-resolved rows are
-    # eligible (resolution_method IS NULL) -- an already-resolved row is left
-    # alone so a re-run does not clobber a prior mapping.
-    pending = conn.execute(
-        "SELECT id FROM opponent_links "
-        "WHERE root_team_id = ? AND resolution_method IS NULL",
-        (root_team_id,),
-    ).fetchall()
-    if not pending:
-        return 0
+    # Eligibility rules: see the docstring. Both statements below interpolate
+    # the SAME predicate constant, so they cannot drift apart on a later edit --
+    # a SELECT that saw more rows than the UPDATE wrote (or fewer) would make
+    # the "what did I replace" report a lie.
+    #
+    # BEGIN IMMEDIATE takes the write lock BEFORE the read, so the two statements
+    # see one state. Python's sqlite3 opens no transaction for a bare SELECT, so
+    # without this a concurrent morning-run could resolve a pending row between
+    # them -- the UPDATE would then write fewer rows than the SELECT reported and
+    # the "across N team(s)" line would overcount. The shared constant prevents
+    # drift on EDIT; this prevents drift in TIME. (This module's writers share
+    # the WAL file with cron -- see the get_connection note at the caller.)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        eligible = conn.execute(
+            f"SELECT public_id, resolution_method FROM opponent_links "
+            f"WHERE {_MAPPABLE_ROW_PREDICATE}",
+            (root_team_id, METHOD_SEARCH),
+        ).fetchall()
+        if not eligible:
+            conn.rollback()
+            return []
 
-    conn.execute(
-        "UPDATE opponent_links "
-        "SET public_id = ?, resolution_method = ?, resolved_at = datetime('now') "
-        "WHERE root_team_id = ? AND resolution_method IS NULL",
-        (public_id, method, root_team_id),
-    )
+        cursor = conn.execute(
+            f"UPDATE opponent_links "
+            f"SET public_id = ?, resolution_method = ?, resolved_at = datetime('now') "
+            f"WHERE {_MAPPABLE_ROW_PREDICATE}",
+            (public_id, method, root_team_id, METHOD_SEARCH),
+        )
+        # The returned prior states are an AUDIT the operator acts on, so the
+        # write must have covered exactly the rows we are about to report. Under
+        # BEGIN IMMEDIATE this cannot diverge -- which is precisely why a
+        # mismatch means an assumption broke (someone removed the lock, or the
+        # two predicates stopped agreeing), and reporting a confident
+        # "Replaced ..." over a write that did not happen is the failure worth
+        # refusing loudly rather than absorbing.
+        if cursor.rowcount != len(eligible):
+            conn.rollback()
+            raise RuntimeError(
+                f"map-opponent aborted: read {len(eligible)} eligible row(s) for "
+                f"root_team_id={root_team_id!r} but the UPDATE wrote "
+                f"{cursor.rowcount}. No rows were changed."
+            )
+    except Exception:
+        conn.rollback()
+        raise
     conn.commit()
-    return len(pending)
+    return [(row[0], row[1]) for row in eligible]
 
 
 @app.command(name="map-opponent")
@@ -431,15 +509,25 @@ def map_opponent_cmd(
         ),
     ),
 ) -> None:
-    """Resolve an unresolved-but-mappable opponent by its root_team_id.
+    """Map an opponent by its root_team_id, or correct a wrong search match.
 
-    Locates the pending opponent_links row(s) the resolution ladder persisted in
-    rung (d) -- there may be one per LSB team facing the opponent -- and UPDATEs
-    ALL of them to resolved-positive (``--target`` -> ``public_id`` +
-    ``resolution_method='operator'``) or, with ``--no-presence``, to the
-    operator-declared resolved-negative state (``resolution_method='no_presence'``,
-    ``public_id`` NULL). The rows are keyed on ``root_team_id`` (a stable
-    registry id), never on the free-text opponent name.
+    Two kinds of row are eligible -- there may be one per LSB team facing the
+    opponent, and ALL eligible ones are updated together:
+
+    \b
+      * the pending row the ladder persisted in rung (d) (not yet resolved)
+      * a row auto-resolved by name SEARCH, which this command OVERWRITES --
+        search matches on a single team hit with no name or season check, so it
+        is the one mapping that can be confidently wrong
+
+    A `progenitor`, `operator` or `no-presence` mapping is left alone; if none
+    of this opponent's rows are eligible the command changes nothing and exits
+    non-zero. Overwriting a search match is announced, and is itself recorded as
+    `operator` -- which this command will not overwrite again.
+
+    With `--no-presence` the rows become the operator-declared no-report state
+    instead. Rows are keyed on `root_team_id` (a stable registry id), never on
+    the free-text opponent name.
     """
     # --- Validate the form (mutually exclusive: target XOR --no-presence) ----
     if no_presence:
@@ -497,20 +585,67 @@ def map_opponent_cmd(
     # UPDATE-ing writer is a SQLite writer on the shared WAL file, so it must
     # carry the factory's busy_timeout + WAL-safe pragmas and WAIT on a concurrent
     # write lock instead of immediately raising "database is locked". The factory
-    # already sets PRAGMA foreign_keys=ON, so this is behavior-preserving (the
-    # UPDATE logic and `updated`-count semantics are unchanged).
+    # already sets PRAGMA foreign_keys=ON, so this is behavior-preserving.
     with closing(get_connection(db_path=db_path)) as conn:
-        updated = _apply_opponent_mapping(
+        applied = _apply_opponent_mapping(
             conn, root_team_id, public_id=public_id, method=method
         )
+        # Rows for this opponent that the predicate did NOT reach, by method --
+        # read AFTER the update so the already-written rows are excluded.
+        skipped_methods = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT resolution_method, COUNT(*) FROM opponent_links "
+                "WHERE root_team_id = ? AND resolution_method IS NOT NULL "
+                "AND resolution_method != ? GROUP BY resolution_method",
+                (root_team_id, method),
+            ).fetchall()
+        }
 
-    if updated == 0:
+    if not applied:
         err_console.print(
-            f"[red]No pending opponent for root_team_id={root_team_id!r}.[/red] "
+            f"[red]No mappable opponent for root_team_id={root_team_id!r}.[/red] "
+            "Only unresolved opponents and automatic `search` resolutions can be "
+            "mapped; a progenitor, operator or no-presence mapping is left alone. "
             "Run `bb report morning-run --dry-run` first to discover and queue "
             "the opponent, then re-run map-opponent."
         )
         raise typer.Exit(code=1)
+
+    updated = len(applied)
+    # An override REPLACES a prior automatic resolution -- say what was
+    # displaced so it never happens silently. A (None, None) prior state is an
+    # ordinary pending fill and needs no such line.
+    #
+    # Report one line per DISTINCT prior state, with a team count. The usual
+    # case is one wrong `search` resolution written identically across every
+    # team facing that opponent, and the message carries nothing that differs
+    # between those rows -- printing it N times would be N copies of one fact.
+    overridden: dict[tuple[str | None, str | None], int] = {}
+    for prior in applied:
+        if prior[1] is not None:
+            overridden[prior] = overridden.get(prior, 0) + 1
+    for (prior_public_id, prior_method), count in overridden.items():
+        err_console.print(
+            f"[yellow]Replaced[/yellow] the existing {prior_method} mapping "
+            f"(public_id={prior_public_id}) for root_team_id={root_team_id} "
+            f"across {count} team(s)."
+        )
+
+    # A PARTIAL apply must not read as a complete one. Rows for this opponent
+    # can legitimately be split by method -- rung (a) depends on each team's own
+    # registry, so Varsity's row can be `progenitor` while JV's is `search` --
+    # and only the eligible ones moved. Without this the success line ("across 1
+    # team(s)") looks complete while another team still points at the old team.
+    if skipped_methods:
+        summary = ", ".join(
+            f"{count}x {m}" for m, count in sorted(skipped_methods.items())
+        )
+        err_console.print(
+            f"[yellow]Left unchanged[/yellow]: {sum(skipped_methods.values())} "
+            f"row(s) for root_team_id={root_team_id} are not mappable "
+            f"({summary}). Those teams keep their existing mapping."
+        )
 
     team_label = (
         f" — {display_name}" if display_name else ""
@@ -674,10 +809,17 @@ def morning_run_cmd(
         for slot in result.slots:
             if slot.resolved_public_id and slot.resolved_team_name:
                 record = f" — record {slot.resolved_record}" if slot.resolved_record else ""
+                # Show HOW it resolved. This is the eyeball line where a
+                # wrong auto-resolve gets caught, and the method decides what
+                # the operator can do about it: a `search` mapping is
+                # correctable via map-opponent, the others are not. Without it
+                # they can only find out by trying.
+                via = f" [via {slot.resolution_method}]" if slot.resolution_method else ""
                 console.print(
                     f"[green]RESOLVED[/green] {slot.opponent_name} "
                     f"(opponent_id={slot.opponent_root_team_id}) -> "
-                    f"{slot.resolved_team_name} [public_id: {slot.resolved_public_id}]{record}"
+                    f"{slot.resolved_team_name} [public_id: {slot.resolved_public_id}]"
+                    f"{via}{record}"
                 )
             elif (
                 slot.resolution_outcome == "unresolved_mappable"

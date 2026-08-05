@@ -520,6 +520,140 @@ def test_rerun_is_idempotent_single_row(db: sqlite3.Connection) -> None:
     assert result2.slots[0].delivery_status == "skipped"
 
 
+def test_summary_detail_line_carries_the_resolution_method() -> None:
+    """The operator summary must name HOW the opponent resolved.
+
+    This is the channel an unattended cron run actually reports through -- the
+    dry-run console line is a different surface and does not cover it. `via
+    search` is what tells the operator a mapping is both the likeliest to be
+    wrong and the only one `map-opponent` can correct, so a regression that
+    drops the tag must fail here.
+    """
+    slot = SlotResult(
+        own_team_id=1,
+        opponent_root_team_id="opp-1",
+        opponent_name="Opp",
+        game_date="2026-08-05",
+        resolution_outcome="auto_resolved",
+        resolved_public_id="pub-1",
+        resolved_team_name="Resolved Opp",
+        resolution_method="search",
+    )
+    line = MorningRunResult(slots=[slot]).detail_lines
+
+    assert "[via search]" in line
+    assert "Resolved Opp" in line
+
+
+def test_summary_detail_line_omits_method_when_absent() -> None:
+    """No method (an unresolved slot) must not render an empty `[via ]`."""
+    slot = SlotResult(
+        own_team_id=1,
+        opponent_root_team_id="opp-1",
+        opponent_name="Opp",
+        game_date="2026-08-05",
+        resolution_outcome="auto_resolved",
+        resolved_public_id="pub-1",
+        resolved_team_name="Resolved Opp",
+    )
+    assert "[via" not in MorningRunResult(slots=[slot]).detail_lines
+
+
+def test_corrected_mapping_regenerates_instead_of_skipping(
+    db: sqlite3.Connection,
+) -> None:
+    """A CHANGED mapping must NOT hit the idempotency skip.
+
+    The operator-override path (`bb report map-opponent` on a wrong `search`
+    resolution, 2026-08-05) is inert without this: the prior report exists and
+    is non-expired, so a skip predicate keyed only on
+    (team, opponent, date) reports "skipped" and the coach keeps reading the
+    WRONG team's report until it expires. Here run 2 resolves to a DIFFERENT
+    public_id -- exactly what a correction produces -- and must regenerate.
+    """
+    client = MagicMock()
+    game = _game(event_id="e1", opponent_id="opp-1", opponent_name="Opp")
+
+    def fake_gen(pid: str) -> GenerationResult:
+        db.execute(
+            "INSERT OR IGNORE INTO reports (slug, team_id, title, expires_at) "
+            "VALUES ('dup-slug', (SELECT id FROM teams LIMIT 1), 'T', "
+            "'2999-01-01T00:00:00Z')"
+        )
+        db.commit()
+        return _ready_result(slug="dup-slug")
+
+    def do_run(public_id: str, method: str):
+        return _run(
+            db, client,
+            generate_fn=fake_gen,
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=MagicMock(return_value=[game]),
+            fetch_opponents=MagicMock(return_value=_linked_registry("opp-1")),
+            resolve_opponent=MagicMock(return_value=LadderResult(
+                outcome=ResolutionOutcome.RESOLVED,
+                public_id=public_id,
+                method=method,
+            )),
+        )
+
+    # Run 1: a WRONG rung-(c) auto-resolution generates a report.
+    assert do_run("wrong-pub", "search").generated == 1
+
+    # Run 2: same team/opponent/date, but the operator has corrected the
+    # mapping, so the ladder now returns a different public_id + `operator`.
+    result2 = do_run("correct-pub", "operator")
+
+    assert result2.generated == 1, "a corrected mapping must regenerate"
+    assert result2.skipped == 0
+    assert result2.slots[0].delivery_status == "generated"
+    # Still ONE audit row (UPSERT), now pointing at the corrected team.
+    count = db.execute("SELECT COUNT(*) FROM scheduled_report_runs").fetchone()[0]
+    assert count == 1
+    stored = db.execute(
+        "SELECT resolved_public_id FROM scheduled_report_runs"
+    ).fetchone()[0]
+    assert stored == "correct-pub"
+
+
+def test_unchanged_mapping_still_skips(db: sqlite3.Connection) -> None:
+    """The converse -- the fix must not defeat ordinary idempotency.
+
+    Same public_id on both runs (the normal repeat-run case) must still skip,
+    or every cron run would regenerate every report.
+    """
+    client = MagicMock()
+    game = _game(event_id="e1", opponent_id="opp-1", opponent_name="Opp")
+
+    def fake_gen(pid: str) -> GenerationResult:
+        db.execute(
+            "INSERT OR IGNORE INTO reports (slug, team_id, title, expires_at) "
+            "VALUES ('dup-slug', (SELECT id FROM teams LIMIT 1), 'T', "
+            "'2999-01-01T00:00:00Z')"
+        )
+        db.commit()
+        return _ready_result(slug="dup-slug")
+
+    def do_run():
+        return _run(
+            db, client,
+            generate_fn=fake_gen,
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=MagicMock(return_value=[game]),
+            fetch_opponents=MagicMock(return_value=_linked_registry("opp-1")),
+            resolve_opponent=MagicMock(return_value=LadderResult(
+                outcome=ResolutionOutcome.RESOLVED,
+                public_id="same-pub",
+                method="search",
+            )),
+        )
+
+    assert do_run().generated == 1
+    assert do_run().skipped == 1
+
+
 def test_skip_preserves_report_linkage_across_reruns(db: sqlite3.Connection) -> None:
     """F-H2 regression: the idempotency skip must NOT wipe the audit row's
     report_id/report_slug, so a later run still recognizes the prior success and

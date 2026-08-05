@@ -326,6 +326,27 @@ def _seed_db_with_pending(
         conn.close()
 
 
+def _set_link_method(
+    db_path: Path, method: str | None, public_id: str | None, root_team_id: str = _ROOT
+) -> None:
+    """Force the seeded link row(s) into an already-resolved state.
+
+    Lets a CLI test start from a wrong `search` auto-resolution -- the state
+    `map-opponent` now overrides -- rather than from the pending row
+    `_seed_db_with_pending` creates.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "UPDATE opponent_links SET resolution_method = ?, public_id = ? "
+            "WHERE root_team_id = ?",
+            (method, public_id, root_team_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _link_rows(db_path: Path, root_team_id: str = _ROOT) -> list[sqlite3.Row]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -351,15 +372,28 @@ def _profile(name: str = "Resolved Opp HS") -> TeamProfile:
     return TeamProfile(public_id=_PUBLIC_ID, name=name, sport="baseball")
 
 
+def _team_seeded_conn() -> sqlite3.Connection:
+    """An in-memory DB with the real schema and one member team (id=1).
+
+    Shared by the two in-memory `_apply_opponent_mapping` test classes so the
+    schema/team boilerplate exists once. Distinct from `_seed_db_with_pending`,
+    which is DISK-backed for the `DATABASE_PATH`-wired CLI tests -- these
+    connections are handed straight to the helper under test.
+    """
+    conn = sqlite3.connect(":memory:")
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB', 'member')"
+    )
+    conn.commit()
+    return conn
+
+
 class TestApplyOpponentMappingHelper:
     """Direct tests of the pure DB helper (in-memory, no CLI)."""
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(":memory:")
-        load_real_schema(conn)
-        conn.execute(
-            "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB', 'member')"
-        )
+        conn = _team_seeded_conn()
         conn.execute(
             "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
             "VALUES (1, ?, 'Typed')",
@@ -370,10 +404,11 @@ class TestApplyOpponentMappingHelper:
 
     def test_positive_update_sets_public_id_method_resolved_at(self):
         conn = self._conn()
-        n = _apply_opponent_mapping(
+        applied = _apply_opponent_mapping(
             conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
         )
-        assert n == 1
+        # One row, and it was a PENDING fill -- prior state (None, None).
+        assert applied == [(None, None)]
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
@@ -387,10 +422,10 @@ class TestApplyOpponentMappingHelper:
 
     def test_no_presence_update_nulls_public_id_sets_method(self):
         conn = self._conn()
-        n = _apply_opponent_mapping(
+        applied = _apply_opponent_mapping(
             conn, _ROOT, public_id=None, method="no_presence"
         )
-        assert n == 1
+        assert applied == [(None, None)]
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
@@ -401,10 +436,10 @@ class TestApplyOpponentMappingHelper:
 
     def test_no_pending_row_returns_zero_and_writes_nothing(self):
         conn = self._conn()
-        n = _apply_opponent_mapping(
+        applied = _apply_opponent_mapping(
             conn, "different-root", public_id=_PUBLIC_ID, method="operator"
         )
-        assert n == 0
+        assert applied == []
         # The seeded row for _ROOT is untouched.
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -412,20 +447,168 @@ class TestApplyOpponentMappingHelper:
         ).fetchone()
         assert row["resolution_method"] is None
 
-    def test_already_resolved_row_not_clobbered(self):
+    def test_operator_resolved_row_not_clobbered(self):
+        """An `operator` mapping is terminal here -- re-mapping refuses.
+
+        NOTE the scope, which narrowed deliberately: "already resolved" is no
+        longer one class. A `search` row IS now re-mappable (see
+        TestSearchOverride below); `operator` / `progenitor` / `no_presence` are
+        not. This test covers `operator` only -- do not read it as covering
+        already-resolved rows in general.
+        """
         conn = self._conn()
         # First resolve positively.
         _apply_opponent_mapping(conn, _ROOT, public_id=_PUBLIC_ID, method="operator")
-        # A second call finds no PENDING row (method is no longer NULL) -> 0.
-        n = _apply_opponent_mapping(
+        # A second call finds no ELIGIBLE row (operator is not overridable) -> [].
+        applied = _apply_opponent_mapping(
             conn, _ROOT, public_id="other-slug", method="operator"
         )
-        assert n == 0
+        assert applied == []
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
         ).fetchone()
         assert row["public_id"] == _PUBLIC_ID  # unchanged
+
+
+class TestSearchOverride:
+    """A rung-(c) `search` resolution is correctable; nothing else is.
+
+    The gap this closes: `search` auto-accepts on a single TEAM hit with no name
+    or season corroboration, so it is the one method that can be confidently
+    wrong -- and before this, `map-opponent` refused it, leaving hand-written SQL
+    as the only recovery.
+    """
+
+    def _conn(self) -> sqlite3.Connection:
+        return _team_seeded_conn()
+
+    def _seed(
+        self,
+        conn: sqlite3.Connection,
+        root: str,
+        method: str | None,
+        public_id: str | None,
+        our_team_id: int = 1,
+    ) -> None:
+        conn.execute(
+            "INSERT INTO opponent_links "
+            "(our_team_id, root_team_id, opponent_name, public_id, resolution_method) "
+            "VALUES (?, ?, 'Typed', ?, ?)",
+            (our_team_id, root, public_id, method),
+        )
+        conn.commit()
+
+    def _method_of(self, conn: sqlite3.Connection, root: str) -> tuple:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT public_id, resolution_method FROM opponent_links "
+            "WHERE root_team_id = ?",
+            (root,),
+        ).fetchone()
+        return (row["public_id"], row["resolution_method"])
+
+    def test_search_resolved_row_is_overridden_and_prior_state_reported(self):
+        conn = self._conn()
+        self._seed(conn, _ROOT, "search", "wrong-slug")
+
+        applied = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+
+        # The return value carries the DISPLACED state so the caller can say
+        # what it replaced -- an override must never be silent.
+        assert applied == [("wrong-slug", "search")]
+        assert self._method_of(conn, _ROOT) == (_PUBLIC_ID, "operator")
+
+    def test_map_opponent_override_does_not_touch_a_different_opponent(self):
+        """🔒 SQL-precedence guard. Fails if the WHERE parentheses are dropped.
+
+        `AND` binds tighter than `OR`, so an unparenthesized
+        `root_team_id = ? AND resolution_method IS NULL OR resolution_method = ?`
+        parses as
+        `(root_team_id = ? AND ... IS NULL) OR (resolution_method = ?)`
+        and rewrites EVERY search-resolved row in the table -- including this
+        second opponent, which the operator never named.
+        """
+        conn = self._conn()
+        self._seed(conn, _ROOT, "search", "wrong-slug")
+        self._seed(conn, "other-root", "search", "other-teams-slug")
+
+        _apply_opponent_mapping(conn, _ROOT, public_id=_PUBLIC_ID, method="operator")
+
+        # The named opponent moved...
+        assert self._method_of(conn, _ROOT) == (_PUBLIC_ID, "operator")
+        # ...and the bystander did NOT.
+        assert self._method_of(conn, "other-root") == ("other-teams-slug", "search")
+
+    def test_no_presence_row_is_still_refused(self):
+        """The resurrection bug: `no_presence` must NEVER become eligible.
+
+        A `no_presence` row carries public_id NULL, so a predicate widened to
+        `resolution_method IS NOT NULL` -- or gated on public_id -- would re-open
+        an opponent the operator explicitly declared absent from GameChanger.
+        """
+        conn = self._conn()
+        self._seed(conn, _ROOT, "no_presence", None)
+
+        applied = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+
+        assert applied == []
+        assert self._method_of(conn, _ROOT) == (None, "no_presence")
+
+    def test_progenitor_row_is_still_refused(self):
+        """A progenitor mapping came from GC's own registry link -- not ours to override."""
+        conn = self._conn()
+        self._seed(conn, _ROOT, "progenitor", "registry-slug")
+
+        applied = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+
+        assert applied == []
+        assert self._method_of(conn, _ROOT) == ("registry-slug", "progenitor")
+
+    def test_override_spans_every_team_facing_the_opponent(self):
+        """The key is root_team_id ALONE, so all our teams' rows move together.
+
+        Pre-existing, deliberate behavior -- pinned here because the override
+        makes it reach ALREADY-RESOLVED rows for the first time.
+        """
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) VALUES (2, 'LSB JV', 'member')"
+        )
+        self._seed(conn, _ROOT, "search", "wrong-slug", our_team_id=1)
+        self._seed(conn, _ROOT, "search", "wrong-slug", our_team_id=2)
+
+        applied = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+
+        assert applied == [("wrong-slug", "search"), ("wrong-slug", "search")]
+        rows = conn.execute(
+            "SELECT resolution_method FROM opponent_links WHERE root_team_id = ?",
+            (_ROOT,),
+        ).fetchall()
+        assert [r[0] for r in rows] == ["operator", "operator"]
+
+    def test_pending_and_search_rows_are_both_eligible_together(self):
+        """A mixed set (one team pending, another search-resolved) all moves."""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) VALUES (2, 'LSB JV', 'member')"
+        )
+        self._seed(conn, _ROOT, None, None, our_team_id=1)
+        self._seed(conn, _ROOT, "search", "wrong-slug", our_team_id=2)
+
+        applied = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+
+        assert applied == [(None, None), ("wrong-slug", "search")]
 
 
 class TestMapOpponentCommand:
@@ -441,6 +624,94 @@ class TestMapOpponentCommand:
         assert rows[0]["public_id"] == _PUBLIC_ID
         assert rows[0]["resolution_method"] == "operator"
         assert rows[0]["resolved_at"] is not None
+
+    def test_override_reports_what_it_replaced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """An override must ANNOUNCE the displaced mapping -- never silent.
+
+        CLI-level on purpose: `TestSearchOverride` pins the helper's return
+        value, but the operator only ever sees the printed line, and a return
+        value nobody renders is not a warning.
+        """
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path)
+        _set_link_method(db_path, "search", "wrong-slug")
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "Replaced" in result.output
+        assert "search" in result.output
+        assert "wrong-slug" in result.output  # the displaced public_id, named
+        assert _link_rows(db_path)[0]["public_id"] == _PUBLIC_ID
+
+    def test_pending_fill_reports_no_replacement(self, mapped_db: Path):
+        """The converse: an ordinary fill displaced nothing, so it must NOT
+        claim to have replaced anything (the seeded row is pending)."""
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "Replaced" not in result.output
+
+    def test_override_across_two_teams_reports_once_with_a_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """One wrong `search` mapping shared by two teams -> ONE line, count 2.
+
+        The message names only the root_team_id and the prior state, so it is
+        byte-identical per row; printing it twice would be one fact twice.
+        """
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path, team_ids=(1, 2))
+        _set_link_method(db_path, "search", "wrong-slug")
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert result.output.count("Replaced") == 1
+        assert "across 2 team(s)" in result.output
+
+    def test_partial_apply_warns_about_untouched_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A split-method opponent must not report a partial apply as complete.
+
+        Rung (a) depends on each team's own registry, so one team's row can be
+        `progenitor` while another's is `search`. Correcting the `search` row
+        leaves the other pointing at the old team -- and "across 1 team(s)"
+        alone reads as done.
+        """
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path, team_ids=(1, 2))
+        # Team 1 -> search (correctable); team 2 -> progenitor (not).
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "UPDATE opponent_links SET resolution_method='search', "
+            "public_id='wrong-slug' WHERE our_team_id=1"
+        )
+        conn.execute(
+            "UPDATE opponent_links SET resolution_method='progenitor', "
+            "public_id='registry-slug' WHERE our_team_id=2"
+        )
+        conn.commit()
+        conn.close()
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "Left unchanged" in result.output
+        assert "progenitor" in result.output
+        rows = _link_rows(db_path)
+        assert rows[0]["public_id"] == _PUBLIC_ID  # team 1 corrected
+        assert rows[1]["public_id"] == "registry-slug"  # team 2 untouched
 
     def test_positive_full_url_target_parsed(self, mapped_db: Path):
         url = f"https://web.gc.com/teams/{_PUBLIC_ID}/2026-some-slug"
@@ -517,7 +788,7 @@ class TestMapOpponentCommand:
             )
 
         assert result.exit_code == 1
-        assert "No pending opponent" in result.output
+        assert "No mappable opponent" in result.output
         # The real pending row is untouched.
         rows = _link_rows(db_path)
         assert rows[0]["resolution_method"] is None
@@ -533,7 +804,7 @@ class TestMapOpponentCommand:
             app, ["map-opponent", "unknown-root", "--no-presence"]
         )
         assert result.exit_code == 1
-        assert "No pending opponent" in result.output
+        assert "No mappable opponent" in result.output
 
     def test_name_lookup_failure_still_applies_mapping(self, mapped_db: Path):
         """AC-5: a failed display-name lookup warns but does not abort."""

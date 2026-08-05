@@ -68,13 +68,19 @@ Opponents with no `progenitor_team_id` key (**median ~30-38% of a team's records
 
 #### Auto-Accept Criteria
 
-All three conditions must be true for automatic resolution:
+**As implemented, the gate is a single condition** (`_resolve_via_search`, `src/gamechanger/opponent_ladder.py`):
 
-1. **Exact name match** (case-insensitive) between `opponent_links.opponent_name` and `result.name`
-2. **Season year match**: `result.season.year` matches the member team's `season_year`
-3. **Single result**: Exactly one result remains after both filters
+> **Exactly one TEAM hit** remains after organization hits are dropped (`is_team_hit()`). Zero team hits, 2+ team hits, or an all-organization result set all fall through to rung (d) — the opponent is left unlinked for one-time operator mapping via `bb report map-opponent`.
 
-If 0 or 2+ results match after filtering, the opponent is left unlinked for one-time operator mapping via `bb report map-opponent` (the deleted admin UI's replacement).
+**There is no name check and no season check.** The single-team count is the ENTIRE gate — state it that way, because that is what decides whether a wrong hit is auto-accepted.
+
+This section previously specified three conditions. Their dispositions differ, and they are recorded separately so no future reader reinstates the wrong one (corrected 2026-08-05, after a spec review found the original rejection rationale itself was wrong):
+
+- ⚰ **RETIRED — criterion 1, exact name match** (case-insensitive, `opponent_links.opponent_name` vs `result.name`). **Never implemented; not planned.** The stored name is scorekeeper free text off *our own* schedule (`pregame_data.opponent_name`), while `result.name` is GC's canonical index entry, and the two diverge in word order and punctuation for the same club. Shape of the divergence, from a real captured result set (names rendered as placeholders per `.claude/rules/api-docs.md`): `Anytown Eagles Navy 10U` / `Anytown Eagles 9U Navy` / `Eagles (Navy) 13U(AAA)` — same club, three orderings and two punctuation styles. An exact match would reject correct hits. (⚠ It would NOT fail for the reason once claimed here — see the `result.name` note in [post-search.md](../endpoints/post-search.md).)
+- 🔶 **OPEN — criterion 2, season-year match** (`result.season.year` vs the member team's `season_year`). **Not implemented, but NOT rejected**, and deliberately not tombstoned: the data is there. `result.season.year` is populated on 15/15 hits in the repo's captured `/search` bodies, and one capture returned a `summer 2025` hit beside `spring 2026` hits — exactly what this filter would discriminate. What is open is cost and semantics: `_resolve_via_search` does not receive the member team's `season_year`, `opponent_links` has no season column, and which season to match is undecided. Tracked in `.project/specs/2026-08-05-rung-c-season-year-filter.md`.
+- ✅ **IMPLEMENTED — criterion 3**, now scoped to TEAM hits as stated above.
+
+**Recovering from a wrong auto-accept.** Because the count is the whole gate, rung (c) can auto-accept a wrong team. `bb report map-opponent` accepts a `search` mapping and overwrites it (2026-08-05); `progenitor`, `operator`, and `no_presence` mappings are refused. The morning-run RESOLVED line prints `[via <method>]` so the method is visible before an operator tries. Note the asymmetry, which is deliberate: the **ladder** never re-attempts a resolved row (its terminality gate is unchanged, and widening it would resurrect `no_presence` rows), so correction is operator-driven and requires noticing the bad mapping first.
 
 #### What POST /search Returns
 
@@ -87,11 +93,11 @@ This means search-resolved opponents skip the progenitor chain entirely -- a sin
 
 > ⚠ **FILTER ON THE ENVELOPE `type` FIRST — search returns ORGANIZATIONS as well as teams (2026-08-04).** The hit envelope carries `type` ∈ `{"team", "organization"}`. Organizations are **15.5% of all hits and 19.5% of baseball hits** (n=599) — not marginal.
 >
-> **Neither identifier above discriminates.** Organizations carry a `public_id` (93/93), so **auto-accept criterion 3 ("exactly one result") can settle on an organization**, and an org `public_id` fed to the public pipeline 404s (3/3 measured). `season`, `avatar_url` and `location` are equally non-discriminating.
+> **Neither identifier above discriminates.** Organizations carry a `public_id` (93/93), so **the single-result auto-accept gate can settle on an organization**, and an org `public_id` fed to the public pipeline 404s (3/3 measured). `season`, `avatar_url` and `location` are equally non-discriminating.
 >
 > Test the **envelope** `type`, not `result.type` — the latter is present only on organizations and absent on teams, so the check inverts. Coextensive cross-checks: orgs have `number_of_players: null` (93/93) and `staff: null` (93/93); teams have both populated (506/506).
 >
-> The three auto-accept conditions in the section above assume every hit is a team.
+> The auto-accept gate in the section above assumes every hit is a team.
 >
 > ✅ **IMPLEMENTED (2026-08-04).** Entity-class filtering now runs ahead of them, via the shared predicate `is_team_hit()` in `src/gamechanger/search.py`, applied per hit at both consumers:
 > - `_resolve_via_search()` (`src/gamechanger/opponent_ladder.py`, rung (c)) **drops organization hits BEFORE** the single-result count, so criterion 3 is now "exactly one **team**". An all-organization result set filters to zero teams and falls through to the operator queue, exactly as a zero-hit result does.
@@ -113,7 +119,9 @@ distinguishing them from progenitor-chain resolutions (`'progenitor'`).
 > `bb report map-opponent <root_team_id> <public_id|GC team URL>` CLI command,
 > which UPDATEs the pending `opponent_links` row with an operator-supplied
 > mapping (or marks it `--no-presence`). The `resolution_method='operator'` value
-> records an operator mapping.
+> records an operator mapping. **Since 2026-08-05 it also accepts a
+> `search`-resolved row**, overwriting a wrong automatic resolution; `progenitor`,
+> `operator` and `no_presence` rows are refused.
 
 ## WARNING: Bridge Endpoints Restricted to "Followed" Teams Only
 
@@ -165,7 +173,7 @@ Opponents resolve through these methods:
 | Category | Method | Resolution Method Value |
 |----------|--------|------------------------|
 | Progenitor chain (Pass 1) | Automated via `progenitor_team_id` → team metadata | `'progenitor'` |
-| POST /search fallback (Pass 2) | Automated via unambiguous single name match | `'search'` |
+| POST /search fallback (Pass 2) | Automated via unambiguous single **team** match | `'search'` |
 | Operator mapping | Manual via `bb report map-opponent` (replaces deleted admin UI) | `'operator'` |
 | Unresolved | No match found; awaiting operator mapping | (none) |
 
