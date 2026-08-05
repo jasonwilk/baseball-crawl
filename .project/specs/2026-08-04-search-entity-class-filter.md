@@ -1,10 +1,9 @@
 # Search returns two entity classes — filter for teams
 
-**Date:** 2026-08-04 · **Status:** COMPLETE (this commit) — the entity-class filter is
-implemented at both call sites, with the shared predicate `is_team_hit()` in
-`src/gamechanger/search.py`. Committed on branch `worktree-search-entity-class-filter` in the
-worktree `.claude/worktrees/search-entity-class-filter`; **not yet merged to `main`, and not
-pushed** — the operator merges at the end. See the final Progress log entry.
+**Date:** 2026-08-04 · **Status:** COMPLETE — **landed on `main` 2026-08-05 as `b9bc37f`**,
+the entity-class filter implemented at both call sites with the shared predicate
+`is_team_hit()` in `src/gamechanger/search.py`. The worktree and its branch are removed;
+**not pushed** — `main` is local-only ahead of `origin`. See the final Progress log entry.
 **Source:** live probes 2026-08-03/04 (~630 calls, read-only, web profile)
 
 ## Goal
@@ -290,3 +289,23 @@ on non-associated ids.** Flagged as needing re-verification, not asserted wrong.
 
   The rung (c) decision above remains open and is unaffected by the commit — committing the
   code did not settle it.
+- **2026-08-05 — LANDED ON `main` as `b9bc37f`.** Operator approved the diff at step 7; the
+  chunk commit `a87f9d0` was cherry-picked onto `main`, which is the merge-base patch here:
+  `a87f9d0^` was verified to equal `git merge-base HEAD main` (`255be02`) BEFORE applying, so
+  the hazard the entry above warns about — a bare-`main` diff reverting the two operator docs
+  commits that landed meanwhile (`768544d`, `91a8c36`) — could not fire. Proven, not assumed:
+  `git diff 255be02 a87f9d0` and `git diff 91a8c36 b9bc37f` are byte-identical.
+
+  **Verified on the MERGED tree in the main checkout, not carried over from the worktree:**
+  full suite **4419 passed, RC=0** (unpiped, written to a file and read back). PII coverage
+  11/11 — 9 auto-scanned (`0 violations`), and the 2 `.claude/rules/` files SKIP_PATHS blinds
+  the scanner to were manually passed over their 6 added lines. Both instruments were given a
+  POSITIVE CONTROL first: the scanner returned `RC=1, 2 violations` on a planted control file,
+  and the manual grep returned 1 on a known-dirty line, so neither clean result is a vacuous
+  zero. ⚠ Note for the next person: `--stdin` takes file PATHS, not content — feeding it
+  content scans zero files and reports a clean `RC=0`, which is exactly what a pass looks like.
+
+  **Not pushed.** `main` is local-only ahead of `origin`. Worktree and branch removed.
+
+  The rung (c) open decision is STILL open — landing did not settle it, any more than
+  committing did. See `2026-08-04-rung-c-auto-accept-criteria-drift.md`.
