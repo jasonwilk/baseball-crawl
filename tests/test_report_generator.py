@@ -2210,14 +2210,18 @@ class TestResolveGcUuid:
     def test_successful_resolution_returns_gc_uuid(self):
         """AC-1: Search returns a hit matching public_id -> returns result.id."""
         client = MagicMock()
+        # The MATCHING hit needs the envelope type: the loop checks public_id
+        # first and entity class second, so non-matching filler hits never
+        # reach the class check and are left as-is.
         client.post_json.return_value = {
             "hits": [
                 {
+                    "type": "team",
                     "result": {
                         "id": "resolved-gc-uuid-123",
                         "public_id": "my-team-slug",
                         "name": "Test Team",
-                    }
+                    },
                 },
                 {
                     "result": {
@@ -2313,7 +2317,10 @@ class TestResolveGcUuid:
         ]
         matching_page = {
             "hits": [
-                {"result": {"id": "target-uuid", "public_id": "target-slug"}}
+                {
+                    "type": "team",
+                    "result": {"id": "target-uuid", "public_id": "target-slug"},
+                }
             ]
         }
         client.post_json.side_effect = [
@@ -2391,11 +2398,12 @@ class TestResolveGcUuid:
         """E-225-02 AC-5: slash-name resolves to gc_uuid via normalized fallback."""
         client = MagicMock()
         canonical_hit = {
+            "type": "team",
             "result": {
                 "id": "ac053e2c-ee27-4f55-9b16-ed77c1bdfebb",
                 "public_id": "yecaUcoSVpJa",
                 "name": "Lincoln Northwest JV/Reserve Falcons",
-            }
+            },
         }
         client.post_json.side_effect = [
             {"hits": []},
@@ -2752,17 +2760,18 @@ class TestResolveGcUuidIntegration:
 
         mock_get_conn.side_effect = lambda: _fresh_conn()
 
-        # Mock client: post_json returns a search hit matching public_id
+        # Mock client: post_json returns a TEAM search hit matching public_id
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.post_json.return_value = {
             "hits": [
                 {
+                    "type": "team",
                     "result": {
                         "id": "resolved-uuid-abc",
                         "public_id": "abc123",
                         "name": "Test Tigers",
-                    }
+                    },
                 }
             ]
         }

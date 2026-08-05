@@ -91,7 +91,13 @@ This means search-resolved opponents skip the progenitor chain entirely -- a sin
 >
 > Test the **envelope** `type`, not `result.type` — the latter is present only on organizations and absent on teams, so the check inverts. Coextensive cross-checks: orgs have `number_of_players: null` (93/93) and `staff: null` (93/93); teams have both populated (506/506).
 >
-> The three auto-accept conditions in the section above assume every hit is a team. **Add entity-class filtering ahead of them.**
+> The three auto-accept conditions in the section above assume every hit is a team.
+>
+> ✅ **IMPLEMENTED (2026-08-04).** Entity-class filtering now runs ahead of them, via the shared predicate `is_team_hit()` in `src/gamechanger/search.py`, applied per hit at both consumers:
+> - `_resolve_via_search()` (`src/gamechanger/opponent_ladder.py`, rung (c)) **drops organization hits BEFORE** the single-result count, so criterion 3 is now "exactly one **team**". An all-organization result set filters to zero teams and falls through to the operator queue, exactly as a zero-hit result does.
+> - `resolve_gc_uuid_by_public_id()` (`src/gamechanger/search.py`) checks `public_id` first and entity class second, **skipping** a non-team match with a WARNING and continuing to page.
+>
+> The predicate is deliberately NOT applied inside `search_teams_by_name()`: that function's raw `hits` length is the has-more-pages signal, so filtering at the source would make a filtered full page read as partial and strand a team whose match sits on a later page.
 
 #### Resolution Method
 
@@ -131,10 +137,12 @@ omitted, not null, on manually-typed opponents. Two resolution paths apply, in o
 
 1. **POST /search fallback (automated)**: After the progenitor chain completes,
    run `POST /search` (via `search_teams_by_name()`) for each unlinked opponent,
-   auto-accepting only on an unambiguous single match. This is the primary
-   automated fallback.
+   **dropping organization hits** (`is_team_hit()`) and then auto-accepting only
+   on an unambiguous single **team** match. This is the primary automated
+   fallback.
 2. **Operator mapping (manual)**: Opponents the search fallback cannot resolve
-   (0 or 2+ matches, or genuinely unindexed teams) are surfaced to the operator
+   (0 or 2+ team matches, an all-organization result set, or genuinely
+   unindexed teams) are surfaced to the operator
    and mapped once via `bb report map-opponent <root_team_id> <public_id|GC team URL>`
    (E-240). This replaces the deleted admin resolve UI.
 

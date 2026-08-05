@@ -31,7 +31,9 @@ When you have a team's `public_id` (the slug used in public endpoints) but need 
 
 2. **Filter results by `public_id`**: Each hit contains `result.id` (the `gc_uuid`) and `result.public_id`. Find the hit where `result.public_id` matches the known `public_id` exactly.
 
-3. **Extract `gc_uuid`**: `result.id` from the matching hit is the `gc_uuid` (also known as `progenitor_team_id`).
+3. **Filter by entity class — REQUIRED, not optional**: a hit matching on `public_id` may still be an ORGANIZATION, whose `result.id` is not a team id. Test the hit's **envelope** `type` via `is_team_hit(hit)` (`src/gamechanger/search.py`) — see the ⚠ section below for why `public_id` cannot discriminate and why `result.type` inverts the check. Both in-repo consumers already do this; new ones must too.
+
+4. **Extract `gc_uuid`**: `result.id` from the matching hit is the `gc_uuid` (also known as `progenitor_team_id`).
 
 ## Reverse Bridge (gc_uuid → public_id)
 
@@ -145,4 +147,4 @@ Pattern verified 2026-03-29:
 - `POST /search` with team name returned hits including one where `result.public_id` matched exactly
 - `result.id` from that hit was the correct `gc_uuid`, confirmed by successful authenticated API calls
 
-Implementation: `src/gamechanger/search.py` (canonical `search_teams_by_name()` helper with punctuation-normalization fallback) and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` filtering). The forward bridge is the `POST /search` filtered-by-`public_id` path above; the former 3-tier `gc_uuid_resolver.py` was dead code (its upstream data sources removed in E-239) and was deleted in E-246.
+Implementation: `src/gamechanger/search.py` (canonical `search_teams_by_name()` helper with punctuation-normalization fallback, the `resolve_gc_uuid_by_public_id()` resolution loop, and the `is_team_hit()` entity-class predicate) and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` + entity-class filtering). The forward bridge is the `POST /search` filtered-by-`public_id` path above; the former 3-tier `gc_uuid_resolver.py` was dead code (its upstream data sources removed in E-239) and was deleted in E-246.

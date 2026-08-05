@@ -88,7 +88,33 @@ def _manual_record(*, root_team_id: str = _ROOT) -> OpponentRecord:
 
 
 def _search_hit(public_id: str, team_id: str = "11111111") -> dict[str, Any]:
-    return {"result": {"name": "Found Team", "public_id": public_id, "id": team_id}}
+    """A TEAM search hit. The envelope ``type`` is required -- rung (c) drops
+    non-team hits before counting, and teams OMIT ``result.type`` entirely."""
+    return {
+        "type": "team",
+        "result": {
+            "name": "Found Team",
+            "public_id": public_id,
+            "id": team_id,
+            "number_of_players": 14,
+            "staff": ["Coach One"],
+        },
+    }
+
+
+def _org_hit(public_id: str, org_id: str = "99999999") -> dict[str, Any]:
+    """An ORGANIZATION search hit, mirroring the real shape: envelope
+    ``type: "organization"``, a ``result.type`` SUBTYPE, and no
+    ``number_of_players``/``staff`` keys (omitted, not null)."""
+    return {
+        "type": "organization",
+        "result": {
+            "name": "Found Team",
+            "public_id": public_id,
+            "id": org_id,
+            "type": "travel",
+        },
+    }
 
 
 def _link_row(db: sqlite3.Connection, root_team_id: str = _ROOT) -> sqlite3.Row:
@@ -385,6 +411,132 @@ def test_search_multiple_matches_falls_to_operator_queue(
     row = _link_row(db)
     assert row["public_id"] is None
     assert row["resolution_method"] is None
+
+
+def test_search_single_organization_hit_does_not_resolve(
+    db: sqlite3.Connection,
+) -> None:
+    """Rung (c) must NOT return an organization's public_id.
+
+    This is the case the uniqueness bar cannot catch: it fires exactly when a
+    name matches ONE thing, which is when an organization name matches
+    uniquely (measured: 2 of 15 organization names returned a single hit, both
+    the organization). Organizations carry a public_id, so the pre-filter
+    result would otherwise look like a clean single match.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [{"hits": [_org_hit(_PUBLIC_ID)]}]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Some Showdown",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    assert result.public_id is None
+    row = _link_row(db)
+    assert row["public_id"] is None
+    assert row["resolution_method"] is None
+
+
+def test_search_organization_beside_one_team_resolves_the_team(
+    db: sqlite3.Connection,
+) -> None:
+    """Drop organizations, THEN count -- not refuse-whenever-an-org-appears.
+
+    An organization hit is usually a NAME COLLISION rather than the umbrella of
+    the team beside it, so refusing here would punt a resolvable team to the
+    operator queue for nothing.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {"hits": [_org_hit("org-slug"), _search_hit(_PUBLIC_ID)]}
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Real Team Name",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.method == METHOD_SEARCH
+    assert result.public_id == _PUBLIC_ID
+
+
+def test_search_two_teams_plus_organization_is_still_ambiguous(
+    db: sqlite3.Connection,
+) -> None:
+    """The team-side uniqueness bar is UNCHANGED.
+
+    Dropping the organization must not turn an ambiguous multi-team result
+    into an auto-resolve -- no new wrong-team mode is introduced.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _org_hit("org-slug"),
+                _search_hit("slug-a", "id-a"),
+                _search_hit("slug-b", "id-b"),
+            ]
+        }
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Ambiguous Team",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    row = _link_row(db)
+    assert row["public_id"] is None
+
+
+def test_search_all_organization_hits_falls_through_like_zero_hits(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An all-organization result set filters to zero teams -> rung (d).
+
+    Also pins the WARNING. This state is newly reachable, and it is how a
+    class-wide failure would present (a renamed envelope type, or a third
+    entity class, would drop EVERY hit). At DEBUG that is indistinguishable
+    from "GameChanger has not indexed this team", so the level is deliberate --
+    do not downgrade it.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {"hits": [_org_hit("org-a", "id-a"), _org_hit("org-b", "id-b")]}
+    ]
+
+    with caplog.at_level("WARNING", logger="src.gamechanger.opponent_ladder"):
+        result = resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="League Showdown",
+            registry=[_manual_record()],
+        )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    assert result.public_id is None
+    warnings = [
+        r.getMessage() for r in caplog.records if r.levelname == "WARNING"
+    ]
+    assert any("are non-team" in m for m in warnings), warnings
 
 
 def test_search_zero_hits_is_unresolved_mappable_not_no_presence(

@@ -1,8 +1,10 @@
 # Search returns two entity classes — filter for teams
 
-**Date:** 2026-08-04 · **Status:** UNPARKED — organizations are now understood well enough to
-decide rung (c), and the deciding evidence is a measurement, not an observation. Ready for the
-spec to be finished and executed. See Progress log.
+**Date:** 2026-08-04 · **Status:** COMPLETE (this commit) — the entity-class filter is
+implemented at both call sites, with the shared predicate `is_team_hit()` in
+`src/gamechanger/search.py`. Committed on branch `worktree-search-entity-class-filter` in the
+worktree `.claude/worktrees/search-entity-class-filter`; **not yet merged to `main`, and not
+pushed** — the operator merges at the end. See the final Progress log entry.
 **Source:** live probes 2026-08-03/04 (~630 calls, read-only, web profile)
 
 ## Goal
@@ -36,10 +38,15 @@ the boxscore/registry investigation; everything before it was documentation.
 - `src/gamechanger/search.py` — `resolve_gc_uuid_by_public_id` filters on
   `result.get("public_id") != public_id` with no type check, then yields `result.id`
   **as the `gc_uuid`**.
-- `src/gamechanger/opponent_ladder.py` — rung (c) `resolve_public_id_by_search` gates on
+- `src/gamechanger/opponent_ladder.py` — rung (c) `_resolve_via_search` gates on
   `len(hits) != 1` then takes `hits[0]`. ⚠ **The uniqueness guard gives NO protection
-  here** — it fires exactly when a name matches one thing, which is when an org name
-  matches uniquely. Measured: 2 of 15 org names returned a single hit; both were the org.
+  AGAINST AN ORGANIZATION** — it fires exactly when a name matches one thing, which is when
+  an org name matches uniquely. Measured: 2 of 15 org names returned a single hit; both were
+  the org. Scope that precisely: the guard is NOT useless and is NOT to be weakened — it is
+  what prevents a multi-hit wrong-team auto-resolve, and it stays exactly as it is. It simply
+  cannot discriminate entity class, which is a different job.
+  *(Symbol name corrected 2026-08-04 by spec review: this file previously called the function
+  `resolve_public_id_by_search`, which does not exist.)*
 - `tests/` — new cases (see Verification).
 
 ## Design
@@ -53,18 +60,26 @@ check and rejects every real team.
 Prefer an explicit shared predicate over two inline checks; both sites want the same
 rule and this repo's recurring defect is a second copy that drifts.
 
-Open design question for planning: **skip** a non-team hit and keep paging, or **refuse**
-the resolution outright? Skip-and-continue is probably right for
-`resolve_gc_uuid_by_public_id` (an org sharing a `public_id` with the sought team is not
-a reason to abandon the search), but rung (c)'s uniqueness contract may want refusal.
-Decide deliberately.
+⚰ **RESOLVED 2026-08-04 — do not re-open. The question below is answered in the Progress
+log; read that before acting on this paragraph.** Site A = **skip-and-continue**; rung (c) =
+**drop org hits, then require exactly one TEAM**. Retained as the record of what was asked.
+
+> Open design question for planning: **skip** a non-team hit and keep paging, or **refuse**
+> the resolution outright? Skip-and-continue is probably right for
+> `resolve_gc_uuid_by_public_id` (an org sharing a `public_id` with the sought team is not
+> a reason to abandon the search), but rung (c)'s uniqueness contract may want refusal.
+> Decide deliberately.
 
 ## Out of scope
 
 - The mechanism is settled — do NOT re-probe it.
 - No change to `is_gc_uuid`.
-- No historical repair: **28/28 stored `gc_uuid`s are teams today**, so there is no
-  live contamination to clean. Verify that still holds before assuming it.
+- No historical repair, across **BOTH** durable stores — this note originally covered
+  `teams.gc_uuid` only and missed the second (see Progress log):
+  1. `teams.gc_uuid` — **28/28 stored values are teams today.**
+  2. `opponent_links` — **10 rows, 0 of them `search`-method**, so rung (c) has never
+     written a durable row in this DB.
+  Verify both still hold before assuming it.
 - The wider organization exploration (below) — separate work.
 
 ## Verification
@@ -175,3 +190,103 @@ on non-associated ids.** Flagged as needing re-verification, not asserted wrong.
   — enumerate its member teams and match by name). Real, and newly possible, but it is a new
   ladder rung rather than an entity-class filter, and 4-of-70 says it would fire almost never.
   Captured in `2026-08-04-org-team-discovery-and-roster-ingest.md`; do not build it here.
+- **2026-08-04 (executed)** — **COMPLETE.** Shared predicate `is_team_hit()` added to
+  `src/gamechanger/search.py` (reads the ENVELOPE `type`, fail-closed on absent/unknown), applied
+  per hit at both call sites and deliberately NOT inside `search_teams_by_name`. Site A checks
+  `public_id` first and entity class second, skipping a non-team match with a WARNING and
+  continuing to page. Rung (c) `_resolve_via_search` drops org hits, then requires exactly one
+  TEAM — the team-side uniqueness bar is unchanged.
+
+  **Verification.** Full suite **4419 passed, RC=0**. Two mutants, each restored from a
+  scratchpad copy (never from the index) with `__pycache__` cleared around every run and the
+  mutation asserted applied:
+  - `result.type` inversion (the edit the spec names as likeliest) → **7 tests failed**, including
+    the dedicated `test_is_team_hit_reads_envelope_type_not_result_type`.
+  - predicate → always-`True` (the pre-fix regression) → **7 tests failed**, including
+    `test_search_single_organization_hit_does_not_resolve`.
+
+  **No historical repair, re-confirmed read-only against the live DB this session:** 28 stored
+  `gc_uuid`s; `opponent_links` = 10 rows (7 `progenitor`, 3 pending, **0 `search`**). Counts only
+  — entity class was NOT re-probed, per this spec's out-of-scope bar.
+
+  **Spec review (headless `codex exec`, per the operating agreement's step 2)** found 6 issues.
+  Fixed here: the settled-question-still-posed-as-open Design paragraph (now tombstoned), the
+  nonexistent symbol `resolve_public_id_by_search`, the Out-of-scope note that covered only
+  `teams.gc_uuid`, and the over-broad "uniqueness guard gives NO protection" sentence (now scoped
+  to entity class, with the bar's real job stated so a later refactor does not drop it). It also
+  caught a stale fixture the execution plan had missed
+  (`TestResolveGcUuidIntegration::test_resolved_gc_uuid_persisted_and_passed_to_spray`).
+
+  **Two items deliberately NOT resolved here**, both flagged to the operator:
+  1. **`OMITTED` vs `null`** — this spec says orgs' team-only keys are omitted;
+     `docs/api/endpoints/post-search.md` says `number_of_players`/`staff` are `null`. Same probe,
+     two phrasings, one wrong. Unsettleable without re-probing (barred) — the proxy corpus holds
+     no captured `/search` body. **No behavioral impact**: the predicate reads only the envelope,
+     and nothing tests those keys. Fixtures follow this spec (omitted); both docs left untouched.
+  2. **Rung (c) auto-accept drift** — `docs/api/flows/opponent-resolution.md` documents two
+     filters (exact name, season year) the code has never had. Pre-existing, not caused here;
+     stubbed as `2026-08-04-rung-c-auto-accept-criteria-drift.md` rather than silently resolved
+     in either direction.
+- **2026-08-04 (`/code-review`)** — 4 findings, all verified against the repo and all fixed. The
+  MEDIUM is the one worth carrying forward:
+
+  **⚠ Dropping organizations WIDENS rung (c)'s auto-accept surface — this spec previously
+  claimed it did not.** The retired sentence: *"The team-side uniqueness bar is unchanged, so no
+  new wrong-auto-resolve mode is introduced."* The bar's PREDICATE is unchanged; its POPULATION
+  is narrower, so one team beside N organizations now auto-resolves where the raw count sent it
+  to the operator queue. The decision STANDS — it is the operator's, and refusing would punt the
+  Showdown/League-shaped queries for nothing — but the safety claim defending it was one-sided
+  and is now stated in both directions at the function, the module docstring, and the call site.
+  Two aggravators recorded with it: the result is **terminal** (`resolve_opponent` treats any
+  non-NULL `resolution_method` as cached, so a wrong resolve never re-surfaces), and the
+  documented name/season filters that would catch a wrong single hit **do not exist**, so the
+  team count is the entire gate.
+
+  Also fixed: a **false claim I authored** in the `is_team_hit` docstring — *"Only bare
+  `GET /organizations/{id}` and `/avatar-image` validate entity class"* dropped the source's
+  *"org paths"* scoping and so implied `GET /teams/{org_id}` does not 404, contradicting the
+  58/58 measurement cited two files away; the real argument rests on the SUB-resources
+  (`/teams/{org_id}/opponents` serves a byte-identical registry). An all-organization result set
+  now logs **WARNING**, not DEBUG — it is newly reachable and is also how a class-wide failure
+  (renamed envelope type, third entity class) would present, which at DEBUG is
+  indistinguishable from an unindexed team; pinned by a test, proven to discriminate by a
+  warning→debug mutation. And three stale *"unambiguous single match"* sites the first sweep
+  missed (module docstring, call-site comment, flow-doc body) now say *single TEAM match*.
+
+  Full suite re-run after all fixes: **4419 passed, RC=0**.
+- **2026-08-04 (paused before commit)** — Operator paused at step 7. **Exact state, so this
+  resumes without re-deriving anything:**
+
+  - **Where:** worktree `.claude/worktrees/search-entity-class-filter`, branch
+    `worktree-search-entity-class-filter`, based on `255be02`. **Nothing committed, nothing
+    pushed.**
+  - ⚠ **`main` MOVES while this is parked** — it advanced twice during this one session
+    (`255be02` → `768544d` → `91a8c36`, operator docs commits). Do NOT record or trust a `main`
+    hash here; compute `git merge-base HEAD main` at landing time. That base is what the closure
+    patch must diff from — a bare-`main` diff silently reverts whatever landed meanwhile.
+  - **Staged:** all 11 files; working tree otherwise clean, no untracked stragglers.
+  - **Steps done:** 3 EXECUTE, 4 VERIFY (4419 passed, RC=0, unpiped), 5 REVIEW (`/code-review`,
+    4 findings, all verified and all fixed), 6 SCAN (11/11 files PII-covered — 9 auto-scanned,
+    and the 2 `.claude/rules/` files SKIP_PATHS blinds the scanner to were manually scanned
+    after a positive control was proven to fire).
+  - **Steps remaining at the time of the pause:** 7 APPROVE, 8 COMMIT, then the merge to `main`.
+    Steps 7 and 8 are now DONE — see the entry below. **The merge is deliberately NOT done**;
+    the operator merges at the end.
+  - **Open operator decision, deliberately left open:** the `/code-review` MEDIUM retired the
+    premise *"no new wrong-auto-resolve mode is introduced"* that partly supported the settled
+    rung (c) decision. The decision was not changed. Whether the retired premise changes the
+    call is the operator's, and is the one thing a resuming session must NOT decide on its own.
+    Detail in `2026-08-04-rung-c-auto-accept-criteria-drift.md`.
+- **2026-08-05 — COMMITTED.** Operator approved at step 7; committed at step 8 on branch
+  `worktree-search-entity-class-filter` in the worktree. **Not merged to `main` and not pushed**
+  — the operator merges at the end, per their standing instruction on this chunk.
+
+  **What remains, and the one hazard in it:** the merge must diff from
+  `git merge-base HEAD main`, **never bare `main`**. `main` advanced twice while this chunk was
+  in flight (three distinct hashes observed in one session, all operator docs commits), so a
+  `main`-based patch would silently revert work nobody here touched. Do not record a `main` hash
+  anywhere; recompute the merge-base at merge time. After merging, remove the worktree and the
+  branch.
+
+  The rung (c) decision above remains open and is unaffected by the commit — committing the
+  code did not settle it.

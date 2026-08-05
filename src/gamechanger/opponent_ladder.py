@@ -21,9 +21,11 @@ The ladder (TN-3), in order:
   they fall through to rung (c)/(d) by design.
 * **Rung (c) -- POST /search by name.** Routes through
   :func:`search_teams_by_name` (never ``client.post_json`` directly), querying a
-  REAL name (never a slug). Auto-resolves ONLY on an unambiguous single match;
+  REAL name (never a slug). Organization hits are dropped first (search returns
+  BOTH entity classes); auto-resolves ONLY on an unambiguous single TEAM match;
   method ``search``. A zero-hit is ambiguous -> falls to rung (d), not a hard
-  failure.
+  failure. See :func:`_resolve_via_search` for what dropping organizations
+  costs -- it widens the accept surface, and the result is terminal.
 * **Rung (d) -- operator queue.** Persists a not-resolved pending
   ``opponent_links`` row (``public_id`` NULL, ``resolution_method`` NULL) that
   ``bb report map-opponent`` (E-240-05) later UPDATEs. Outcome
@@ -55,7 +57,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from src.gamechanger.search import search_teams_by_name
+from src.gamechanger.search import is_team_hit, search_teams_by_name
 
 if TYPE_CHECKING:
     from src.gamechanger.client import GameChangerClient
@@ -254,24 +256,83 @@ def _resolve_via_progenitor(
 def _resolve_via_search(
     client: GameChangerClient, opponent_name: str
 ) -> str | None:
-    """Resolve a public_id via POST /search on an UNAMBIGUOUS single match.
+    """Resolve a public_id via POST /search on an UNAMBIGUOUS single TEAM match.
 
     Routes through :func:`search_teams_by_name` (never ``client.post_json``).
-    Returns the single hit's ``result.public_id`` ONLY when exactly one hit is
-    returned; zero hits (ambiguous: punctuation quirk vs. genuinely unindexed)
-    or 2+ hits (ambiguous) return ``None`` so the caller falls to rung (d) --
-    NEVER a hard failure, and NEVER a wrong-team auto-ingest.
+    Organization hits are DROPPED first (:func:`is_team_hit`); the
+    ``result.public_id`` is returned ONLY when exactly one TEAM hit remains.
+    Zero team hits (ambiguous: punctuation quirk, genuinely unindexed, or an
+    all-organization result set) or 2+ team hits (ambiguous) return ``None`` so
+    the caller falls to rung (d) -- NEVER a hard failure.
+
+    ⚠ **State both sides: dropping organizations WIDENS the auto-accept
+    surface.** The bar's PREDICATE is unchanged ("exactly one"), but its
+    POPULATION is narrower, so one team beside N organizations now
+    auto-resolves where the raw count previously sent it to the operator
+    queue. That is the deliberate trade -- refusing whenever an organization
+    appears would punt the Showdown/League-shaped queries for nothing -- but it
+    is a real widening, not a no-op, and it is STICKY: :func:`resolve_opponent`
+    treats any ``opponent_links`` row with a non-NULL ``resolution_method`` as
+    terminal, so a wrong auto-resolve is never re-attempted and never
+    re-surfaces to the operator. Note also that the name-match and season-year
+    filters documented for this rung are NOT implemented (see
+    ``.project/specs/2026-08-04-rung-c-auto-accept-criteria-drift.md``), so the
+    single-team count is the ENTIRE gate.
     """
     hits = search_teams_by_name(client, opponent_name)
-    if len(hits) != 1:
-        logger.debug(
-            "Rung (c): %d search hit(s) for %r -- ambiguous, falling through",
+    # Drop organizations, THEN count. Search is heterogeneous and an
+    # organization carries a public_id, so the uniqueness bar below cannot tell
+    # the classes apart on its own -- it fires exactly when a name matches one
+    # thing, which is precisely when an organization name matches uniquely
+    # (measured: 2 of 15 organization names returned a single hit; both were
+    # the organization). The bar's PREDICATE is unchanged and still
+    # load-bearing -- it is what prevents a multi-hit wrong-team auto-resolve.
+    # Its POPULATION is not: see the docstring's "widens the auto-accept
+    # surface" note before assuming this filter is safety-neutral. It is not.
+    #
+    # Why drop-then-count rather than refusing whenever an organization
+    # appears: an organization hit is usually a NAME COLLISION, not the
+    # umbrella of the team beside it -- only 4 of 70 co-occurring organization
+    # hits had a same-page team in their member list. Refusing would punt the
+    # Showdown/League-shaped queries (43 organizations, ~0 of them umbrellas)
+    # to the operator queue for nothing. ⚠ 4-of-70 is a LOWER bound on umbrella
+    # relationships, not a rate: the test only sees membership when the member
+    # team happens to rank on the same 25-hit page. It refutes "an organization
+    # hit is that team's umbrella"; it does NOT license the reverse claim that
+    # a given organization is unrelated to a given team. Both readings favor
+    # dropping. Resolving THROUGH the organization was considered and declined:
+    # that is a new ladder rung, not an entity-class filter, and 4-of-70 says
+    # it would fire almost never. An all-organization result set filters to
+    # zero teams and falls to rung (d), exactly as a zero-hit does.
+    team_hits = [hit for hit in hits if is_team_hit(hit)]
+    if hits and not team_hits:
+        # Newly reachable state, and the one worth hearing about: search
+        # returned results but NONE were teams. WARNING rather than DEBUG
+        # because this is also how a class-wide failure would present -- if the
+        # envelope type were renamed, or a third entity class appeared, the
+        # fail-closed predicate would drop EVERY hit and route EVERY opponent
+        # to the operator queue. At DEBUG that is indistinguishable from the
+        # ordinary "GameChanger has not indexed this team" case.
+        logger.warning(
+            "Rung (c): all %d search hit(s) for %r are non-team (organizations "
+            "or an unrecognized entity class) -- no team to resolve, falling "
+            "through to the operator queue",
             len(hits),
             opponent_name,
         )
         return None
+    if len(team_hits) != 1:
+        logger.debug(
+            "Rung (c): %d search hit(s) for %r, %d team hit(s) after dropping "
+            "%d non-team hit(s) -- ambiguous, falling through",
+            len(hits),
+            opponent_name,
+            len(team_hits),
+            len(hits) - len(team_hits),
+        )
+        return None
 
-    result = hits[0].get("result") if isinstance(hits[0], dict) else None
+    result = team_hits[0].get("result")
     if not isinstance(result, dict):
         return None
     public_id = result.get("public_id")
@@ -408,7 +469,7 @@ def resolve_opponent(
         )
         return LadderResult(outcome=ResolutionOutcome.DEFERRED_PLACEHOLDER)
 
-    # --- Rung (c): POST /search by name (unambiguous single match only) -----
+    # --- Rung (c): POST /search by name (unambiguous single TEAM match only) --
     if opponent_name:
         public_id = _resolve_via_search(client, opponent_name)
         if public_id:

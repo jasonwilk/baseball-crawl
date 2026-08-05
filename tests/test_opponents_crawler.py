@@ -324,12 +324,15 @@ def _profile(name: str, public_id: str = "dD9PtF0YbKad") -> TeamProfile:
 
 
 def _search_hit(*, name: str, public_id: str, team_id: str) -> dict[str, Any]:
+    """A TEAM search hit. The envelope ``type`` is required: the shared
+    resolution loop now drops hits whose envelope type is not ``"team"``."""
     return {
+        "type": "team",
         "result": {
             "name": name,
             "public_id": public_id,
             "id": team_id,
-        }
+        },
     }
 
 

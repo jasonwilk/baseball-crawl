@@ -15,6 +15,14 @@ It also exposes :func:`resolve_gc_uuid_by_public_id`, the shared
 ``public_id``-match pagination loop used by both the report generator and the
 own-team opponent resolver (see those callers for the per-match validation
 policy each layers on top of this loop).
+
+Finally it exposes :func:`is_team_hit`, the entity-class predicate. ``POST
+/search`` returns a HETEROGENEOUS result set -- teams and organizations -- and
+an organization carries a ``public_id`` just as a team does, so filtering hits
+on ``public_id`` alone can select one. Consumers that need a team MUST apply
+the predicate per hit; it is deliberately not applied inside
+:func:`search_teams_by_name`, whose raw ``hits`` length is the pagination
+signal.
 """
 
 from __future__ import annotations
@@ -44,6 +52,38 @@ _SEARCH_MAX_PAGES = 5
 # name means search_teams_by_name already exhausted its raw + normalized
 # attempts, so paginating further would just repeat the same lookups.
 _NAME_PUNCTUATION_RE = re.compile(r"[^\w ]")
+
+# Envelope entity class marking a search hit as a team. GC's search index is
+# heterogeneous: organizations are 15.5% of all hits and 19.5% of baseball hits
+# (n=599 measured 2026-08-04), and they carry a public_id exactly as teams do.
+_HIT_TYPE_TEAM = "team"
+
+
+def is_team_hit(hit: Any) -> bool:
+    """Return True when a ``POST /search`` hit is a TEAM, not an organization.
+
+    Reads the hit's **envelope** ``type``, which is ``"team"`` or
+    ``"organization"``.
+
+    ⚠ Read the ENVELOPE, never ``result.type``. ``result.type`` is the
+    ORGANIZATION SUBTYPE (``travel`` / ``tournament`` / ``league``) and is
+    ABSENT on teams, so a ``result.type == "team"`` test matches nothing and
+    inverts this check -- it would reject every real team.
+
+    Why the check belongs at resolution time rather than downstream: a
+    wrong-class id often does NOT fail fast. The team RESOURCE does refuse --
+    ``GET /teams/{org_id}`` 404s (58/58 measured) -- but SUB-RESOURCES under
+    the same prefix do not validate entity class:
+    ``GET /teams/{org_id}/opponents`` serves a registry byte-identical to the
+    organization path (2/2). So an organization id can travel a long way
+    returning populated, plausible data, and when something finally does
+    refuse it, it reads as dead data rather than as a class error. The
+    envelope ``type`` is the one cheap discriminator, and it is already
+    present in a response we have.
+
+    Fail-closed: an absent or unrecognized ``type`` is NOT a team.
+    """
+    return isinstance(hit, dict) and hit.get("type") == _HIT_TYPE_TEAM
 
 
 def _normalize_team_name(name: str) -> str:
@@ -128,8 +168,16 @@ def resolve_gc_uuid_by_public_id(
     ``_SEARCH_MAX_PAGES``), it routes the query through
     :func:`search_teams_by_name` (so the punctuation/Unicode-apostrophe quirk
     handling stays centralized here, NOT inlined), filters the hits for an
-    exact ``result.public_id == public_id`` match, and yields the matching
-    hit's ``result.id`` paired with the page index it was found on.
+    exact ``result.public_id == public_id`` match **that is also a team hit**
+    (:func:`is_team_hit`), and yields the matching hit's ``result.id`` paired
+    with the page index it was found on.
+
+    The two filters are ordered ``public_id`` first, entity class second, and
+    a non-team match is SKIPPED rather than refused -- see the inline comment
+    at the check. Filtering is done here, per hit, and deliberately NOT inside
+    :func:`search_teams_by_name`: that function's ``hits`` length is read below
+    as the has-more-pages signal, so filtering at the source would make a full
+    page of 25 look partial and strand a team whose match sits on a later page.
 
     Yielding lazily (a generator) lets each caller layer its own per-match
     policy and stop early:
@@ -166,6 +214,23 @@ def resolve_gc_uuid_by_public_id(
             if not isinstance(result, dict):
                 continue
             if result.get("public_id") != public_id:
+                continue
+            # Entity class is checked AFTER public_id, deliberately. The ~1-in-6
+            # background organization noise already fails the public_id test and
+            # skips silently, so only an organization carrying the EXACT sought
+            # public_id reaches here -- rare, and worth a WARNING, because it
+            # means the slug we were handed names an organization whose id is
+            # not a team id. Skip it and keep paging: an organization sharing a
+            # public_id with the sought team is no reason to abandon the search.
+            if not is_team_hit(hit):
+                logger.warning(
+                    "POST /search hit matched public_id=%s but its envelope "
+                    "type is %r, not %r; skipping (an organization id is not a "
+                    "team id) and continuing to page.",
+                    public_id,
+                    hit.get("type") if isinstance(hit, dict) else None,
+                    _HIT_TYPE_TEAM,
+                )
                 continue
             yield page, result.get("id")
 
