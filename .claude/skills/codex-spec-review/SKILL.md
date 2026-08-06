@@ -69,12 +69,12 @@ The headless script streams Codex's output to the Bash tool result, which is tru
 2. **Read the file to completion** and produce a complete digest of every finding (story ID/AC label/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget — see `.claude/skills/context-fundamentals/SKILL.md`), but you must process every finding.
 3. **Emit a read-receipt derived from the actual file** — its line count (`wc -l <file>`) and its last line (`tail -n 1 <file>`) — before triage begins.
 
-The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded output-integrity rule (`.claude/rules/tool-output-integrity.md` — never assert or triage content not seen cleanly) and the clean-reread-before-defect discipline (`.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md`); it is the structural form of the read-findings-before-triage lesson.
+The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded tool-discipline rule (`.claude/rules/tool-discipline.md` — never assert or triage content not seen cleanly); it is the structural form of the read-findings-before-triage lesson.
 
 After the receipt and complete digest are satisfied, offer the user an advisory triage session:
 
 1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, agent infrastructure, UX).
-2. Map those domains to agents from CLAUDE.md's Agent Ecosystem table (ambient context at runtime -- do NOT use a hardcoded roster).
+2. For a finding whose domain genuinely needs a specialist read, consult the relevant subagent in `.claude/agents/` (read the directory at runtime -- do NOT use a hardcoded roster).
 3. The triage team always includes the **product-manager** (PM owns spec work). Other agents are consultative based on the findings' domains.
 4. Offer to spawn the triage team. If the user accepts, spawn the relevant agents as named subagents via the `Agent` tool (the triage team forms implicitly on the first spawn). If the user declines, the workflow ends.
 
@@ -190,7 +190,7 @@ Report the error and stop. Do not attempt to generate a prompt or run the script
 
 ## Anti-Patterns
 
-1. **Do not hardcode an agent roster in this skill file.** Agent selection for triage uses CLAUDE.md's Agent Ecosystem table at runtime (ambient context). This keeps the roster current without manual sync.
+1. **Do not hardcode an agent roster in this skill file.** Read `.claude/agents/` at runtime if a finding needs a specialist. This keeps the roster current without manual sync.
 2. **Do not offer triage in the prompt-generation path.** Triage is headless-only. The prompt-gen path assembles and presents -- nothing more.
 3. **Do not embed rubric content or planning artifact content.** The skill resolves paths and confirms existence; it does not read or cache file contents.
 4. **Do not auto-apply Codex suggestions without team review.** In headless mode, Codex findings are presented for human judgment. Even in triage, the team recommends actions -- they do not implement directly.

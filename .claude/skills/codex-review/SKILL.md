@@ -41,32 +41,17 @@ If the user does not specify a mode, default to `uncommitted`.
 
 ---
 
-## Epic Worktree Path
-
-When this skill is invoked during the "and review" chain (implement skill Phase 4), the epic worktree path is available from the dispatch context. The implement skill creates the epic worktree in Phase 2 Step 1 at `/tmp/.worktrees/baseball-crawl-E-NNN/` and carries it through the entire dispatch lifecycle. Phase 4 invokes this skill after all stories are DONE but before closure -- the epic worktree contains all accumulated story patches (the complete epic diff against main).
-
-When this skill is invoked standalone (not during dispatch), no epic worktree path is available. The skill operates on the main checkout as before.
-
----
-
 ## Headless Path
 
 ### Step 1: Run the script
 
-Run the code review script via Bash in the foreground. When an epic worktree path is available (during the "and review" chain), pass `--workdir <epic-worktree-path>` so that `uncommitted` mode generates the diff from the epic worktree against main:
+Run the code review script via Bash in the foreground:
 
-**During "and review" chain (epic worktree available):**
-```
-timeout 1200 ./scripts/codex-review.sh --workdir <epic-worktree-path> <mode> [args]
-```
-
-**Standalone invocation (no epic worktree):**
 ```
 timeout 1200 ./scripts/codex-review.sh <mode> [args]
 ```
 
 Examples:
-- `timeout 1200 ./scripts/codex-review.sh --workdir /tmp/.worktrees/baseball-crawl-E-137 uncommitted`
 - `timeout 1200 ./scripts/codex-review.sh uncommitted`
 - `timeout 1200 ./scripts/codex-review.sh base main`
 - `timeout 1200 ./scripts/codex-review.sh commit abc1234`
@@ -82,7 +67,7 @@ Examples:
 - If the script reports **"No findings."**: Report "Codex review completed with no findings -- clean review" to the user. Skip triage. Workflow ends.
 - If the script reports findings: do NOT present or characterize them yet -- the inline Bash result is only a truncated *preview*. Proceed to Step 4, whose read-receipt gate requires reading the full `RESULT_FILE` to completion BEFORE any finding is presented or triaged.
 
-**Test-sweep caveat**: any test run Codex performs while reviewing is **best-effort** and advisory -- Codex reviews the diff, it is not the test gate. The authoritative full-suite check is the implement skill's Phase 5 Step 1b closure gate (`python -m pytest tests/` against the main checkout). Do not treat a Codex "tests pass" statement as a substitute for that gate, and do not skip Step 1b because Codex ran tests.
+**Test-sweep caveat**: any test run Codex performs while reviewing is **best-effort** and advisory -- Codex reviews the diff, it is not the test gate. The authoritative check is lifecycle step 4 VERIFY (`python -m pytest tests/`, unpiped, against the main checkout). Do not treat a Codex "tests pass" statement as a substitute for it, and do not skip it because Codex ran tests.
 
 ### Step 4: Offer advisory triage
 
@@ -94,53 +79,40 @@ The headless script streams Codex's output to the Bash tool result, which is tru
 2. **Read `RESULT_FILE` to completion** and produce a complete digest of every finding (id/priority/file:line/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget — see `.claude/skills/context-fundamentals/SKILL.md`), but you must process every finding.
 3. **Emit a read-receipt derived from the actual file** — its line count (`wc -l "${RESULT_FILE}"`) and its last line (`tail -n 1 "${RESULT_FILE}"`) — before triage begins. This may reuse the script's receipt values, but only after you have actually read the file.
 
-The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded output-integrity rule (`.claude/rules/tool-output-integrity.md` — never assert or triage content not seen cleanly) and the clean-reread-before-defect discipline (`.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md`); it is the structural form of the read-findings-before-triage lesson.
+The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded tool-discipline rule (`.claude/rules/tool-discipline.md` — never assert or triage content not seen cleanly); it is the structural form of the read-findings-before-triage lesson.
 
-After the receipt and complete digest are satisfied, present the full findings to the user (this is the point at which findings are first presented -- never before the gate) and offer an advisory triage session:
+After the receipt and complete digest are satisfied, present the full findings to the user (this is the point at which findings are first presented -- never before the gate), then assess them:
 
-1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, agent infrastructure, UX).
-2. Map those domains to agents from CLAUDE.md's Agent Ecosystem table (ambient context at runtime -- do NOT use a hardcoded roster).
-3. Offer to spawn a triage team with the relevant agents. The team composition depends on the findings' domains -- there is no fixed team.
-4. If the user accepts, spawn the relevant agents as named subagents via the `Agent` tool (the triage team forms implicitly on the first spawn). If the user declines, the workflow ends.
+1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, UX).
+2. For a finding whose domain genuinely needs a specialist read, consult the relevant subagent in `.claude/agents/`. Don't delegate what a handful of tool calls finishes.
 
-**Triage is advisory.** The team assesses findings and recommends action (fix, defer, dismiss) but does NOT implement changes directly. Confirmed findings proceed to Step 5 (Remediation Loop).
+**Assessment is advisory.** It recommends action (fix, defer, dismiss); confirmed findings proceed to Step 5.
 
-### Step 5: Remediation loop
+### Step 5: Remediation
 
-After triage completes (whether via triage team or main session assessment), any findings confirmed for remediation enter the remediation loop. If all findings were dismissed or marked false positive during triage, skip to Step 7. Remediation is authorized by the post-review remediation exception in `workflow-discipline.md`'s Work Authorization Gate -- the codex-review skill does not declare its own authorization model.
+The session fixes real findings. If all findings were dismissed or marked false positive, skip to Step 6.
 
-**Spawning mechanics** depend on context:
+For each finding confirmed for remediation:
 
-- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. A fresh implementer is spawned into the **epic worktree** (without `isolation: "worktree"`) using the agent routing table to select the appropriate agent type for each finding's domain. The original dispatch team implementers may have been shut down, so a fresh spawn is the reliable path. PM is already on the team for disposition tracking. See the implement skill's **Remediation Spawn Context** (defined at the start of Phase 5) for the full spawn context.
-- **(b) Standalone post-dev review** (invoked directly by the user): No dispatch team exists. The main session creates a remediation team using the agent routing table (`/.claude/rules/agent-routing.md`) to select the appropriate implementer type(s) for the findings' domains (not hard-coded to SE), plus PM for disposition tracking.
+1. **Validate** it -- confirm it is a real issue, or identify it as a false positive.
+2. **Remediate** confirmed issues in the main checkout.
+3. Record what changed (files changed and nature of fix).
 
-For each finding confirmed for remediation, route it to the implementer with the finding details. The implementer:
+**Remediation fixes are NOT re-reviewed.** If the user wants another review pass after remediation, they invoke a separate codex-review.
 
-1. **Validates** the finding -- confirming it is a real issue or identifying it as a false positive.
-2. **Remediates** confirmed issues. Where the implementer works depends on context:
-   - **(a) "And review" chain**: The epic worktree is still active (closure has not happened yet). The implementer applies fixes in the **epic worktree**. Fixes are NOT committed -- they accumulate in the epic worktree and are included in the closure merge sequence (Phase 5).
-   - **(b) Standalone post-dev review**: No epic worktree exists. The implementer works in the main checkout.
-3. Reports completion with a change summary (files changed and nature of fix).
+### Step 6: Disposition record
 
-**Remediation fixes are NOT re-reviewed.** PM records dispositions. If the user wants another review pass after remediation, they invoke a separate codex-review.
+Record every finding with its disposition:
 
-### Step 6: PM disposition tracking
+- **FIXED**: with a change summary describing what was fixed (files, nature of change).
+- **DISMISSED**: with a reason explaining why the finding was not actionable.
+- **FALSE POSITIVE**: with an explanation of why the finding does not apply.
 
-PM records all findings with their dispositions. Each finding gets one of three dispositions:
-
-- **FIXED**: With a change summary describing what was fixed (files, nature of change) -- not a git commit SHA, since commits happen after team shutdown.
-- **DISMISSED**: With a reason explaining why the finding was not actionable.
-- **FALSE POSITIVE**: With an explanation of why the finding does not apply.
-
-**Recording location** depends on context:
-
-- **(a) "And review" chain**: PM records in the dispatch epic's History section.
-- **(b) Standalone post-dev review**: PM records in a remediation log at `/.project/research/codex-review-YYYY-MM-DD-remediation.md` (standalone reviews may not map to a single epic).
+Record them in the chunk's spec file under `.project/specs/`, in its progress log.
 
 ### Step 7: Wrap up
 
-- If this was an "and review" chain, this skill ran as the implement skill's Phase 4 (Codex) pass; control returns to the implement skill, which proceeds to Phase 5 (closure). This Codex pass does not re-run -- but the review chain is NOT complete when this skill returns: the unconditional **Closure CR Integration Review** (Phase 5 Step 1c) still runs, adjudicating the post-Codex-remediation diff before the closure merge. Codex-first is deliberate so that CR sees Codex's findings and the remediation rather than approving-then-reversing.
-- If this was a standalone review, present the disposition summary to the user and offer to commit changes.
+Present the disposition summary to the user. Remediation lands through the normal lifecycle: scan, operator approval, commit.
 
 ---
 
@@ -148,20 +120,9 @@ PM records all findings with their dispositions. Each finding gets one of three 
 
 ### Step 1: Gather the diff
 
-Use Bash to gather the diff content based on the mode. When an epic worktree path is available (during the "and review" chain), use `git -C <epic-worktree-path>` to run git commands from the epic worktree.
+Use Bash to gather the diff content based on the mode.
 
 **Mode: `uncommitted`**
-
-**During "and review" chain (epic worktree available):**
-
-Run a single command to get all changes relative to the epic's branch point:
-```
-git -C <epic-worktree-path> diff $(git -C <epic-worktree-path> merge-base epic/E-NNN main)
-```
-
-This produces the complete epic diff (all accumulated story patches). **The base is the MERGE BASE, never bare `main`** -- in the epic worktree `HEAD` is `epic/E-NNN` and `main` moves while the epic runs, so a bare-`main` diff folds main's own post-branch commits into what reads as the epic's work. In E-278 exactly that produced an 85-line phantom finding against a file no story touched.
-
-**Standalone invocation (no epic worktree):**
 
 Run three commands:
 
@@ -205,18 +166,14 @@ Omit any section that is empty.
 
 **Mode: `base <branch>`**
 
-When an epic worktree path is available, use it; otherwise omit `-C` (runs from the main checkout):
 ```
-git -C <epic-worktree-path> diff <branch>...HEAD   # during "and review" chain
-git diff <branch>...HEAD                            # standalone
+git diff <branch>...HEAD
 ```
 
 **Mode: `commit <sha>`**
 
-Same resolution — use the epic worktree path if available, otherwise the main checkout:
 ```
-git -C <epic-worktree-path> show <sha>              # during "and review" chain
-git show <sha>                                      # standalone
+git show <sha>
 ```
 
 **Empty diff**: If all diff commands return empty output, report "No changes found for the specified mode. Nothing to generate a review prompt for." Stop.
@@ -231,7 +188,7 @@ Count the total lines in the assembled diff content:
 | 5,000 to 10,000 | Warn: "The diff is approximately N lines. This is large for a single Codex review -- results may be less focused. Proceeding with assembly." Then proceed |
 | Over 10,000 | Refuse: "The diff is approximately N lines, which exceeds the 10,000-line limit for a single review prompt. Suggestions: narrow the scope to specific directories or files, review a single commit instead of the full diff, or split changes across multiple review prompts." Stop |
 
-**Large removal/refactor epics**: when the size comes from many DELETED files (a removal epic), re-scope the diff to added/copied/modified/renamed files only (`git diff main --diff-filter=ACMR`) — pure deletions have no content to review and can dominate the byte/line count (E-239: a ~2.57M-char full diff dropped to ~445K under ACMR, clearing Codex's input limit). Note: the script's WORKDIR (epic-worktree) `uncommitted` path already defaults to `--diff-filter=ACMR` for exactly this reason (see `scripts/codex-review.sh`), so during an "and review" chain the headless diff is already deletion-filtered. This prompt-generation guidance therefore applies to the standalone (non-WORKDIR) staged/unstaged path and to `base`/`commit` modes, where deletions are still included by default — apply ACMR manually here when a removal diff is oversized.
+**Large removal/refactor chunks**: when the size comes from many DELETED files, re-scope the diff to added/copied/modified/renamed files only (`git diff main --diff-filter=ACMR`) — pure deletions have no content to review and can dominate the byte/line count (E-239: a ~2.57M-char full diff dropped to ~445K under ACMR, clearing Codex's input limit). Deletions are included by default on the staged/unstaged path and in `base`/`commit` modes, so apply ACMR manually when a removal diff is oversized.
 
 ### Step 3: Assemble the lean prompt
 
@@ -287,24 +244,18 @@ Verify rubric exists at .project/codex-review.md
 Determine diff mode (default: uncommitted)
   |
   +---> HEADLESS PATH:
-  |       Run codex-review.sh [--workdir <epic-worktree-path>] <mode> [args]
-  |       Capture and present findings
+  |       Run codex-review.sh <mode> [args]
+  |       Read RESULT_FILE to completion, emit receipt, digest every finding
   |       No changes? -> Report and stop
   |       No findings? -> Report clean review, stop
-  |       Findings? -> Offer advisory triage (agents from CLAUDE.md)
-  |       User accepts? -> Spawn triage team
-  |       User declines? -> Stop (no remediation)
-  |       Triage complete, findings confirmed for remediation?
+  |       Findings? -> Present them, then assess
+  |       Findings confirmed for remediation?
   |         NO -> Stop
-  |         YES -> Remediation loop:
-  |           Spawn fresh implementer (epic worktree for "and review" chain, main checkout for standalone)
-  |           Implementer validates each finding (real issue or false positive)
-  |           Implementer remediates in epic worktree ("and review") or main checkout (standalone)
-  |           PM records dispositions (FIXED/DISMISSED/FALSE POSITIVE)
-  |             "And review" chain -> epic History section
-  |             Standalone review -> .project/research/codex-review-YYYY-MM-DD-remediation.md
+  |         YES -> The session validates each finding (real issue or false positive)
+  |           and fixes the real ones in the main checkout
+  |           Record dispositions (FIXED/DISMISSED/FALSE POSITIVE) in the chunk's spec
   |           Fixes are NOT re-reviewed
-  |           Present disposition summary, offer to commit
+  |           Present disposition summary; remediation lands via the normal lifecycle
   |
   +---> PROMPT-GEN PATH:
           Gather diff via Bash + Read
@@ -344,9 +295,9 @@ Detected via `file --brief --mime-type`. Binary files are skipped with a note. T
 
 ## Anti-Patterns
 
-1. **Do not hardcode an agent roster in this skill file.** Agent selection for triage uses CLAUDE.md's Agent Ecosystem table at runtime (ambient context). This keeps the roster current without manual sync.
-2. **Do not offer triage in the prompt-generation path.** Triage is headless-only. The prompt-gen path assembles and presents -- nothing more.
+1. **Do not hardcode an agent roster in this skill file.** Read `.claude/agents/` at runtime if a finding needs a specialist. This keeps the roster current without manual sync.
+2. **Do not assess findings in the prompt-generation path.** Assessment is headless-only. The prompt-gen path assembles and presents -- nothing more.
 3. **Do not embed rubric content in this skill file.** The rubric is read at runtime and embedded in the generated prompt (both script and prompt-generation paths); it is NOT hardcoded here. Two sources are read fresh at prompt-assembly time: `.project/codex-review.md` supplies the Setup, Codex-specific priorities, and Reporting sections, and `.claude/agents/code-reviewer.md` supplies the Bug Pattern Checklist and Security checklist (single-sourced via its delimiter markers, so they never drift from CR's rubric).
 4. **Do not summarize the diff in prompt-generation.** The prompt must contain the complete diff content. Codex needs the full code to perform a meaningful review.
 5. **Do not add separator walls, "Begin your response with" instructions, or team recommendation blocks to prompts.** The lean format has no ceremony.
-6. **Do not implement fixes during triage.** Triage is advisory -- the triage team assesses and recommends but does NOT write code. Implementation happens in the separate remediation phase (Step 5), which is authorized by the post-review remediation exception in `workflow-discipline.md`'s Work Authorization Gate.
+6. **Do not implement fixes while assessing.** Assessment recommends; Step 5 is where the session fixes real findings.

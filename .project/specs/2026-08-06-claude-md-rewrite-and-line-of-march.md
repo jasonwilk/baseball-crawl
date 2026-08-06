@@ -1,6 +1,6 @@
 # Spec: CLAUDE.md rewrite + line of march (migration Step 1)
 
-**Date:** 2026-08-06 · **Status:** OPEN — spec approved, execution owed in a fresh session.
+**Date:** 2026-08-06 · **Status:** COMPLETE (this commit).
 **Source of truth:** `.project/research/2026-08-02-system-redesign-proposal.md` §6–7 and its
 §9 Appendix (the agreement being transcribed). That file is the historical record — **do not
 edit it.** Where the proposal and the repo disagree, the repo wins.
@@ -100,7 +100,8 @@ them falsifies the record, so they are excluded from the sweep by design.
    collapsed," not "the change is right." Do not pipe the run — a pipe reports its own exit code.
 2. `bash -n .claude/hooks/*.sh`; `python -c "import json; json.load(open('.claude/settings.json'))"`;
    `ls .claude/hooks/*.py` returns nothing (no Python hook survives).
-3. `wc -c CLAUDE.md` ≤ 8192; `wc -l .claude/rules/tool-discipline.md` ≤ 20.
+3. `wc -c CLAUDE.md` ≤ 8192 **(SUPERSEDED at review time — cap raised to 11KB by operator
+   decision; see Progress, "Fourth departure")**; `wc -l .claude/rules/tool-discipline.md` ≤ 20.
 4. **Reference sweep by ABSENCE.** Pattern: the 10 deleted rule stems plus
    `skills/implement|skills/plan|implement skill|plan skill`. Scope: `CLAUDE.md`,
    `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/settings.json`, kept agents.
@@ -120,3 +121,122 @@ them falsifies the record, so they are excluded from the sweep by design.
    files a manual pass with a positive control.
 
 ## Progress
+
+**2026-08-06 — executed in one session. All verification commands run.**
+
+Landed as specified: 10 rules, 2 skills and 2 unwired hooks deleted; `CLAUDE.md` rewritten
+(product frame → lifecycle → line of march → facts → pointers); `tool-discipline.md` and
+`.project/specs/README.md` written; `workflow-help` regenerated; the 5-file reference sweep
+applied; `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` removed.
+
+Verification results:
+
+1. `python -m pytest tests/` — **4434 passed, 0 failed, RC=0**, matching the spec's baseline
+   exactly. Run unpiped with `$?` captured to a file. Weak signal by the spec's own reasoning,
+   and it stayed weak: nothing mechanical referenced the deleted files.
+2. `bash -n` clean on all 6 surviving hooks; `settings.json` parses; `ls .claude/hooks/*.py`
+   returns no matches — no Python hook survives.
+3. `wc -l tool-discipline.md` = **14** (≤ 20). **`wc -c CLAUDE.md` = 10,585, which DOES NOT meet
+   the spec's ≤ 8192 — the cap was raised to 11KB by operator decision at review time. See the
+   fourth departure below.** The file did meet 8192 (at 8157, then 8189 after the review's prose
+   fixes); the cap was lifted deliberately, not missed.
+4. Reference sweep by absence — run per-file, never multi-path-with-alternation. **Positive
+   control confirmed by Read first**: `.claude/agents/code-reviewer.md:368` carries both
+   `skills/implement` and `dispatch-pattern` contiguously; the pattern returned 6 there, so the
+   zeros below are verified absence rather than an unexplained empty. **Zero** in `CLAUDE.md`,
+   `.claude/rules/`, `.claude/hooks/`, `.claude/settings.json`, and all four surviving
+   user-facing skills.
+5. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` in `settings.json` — zero.
+6. `Dispatch active|two modes` — zero in `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`,
+   `.claude/agents/`, each swept separately.
+7. Lifecycle step 6 PII gate, scanned-count vs staged-count: **3 scanned of 24 staged**, 0
+   violations. The 21 skipped are all `.claude/` (14 of them deletions). Manual pass on the 7
+   added/modified `.claude/` files: a control-verified pattern sweep (credential/email/phone
+   shapes) over the 107 added lines returned **0**, with the same pattern returning 2 on a
+   known-bad control file. Name coverage, which no pattern reaches, via
+   `scripts/check_doc_pii.sh`: `.project/specs` → rc=0 PASS; `.claude` → rc=1, but **zero
+   overlap** with the 21 files this commit touches (all hits pre-existing in `agent-memory/`,
+   four agent definitions, and three rules), confirmed with an injected-overlap control proving
+   `comm` could detect one.
+   **Finding:** `SKIP_PATHS` blinds the scanner even to EXPLICIT file arguments. Copying a
+   known-bad file under `.claude/` returned RC=0 and printed nothing, versus RC=1 outside — so a
+   silent RC=0 there is vacuous, not clean. Recorded as a standing residual.
+8. Write-safety guard proved in both directions by live probe: an outside-repo write and a
+   `..`-traversal write were both DENIED (neither left a file on disk), a scratchpad write was
+   ALLOWED. Principle G applied to the guard itself.
+
+**Review (lifecycle step 5).** Codex review + an independent adversarial review. Dispositions:
+
+- **FIXED** — `codex-spec-review/SKILL.md:77,193` cited "CLAUDE.md's Agent Ecosystem table,"
+  which this rewrite deletes. I had fixed the identical line in `codex-review` and not swept its
+  sibling. Both now read `.claude/agents/`; verified by absence with a live control.
+- **FIXED** — CLAUDE.md steps 7, 8 and 9 each failed the spec's own acceptance criterion. Step 8
+  was purely descriptive and had **lost the investigate-on-missing-receipt lesson** entirely
+  (the receipt's ABSENCE is the alarm); step 7 described the operator's behavior instead of
+  instructing the session; step 9 ordered a Status flip whose deadline had already passed two
+  steps earlier, so it was executable only by reading ahead. The flip now lives in step 7. Byte
+  compression had also dropped "no hash needed," inverting it into an instruction to cite a
+  hash — restored.
+- **FIXED** — Principle F named only COMPLETE/PARKED, so a session reading it alone could
+  conclude STUB is an illegal state. It now names all four.
+- **FIXED** — the `epics/` enumeration was wrong in the spec and in the line of march: five
+  directories, not three, and the omitted **E-263 is READY with real product work**. The
+  conclusion (the hook does not fire) survives — verified against the hook's match rule and all
+  five status lines — but it was a false premise under a correct conclusion, sitting in the file
+  that now answers "what next," about the one epic Step 3's freeze would strand.
+- **DISMISSED** — "spec marked COMPLETE before the commit exists." This is the ratified design:
+  step 9 prescribes flipping before staging, and the prior chunk's spec
+  (`2026-08-05-rung-c-search-resolve-recoverable.md`) uses the identical `**COMPLETE (this
+  commit)**` form.
+- **DEFERRED to a new chunk** — `docs/` still teaches the retired flow (~110 refs / 18 files;
+  `docs/admin/agent-guide.md` is about nothing else). Two references break with this commit:
+  `production-deployment.md:507` → the deleted implement skill, and `agent-guide.md:102` →
+  `context-ratchet.sh` "survives," now false. Logged under NEXT.
+- **NOTED, no change** — `.claude/rules/devcontainer.md:101` and `documentation.md` /
+  `ideas-workflow.md` describe procedures owned by roles that die at Step 2 but are not trimmed
+  until Steps 3–4. The migration sequencing accepts this window; it had not been written down.
+- **NOTED, no change** — a THIRD "Agent Ecosystem table" reference stands at
+  `.claude/skills/agent-standards/SKILL.md:121`. Left deliberately: unlike `codex-review` and
+  `codex-spec-review`, which survive, `agent-standards` dies at Step 2. Recorded because the
+  FIXED entry above would otherwise read as though the sibling sweep were exhaustive.
+
+**Third departure from the spec.** Files §4 says FACTS carries "git conventions incl. the
+`[pii-hook]` receipt". The shipped Facts/Git line does not: the receipt moved to lifecycle step 8,
+where it sits at the point of action and carries the alarm semantics (its ABSENCE is the signal)
+that a passive mention under Facts would not. Deliberate, and better, but a deviation.
+
+**Fourth departure — the 8KB cap was raised to 11KB by operator decision.** The cap was not merely
+tight, it was TRADING AGAINST the spec's own acceptance criterion. Meeting 8192 cost, in order:
+the POINTERS per-rule enumeration that Files §5 explicitly asked for (compressed to one browse
+sentence), the line-of-march section names, the `bb` command groups, "treat GameChanger session
+tokens as sensitive at all times", the pip-tools / `docker compose up` / server-rendered stack
+detail, and principle H's "(a worktree needs its own HEAD)" clause — plus three prose defects
+introduced by the compression itself, one of which (a line beginning `- ` mid-paragraph) would
+have rendered as a stray markdown bullet. The operator chose to restore the dropped context.
+Restored at 10,585 bytes against a new 11KB (11,264-byte) cap, ~680 bytes of headroom.
+
+Two items were restored that the cap did NOT force out — the spec's section outline simply had no
+place for them, and the adversarial review flagged both as silent losses: **"Simple first.
+Complexity as needed."** (the repo's founding principle, absent from the new file and from the
+spec's outline) and the **mitmproxy host-vs-container boundary** (previously ambient, reduced by
+this migration to a path-scoped rule invisible to a session that runs a `mitmproxy` Bash command
+without touching `proxy/**`). The Data Philosophy was restored on the same grounds. Reversible: if
+the intent was to drop them, delete those three blocks.
+
+Two departures from the spec, both recorded in `.project/specs/README.md`:
+
+- **The accepted-residual list was incomplete.** The sweep found a live reference to the deleted
+  `implement` skill in `.claude/skills/multi-agent-patterns/SKILL.md:50` (confirmed by Read, not
+  by grep count). Same class as the listed residuals, same Step-2 expiry, so it was left standing
+  and recorded rather than fixed. The list also over-predicted the agent count: five definitions
+  carry dangling refs, not seven — `docs-writer` and `ux-designer` have none.
+- **`codex-review` needed one edit beyond the enumerated scrub.** Its triage step routed agent
+  selection through "CLAUDE.md's Agent Ecosystem table", which this rewrite deletes. Left as-is
+  it would have been a dangling claim created by this chunk, so it now reads `.claude/agents/`
+  directly. Deeper single-sourcing remains Step 2.
+
+**The 8KB cap is now the binding constraint on CLAUDE.md and it actively fought prose quality.**
+Reaching it required cutting the pointer section from a per-rule enumeration to a grouped browse
+line, and an intermediate draft introduced three prose defects that only a full read-back caught
+— including a line beginning `- ` mid-paragraph, which markdown would have rendered as a stray
+list item. Budget a removal before any future addition.
