@@ -439,9 +439,12 @@ B. A fork is the SAME BRAIN, not a second worker: never fork to
    parallelize; read-only tangents only, closed after. A finished session
    answers no new questions -- new question, new session. Discovered
    work exits as a spec stub, not as more work in this session.
-C. Questions to the operator are SELF-CONTAINED: no terms, tiers, or
-   options the operator hasn't been shown; subagent language is defined
-   on relay.
+C. Questions to the operator are OPERATOR-SHAPED: assume they have NOT
+   been following the session. Every decision question carries, in
+   order: what I was doing, what I found, what the decision is, the
+   options with their consequences, and my recommendation. No terms,
+   tiers, or options they haven't been shown; subagent language is
+   defined on relay.
 D. Subagents: Explore for search, api-scout for API archaeology,
    baseball-coach for coaching semantics, /code-review's fork for review.
    Don't delegate what a handful of tool calls finishes.
