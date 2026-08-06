@@ -393,7 +393,10 @@ just ask; skip to step 4 with "small change: no spec".
   1 SPEC         ENTER PLAN MODE yourself if the operator hasn't set it →
                  interview → .project/specs/<date>-<slug>.md (≤1 page:
                  goal, files, out-of-scope, verification commands,
-                 progress log; person names never appear)
+                 progress log; person names never appear). Verify every
+                 LOAD-BEARING claim you cite -- an inherited claim is an
+                 unverified one, and unverified premises are where stubs
+                 come from.
   2 SPEC-REVIEW  mandatory when big or destructive. HOW: headless
                  codex exec against the spec file ("adversarially review
                  this spec: <path> -- check claims against the repo").
@@ -465,7 +468,9 @@ H. Worktrees are ISOLATION, not ceremony: use one only when this
    remove worktree and branch, all in the same session. Never park
    work in one. Branches are worktree PLUMBING (a worktree needs its
    own HEAD), never workflow: this repo is trunk-based, main is the
-   only long-lived branch, no feature branches or PRs.
+   only long-lived branch, no feature branches or PRs. Bash writes
+   (cp, mv, redirects, sed -i) are writes the guards cannot see --
+   police them yourself.
 ```
 
 ---
