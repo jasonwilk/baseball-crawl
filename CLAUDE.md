@@ -50,7 +50,10 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
 2. **SPEC-REVIEW** - Mandatory when big or destructive: run headless `codex exec` on the spec
    ("adversarially review this spec: `<path>` - check claims against the repo"). The legacy
    codex-spec-review skill needs an epic dir; don't use it. Skip only if this spec was
-   codex-reviewed at planning, and cite that pass.
+   codex-reviewed at planning, and cite that pass. **Do NOT call ExitPlanMode or present a
+   spec until this review has run and its findings are folded in** - the review is part of
+   WRITING the spec, not part of approving it; presenting an unreviewed spec is a step-order
+   violation (missed twice; this sentence exists because of it).
 3. **EXECUTE** - In a FRESH session, from the spec. A spec is a CLAIM: audit it against the repo
    first. The spec, not the chat, carries state. Leave at a boundary - context bar yellow, or two
    failed corrections - by updating the progress log and going to step 9.
