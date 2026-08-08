@@ -4,7 +4,6 @@ paths:
   - "tests/**"
   - "migrations/**"
   - "scripts/**"
-  - "epics/**"
 ---
 
 # Canonical Seams

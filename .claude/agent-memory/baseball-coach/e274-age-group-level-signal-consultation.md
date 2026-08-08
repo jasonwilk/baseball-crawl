@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-E-274 (planned 2026-07-25) proposes reading GameChanger's `age_group` field as a structured level signal for school teams (`high_varsity` / `high_junior_varsity` / `high_freshman` / etc.) instead of inferring level purely from team-name keywords. GC's HS enum has only three values; LSB's own program runs four (Freshman, Reserve, JV, Varsity), so the collapse is real. See [[league-pitch-rules]] for the underlying season x level -> league classification model this feeds, and `.project/ideas/IDEA-171-unmatched-age-group-forms-are-unread.md` for the discovery that seeded this epic.
+E-274 (planned 2026-07-25) proposes reading GameChanger's `age_group` field as a structured level signal for school teams (`high_varsity` / `high_junior_varsity` / `high_freshman` / etc.) instead of inferring level purely from team-name keywords. GC's HS enum has only three values; LSB's own program runs four (Freshman, Reserve, JV, Varsity), so the collapse is real. See [[league-pitch-rules]] for the underlying season x level -> league classification model this feeds, and `.project/archive/ideas/IDEA-171-unmatched-age-group-forms-are-unread.md` for the discovery that seeded this epic.
 
 Four rulings from the domain consultation:
 

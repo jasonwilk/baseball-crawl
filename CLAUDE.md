@@ -49,11 +49,10 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    unverified, and unverified premises are where stubs come from.
 2. **SPEC-REVIEW** - Plan mode cannot write files, so the flow is: ExitPlanMode presents an
    OUTLINE, and the operator's approval there authorizes exactly one thing - WRITING THE SPEC
-   FILE. Never implementation. Then, in order: write the spec, run headless `codex exec` on it
-   ("adversarially review this spec: `<path>` - check claims against the repo"; mandatory when
-   big or destructive), fold the findings in, and only then present the spec for commit
-   approval. Implementation starts only from a COMMITTED spec, in a fresh session. The legacy
-   codex-spec-review skill needs an epic dir; don't use it.
+   FILE. Never implementation. Then, in order: write the spec, run
+   `./scripts/codex-spec-review.sh <path>` (mandatory when big or destructive; read its
+   `RESULT_FILE`, not the preview), fold the findings in, and only then present the spec for
+   commit approval. Implementation starts only from a COMMITTED spec, in a fresh session.
 3. **EXECUTE** - In a FRESH session, from the spec. A spec is a CLAIM: audit it against the repo
    first. The spec, not the chat, carries state. Leave at a boundary - context bar yellow, or two
    failed corrections - by updating the progress log and going to step 9.
@@ -74,7 +73,8 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    first check.
 9. **HANDOFF** - Enumerate every spec stub you created, each with a one-line "why you should
    care". The Status you flipped at step 7 reads `COMPLETE (this commit)`, `PARKED + why`,
-   `STUB`, or `OPEN + what decision is owed` - no hash needed, `git log` on the spec supplies it.
+   `STUB`, or `OPEN + what decision is owed`; a COMPLETE one moves to `.project/specs/done/` in
+   this commit - no hash needed, `git log --follow` on the spec supplies it.
    Only post-commit steps (a backfill, a migration run) earn a second small results commit, and
    THAT one cites hashes. Then report what landed, what's carried and where, the exact
    next-session prompt, and the literal last line
@@ -87,7 +87,9 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
 - **A.** Get operator approval for every commit.
 - **B.** Treat a fork as the SAME BRAIN, not a second worker: never fork to parallelize, keep
   tangents read-only, close them after. A finished session answers no new questions - new
-  question, new session. Exit discovered work as a spec stub, not as more work here.
+  question, new session. Exit discovered work, never work it here: broken or owed becomes a spec
+  stub, someday becomes one line in `.project/specs/IDEAS.md`, direction goes to
+  `docs/vision-signals.md`.
 - **C.** Shape questions to the operator, who has NOT been following the session: give each
   decision, in order, what you were doing, what you found, what the decision is, the options with
   their consequences, your recommendation. Use no term or option they haven't been shown; define
@@ -98,8 +100,8 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
 - **E.** Send lessons to memory; promote one to a rule only after it bites twice, at the
   per-3-chunk audit, never mid-flight. Keep the destructive seams in this file.
 - **F.** At that audit, also do housekeeping: every spec in `.project/specs/` must read COMPLETE
-  or PARKED, or belong to a live chunk; a STUB or OPEN one gets a decision. Close any session
-  older than the last audit.
+  or PARKED, or belong to a live chunk; a STUB or OPEN one gets a decision; curate `IDEAS.md`.
+  Close any session older than the last audit.
 - **G.** Count a clean result only with a POSITIVE CONTROL: prove the instrument can fail before
   you trust its pass. A scan, probe, or gate you cannot show failing proves nothing.
 - **H.** Use a worktree for ISOLATION, never ceremony - only when this session cannot safely write
@@ -108,6 +110,8 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
   (a worktree needs its own HEAD), never workflow: this repo is trunk-based, `main` is the only
   long-lived branch, no feature branches, no PRs. Police your own Bash writes (`cp`, `mv`,
   redirects, `sed -i`); the guards cannot see them.
+- **I.** A cap is a TRIPWIRE, not a wall: when one binds against load-bearing content, stop and
+  bring the operator the trade. Never compress meaning to fit; never raise a cap yourself.
 
 ## Line of march
 
@@ -163,6 +167,6 @@ each answers:
   `proxy-boundary`.
 - Writing code: `testing`, `python-style`. Safety: `pii-safety`. Stack: `app-troubleshooting`,
   `devcontainer`, `dependency-management`.
-- Docs, ideas, vision: `documentation`, `ideas-workflow`, `vision-signals` - capture vision
-  signals as you notice them; "curate the vision" is the operator's trigger to review them, and
-  `docs/VISION.md` is edited only in that deliberate session.
+- Docs and vision: `documentation`, `vision-signals` - capture vision signals as you notice
+  them; "curate the vision" is the operator's trigger to review them, and `docs/VISION.md` is
+  edited only in that deliberate session.

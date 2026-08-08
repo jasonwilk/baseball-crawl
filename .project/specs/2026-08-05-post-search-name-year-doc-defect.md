@@ -53,7 +53,7 @@ diverge from our free-text schedule names in word order and punctuation, which i
 the very list above (`Nighthawks Navy 10U` vs `Nighthawks 9U Navy`) — but it now rests on
 that observation rather than on this doc line. **Anyone re-opening the name-match question
 should not lean on this sentence until it has been re-measured.**
-See `2026-08-04-rung-c-auto-accept-criteria-drift.md`.
+See `.project/specs/done/2026-08-04-rung-c-auto-accept-criteria-drift.md`.
 
 ## Out of scope
 

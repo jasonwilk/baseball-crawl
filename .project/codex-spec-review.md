@@ -5,101 +5,61 @@
 Before reviewing, read this workflow context file:
 1. `/workspaces/baseball-crawl/CLAUDE.md` -- project principles, tech stack, chunk lifecycle, workflow conventions
 
-This is a **planning artifact review**, not a code review. Evaluate the epic and story files provided against the project's workflow contracts and planning quality standards.
+This is a **planning artifact review**, not a code review. Evaluate the one-page chunk spec provided against the project's workflow contracts and planning quality standards.
 
-## Facts Table (build before evaluating)
-
-Before checking individual items, extract a facts table from the epic's Technical Notes. List every named value: counts, env var names, field lists, status categories, file paths, agent names, and category labels. For each value, record every location where it appears across story ACs, the epic table, and Technical Notes. Use this table as the ground truth when evaluating categories 10-12 below -- it front-loads consistency checking instead of relying on noticing drift during line-by-line review.
+**A spec is a CLAIM, not a fact.** The single most valuable thing this review does is resolve the spec's assertions against the actual repository -- file paths, line numbers, counts, command behavior, what a gate does today. Check them; do not take them on the spec's word.
 
 ## Evaluation Checklist
 
-For every story in the epic, check each item and report findings:
+Check each item and report findings:
 
-### 1. Acceptance-Criteria Clarity and Testability
-- Are all ACs specific enough that an implementing agent could verify them without guessing?
-- Can each AC be confirmed with a concrete, observable test (file exists, command exits 0, output contains X)?
-- Are any ACs ambiguous, subjective, or dependent on unstated context?
+### 1. Verification Commands: Concrete and Observable
+- Does the spec carry a Verification section of numbered commands with expected results?
+- Can each one be confirmed by observation (file exists, command exits 0, count equals N, output contains X) rather than by judgment?
+- Are any verification steps ambiguous, subjective, or dependent on unstated context?
+- Does any step claim a clean result without a **positive control** -- a demonstration that the instrument can fail? A sweep, scan, or gate never shown failing proves nothing.
+- Is any step *unsatisfiable as written* -- does the work described elsewhere in the spec guarantee a hit the step says will not be there?
 
-### 2. Dependency Correctness and Sequencing
-- Are all `Blocked by` / `Blocks` relationships explicitly stated in each story file?
-- Do the dependencies reflect the actual data flow and file modification order?
-- Are there hidden dependencies not captured in the dependency fields (e.g., story A must read output from story B)?
-- Does the epic's Stories table match the dependency graph in individual story files?
-
-### 3. File-Conflict and Parallel-Execution Risks
-- Do any two stories marked as parallel-safe modify the same file?
-- If parallel execution is claimed, verify that "Files to Create or Modify" lists do not overlap.
-- Are there implicit ordering requirements (e.g., story A creates a file that story B reads) that make them not truly parallel-safe?
-
-### 4. Story Sizing and Vertical Slicing
-- Is each story independently deliverable and testable end-to-end?
-- Are any stories too large -- spanning multiple domains, producing artifacts that can't be verified until a later story completes?
-- Are any stories too small -- trivially contained in a neighboring story with no benefit to splitting?
-- Does each story deliver clear, standalone value?
-
-### 5. Scope Correctness
-- Does every file the work names actually belong to the change being described, and is anything it will inevitably touch missing from the list?
+### 2. Scope Correctness
+- Does every file the work names actually belong to the change being described, and is anything it will inevitably touch missing from the Files list?
 - Are the destructive seams named where the work reaches them (`bb report generate`, `bb db purge-scouting`)?
+- Does the work strand anything: a pointer to a file being deleted or moved, a cross-reference in surviving prose, a rule whose `paths:` frontmatter names a tree being frozen?
 
-### 6. Mismatch Between Epic Claims and Current Repo Reality
-- Does the epic's Background or Context section describe things that are already done but framed as future?
-- Does the epic describe dependencies as "will be created" when they already exist in the repo?
-- Are there AC items that are already satisfied by existing code or configuration?
+### 3. Claims vs. Repo Reality
+- Are the spec's claims about existing infrastructure accurate -- file paths, line numbers, module names, counts, command and gate behavior? Open the files and check.
+- Does the spec describe as future something that is already done, or as "will be created" something that already exists?
+- Are measurements (byte counts, file counts, line ranges) still true today, and does the spec say when they were taken?
+- Does the spec clearly distinguish what exists now from what this chunk will create?
 
-### 7. Missing Expert Consultation
-- Expert consultation is expected before the work is called ready when it touches:
-  - Domain statistics or coaching logic (baseball-coach should be consulted)
-  - API behavior or GameChanger endpoint patterns (api-scout should be consulted)
-  - Database schema or ETL pipeline design
-- Does the epic's Background section document that consultation occurred where it was warranted?
-- If consultation was skipped, is there a stated reason?
+### 4. Missing Expert Consultation
+- Consultation is expected before the work is called ready when it touches:
+  - Domain statistics or coaching logic (`baseball-coach` should be consulted)
+  - API behavior or GameChanger endpoint patterns (`api-scout` should be consulted)
+- Does the spec document that consultation occurred where it was warranted? If it was skipped, is there a stated reason?
 
-### 8. Definition of Done Clarity
-- Does each story have a "Definition of Done" section that an implementing agent could use to self-assess completion?
-- Are the DoD items specific and verifiable (not vague like "works correctly" or "looks good")?
-- Is the DoD consistent with the ACs (not a weaker or looser restatement)?
-
-### 9. Implemented Reality vs. Planned Future State
-- Does the epic clearly distinguish between what currently exists in the repo and what the epic will create?
-- Are any claims about existing infrastructure actually accurate (file paths, module names, API behaviors)?
-- If the epic references other epics as "completed", have those actually been completed and archived?
-
-### 9b. Safety Absolutes Without an Attempted Counterexample
-- Does any AC or Technical Note make an **absolute claim about deletion, destruction, or a safety guarantee** -- "cannot delete", "always refuses", "never retires more than", "aborts on"? For each one, try to BUILD the counterexample: construct the input, ordering, or FK action under which the claim fails. A surviving absolute is shippable; a falsified one is a blocking finding, and the epic should name whoever is assigned to attempt the construction.
+### 5. Safety Absolutes Without an Attempted Counterexample
+- Does the spec make an **absolute claim about deletion, destruction, or a safety guarantee** -- "cannot delete", "always refuses", "never retires more than", "aborts on"? For each one, try to BUILD the counterexample: construct the input, ordering, or FK action under which the claim fails. A surviving absolute is shippable; a falsified one is a blocking finding.
 - **Reasoning to an absolute is not evidence for it.** In E-270 the claim "a KEEP-to-PURGE foreign key aborts the purge" was true only for a default-action FK; an `ON DELETE CASCADE` edge raises nothing, commits, and destroys the preserved row. That epic shipped 7 prose defects of this class, E-272 shipped the NRBL over-rest claim, and E-276's planning produced 4-5 wrong gate absolutes -- **every one of them killed by construction, none by review.**
 
-## Epic-Level Checks
-
-The per-story categories above (1-9b) evaluate each story individually. The following categories operate on the epic as a whole -- checking consistency *across* files, propagation *across* stories, and surface area *across* ACs. Evaluate these against the facts table built during setup.
-
-### 10. Internal Consistency
-- Do values that appear in multiple locations (counts, env var names, field names, status codes) match across all occurrences in the epic and story files?
-- Are there contradictions between ACs in different stories within the same epic?
-- Does the epic's Stories table (status, description, dependencies) match the content of the individual story files?
-
-### 11. Propagation Completeness
-- When the epic's Technical Notes define a rule, procedure, or constraint, do all stories that implement that rule reflect the current version?
-- Are there stale references to superseded decisions from earlier drafts or prior review rounds?
-- After a finding is incorporated, has the fix propagated to all locations where the original value appeared?
-
-### 12. Specification Surface Area
-- Are ACs restating content from Technical Notes instead of referencing it (e.g., "per Technical Notes section X")?
-- Could an AC sub-clause be replaced with a reference to Technical Notes without losing testability?
-- Are there ACs with more than 3 sub-clauses that should be decomposed into separate ACs or converted to references?
+### 6. Spec Hygiene
+- Does the spec name its **out of scope** -- what a reader would reasonably expect here and will not find, and where it lives instead?
+- Does it carry a **progress log**?
+- Does it name a **person**? No spec may. Real team/org identifiers belong to the placeholder taxonomy in `.claude/rules/api-docs.md`; a person's name is never acceptable.
+- Does its **Status** read one of the four values in CLAUDE.md step 9 -- `COMPLETE (this commit)`, `PARKED + why`, `STUB`, `OPEN + what decision is owed` -- or explicitly claim a chunk in flight? A fifth status is a finding.
 
 ## Re-Review Protocol
 
-Round 2+ reviews (after PM incorporates findings) follow a scoped process:
+Round 2+ reviews (after the findings are incorporated) follow a scoped process:
 
-1. Read the change summary from PM identifying what was modified.
-2. Verify each claimed fix was actually applied in the updated files.
-3. Check that fixes did not introduce new inconsistencies in adjacent text (the facts table helps here -- re-check affected rows).
-4. Do NOT re-review unchanged sections. Categories 1-9 findings on unmodified stories from prior rounds are closed. Only re-evaluate sections that were touched or are adjacent to a change.
+1. Read the change summary identifying what was modified.
+2. Verify each claimed fix was actually applied in the updated spec.
+3. Check that fixes did not introduce new inconsistencies in adjacent text -- a corrected count often appears in more than one place.
+4. Do NOT re-review unchanged sections. Prior-round findings on untouched sections are closed. Only re-evaluate what was touched or is adjacent to a change.
 
 ## Reporting
 
-- Cite the specific story ID and AC label (e.g., "E-034-03, AC-5") for every finding.
+- Cite the spec's section heading (e.g. "§4 Templates", "Verification step 2") for every finding.
 - Group findings by checklist category.
-- Rate each finding: **P1** (blocks READY), **P2** (should fix before READY), **P3** (minor, fix if easy).
-- If the spec is clean across all categories, state explicitly: "No findings. This epic is ready to mark READY."
-- Do not report stylistic opinions on prose quality unless they cause genuine ambiguity in a testable AC.
+- Rate each finding: **P1** (blocks execution), **P2** (should fix before executing), **P3** (minor, fix if easy).
+- If the spec is clean across all categories, state explicitly: "No findings. This spec is ready to execute."
+- Do not report stylistic opinions on prose quality unless they cause genuine ambiguity in a verification step.

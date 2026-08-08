@@ -1,7 +1,6 @@
 ---
 paths:
   - "docs/**"
-  - "epics/**"
   - ".project/archive/**"
 ---
 

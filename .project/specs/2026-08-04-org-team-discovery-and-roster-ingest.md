@@ -1,6 +1,6 @@
 # Organizations as a team-discovery and roster source
 
-**Date:** 2026-08-04 · **Status:** RULED 2026-08-08 — bulk discovery DECLINED (vision non-goal); the narrow opponent roster-recovery framing is funded as a MEASUREMENT-ONLY chunk (see README NEXT); design nothing unless the reach number is material
+**Date:** 2026-08-04 · **Status:** PARKED — ruled by the operator 2026-08-08: bulk org discovery DECLINED (vision non-goal); the narrow opponent roster-recovery framing is funded as a MEASUREMENT-ONLY chunk, queued in README NEXT, not started. Design nothing unless the reach number is material
 **Source:** live probes 2026-08-04 (~450 calls, read-only, web profile). Evidence:
 `.claude/agent-memory/api-scout/organization-scope.md`.
 

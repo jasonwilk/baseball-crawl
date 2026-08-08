@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
-# codex-spec-review.sh -- Run a project-aware Codex spec review on a planning artifact directory.
+# codex-spec-review.sh -- Run a project-aware Codex review on a chunk spec file.
 #
 # CLI mode verified against installed codex version (2026-03-03):
 #   `codex exec` is used (not `codex review`) because spec review is NOT diff-centric.
-#   It evaluates planning artifacts (epic and story markdown files) against workflow contracts.
+#   It evaluates a one-page spec against the project's workflow contracts.
 #   The assembled prompt contains file paths and review instructions (not file contents).
-#   Codex reads the rubric and epic files itself via its repository access.
+#   Codex reads the rubric and the spec file itself via its repository access.
 #   The prompt (plus optional runtime note) is passed via stdin using `-` as the PROMPT argument.
 #
 # Usage:
-#   codex-spec-review.sh <epic-dir> [--note "text"] [--note-file /path/to/file]
+#   codex-spec-review.sh <spec-file> [--note "text"] [--note-file /path/to/file]
 #
 # Examples:
-#   ./scripts/codex-spec-review.sh epics/E-034-codex-review
-#   ./scripts/codex-spec-review.sh epics/E-034-codex-review --note "Focus on AC testability"
-#   ./scripts/codex-spec-review.sh epics/E-034-codex-review --note-file /tmp/pm-context.txt
+#   ./scripts/codex-spec-review.sh .project/specs/2026-08-05-rung-c-season-year-filter.md
+#   ./scripts/codex-spec-review.sh .project/specs/<date>-<slug>.md --note "Focus on the destructive seams"
 
 set -euo pipefail
 
@@ -27,22 +26,20 @@ RUBRIC_FILE="${REPO_ROOT}/.project/codex-spec-review.md"
 # ---------------------------------------------------------------------------
 usage() {
     cat >&2 <<EOF
-Usage: $(basename "$0") <epic-dir> [--note "text"] [--note-file /path/to/file]
+Usage: $(basename "$0") <spec-file> [--note "text"] [--note-file /path/to/file]
 
 Arguments:
-  <epic-dir>             Path to the epic directory to review (must contain epic.md).
+  <spec-file>            Path to the chunk spec markdown file to review.
                          Can be absolute or relative to the repo root.
 
 Options:
   --note "text"          Include a short runtime context note in the Codex prompt.
-                         Describe what the epic accomplishes, what changed, and
-                         what you want Codex to focus on.
+                         Describe what the chunk does and what to focus on.
   --note-file /path      Read the runtime note from a file instead of inline text.
 
 Examples:
-  $(basename "$0") epics/E-034-codex-review
-  $(basename "$0") epics/E-034-codex-review --note "Focus on AC testability in E-034-03"
-  $(basename "$0") /workspaces/baseball-crawl/epics/E-034-codex-review --note-file /tmp/context.txt
+  $(basename "$0") .project/specs/2026-08-05-rung-c-season-year-filter.md
+  $(basename "$0") .project/specs/<date>-<slug>.md --note "Check the byte budget claims"
 EOF
     exit 1
 }
@@ -59,7 +56,7 @@ fi
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
-EPIC_DIR=""
+SPEC_FILE=""
 RUNTIME_NOTE=""
 
 while [[ $# -gt 0 ]]; do
@@ -92,11 +89,11 @@ while [[ $# -gt 0 ]]; do
             usage
             ;;
         *)
-            if [[ -n "${EPIC_DIR}" ]]; then
-                echo "Error: unexpected argument '$1' (epic-dir already set to '${EPIC_DIR}')." >&2
+            if [[ -n "${SPEC_FILE}" ]]; then
+                echo "Error: unexpected argument '$1' (spec-file already set to '${SPEC_FILE}')." >&2
                 usage
             fi
-            EPIC_DIR="$1"
+            SPEC_FILE="$1"
             shift
             ;;
     esac
@@ -105,29 +102,23 @@ done
 # ---------------------------------------------------------------------------
 # Validate required argument
 # ---------------------------------------------------------------------------
-if [[ -z "${EPIC_DIR}" ]]; then
-    echo "Error: epic-dir is required." >&2
+if [[ -z "${SPEC_FILE}" ]]; then
+    echo "Error: spec-file is required." >&2
     usage
 fi
 
-# Resolve to absolute path. If the path is relative, try it from cwd first,
+# Resolve to an absolute path. If the path is relative, try it from cwd first,
 # then from REPO_ROOT.
-if [[ "${EPIC_DIR}" != /* ]]; then
-    if [[ -d "${EPIC_DIR}" ]]; then
-        EPIC_DIR="$(cd "${EPIC_DIR}" && pwd)"
-    elif [[ -d "${REPO_ROOT}/${EPIC_DIR}" ]]; then
-        EPIC_DIR="$(cd "${REPO_ROOT}/${EPIC_DIR}" && pwd)"
+if [[ "${SPEC_FILE}" != /* ]]; then
+    if [[ -f "${SPEC_FILE}" ]]; then
+        SPEC_FILE="$(cd "$(dirname "${SPEC_FILE}")" && pwd)/$(basename "${SPEC_FILE}")"
+    elif [[ -f "${REPO_ROOT}/${SPEC_FILE}" ]]; then
+        SPEC_FILE="${REPO_ROOT}/${SPEC_FILE}"
     fi
 fi
 
-if [[ ! -d "${EPIC_DIR}" ]]; then
-    echo "Error: epic directory does not exist: ${EPIC_DIR}" >&2
-    exit 1
-fi
-
-if [[ ! -f "${EPIC_DIR}/epic.md" ]]; then
-    echo "Error: epic.md not found in ${EPIC_DIR}" >&2
-    echo "  The target directory must be an epic directory containing an epic.md file." >&2
+if [[ ! -f "${SPEC_FILE}" ]]; then
+    echo "Error: spec file does not exist: ${SPEC_FILE}" >&2
     exit 1
 fi
 
@@ -141,34 +132,28 @@ fi
 
 # ---------------------------------------------------------------------------
 # Assemble prompt (file paths + review instructions + optional runtime note)
-# No file contents are embedded -- Codex reads the rubric and epic files itself.
+# No file contents are embedded -- Codex reads the rubric and the spec itself.
 # ---------------------------------------------------------------------------
 assemble_prompt() {
-    # Warn if the epic directory has no .md files (likely a misconfigured path).
-    local md_count
-    md_count=$(find "${EPIC_DIR}" -maxdepth 1 -name "*.md" | wc -l)
-    if [[ "${md_count}" -eq 0 ]]; then
-        echo "Warning: no .md files found in ${EPIC_DIR}" >&2
-    fi
-
     echo "SPEC-REVIEW REQUEST"
     echo ""
     echo "Rubric: ${RUBRIC_FILE}"
-    echo "Planning artifacts: ${EPIC_DIR}/ (all *.md files)"
+    echo "Spec under review: ${SPEC_FILE}"
 
     if [[ -n "${RUNTIME_NOTE}" ]]; then
         echo ""
-        echo "RUNTIME CONTEXT NOTE FROM PM"
+        echo "RUNTIME CONTEXT NOTE"
         echo "${RUNTIME_NOTE}"
     fi
 
     echo ""
     echo "Instructions:"
     echo "1. Read the rubric at the path above."
-    echo "2. Read all .md files in the planning artifacts directory above."
-    echo "3. Review the planning artifacts against the rubric. Follow its Evaluation Checklist exactly."
-    echo "4. Cite story ID and AC label for each finding."
-    echo "5. If the spec is clean, state: \"No findings. This epic is ready to mark READY.\""
+    echo "2. Read the spec file above."
+    echo "3. Review the spec against the rubric. Follow its Evaluation Checklist exactly."
+    echo "4. Check the spec's claims against the actual repository -- a spec is a CLAIM, not a fact."
+    echo "5. Cite the spec's section heading for each finding."
+    echo "6. If the spec is clean, state: \"No findings. This spec is ready to execute.\""
 }
 
 # ---------------------------------------------------------------------------
@@ -180,4 +165,50 @@ CODEX_SANDBOX_ARGS=()
 if [[ "${CODEX_SANDBOX_OFF:-}" == "1" ]]; then
     CODEX_SANDBOX_ARGS=(--sandbox danger-full-access)
 fi
-assemble_prompt | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
+
+# The review output is tee'd to RESULT_FILE so the read-receipt gate (skill Step
+# 4) reads a stable file instead of a manual stdout redirect -- the documented
+# fabrication hole, skipped on 44 of 48 invocations.
+#
+# mktemp, NOT a timestamp: two runs starting in the same second would resolve to
+# one second-granular name, and the second tee would truncate the first, leaving
+# run A's receipt describing run B's review -- precisely the fabrication class
+# this receipt exists to close. mktemp also defeats a symlink pre-planted at a
+# predictable path. Created HERE, after argument parsing, so a usage error does
+# not litter /tmp.
+RESULT_FILE="$(mktemp -t codex-spec-review.XXXXXX)"
+
+# ANNOUNCE THE PATH BEFORE CODEX RUNS. This line is load-bearing and its POSITION
+# is the whole point: a large review is truncated to a PREVIEW OF THE FIRST ~2KB
+# by the calling tool, and the motivating incident was a ~373KB result -- so a
+# receipt printed only after the stream is invisible in exactly the case it was
+# built for. The skill's prescribed `timeout 1200` has the same shape: SIGTERM
+# kills the script mid-stream and no trailing echo ever runs, stranding a partial
+# result file nobody can name. Printing first survives both. Do NOT move it below
+# the pipeline, and do not delete it as a duplicate of the trailing receipt.
+echo "RESULT_FILE=${RESULT_FILE}"
+echo ""
+
+# Fail EARLY and legibly if the result file is not writable. Without this, a tee
+# that cannot write exits immediately, codex takes SIGPIPE mid-review, and
+# pipefail surfaces a non-zero rc -- which the skill maps to "the script itself
+# failed", discarding a review that actually ran fine.
+if ! : > "${RESULT_FILE}"; then
+    echo "Error: cannot write the result file: ${RESULT_FILE}" >&2
+    exit 1
+fi
+
+# set -o pipefail is preserved: codex's exit code (the rightmost non-zero)
+# propagates through the zero-exit tee; we capture it, print the receipt
+# regardless of pass/fail, then return it so the exit status still reflects codex.
+rc=0
+assemble_prompt \
+    | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" - \
+    | tee "${RESULT_FILE}" || rc=$?
+echo ""
+echo "RESULT_FILE=${RESULT_FILE}"
+if [[ -f "${RESULT_FILE}" ]]; then
+    wc -l "${RESULT_FILE}"
+    echo "tail -n1: $(tail -n1 "${RESULT_FILE}")"
+fi
+exit "${rc}"

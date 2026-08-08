@@ -1,7 +1,7 @@
 # Which identifier is valid on which path — the Tier 2 audit
 
 **Date:** 2026-08-04 · **Status:** PARKED — funded by the operator, not started
-**Sibling:** `.project/specs/2026-08-04-search-entity-class-filter.md` (the code fix)
+**Sibling:** `.project/specs/done/2026-08-04-search-entity-class-filter.md` (the code fix, COMPLETE)
 
 ## Why this exists
 

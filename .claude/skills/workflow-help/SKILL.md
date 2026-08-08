@@ -44,6 +44,10 @@ CODE REVIEW
   "codex review"            Codex audits the diff
   └─ + "prompt"             Returns copy-paste prompt
 
+SPEC REVIEW
+  "spec review <slug>"      Codex audits a spec file
+  └─ + "prompt"             Returns copy-paste prompt
+
 API CAPTURE  ⚠ time-sensitive
   "ingest endpoint"         Execute curl + document endpoint
                             gc-signature expires in minutes
@@ -67,10 +71,7 @@ editing it independently:
 - Lifecycle steps and the line-of-march pointer: **`CLAUDE.md`**, sections "How work gets done
   here" and "Line of march".
 - Code review: `.claude/skills/codex-review/SKILL.md` frontmatter.
+- Spec review: `.claude/skills/codex-spec-review/SKILL.md` frontmatter.
 - Ingest endpoint: `.claude/skills/ingest-endpoint/SKILL.md` frontmatter.
 - Vision curation: `.claude/rules/vision-signals.md`, which carries the trigger phrase and the
   rule that `docs/VISION.md` is edited only in a deliberate curation session.
-
-`codex-spec-review` is deliberately absent: it resolves only `epics/` directories, so it cannot
-review a spec file. Lifecycle step 2 runs headless `codex exec` instead. Add it back when Step 3
-rewrites its input resolution.

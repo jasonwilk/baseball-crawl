@@ -1,8 +1,8 @@
 # Migration Step 3 — specs live
 
-**Date**: 2026-08-08 · **Status**: CHUNK IN FLIGHT — spec reviewed and folded; execution owed in a
-fresh session. (`.project/specs/README.md:8` exempts a spec belonging to a chunk in flight from the
-four terminal statuses; this is that case, and it is why no terminal status is claimed here.)
+**Date**: 2026-08-08 · **Status**: COMPLETE (this commit) — executed 2026-08-08 from the committed
+spec (`b03d9c0`), in a fresh session. Per its own §6 rule this file moved to `.project/specs/done/`
+in the same commit; use `git log --follow` on this path for its history.
 **Source**: `.project/specs/README.md` NOW; `.project/research/2026-08-02-system-redesign-proposal.md` §7
 
 **Two commits, do not conflate them.** THIS commit lands the spec only — nothing in the Files
@@ -497,3 +497,57 @@ code.**
   vocabulary at four, re-status the three specs to `PARKED + why` (§10). CLAUDE.md and the README
   keep their four-status text unchanged, which returns the bytes §7 had provisionally costed for
   the alternative. Spec is complete and ready for commit approval.
+- **2026-08-08 — EXECUTED.** All ten pieces landed; all ten verification steps run. Full suite
+  green: **4,416 passed, RC=0** (4,416 + the deleted gate file's 28 collected = 4,444 prior; the
+  arithmetic reconciles, nothing else regressed). CLAUDE.md measured **11,264 bytes against the
+  11,264 cap — AT it, zero headroom**; it passes `≤ 11264` so no trade was owed, but the next
+  addition of any size breaches it (recorded as a residual under principle I).
+
+  Five things the audit found that this spec did not name, all folded in:
+  1. **`epics/.gitkeep`** was tracked (the 26th file) but absent from Deletes, while the Goal and
+     verification step 1 both require `epics/` to not exist. Deleted.
+  2. **`CLAUDE.md`'s Pointers block listed `ideas-workflow`**, the rule this chunk deletes. Dropped
+     — a sixth CLAUDE.md edit, and it returned bytes rather than spending them.
+  3. **`.githooks/pre-commit` cross-referenced "the archive-reference gate above"** from inside the
+     surviving frozen-archive gate's comment. Reworded to name it as retired; the load-bearing
+     "never drop `--no-renames`" instruction kept intact.
+  4. **Verification step 2's "returns nothing" is unsatisfiable as written**, and contradicts §1 of
+     The work, which rules that the `.project/research/` records keep their `epics/E-27x-` strings.
+     The sweep was run as "every hit must be on §1's accepted list" and passes on that reading: the
+     only hits are the three research records and this spec itself. **Zero live pointers survive** —
+     both repoints in §1 verified gone from the sweep. Positive control planted and seen first.
+  5. **The `done/` moves stranded pointers in four live specs.** Applying §1's own criterion-vs-
+     evidence rule, the two path-shaped/navigational ones were repointed
+     (`2026-08-04-identifier-validity-audit.md:4`, `2026-08-05-post-search-name-year-doc-defect.md:56`);
+     four provenance records naming a spec by bare filename were left as written, per the same rule.
+     Found by the step-6 dogfood — the rewritten review script caught a defect this chunk created.
+- **2026-08-08 — `/security-review`: ZERO findings.** The one security-adjacent removal is the
+  archive-refs gate, and the surviving controls were checked individually: the frozen-archive
+  invariant still sits ABOVE the missing-scanner skip's unconditional `exit 0`, no variable was
+  orphaned, and `STAGED_ARR`/`GATE_TREES`/the fail-closed counter are byte-identical to HEAD. PII
+  coverage across the moves is unchanged-to-broader (both source and destination were already in
+  `SKIP_PATHS`; the doc-PII byte gate sweeps the destination and did so in this commit).
+- **2026-08-08 — `/code-review`: 6 findings, all read to completion and re-verified against the
+  repo. Five FIXED, one ROUTED. None dismissed.**
+
+  | # | Finding | Disposition |
+  |---|---|---|
+  | 1 (MED) | The `RESULT_FILE=` receipt printed only AFTER the stream — invisible in exactly the large-output case it exists for (the caller truncates to a preview of the FIRST ~2KB; the motivating incident was ~373KB), and `timeout`'s SIGTERM kills the script before any trailing echo | **FIXED** — the path is now announced BEFORE codex runs, with the trailing receipt kept. A comment pins the POSITION as load-bearing so it is not "deduplicated" later |
+  | 2 (MED) | A `tee` that cannot write makes codex take SIGPIPE mid-review, and `pipefail` surfaces non-zero — which the skill maps to "the script itself failed", discarding a review that ran fine | **FIXED** — writability is now checked up front and fails with a legible error |
+  | 3 (LOW) | `/tmp/codex-spec-review-$(date +%s).txt` is second-granular: two runs in the same second collide, the second `tee` truncates the first, and run A's receipt then describes run B — the exact fabrication class the receipt closes | **FIXED** — `mktemp`, created after argument parsing so a usage error leaves no litter |
+  | 4 (MED) | CLAUDE.md step 2 still told sessions to hand-roll `codex exec`, bypassing `.project/codex-spec-review.md` — **the rubric this very commit rewrote** — while `workflow-help` newly advertised the skill route. Two routes, and the mandated one skipped the rubric | **FIXED** — step 2 now invokes `./scripts/codex-spec-review.sh`. It also SAVED bytes, which is what took CLAUDE.md back off the cap |
+  | 5 (LOW) | `.claude/rules/pii-safety.md:50` cited "the neighbouring archive-reference gate" as the precedent for keeping `--no-renames` — a neighbour this commit deleted. The hook's own comment was updated; this always-loadable rule was not | **FIXED** — reworded, and it now states that this invariant is the sole remaining carrier of the lesson |
+  | 6 (LOW) | Four DEAD `epics/` pointers on LIVE surfaces (E-075, E-002), archived long before this chunk | **ROUTED**, not fixed — different epics, predates this chunk, and the `docs/` sweep in NEXT owns it. Recorded there explicitly, including the fourth site the review itself missed (`.claude/agent-memory/api-scout/mobile-auth-notes.md:53`) |
+
+  Finding 4 is the one worth remembering: this chunk rewrote a rubric and then left the lifecycle
+  step pointing away from it. Cleared, and cleared: `for tree in epics .project`
+  (`.githooks/pre-commit:125`) is now an unreachable branch — intentional per §2, left inert.
+- **2026-08-08 — Residual discovered, NOT fixed here (needs its own chunk).**
+  `src/safety/pii_scanner.py:320` enumerates staged files with `--diff-filter=ACM`, which **drops
+  renames**. Measured on this commit: ACM sees 17 paths, the hook's `ACMR` sees 284 — **267 renames
+  invisible** to the standalone scanner, including this spec's own move-and-edit, which git scores
+  `R099`. The pre-commit hook is unaffected (it enumerates `ACMR`), so this commit's PII coverage is
+  intact; but CLAUDE.md step 6 tells every session to run `pii_scanner.py --staged` by hand, and
+  that command is blind to a move-and-edit. This is the same defect class `.claude/rules/pii-safety.md`
+  records as a live bypass for the frozen-archive gate ("`--diff-filter=AM` on its own DROPS
+  renames"). One-line fix, but it touches a security control and needs its own spec + review.

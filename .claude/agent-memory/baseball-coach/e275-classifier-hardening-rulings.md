@@ -13,7 +13,7 @@ places before this session even started: `.claude/agent-memory/baseball-coach/le
 ("ADDITIONAL GAP FOUND 2026-07-25" under the Season x Level model) and
 [[e274-age-group-level-signal-consultation]] ("Recreational-family under-rest hazard").
 It also matches the shipped epic AC language for the school family in
-`epics/E-274-age-group-level-signal/epic.md` TN-3. **E-275 planning should cite those
+`.project/archive/E-274-age-group-level-signal/epic.md` TN-3. **E-275 planning should cite those
 locations directly for the rec/school rulings rather than re-deriving from this file** --
 this file's contribution is (a) confirmation the ruling survived independent re-derivation,
 (b) the NEW travel-family and little_league/USSSA/Perfect-Game/IDEA-172 rulings requested
