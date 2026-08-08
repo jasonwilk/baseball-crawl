@@ -15,10 +15,19 @@ Individual chunk specs live beside this file as `<date>-<slug>.md`. Every one of
   `ideas-workflow.md`. `epics/` freezes; new work enters as specs. E-263 Deep Scout is RULED
   (operator, 2026-08-08): **PARKED** — freeze over it; if revived it will most likely be picked
   apart and re-planned as fresh specs, not dispatched from the epic. The freeze is unblocked.
-- **The three operator decisions below** — still queued for one sitting.
-
 ## NEXT
 
+- **Rung-c season-year filter — RULED: BUILD** (operator, 2026-08-08). Semantics settled: a team
+  from one YEAR must never auto-match a team from another year; cross-season within the same
+  year (spring 2026 vs summer 2026) is legitimate; a hit with `season.year` absent REFUSES
+  auto-accept (fail-closed). Compare against the member team's `teams.season_year`. Small chunk
+  (`_resolve_via_search` signature + `morning_run` caller + tests); spec
+  `2026-08-05-rung-c-season-year-filter.md`.
+- **Opponent org-reachability measurement — RULED: measure only** (operator, 2026-08-08). Bulk
+  org discovery is DECLINED (vision non-goal). The funded question: what fraction of our real
+  unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's
+  roster surface? Read-only, needs a team→org lookup answer first; design nothing unless the
+  number is material. Spec `2026-08-04-org-team-discovery-and-roster-ingest.md`.
 - **Migration Step 4 — second-pass rule trim.** After ~3 more real chunks, take the ~23 surviving
   path-scoped rules through "would removing this line cause a mistake?", run `/doctor`, and
   regenerate the cheat sheet from what actually got used.
@@ -34,16 +43,16 @@ Individual chunk specs live beside this file as `<date>-<slug>.md`. Every one of
 
 ## PARKED DECISIONS
 
-Each needs the operator, not more analysis. Evidence is in the named spec.
+None open. The sitting of 2026-08-08 ruled all three (details in the named specs):
 
-1. **Bulk team discovery via organizations** — does the product want it?
-   (`2026-08-04-org-team-discovery-and-roster-ingest.md`; vision-adjacent, consider alongside
-   "curate the vision".)
-2. **Rung-c season-year filter** — a cost/semantics call.
-   (`2026-08-05-rung-c-season-year-filter.md`, status OPEN.)
-3. **`docs/api` redacted-prefix corpus** — relax the `api-docs.md` rule, or scrub ~140 sites?
-   (`2026-08-04-docs-api-redacted-prefix-corpus.md`; recommendation on file: relax, the prefixes
-   are team-scoped IDs.)
+1. **Bulk org discovery: DECLINED** — vision non-goal; the narrow roster-recovery measurement is
+   funded instead (see NEXT).
+2. **Season-year filter: BUILD**, semantics settled — never cross-YEAR, same-year cross-season
+   fine, absent year refuses (see NEXT).
+3. **Prefix corpus: rule RELAXED, scrub CANCELLED** — real team/org/game ID prefixes are
+   acceptable in `-REDACTED` placeholders; PERSON-scoped identifiers (player/user ids) remain
+   synthetic-only, verified whenever those docs are next touched. The `api-docs.md` rule edit
+   rides the PII-docs chunk.
 
 ## STANDING RESIDUALS
 

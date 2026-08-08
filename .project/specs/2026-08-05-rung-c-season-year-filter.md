@@ -1,7 +1,9 @@
 # Rung (c): should auto-accept require a season-year match?
 
-**Date:** 2026-08-05 · **Status:** **OPEN — viable, not rejected.** Needs a cost/semantics
-decision, not a discovery. Split out of
+**Date:** 2026-08-05 · **Status:** **RULED 2026-08-08 — BUILD.** Operator semantics: a team
+from one YEAR must never auto-match a team from another year; cross-season within the same year
+(spring 2026 vs summer 2026) is legitimate; absent `season.year` REFUSES auto-accept
+(fail-closed). Compare against the member team's `teams.season_year`. Small chunk, after Step 3. Split out of
 `2026-08-04-rung-c-auto-accept-criteria-drift.md` on the operator's call
 ("track separately; keep that chunk focused").
 **Source:** codex spec review of `2026-08-05-rung-c-search-resolve-recoverable.md`, which

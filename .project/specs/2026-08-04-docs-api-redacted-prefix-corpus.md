@@ -1,6 +1,6 @@
 # `docs/api` `-REDACTED` placeholders use REAL UUID prefixes
 
-**Date:** 2026-08-04 · **Status:** STUB — measured, deliberately NOT remediated in this pass
+**Date:** 2026-08-04 · **Status:** RULED 2026-08-08 — rule RELAXED, scrub CANCELLED. Real team/org/game ID prefixes are acceptable in `-REDACTED` placeholders (operator team-ID policy); PERSON-scoped identifiers (player/user ids) remain synthetic-only. The `api-docs.md` rule edit rides the PII-docs chunk; the measurement below stays as the record
 **Related:** `.claude/agent-memory/api-scout/docs-api-pii-corpus.md` (2026-07-06, E-254-07),
 which already recorded that `docs/api` embeds real identifiers corpus-wide and that the
 denylist cannot certify the tree clean.

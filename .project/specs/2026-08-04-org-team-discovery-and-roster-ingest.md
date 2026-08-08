@@ -1,6 +1,6 @@
 # Organizations as a team-discovery and roster source
 
-**Date:** 2026-08-04 · **Status:** STUB — a product decision is owed BEFORE any design
+**Date:** 2026-08-04 · **Status:** RULED 2026-08-08 — bulk discovery DECLINED (vision non-goal); the narrow opponent roster-recovery framing is funded as a MEASUREMENT-ONLY chunk (see README NEXT); design nothing unless the reach number is material
 **Source:** live probes 2026-08-04 (~450 calls, read-only, web profile). Evidence:
 `.claude/agent-memory/api-scout/organization-scope.md`.
 
