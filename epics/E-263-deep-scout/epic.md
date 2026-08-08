@@ -1,7 +1,9 @@
 # E-263: Deep Scout v1 — Opponent-Intelligence Report Sections
 
 ## Status
-`READY` (set 2026-07-13 — freshness clock starts here)
+`PARKED` (operator ruling 2026-08-08 — parked ahead of the epics/ freeze; may be revived, but the
+stated likelihood is it gets picked apart and re-planned as fresh specs under the chunk lifecycle
+rather than dispatched from this epic. Was `READY` since 2026-07-13.)
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- READY gate passed: 6-expert consultation + internal review iter-1 (CR spec audit + 6 holistic) + Codex spec review iter-1, all findings triaged + incorporated; both operator-gated items resolved (OQ1/OQ2/OQ5). -->

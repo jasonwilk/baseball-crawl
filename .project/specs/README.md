@@ -12,8 +12,9 @@ Individual chunk specs live beside this file as `<date>-<slug>.md`. Every one of
 - **Migration Step 3 — specs live.** A ≤30-line spec template (first line: no real names, use the
   `api-docs.md` placeholder taxonomy), `codex-spec-review` rewritten to take a spec file path
   instead of resolving an epic dir, a `specs/done/` convention, and trims to `documentation.md` and
-  `ideas-workflow.md`. `epics/` freezes; new work enters as specs. **Rule on E-263 Deep Scout
-  (READY) before the freeze** — it is the only epic dir carrying real product work.
+  `ideas-workflow.md`. `epics/` freezes; new work enters as specs. E-263 Deep Scout is RULED
+  (operator, 2026-08-08): **PARKED** — freeze over it; if revived it will most likely be picked
+  apart and re-planned as fresh specs, not dispatched from the epic. The freeze is unblocked.
 - **The three operator decisions below** — still queued for one sitting.
 
 ## NEXT
