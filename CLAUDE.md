@@ -47,13 +47,13 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    `.project/specs/<date>-<slug>.md`: one page - goal, files, out-of-scope, verification commands,
    progress log, no person's name. Verify every LOAD-BEARING claim you cite: an inherited claim is
    unverified, and unverified premises are where stubs come from.
-2. **SPEC-REVIEW** - Mandatory when big or destructive: run headless `codex exec` on the spec
-   ("adversarially review this spec: `<path>` - check claims against the repo"). The legacy
-   codex-spec-review skill needs an epic dir; don't use it. Skip only if this spec was
-   codex-reviewed at planning, and cite that pass. **Do NOT call ExitPlanMode or present a
-   spec until this review has run and its findings are folded in** - the review is part of
-   WRITING the spec, not part of approving it; presenting an unreviewed spec is a step-order
-   violation (missed twice; this sentence exists because of it).
+2. **SPEC-REVIEW** - Plan mode cannot write files, so the flow is: ExitPlanMode presents an
+   OUTLINE, and the operator's approval there authorizes exactly one thing - WRITING THE SPEC
+   FILE. Never implementation. Then, in order: write the spec, run headless `codex exec` on it
+   ("adversarially review this spec: `<path>` - check claims against the repo"; mandatory when
+   big or destructive), fold the findings in, and only then present the spec for commit
+   approval. Implementation starts only from a COMMITTED spec, in a fresh session. The legacy
+   codex-spec-review skill needs an epic dir; don't use it.
 3. **EXECUTE** - In a FRESH session, from the spec. A spec is a CLAIM: audit it against the repo
    first. The spec, not the chat, carries state. Leave at a boundary - context bar yellow, or two
    failed corrections - by updating the progress log and going to step 9.
