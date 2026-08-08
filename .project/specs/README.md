@@ -9,32 +9,26 @@ Individual chunk specs live beside this file as `<date>-<slug>.md`. Every one of
 
 ## NOW
 
-- **Migration Step 2 — retire the choreography.** Single-source `codex-review` (copy the bug-pattern
-  and security checklists it reads out of `code-reviewer.md` into the skill's own directory) and
-  rewrite `ingest-endpoint` phase 2 so findings go to the session, THEN delete the 7 agent
-  definitions and the `agent-standards` / `context-fundamentals` / `filesystem-context` /
-  `multi-agent-patterns` skills, archive their agent-memory, drop `epic-archive-check.sh` and its
-  `settings.json` wiring, and trim `api-scout` / `baseball-coach`. Every accepted residual below
-  expires here. Order matters: single-source BEFORE deleting, or `codex-review` fails closed.
-- **The three operator decisions below** — queued for one sitting, now unblocked by Step 1.
-
-## NEXT
-
 - **Migration Step 3 — specs live.** A ≤30-line spec template (first line: no real names, use the
   `api-docs.md` placeholder taxonomy), `codex-spec-review` rewritten to take a spec file path
   instead of resolving an epic dir, a `specs/done/` convention, and trims to `documentation.md` and
-  `ideas-workflow.md`. `epics/` freezes; new work enters as specs.
+  `ideas-workflow.md`. `epics/` freezes; new work enters as specs. **Rule on E-263 Deep Scout
+  (READY) before the freeze** — it is the only epic dir carrying real product work.
+- **The three operator decisions below** — still queued for one sitting.
+
+## NEXT
+
 - **Migration Step 4 — second-pass rule trim.** After ~3 more real chunks, take the ~23 surviving
   path-scoped rules through "would removing this line cause a mistake?", run `/doctor`, and
   regenerate the cheat sheet from what actually got used.
-- **Sweep `docs/` for the retired workflow.** Found by the Step 1 codex review, out of that
-  chunk's declared sweep scope (which covered `CLAUDE.md`, `.claude/`, and settings only).
-  Operator-facing docs still teach the PM/epic/dispatch flow: ~110 references across 18 files,
-  and `docs/admin/agent-guide.md` (124 lines) is about nothing else. Two references are broken by
-  the Step 1 commit specifically — `docs/admin/production-deployment.md:507` points at the
-  deleted `.claude/skills/implement/SKILL.md`, and `docs/admin/agent-guide.md:102` says
-  `context-ratchet.sh` "survives," which this commit made false. Best sequenced after Step 2,
-  when the agents this documentation describes are actually gone.
+- **Sweep `docs/` for the retired workflow — now unblocked, the agents are gone.** Deliberately
+  out of Step 2's scope. Operator-facing docs still teach the PM/epic/dispatch flow; the Step 2
+  sweep measured **4 files** still naming a deleted agent (`docs/admin/agent-guide.md`, 124 lines
+  and about nothing else; `docs/admin/production-deployment.md:564`; `docs/admin/operations.md:1048`;
+  `docs/vision-signals.md:15`), on top of the ~110 references across 18 files the Step 1 review
+  counted for the wider workflow prose. Also still open from Step 1:
+  `docs/admin/production-deployment.md:507` points at the deleted `.claude/skills/implement/SKILL.md`
+  and `docs/admin/agent-guide.md:102` says `context-ratchet.sh` "survives," which is false.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -74,30 +68,21 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   anchor evidence" scoping, but it means a `.claude/` write gets no automatic PII coverage: scan
   it by hand, and note that a silent RC=0 there is vacuous, not clean.
 
-### Accepted residuals from Step 1 — all expire at Step 2
+### Accepted residuals from Step 2
 
-Step 1 deleted 10 always-on rules and the `implement` / `plan` skills. These references to them
-were left standing on purpose, because the files carrying them die at Step 2 and fixing them now
-would blow the chunk boundary:
-
-- Five agent definitions keep dangling references: `claude-architect` (6), `code-reviewer` (6),
-  `product-manager` (7), `data-engineer` (2), `software-engineer` (2). Measured by the Step 1
-  sweep, 2026-08-06. The spec predicted seven; `docs-writer` and `ux-designer` have none, and
-  `api-scout`'s single reference was repointed in Step 1.
-- `.claude/skills/agent-standards/SKILL.md:121` cites the "CLAUDE.md Agent Ecosystem table",
-  which Step 1 deleted. Its two siblings in `codex-review` and `codex-spec-review` were repointed
-  because those skills survive; this one dies at Step 2, so it was left.
-- Three skills keep dangling references: `agent-standards` (1), `context-fundamentals` (2), and
-  `multi-agent-patterns` (1, at `SKILL.md:50` — "the implement skill (Phase 3) is authoritative").
-  The spec's residual list named only the first two; `multi-agent-patterns` is the same class and
-  dies at the same step.
-- `epic-archive-check.sh` stays wired in `settings.json`. It does not fire, but the spec's reason
-  was wrong and is corrected here: `epics/` holds **five** directories, not three — E-174
-  (DRAFT), **E-263 Deep Scout (READY)**, E-271 (DRAFT), E-274 (DRAFT), E-275 (DRAFT). The hook
-  denies only on a status line of exactly `COMPLETED` or `ABANDONED`, so none of the five trips
-  it. **E-263 is the live one to decide about**: it is the only READY epic carrying real product
-  work, and Step 3 freezes `epics/`. Do not let that freeze happen without ruling on it.
-- `codex-review` lacks `disable-model-invocation: true`.
-- The "curate the vision" workflow no longer names an owning agent. The trigger phrase and the
-  do-not-edit-`VISION.md`-directly rule survive in `.claude/rules/vision-signals.md`; the session
-  runs the curation itself.
+- **The PII pattern scanner is blind to EXTENSIONLESS files** — `is_scannable` gates on suffix,
+  so a file with no `.` in its name is skipped as "non-scannable extension" regardless of
+  `SKIP_PATHS`. Exactly two tracked files are affected today: `.githooks/pre-commit` (which is
+  itself a PII gate) and `Dockerfile` (which the security checklist's 4h asks reviewers to check).
+  Found at Step 2 because this chunk edits the hook; both were scanned BY HAND with a positive
+  control and are clean. A one-line fix (treat a shebang or a known basename as scannable) —
+  fold it into the next `src/`-touching chunk.
+- **`.project/codex-spec-review.md` still resolves an epic dir and points at three rules Step 1
+  deleted** (`workflow-discipline`, `agent-routing`, `dispatch-pattern`). Step 2 scrubbed its role
+  names so this commit adds no NEW dangling pointer, but the structural rewrite is Step 3's.
+- **`.project/templates/{epic,story}-template.md` still enumerate the deleted agent roster.** They
+  are epic machinery and die with `epics/` at Step 3; left deliberately.
+- **`epics/`, `.project/ideas`, `.project/research`, `.project/decisions`, `reviews/` keep role
+  names.** Historical records, not pointers. `epics/` freezes at Step 3; the rest stay as written.
+- **The `codex-review` skill vs. first-party `codex review` comparison was owed at Step 2 and was
+  NOT done.** Carried forward rather than silently dropped.

@@ -1,6 +1,7 @@
 ---
 name: codex-review
 description: This skill should be used when the user says "codex review", "review with codex", "codex review E-NNN", "code review", "code review E-NNN", "review epic", "review epic E-NNN", "post-dev review", "codex review prompt", "code review prompt", "generate codex review prompt", or "generate code review prompt" -- or otherwise implies running a Codex code review on implementation changes. The ABSENCE of the word "spec" is the mode discriminator: a review request CONTAINING it belongs to the codex-spec-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
+disable-model-invocation: true
 ---
 
 # Skill: codex-review
@@ -76,7 +77,7 @@ Examples:
 The headless script streams Codex's output to the Bash tool result, which is truncated to a *preview* when the result is large. Triaging off that preview is the motivating failure mode: in the E-230 dispatch a triage question was fired off a ~2KB preview of a ~373KB persisted Codex result, mischaracterizing four valid findings as "2 LOW already-adjudicated." Before ANY triage tool or action runs against the review result you MUST:
 
 1. **Locate the script-produced result file.** The script tees the full Codex output to a deterministic file and prints a receipt on stdout: a `RESULT_FILE=<path>` line, that file's `wc -l`, and its `tail -n1`. Read that `RESULT_FILE` -- do NOT re-run the script with a manual `> file` redirect (the missed manual redirect is the exact fabrication hole this closes: 44/48 invocations skipped it), and do NOT rely on the inline Bash preview. If no `RESULT_FILE=` receipt appeared (e.g. the script errored before the tee), treat that as a failure to surface to the user, NOT a cue to triage off the preview.
-2. **Read `RESULT_FILE` to completion** and produce a complete digest of every finding (id/priority/file:line/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget — see `.claude/skills/context-fundamentals/SKILL.md`), but you must process every finding.
+2. **Read `RESULT_FILE` to completion** and produce a complete digest of every finding (id/priority/file:line/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget), but you must process every finding.
 3. **Emit a read-receipt derived from the actual file** — its line count (`wc -l "${RESULT_FILE}"`) and its last line (`tail -n 1 "${RESULT_FILE}"`) — before triage begins. This may reuse the script's receipt values, but only after you have actually read the file.
 
 The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded tool-discipline rule (`.claude/rules/tool-discipline.md` — never assert or triage content not seen cleanly); it is the structural form of the read-findings-before-triage lesson.
@@ -84,7 +85,7 @@ The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic gua
 After the receipt and complete digest are satisfied, present the full findings to the user (this is the point at which findings are first presented -- never before the gate), then assess them:
 
 1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, UX).
-2. For a finding whose domain genuinely needs a specialist read, consult the relevant subagent in `.claude/agents/`. Don't delegate what a handful of tool calls finishes.
+2. Two domain subagents survive -- `api-scout` (GameChanger API archaeology) and `baseball-coach` (coaching semantics). Consult one only when a finding genuinely turns on its domain; don't delegate what a handful of tool calls finishes.
 
 **Assessment is advisory.** It recommends action (fix, defer, dismiss); confirmed findings proceed to Step 5.
 
@@ -192,7 +193,7 @@ Count the total lines in the assembled diff content:
 
 ### Step 3: Assemble the lean prompt
 
-Build the prompt matching the format used by `scripts/codex-review.sh`. All content is **embedded directly** in the prompt (not referenced by path) so that codex in ephemeral mode can access it without repository file access. Consistent with the headless path, the Bug Pattern Checklist and Security checklist are single-sourced from `code-reviewer.md` -- read the content between the delimiter markers and embed it, do NOT re-summarize it:
+Build the prompt matching the format used by `scripts/codex-review.sh`. All content is **embedded directly** in the prompt (not referenced by path) so that codex in ephemeral mode can access it without repository file access. Consistent with the headless path, the Bug Pattern Checklist and Security checklist are single-sourced from the two files beside this one -- read each whole and embed it, do NOT re-summarize it:
 
 ```
 CODE-REVIEW REQUEST
@@ -200,11 +201,11 @@ CODE-REVIEW REQUEST
 REVIEW RUBRIC
 {rubric file contents — read from /workspaces/baseball-crawl/.project/codex-review.md}
 
-CODE-REVIEWER BUG PATTERN CHECKLIST (single-sourced live from code-reviewer.md)
-{content between <!-- BUG-PATTERN-CHECKLIST:START --> and <!-- BUG-PATTERN-CHECKLIST:END --> in /workspaces/baseball-crawl/.claude/agents/code-reviewer.md}
+BUG PATTERN CHECKLIST
+{full contents of /workspaces/baseball-crawl/.claude/skills/codex-review/bug-pattern-checklist.md}
 
-CODE-REVIEWER SECURITY CHECKLIST (single-sourced live from code-reviewer.md)
-{content between <!-- SECURITY-CHECKLIST:START --> and <!-- SECURITY-CHECKLIST:END --> in /workspaces/baseball-crawl/.claude/agents/code-reviewer.md}
+SECURITY CHECKLIST
+{full contents of /workspaces/baseball-crawl/.claude/skills/codex-review/security-checklist.md}
 
 CHANGES TO REVIEW (mode: {mode label})
 {diff content}
@@ -274,7 +275,7 @@ Determine diff mode (default: uncommitted)
 If all diff commands return empty results, report "No changes found" and stop. Do not assemble an empty prompt or run the script with nothing to review.
 
 ### Rubric file missing
-Report the error and stop. Do not attempt to generate a prompt or run the script without the rubric. The script also fails closed if `.claude/agents/code-reviewer.md` is missing or if its checklist delimiters violate the contract it enforces -- each of the four markers (`BUG-PATTERN-CHECKLIST` / `SECURITY-CHECKLIST` START/END) must appear EXACTLY ONCE and each START must precede its END. A duplicated or out-of-order marker fails closed (the single-source extraction requires the contract, and the Codex prompt must never ship with a zero or partial security rubric). If that error appears, the fix is to restore the delimiter contract in `code-reviewer.md`, not to bypass the extraction.
+Report the error and stop. Do not attempt to generate a prompt or run the script without the rubric. The script also fails closed if either checklist file beside this one (`bug-pattern-checklist.md`, `security-checklist.md`) is **missing OR empty** -- a truncated-to-zero file and an absent one are the same defect from the prompt's point of view, and the Codex prompt must never ship with a zero or partial security rubric. If that error appears, the fix is to restore the checklist file, not to bypass the read.
 
 ### Codex not installed (headless only)
 The script checks for `codex` in PATH and exits with an error including install instructions. Report this error to the user and stop.
@@ -295,9 +296,9 @@ Detected via `file --brief --mime-type`. Binary files are skipped with a note. T
 
 ## Anti-Patterns
 
-1. **Do not hardcode an agent roster in this skill file.** Read `.claude/agents/` at runtime if a finding needs a specialist. This keeps the roster current without manual sync.
+1. **Do not spawn a subagent to do the review, or to triage its findings.** The session runs both. The only two subagents left are the domain specialists `api-scout` and `baseball-coach`, and they are consulted on a specific domain question, never handed the review.
 2. **Do not assess findings in the prompt-generation path.** Assessment is headless-only. The prompt-gen path assembles and presents -- nothing more.
-3. **Do not embed rubric content in this skill file.** The rubric is read at runtime and embedded in the generated prompt (both script and prompt-generation paths); it is NOT hardcoded here. Two sources are read fresh at prompt-assembly time: `.project/codex-review.md` supplies the Setup, Codex-specific priorities, and Reporting sections, and `.claude/agents/code-reviewer.md` supplies the Bug Pattern Checklist and Security checklist (single-sourced via its delimiter markers, so they never drift from CR's rubric).
+3. **Do not embed rubric content in this skill file.** The rubric is read at runtime and embedded in the generated prompt (both script and prompt-generation paths); it is NOT hardcoded here. Three files are read fresh at prompt-assembly time: `.project/codex-review.md` supplies the Setup, Codex-specific priorities, and Reporting sections, and `bug-pattern-checklist.md` / `security-checklist.md` beside this file supply the two checklists (read whole, so they never drift from what is on disk).
 4. **Do not summarize the diff in prompt-generation.** The prompt must contain the complete diff content. Codex needs the full code to perform a meaningful review.
 5. **Do not add separator walls, "Begin your response with" instructions, or team recommendation blocks to prompts.** The lean format has no ceremony.
 6. **Do not implement fixes while assessing.** Assessment recommends; Step 5 is where the session fixes real findings.

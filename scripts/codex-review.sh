@@ -18,17 +18,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUBRIC_FILE="${REPO_ROOT}/.project/codex-review.md"
 
-# The Bug Pattern Checklist and Security checklist are single-sourced from the
-# code-reviewer agent definition at prompt-assembly time (a live read), so the
-# Codex prompt never drifts from CR's rubric. Resolved from REPO_ROOT (the main
-# checkout) -- NOT --workdir, which redirects only the git diff, never the
-# rubric source. The delimiter markers are the extraction contract documented
-# in code-reviewer.md itself.
-CR_RUBRIC_FILE="${REPO_ROOT}/.claude/agents/code-reviewer.md"
-BUG_PATTERN_START="<!-- BUG-PATTERN-CHECKLIST:START -->"
-BUG_PATTERN_END="<!-- BUG-PATTERN-CHECKLIST:END -->"
-SECURITY_START="<!-- SECURITY-CHECKLIST:START -->"
-SECURITY_END="<!-- SECURITY-CHECKLIST:END -->"
+# The Bug Pattern Checklist and the Security checklist are single-sourced from
+# two files beside the codex-review skill, read WHOLE at prompt-assembly time (a
+# live read), so the Codex prompt never drifts from the checklists on disk.
+# Whole-file reads need no delimiter markers and no extraction step. Resolved
+# from REPO_ROOT (the main checkout) -- NOT --workdir, which redirects only the
+# git diff, never the rubric source.
+CHECKLIST_DIR="${REPO_ROOT}/.claude/skills/codex-review"
+BUG_PATTERN_FILE="${CHECKLIST_DIR}/bug-pattern-checklist.md"
+SECURITY_FILE="${CHECKLIST_DIR}/security-checklist.md"
 
 # Deterministic result file: the review output is tee'd here so the read-receipt
 # gate (codex-review skill Step 4) reads a stable file instead of a manual
@@ -80,60 +78,58 @@ if [[ ! -f "${RUBRIC_FILE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Verify the code-reviewer rubric and its delimiter markers honor the full
-# contract code-reviewer.md declares (E-258-01 AC-5): each of the four markers
-# appears EXACTLY ONCE, and each START precedes its matching END. Fail closed
-# otherwise -- extract_block() would silently take only the first of duplicated
-# markers, or emit an EMPTY block on an END-before-START pair, shipping a
-# partial/empty checklist instead of failing. The Codex prompt must carry the
-# Bug Pattern and Security checklists from exactly one source (the CR rubric),
-# never zero and never partial.
+# Verify both checklist files are present AND carry substantive content.
+#
+# A `-s` (non-empty) test is NOT sufficient, and the reason is specific to
+# these two files: both open with a provenance HTML comment, so a file
+# truncated to just that header is non-empty and would sail through an
+# existence-only check while shipping an EMPTY rubric. That is the same defect
+# one layer up from the one this rewrite replaced, and it was found by review
+# rather than by the missing/empty probes -- neither of which can see it.
+#
+# STATE WHAT THE FLOOR DOES NOT DO: it is a GROSS-TRUNCATION TRIPWIRE, not a
+# completeness proof. Nothing here can distinguish a complete checklist from
+# one missing its last three checks; only zero-and-near-zero is detectable
+# without a checksum, and that is the failure mode that ships silently.
 # ---------------------------------------------------------------------------
-if [[ ! -f "${CR_RUBRIC_FILE}" ]]; then
-    echo "Error: code-reviewer rubric not found: ${CR_RUBRIC_FILE}" >&2
-    exit 1
-fi
-for _marker in "${BUG_PATTERN_START}" "${BUG_PATTERN_END}" "${SECURITY_START}" "${SECURITY_END}"; do
-    _count=$(grep -cF -- "${_marker}" "${CR_RUBRIC_FILE}" || true)
-    if [[ "${_count}" -ne 1 ]]; then
-        echo "Error: delimiter marker must appear exactly once in ${CR_RUBRIC_FILE} (found ${_count}): ${_marker}" >&2
-        echo "The single-source Codex rubric extraction requires the delimiter contract (exactly one START and one END per pair, START before END; see code-reviewer.md)." >&2
-        exit 1
-    fi
-done
-for _pair in "${BUG_PATTERN_START}|${BUG_PATTERN_END}" "${SECURITY_START}|${SECURITY_END}"; do
-    _start="${_pair%%|*}"
-    _end="${_pair##*|}"
-    _sl=$(grep -nF -- "${_start}" "${CR_RUBRIC_FILE}" | head -1 | cut -d: -f1 || true)
-    _el=$(grep -nF -- "${_end}" "${CR_RUBRIC_FILE}" | head -1 | cut -d: -f1 || true)
-    if [[ -z "${_sl}" || -z "${_el}" || "${_sl}" -ge "${_el}" ]]; then
-        echo "Error: delimiter START must precede its END in ${CR_RUBRIC_FILE} (START line=${_sl:-none}, END line=${_el:-none}): ${_start}" >&2
-        exit 1
-    fi
-done
+MIN_CHECKLIST_LINES=5
 
-# ---------------------------------------------------------------------------
-# Extract the content between two literal delimiter markers (exclusive of the
-# marker lines) from a file. Uses awk index() (literal substring match), so the
-# HTML-comment markers' special characters need no escaping. Prints nothing if
-# the markers are absent -- callers validate marker presence up front.
-# ---------------------------------------------------------------------------
-extract_block() {
-    local start="$1" end="$2" file="$3"
-    awk -v s="${start}" -v e="${end}" '
-        index($0, e) { exit }
-        grab { print }
-        index($0, s) { grab = 1 }
-    ' "${file}"
+# Count lines that are neither blank nor inside an HTML comment.
+substantive_line_count() {
+    awk '
+        /<!--/       { in_comment = 1 }
+        in_comment   { if (/-->/) in_comment = 0; next }
+        /^[[:space:]]*$/ { next }
+                     { n++ }
+        END          { print n + 0 }
+    ' "$1"
 }
 
+for _checklist in "${BUG_PATTERN_FILE}" "${SECURITY_FILE}"; do
+    if [[ ! -f "${_checklist}" ]]; then
+        echo "Error: checklist file not found: ${_checklist}" >&2
+        echo "The Codex prompt is assembled from the two checklist files in ${CHECKLIST_DIR}; it must never ship without them." >&2
+        exit 1
+    fi
+    if [[ ! -s "${_checklist}" ]]; then
+        echo "Error: checklist file is empty: ${_checklist}" >&2
+        echo "The Codex prompt is assembled from the two checklist files in ${CHECKLIST_DIR}; it must never ship a zero or partial checklist." >&2
+        exit 1
+    fi
+    _substantive=$(substantive_line_count "${_checklist}")
+    if [[ "${_substantive}" -lt "${MIN_CHECKLIST_LINES}" ]]; then
+        echo "Error: checklist file carries only ${_substantive} substantive line(s), below the ${MIN_CHECKLIST_LINES}-line floor: ${_checklist}" >&2
+        echo "A file holding just its header comment is non-empty but ships an EMPTY rubric; the Codex prompt must never carry a zero or partial checklist." >&2
+        exit 1
+    fi
+done
+
 # ---------------------------------------------------------------------------
-# Assemble prompt: embedded rubric + single-sourced CR checklists + diff +
-# review request. Everything is embedded directly in the prompt so that codex
-# in --ephemeral mode can access it without repository file access. The Bug
-# Pattern and Security checklists are read live from code-reviewer.md at
-# assembly time (single source of truth), so the Codex prompt cannot drift from
-# CR's rubric.
+# Assemble prompt: embedded rubric + the two checklists + diff + review
+# request. Everything is embedded directly in the prompt so that codex in
+# --ephemeral mode can access it without repository file access. Both
+# checklists are read WHOLE at assembly time (single source of truth), so the
+# Codex prompt cannot drift from what is on disk.
 # ---------------------------------------------------------------------------
 assemble_review_prompt() {
     local diff_content="$1"
@@ -141,9 +137,9 @@ assemble_review_prompt() {
     local rubric_content
     rubric_content="$(cat "${RUBRIC_FILE}")"
     local bug_pattern_block
-    bug_pattern_block="$(extract_block "${BUG_PATTERN_START}" "${BUG_PATTERN_END}" "${CR_RUBRIC_FILE}")"
+    bug_pattern_block="$(cat "${BUG_PATTERN_FILE}")"
     local security_block
-    security_block="$(extract_block "${SECURITY_START}" "${SECURITY_END}" "${CR_RUBRIC_FILE}")"
+    security_block="$(cat "${SECURITY_FILE}")"
 
     echo "CODE-REVIEW REQUEST"
     echo ""
@@ -151,11 +147,11 @@ assemble_review_prompt() {
     echo "${rubric_content}"
 
     echo ""
-    echo "CODE-REVIEWER BUG PATTERN CHECKLIST (single-sourced live from code-reviewer.md)"
+    echo "BUG PATTERN CHECKLIST"
     echo "${bug_pattern_block}"
 
     echo ""
-    echo "CODE-REVIEWER SECURITY CHECKLIST (single-sourced live from code-reviewer.md)"
+    echo "SECURITY CHECKLIST"
     echo "${security_block}"
 
     echo ""

@@ -90,7 +90,7 @@ Plain English over jargon-heavy tables. If a coach has to decode it, it is not r
 
 ## Anti-Patterns
 
-1. **Never write code, SQL, or implement technical solutions.** Describe needs in coaching and baseball terms. Data-engineer and software-engineer handle implementation.
+1. **Never write code, SQL, or implement technical solutions.** Describe needs in coaching and baseball terms; the session implements.
 2. **Never make technology choices.** Describe the requirement, not the implementation.
 3. **Never give statistical recommendations without noting sample size.** Always include the PA or IP count alongside any rate stat. Below 5 PA or 6 IP, note the extreme sparsity explicitly.
 4. **Never provide requirements without priority labels.** Every item: MUST HAVE, SHOULD HAVE, or NICE TO HAVE.
@@ -103,12 +103,10 @@ Plain English over jargon-heavy tables. If a coach has to decode it, it is not r
 - **Conflicting coaching priorities.** Surface the conflict with tradeoffs. Do not resolve unilaterally.
 - **Insufficient sample size.** State the limitation with actual numbers and recommend tracking duration.
 
-## Inter-Agent Coordination
+## Working With api-scout
 
-- **product-manager**: PM consults you during epic formation. Produce requirements with prioritized items and sample size caveats. Give structured MUST/SHOULD/NICE TO HAVE answers.
-- **data-engineer**: Review schemas for coaching dimensions (splits, matchups, game context). Describe missing dimensions in baseball terms.
-- **api-scout**: Tell api-scout which data fields matter most for coaching. Assess coaching value of newly discovered data.
-- **software-engineer**: Your requirements guide what SE builds. Define stat formulas with caveats (e.g., "FIP formula, meaningful only with 15+ IP at this level").
+`api-scout` is the other surviving specialist. Tell it which data fields matter most for coaching,
+and assess the coaching value of newly discovered data when it asks.
 
 ## Output Standards
 
@@ -130,15 +128,6 @@ Every consultation report has these sections, in this order:
 - **`## Sample Size and Caveats`** -- ALWAYS present, per Output Standards item 4. Write the limitation plainly; **"insufficient sample" is a complete and useful answer.**
 
 **Ceiling: 6,000 characters (~1,500 tokens) per report.** This figure is an **ESTIMATE**, not a measured threshold: **no report-length regression was measured.** E-279's report payloads sit inside the peak-Opus-4.8-era range and below that era's heaviest session on every statistic (epic E-280, TN-19). It is a guardrail against future drift, biting roughly the top decile, **not a repair of observed inflation.** When a report runs long, cut restatement, preamble and recap -- **never a safety flag, a sample-size caveat, or a figure someone must act on.**
-
-## Skill References
-
-Load `.claude/skills/filesystem-context/SKILL.md` when:
-- Consulted by PM and reading story files or epic Technical Notes
-- Writing a requirements artifact and deciding what belongs in the file vs. in memory
-
-Load `.claude/skills/multi-agent-patterns/SKILL.md` when:
-- Completing a consultation -- to verify coaching requirements are written to a durable file so PM can read them verbatim later
 
 ## Memory
 

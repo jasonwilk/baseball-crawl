@@ -1,6 +1,6 @@
 # Migration Step 2 — retire the choreography
 
-**Status**: OPEN — spec-reviewed, ready to EXECUTE
+**Status**: COMPLETE (this commit)
 **Source**: `.project/research/2026-08-02-system-redesign-proposal.md` §7 Step 2; `.project/specs/README.md` NOW.
 
 ## Goal
@@ -299,3 +299,194 @@ code.
     permissions and plugin flags only — no hook wiring, nothing this chunk touches.
 
   Status OPEN → ready to EXECUTE in a fresh session.
+
+- 2026-08-06 — **EXECUTED.** Phase A green before anything was deleted; then B, then C. Full suite
+  **4434 passed, RC=0** (unpiped, RC captured separately). `wc -c CLAUDE.md` = **10,661 / 11,264**
+  (603 bytes headroom).
+
+  **Phase A gate — positive control, all four legs.** Prerequisites established FIRST (`codex` on
+  PATH, `.project/codex-review.md` present), so a non-zero RC could only come from the checklist
+  gate. Probed with a stub `codex` on PATH that dumps stdin, against a NON-EMPTY diff — the spec's
+  warned-about hole (`uncommitted` mode exits 0 at `:300-304` on a clean tree, having read neither
+  checklist) was avoided, and the evidence taken was the assembled prompt, never the exit code.
+  *missing* → RC=1, "checklist file not found", no prompt assembled. *empty* (`: >`) → RC=1,
+  "checklist file is empty", no prompt assembled — the leg that discriminates an existence-only
+  rewrite. *restored* → RC=0, prompt assembled, security block byte-identical to the pre-probe
+  capture.
+
+  **Checklist copy verified against the OLD extraction, not by eye.** Ran the pre-change script
+  from a pristine `git archive HEAD` tree and diffed its extracted blocks against the new files:
+  bug-pattern **18 lines vs 18**, security **45 vs 45** — no check dropped — with exactly 14
+  changed lines, every one an enumerated scrub. Both Step-1-broken cross-references fixed
+  ("CLAUDE.md GameChanger API section" and "Security Rules in CLAUDE.md" → the bolded
+  **GameChanger API** / **Security.** items under `## Facts`); the four sound ones untouched.
+
+  **The six historical-attribution sites were all matched by the sweep and all left as-is**, and
+  the lookalike two lines away behaved as the spec predicted: `deep-scout-signal-catalog.md:12`
+  (live routing instruction) is scrubbed and `:10` (attribution) survives, which the post-change
+  sweep confirms by showing `:10` and not `:12`.
+
+  **Decision 3 held**: `check_archive_refs.sh`, `.githooks/pre-commit`'s archive stanza and
+  `tests/test_archive_refs_gate.py` were not touched; that test file passes (28 tests).
+
+  ### Operator decision taken during execution — the doc-PII gate blocked the archive move
+
+  Not anticipated by the spec or either review pass. `.githooks/pre-commit` runs
+  `check_doc_pii.sh` over the WHOLE `.project/` tree whenever any `.project/` file is staged, and
+  this chunk always stages `.project/specs/`. `.project/` passed clean (RC=0) before the move;
+  **probed before running it**, the move made it RC=1 on **7 lines in 6 files** — team/program
+  names only (no player names, UUIDs, public_ids or emails), 4 of the 7 anchoring real evidence
+  (a name→classification table, a bracket-precedence example). The gate has no override and no
+  suppression marker, so step 8 would have been blocked. The content is ungated today only
+  because the gate is scoped to `epics/` + `.project/` and the memory lived in `.claude/`.
+
+  **Operator ruling: narrow that directory out of the gate — "nothing should land in it that
+  wasn't already committed."** Implemented as a POST-FILTER on grep's PATH field
+  (`ARCHIVE_EXCLUDE_RE`), deliberately not `--exclude-dir`, which matches a BASENAME and would
+  also blind the gate to a LIVE `.claude/agent-memory/`. Three self-test legs added inside the
+  harness (excluded hit dropped; ordinary hit survives; content-that-spells-the-path survives) and
+  three pytest tests (`TestArchivedAgentMemoryExclusion`).
+
+  Mutation-proven, per test rather than as a count: **exclusion removed** → only test 1 fails
+  (tests 2-3 are outside the blast radius; their passing says nothing); **widened to
+  `.project/archive/`** → only test 2 fails, and it is load-bearing because **the harness
+  self-test stays GREEN (exit 0) under that mutant**; **anchor dropped** → all three fail via the
+  self-test's exit 2, so test 3 corroborates rather than owns that direction. End-to-end proof:
+  the real 104-file staged move now passes the gate the hook actually runs, against a
+  `git checkout-index` snapshot of the index (`.project` RC=0, `epics` RC=0). Documented in
+  `.claude/rules/pii-safety.md`. **This puts a security gate in the diff, so step 5 owes
+  `/security-review` as well as `/code-review`.**
+
+  ### Found during execution, beyond the spec's enumeration — all fixed
+
+  - `.claude/agents/api-scout.md` Model Adapter cited
+    `.claude/agent-memory/claude-architect/model-behavior-reference.md`, a path this chunk
+    archives. Same class as `testing.md:25` / `recon_scoreboard.py:176`; repointed with them.
+  - `.github/workflows/ci.yml:12` — a live CI comment naming `code-reviewer` and the deleted
+    `implement/SKILL.md`. Reworded to lifecycle step 4 VERIFY.
+  - `.claude/rules/devcontainer.md:99,126` — two more "Step 1d" references beyond the `:101` the
+    spec named. Exactly the class verification step 3 exists to catch: stranded prose sharing none
+    of the sweep's words.
+  - `.claude/skills/ingest-endpoint/SKILL.md:33` — "no PM intermediation needed".
+  - `.claude/skills/codex-spec-review/SKILL.md` — `77`, `79`, `193` carried roster/spawn prose the
+    spec's line list (`69,78,81,117,157`) did not name.
+  - `.project/codex-spec-review.md` — the spec-review twin of the `.project/codex-review.md`
+    finding: a live rubric naming `product-manager.md` as a file to READ. Role names scrubbed so
+    this commit adds no new dangling pointer; the structural rewrite stays Step 3's.
+  - A self-test fixture I first named `data-engineer/` inside `check_doc_pii.sh` would have
+    polluted every future sweep with a false hit; renamed to `retired-agent/`.
+
+  ### Sweep result
+
+  Repo-wide over tracked files, `.project/archive` excluded: every surviving hit is a permitted
+  survivor — the 8 attribution sites, the 3 archived-path repointings, decision 3's untouched
+  gate + test, the specs describing this work, and the deferred trees (`docs/`, `epics/`,
+  `.project/{ideas,research,decisions,templates}`, `reviews/`). Read, not counted.
+
+- 2026-08-07 — **CODEX REVIEW (headless, `uncommitted`) — 2 findings, both VALID, both FIXED.**
+  Read-receipt: `RESULT_FILE` 7 lines, last line the reviewer's own pytest note; both findings
+  digested before triage. The run also exercised the rewritten script end-to-end.
+
+  1. *P1 Bugs* — **the new checklist gate did not actually fail closed on a PARTIAL file.** `-f`
+     plus `-s` passes a file truncated to just its provenance HTML comment, which then `cat`s an
+     EMPTY rubric into the prompt at RC=0. **Reproduced independently before fixing**: truncating
+     `security-checklist.md` to its 3-line header shipped a security section containing only that
+     header, RC=0. This is the same existence-only defect the spec warned about, one layer up —
+     and neither the missing nor the empty probe can see it, which is why review caught it and
+     the positive control did not. **FIXED**: added `substantive_line_count()` (non-blank lines
+     outside HTML comments) and a `MIN_CHECKLIST_LINES=5` floor. Re-measured with RC captured
+     directly, not through a pipe — missing / comment-only / blank-line-only / truly-empty all
+     RC=1 with distinct messages, restored RC=0 shipping 48 security lines. The floor is
+     documented in the script as a **gross-truncation tripwire, not a completeness proof**:
+     nothing short of a checksum can tell a complete checklist from one missing three checks.
+  2. *P3 Security* — **the archive carve-out was a permanent fail-open, not a one-time move
+     exception.** Correct, and the sharper form of something I flagged only as a shape: the
+     operator's invariant ("nothing lands there that wasn't already committed") was written down
+     and enforced by nothing, so any later edit under `.project/archive/agent-memory/**` would
+     commit unscanned. **FIXED**: `.githooks/pre-commit` gained a **frozen-archive invariant**
+     gate — a staged file under that prefix is admissible exactly when its BLOB already exists in
+     HEAD. Placed above the missing-scanner skip (that skip `exit 0`s past everything below it).
+     The test is on the blob, **never on git's rename detection**, which is a heuristic and must
+     not be load-bearing in a safety gate: verified that this commit's own 104 moves pass both
+     with rename detection on (0 candidates) and forced off (104 candidates, 0 not-in-HEAD).
+
+  Four new tests (`TestFrozenArchiveInvariant`), and `TestArchivedAgentMemoryExclusion`'s first
+  test was **reworked** — the new gate correctly refused it, because it staged content straight
+  into the archive rather than moving it in. That is the gate working, not a regression; the test
+  now seeds the realistic way. All mutants re-run after the rework and per-test outcomes recorded
+  in both class docstrings; the pre-rework mutation run is marked superseded rather than left to
+  read as current.
+
+- 2026-08-07 — **Correction: `INGESTION-BUGS-HANDOFF.md` is NOT tracked**, contrary to what the
+  first execution report and a Step 2 residual claimed. `git ls-files` returns no entry, it is
+  absent from `HEAD`, `git log --all` finds 0 commits touching it, and it is excluded via
+  `.git/info/exclude:20`. The error: `git ls-files <path> && echo TRACKED` reads an EXIT CODE as a
+  presence test, and `ls-files` exits 0 on no match. It surfaced only in the first
+  filesystem-walking sweep, which sees ignored files; the `git ls-files`-based sweep never listed
+  it. The false residual has been removed from `.project/specs/README.md`. No action needed.
+
+- 2026-08-08 — **SECURITY REVIEW + CODE REVIEW. 5 findings, all VALID, all FIXED.** Two of them
+  were defects in the remediation from the previous entry, which is the argument for running both.
+
+  **SEC-1 *HIGH* — the frozen-archive gate had a live bypass, and my own comment asserted it did
+  not.** The enumeration used `--diff-filter=AM` WITHOUT `--no-renames`. Git scores a move-AND-edit
+  as `R<score>`, and `--diff-filter=AM` drops renames, so the candidate set came back EMPTY and
+  edited content landed in the one tree no PII gate sweeps (`.project/archive/` is in `SKIP_PATHS`
+  AND excluded from the byte-gate). Reproduced: an 8-line file moved in with one line appended
+  scores `R058` and enumerates as NOTHING under AM-with-renames, versus the destination path under
+  `--no-renames` — where its blob is correctly absent from HEAD. **All 104 moves in this very
+  commit are `R`, so the gate was silent on the commit it was written for.** The prose defect is
+  the lesson: I wrote "the test is on the BLOB, not on git's rename detection", which was true of
+  the TEST and false of the ENUMERATION feeding it — a claim about half the mechanism, stated
+  about the whole. **FIXED** with `--no-renames` (what the neighbouring archive-refs gate already
+  does, and documents). Comment and `pii-safety.md` corrected to say what is actually true.
+
+  **SEC-2 *MEDIUM* — the byte-gate exclusion was strictly WIDER than the gate protecting it.**
+  `^[^:]*\.project/archive/agent-memory/` matched SUFFIX-wise, so
+  `epics/E-999/.project/archive/agent-memory/x.md` was dropped — while the enforcing gate anchors
+  its prefix test at the REPO ROOT and never classified that nested lookalike as a candidate.
+  Neither instrument covered it. **FIXED**: the prefix is now derived from the scan root
+  (`${TARGET%/}/archive/agent-memory/`, only when the root IS a `.project` tree) and matched
+  LITERALLY at position 1 of the path field via `awk index()` — so a scan root containing a regex
+  metacharacter cannot alter it either.
+
+  **SEC-3 *LOW* — two fail-open shapes in the same block**: candidates were re-split from a
+  newline-joined string (a path containing a newline fragments and resolves to no blob), and
+  `git ls-files -- "$p"` treats its argument as a GLOB (verified: `d/a?b.md` resolves to two
+  blobs, and a multi-line `$_blob` then satisfies `grep -qxF` on either). **FIXED**: NUL-safe
+  bash array end to end, `:(literal)` pathspec magic, and an unresolvable path now BLOCKS rather
+  than `continue`s — per this repo's own "a missing safety signal defaults to REFUSE" rule.
+
+  **CR-1 *MEDIUM* — I silently deleted a pre-existing assertion.** Inserting the new test class
+  landed it BETWEEN `test_non_planning_paths_do_not_invoke_the_gate`'s two asserts, orphaning
+  `assert "[doc-pii:" not in _output(result)`; I then removed the orphan as a "stray contradictory
+  line" and **misattributed it to an external writer**. Without it that test is a tautology —
+  a commit where the gate DID run and passed also exits 0. **RESTORED** with a comment saying why
+  it is load-bearing. `git diff HEAD -- tests/test_doc_pii_hook.py` now shows ZERO removed lines,
+  which is the check that would have caught this at the time.
+
+  **CR-2 *LOW*** — `codex-spec-review` lacked `disable-model-invocation: true` while CLAUDE.md
+  step 2 says "don't use it" and its description auto-triggers on wording step 2 itself uses.
+  **FIXED**; both review skills now carry the flag.
+
+  Mutation-proved from a VERIFIED baseline (the first attempt was measured against a torn file —
+  see below — and is discarded). Each mutant fails exactly its own test, nothing else:
+  `--no-renames` dropped → `test_move_with_an_edit_is_blocked`; `:(literal)` → bare glob →
+  `test_glob_character_in_path_does_not_launder_the_blob_check`; exclusion disabled →
+  `test_identifier_arriving_by_move_does_not_block`; widened to the whole archive →
+  `test_exclusion_does_not_reach_the_rest_of_the_archive`; suffix-wise →
+  `test_nested_lookalike_directory_is_not_excluded`. Re-verified this commit's 104 moves pass the
+  corrected gate (104 candidates under `--no-renames`, 0 violations).
+
+  **Self-test gap found while re-measuring**: leg (d) asserted the WRONG fixture survived, so the
+  harness could not catch the suffix-wise mutant at all — only the pytest test could. Corrected;
+  the mutant now drives `check_doc_pii.sh` to exit 2 as intended.
+
+  **Tool-discipline note, recorded because the differential mattered.** Mid-review the
+  `--no-renames` fix vanished from disk and a mutation run reported a torn file. Both causes were
+  live: the `/code-review` fork was running its OWN mutation probe on the same file and its
+  restore collided with mine. It disclosed this unprompted. Two consequences: a mutation
+  measurement taken while a sibling writes the target is worthless (the backup captured the
+  mutated state, so every "restore" re-applied it), and the protocol's assert-the-mutation-applied
+  step must be paired with an assert-the-BASELINE-is-intact step before the control run. Both were
+  added on the re-run.

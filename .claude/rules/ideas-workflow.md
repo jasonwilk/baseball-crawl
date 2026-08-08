@@ -38,7 +38,7 @@ Ideas and epics serve different purposes. Do not conflate them.
 ## Adding Ideas
 
 - Anyone (user or any agent) can propose an idea
-- The **product-manager** agent is responsible for writing the idea file using the template at `/.project/templates/idea-template.md`
+- The session writes the idea file using the template at `/.project/templates/idea-template.md`
 - Name: `IDEA-NNN-short-slug.md` (sequential, never reused)
 - Add a row to the index in `/.project/ideas/README.md`
 - Ideas start as `CANDIDATE`

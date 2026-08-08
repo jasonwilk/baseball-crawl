@@ -88,6 +88,76 @@ if [ -n "$ARCHIVING_IDS" ]; then
 fi
 # --- end archive-reference gate ----------------------------------------------
 
+# --- frozen-archive invariant ------------------------------------------------
+# scripts/check_doc_pii.sh EXCLUDES .project/archive/agent-memory/ from its
+# sweep (2026-08-06, operator ruling: "nothing should land in it that wasn't
+# already committed"). That exclusion is sound ONLY while the tree is what it
+# claims to be. Nothing about a PATH makes it frozen, so the invariant is
+# ENFORCED here rather than assumed -- otherwise the carve-out is a standing
+# fail-open into the only PII gate covering .project/, and a real identifier
+# added there later would commit silently.
+#
+# PLACED ABOVE THE MISSING-SCANNER SKIP for the reason that block documents:
+# that skip exits 0 and takes every later gate with it, including gates with no
+# scanner dependency. This one depends on REPO_ROOT and git alone.
+#
+# THE TEST IS ON THE BLOB, NOT ON GIT'S RENAME DETECTION -- but that is only
+# true if the ENUMERATION never sees a rename either, and `--diff-filter=AM`
+# alone does NOT achieve it. `--no-renames` is what makes the claim true, and
+# omitting it was a live bypass: git records a move-AND-edit as `R<score>`, so
+# `--diff-filter=AM` drops it entirely, the candidate set comes back empty, and
+# edited content lands in the one tree no PII gate sweeps. Measured: an
+# 8-line file moved in with one line appended scores `R058` and enumerates as
+# NOTHING under AM-with-renames, versus the destination path under
+# `--no-renames`. The archive-reference gate above passes `--no-renames` for
+# this same reason. Never drop it here.
+#
+# With it, a pure move normalizes to D-plus-A, the destination lands in the `A`
+# half, and its blob is already in HEAD -- admissible. A move-and-edit, or new
+# content, produces a blob HEAD has never seen -- blocked, which is precisely
+# the case the byte-gate exclusion cannot cover.
+FROZEN_PREFIX=".project/archive/agent-memory/"
+_frozen_candidates=()
+while IFS= read -r -d '' _p; do
+  case "$_p" in
+    "$FROZEN_PREFIX"*) _frozen_candidates+=("$_p") ;;
+  esac
+done < <(git -C "$REPO_ROOT" diff --cached --name-only -z --no-renames --diff-filter=AM)
+
+if [ ${#_frozen_candidates[@]} -gt 0 ]; then
+  # Computed only when a candidate exists, so ordinary commits pay nothing.
+  # An absent HEAD (initial commit) yields an empty list, which blocks -- the
+  # fail-closed direction.
+  _head_blobs="$(git -C "$REPO_ROOT" ls-tree -r HEAD 2>/dev/null | awk '{print $3}' | sort -u)"
+  _frozen_violations=""
+  # Iterating the ARRAY, never a re-split string: a path containing a newline
+  # would otherwise split into fragments that resolve to no blob. And the
+  # lookup uses `:(literal)` pathspec magic, because `git ls-files -- "$p"`
+  # treats its argument as a GLOB -- a path holding `*` or `?` can match
+  # several entries, and a multi-line $_blob would then satisfy `grep -qxF`
+  # on any one of them.
+  for _p in "${_frozen_candidates[@]}"; do
+    _blob="$(git -C "$REPO_ROOT" ls-files --stage -- ":(literal)$_p" | awk '{print $2}')"
+    # An unresolvable staged path is INVALID, not admissible -- refuse.
+    if [ -z "$_blob" ] || ! printf '%s\n' "$_head_blobs" | grep -qxF "$_blob"; then
+      _frozen_violations="${_frozen_violations}  ${_p}"$'\n'
+    fi
+  done
+
+  if [ -n "$_frozen_violations" ]; then
+    echo "[frozen-archive: BLOCKED] new or edited content under ${FROZEN_PREFIX}" >&2
+    printf '%s' "$_frozen_violations" >&2
+    echo "" >&2
+    echo "[frozen-archive] That tree is EXCLUDED from the doc-PII byte-gate because it is" >&2
+    echo "[frozen-archive] supposed to receive only content already committed elsewhere." >&2
+    echo "[frozen-archive] These files are new or modified, so nothing has PII-scanned them." >&2
+    echo "[frozen-archive] Either revert them, or scan them by hand and lift this gate" >&2
+    echo "[frozen-archive] deliberately -- do not widen the byte-gate exclusion to cover them." >&2
+    exit 1
+  fi
+fi
+# --- end frozen-archive invariant --------------------------------------------
+
 if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   echo "[pii-hook] Scanner not installed yet. Skipping PII check."
   exit 0

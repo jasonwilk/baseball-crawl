@@ -8,9 +8,8 @@
 # WHAT CI DELIBERATELY CANNOT ABSORB -- the credentialed, populated-DB runtime
 # smoke. `bb report generate` / `bb report morning-run` need a live stack, real
 # GameChanger credentials, and the host-mounted `data/app.db` -- none of which
-# exist on a runner. That gate stays where it can actually run: the
-# code-reviewer at epic closure (implement/SKILL.md Step 1d, E-256-11) and the
-# operator post-deploy. Do not try to move it here; a fresh checkout has no
+# exist on a runner. That gate stays where it can actually run: lifecycle
+# step 4 VERIFY in the main checkout, and the operator post-deploy. Do not try to move it here; a fresh checkout has no
 # `.env` and an empty DB, so it would pass vacuously or fail on missing creds.
 #
 # smoke_test.py VERDICT (E-256-09, AGENTIC-FLOW-REVIEW.md false binary):

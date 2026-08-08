@@ -2,12 +2,8 @@
 
 ## Setup
 
-Before reviewing, read these workflow context files:
-1. `/workspaces/baseball-crawl/CLAUDE.md` -- project principles, tech stack, agent ecosystem, workflow conventions
-2. `/workspaces/baseball-crawl/.claude/rules/workflow-discipline.md` -- READY gate, work authorization gate, PM task types
-3. `/workspaces/baseball-crawl/.claude/rules/agent-routing.md` -- agent selection routing table, dispatch team metadata, decision routing
-4. `/workspaces/baseball-crawl/.claude/rules/dispatch-pattern.md` -- dispatch overview (team roles, procedure pointer)
-5. `/workspaces/baseball-crawl/.claude/agents/product-manager.md` -- PM agent definition, refinement workflow, quality checklist
+Before reviewing, read this workflow context file:
+1. `/workspaces/baseball-crawl/CLAUDE.md` -- project principles, tech stack, chunk lifecycle, workflow conventions
 
 This is a **planning artifact review**, not a code review. Evaluate the epic and story files provided against the project's workflow contracts and planning quality standards.
 
@@ -41,11 +37,9 @@ For every story in the epic, check each item and report findings:
 - Are any stories too small -- trivially contained in a neighboring story with no benefit to splitting?
 - Does each story deliver clear, standalone value?
 
-### 5. Agent-Routing Correctness
-- Per the routing table in `agent-routing.md`: context-layer files (CLAUDE.md, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/agent-memory/**`) must route to `claude-architect`.
-- Python implementation, crawlers, parsers, tests, utility scripts route to `software-engineer`.
-- Database schema, SQL migrations, ETL route to a data-engineer-roled agent.
-- Are any stories routed to the wrong agent type given their "Files to Create or Modify"?
+### 5. Scope Correctness
+- Does every file the work names actually belong to the change being described, and is anything it will inevitably touch missing from the list?
+- Are the destructive seams named where the work reaches them (`bb report generate`, `bb db purge-scouting`)?
 
 ### 6. Mismatch Between Epic Claims and Current Repo Reality
 - Does the epic's Background or Context section describe things that are already done but framed as future?
@@ -53,11 +47,10 @@ For every story in the epic, check each item and report findings:
 - Are there AC items that are already satisfied by existing code or configuration?
 
 ### 7. Missing Expert Consultation
-- Per the PM workflow, expert consultation is expected before marking an epic READY when stories touch:
+- Expert consultation is expected before the work is called ready when it touches:
   - Domain statistics or coaching logic (baseball-coach should be consulted)
   - API behavior or GameChanger endpoint patterns (api-scout should be consulted)
-  - Database schema or ETL pipeline design (data-engineer should be consulted)
-  - Agent infrastructure, CLAUDE.md, rules, or skills (claude-architect should be consulted)
+  - Database schema or ETL pipeline design
 - Does the epic's Background section document that consultation occurred where it was warranted?
 - If consultation was skipped, is there a stated reason?
 

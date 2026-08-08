@@ -57,6 +57,7 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
 4. **VERIFY** - Run the spec's named commands. A chunk touching `src/`, `tests/`, or `migrations/`
    needs the FULL suite green. No green, no done.
 5. **REVIEW** - Run `/code-review`; add `/security-review` on auth, serving, PII, or deletes.
+   Both are OPERATOR-TYPED - a session cannot invoke them, so stop and ask.
    `/simplify` is optional and runs BEFORE `/code-review` (its fixes need reviewing too). Codex
    review is a second opinion on request. Docs-only chunk: PII gates alone.
 6. **SCAN** - Run `python3 src/safety/pii_scanner.py --staged` and compare scanned-count to

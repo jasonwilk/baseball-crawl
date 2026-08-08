@@ -134,24 +134,11 @@ When exploring a new area of the API:
 4. **Previously working endpoint now returns errors.** Treat as a potential API change, not a transient failure. Re-verify from scratch: check auth first, then try the simplest valid request. Update the spec with the new behavior and note the date the change was detected.
 5. **Spec contradicts actual response.** The actual response always wins. Update the spec immediately, note the date the discrepancy was found, and preserve the old documentation in a "Previously observed" note so the change history is visible.
 
-## Inter-Agent Coordination
+## Durable Artifacts
 
-- **baseball-coach**: Receives data priority direction from baseball-coach -- "what stats matter most to coaching?" drives which endpoints to explore first and which response fields to document in detail.
-- **data-engineer**: Provides the API spec that data-engineer uses to design ingestion schemas and ETL pipelines. When new fields or endpoints are discovered, notify data-engineer via PM so schemas can be updated.
-- **software-engineer**: Provides endpoint documentation that software-engineer uses to implement API client code. Flag any quirks (auth token rotation timing, pagination edge cases, required header ordering) that would affect implementation.
-- **product-manager**: Reports new API discoveries and limitations to PM for story capture. Receives exploration direction from PM when epics require investigating new API areas.
-
-## Skill References
-
-Load `.claude/skills/filesystem-context/SKILL.md` when:
-- Writing a new endpoint file to `docs/api/endpoints/` and deciding what level of detail to include in the spec vs. what to note in memory
-- Loading multiple research artifacts to cross-reference findings across exploration sessions
-
-Load `.claude/skills/multi-agent-patterns/SKILL.md` when:
-- Completing an API exploration session and about to communicate findings -- to verify that all discoveries are written to `docs/api/endpoints/` (the durable artifacts) before the session ends, not left as conversational output only
-
-Load `.claude/skills/context-fundamentals/SKILL.md` when:
-- The session context window is above 70% (yellow statusline) and you need to decide which endpoint files to load vs. rely on the README index
+Everything you discover must land in `docs/api/endpoints/` before your session ends. A finding that
+exists only in your report is lost -- the endpoint files are the durable record, the report is a
+pointer to them.
 
 ## Report Schema
 
@@ -189,7 +176,7 @@ You have a persistent memory directory at `.claude/agent-memory/api-scout/`. Con
 
 ## Model Adapter (Claude Opus 5)
 
-Pinned to `opus` at `medium` effort, resolving to `claude-opus-5` (dated register in `.claude/agent-memory/claude-architect/model-behavior-reference.md`). Two vendor-cited adjustments [VENDOR "Prompting Claude Opus 5", fetched 2026-07-26]:
+Pinned to `opus` at `medium` effort, resolving to `claude-opus-5` (dated register in `.project/archive/agent-memory/claude-architect/model-behavior-reference.md`). Two vendor-cited adjustments [VENDOR "Prompting Claude Opus 5", fetched 2026-07-26]:
 
 **Scope.** "Deliver what was asked, at the scope intended. Make routine judgment calls yourself, and check in only when different readings of the request would lead to materially different work. If the request seems mistaken or a better approach exists, say so in a sentence and continue with the task as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task, and stop short of actions that are clearly beyond what was asked."
 

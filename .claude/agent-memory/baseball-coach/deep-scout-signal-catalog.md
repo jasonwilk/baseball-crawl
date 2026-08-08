@@ -9,7 +9,7 @@ Domain-content deliverable for the Deep Scout "Scouting Signal Catalog" consulta
 
 **Why:** claude-architect designs WHERE the catalog lives and HOW it's stored; this file is the coaching WHY -- which signals earn a roster spot on a Friday-night one-pager, and which are noise.
 
-**How to apply:** When PM or claude-architect scopes a Deep Scout epic, this is the domain input for prioritizing sections and their sample-floor/ethics gates. Full per-signal detail (exploit action, tier, floor, ethics) was delivered to team-lead via SendMessage on 2026-07-13; this file holds the durable summary so a future session doesn't have to re-derive it.
+**How to apply:** When a Deep Scout chunk is scoped, this is the domain input for prioritizing sections and their sample-floor/ethics gates. Full per-signal detail (exploit action, tier, floor, ethics) was delivered to team-lead via SendMessage on 2026-07-13; this file holds the durable summary so a future session doesn't have to re-derive it.
 
 ## Tier summary (the 15 given signals)
 

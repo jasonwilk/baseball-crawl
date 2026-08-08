@@ -96,10 +96,10 @@ This lives inline in `.devcontainer/devcontainer.json`'s `postCreateCommand` cha
 
 ### Boundary: dev / main-checkout only, NOT a CI gate
 
-This browser test is a **dev / main-checkout** capability, not a CI gate. The boundary mirrors the Step 1d smoke fixture's live-only boundary: just as Step 1d exercises the dev-only host-mounted `./data/app.db` (absent from worktrees/CI), the browser test needs the chromium binary that only the devcontainer post-create flow installs.
+This browser test is a **dev / main-checkout** capability, not a CI gate. The boundary mirrors the runtime smoke's live-only boundary: just as `bb report generate` needs the dev-only host-mounted `./data/app.db` (absent from worktrees/CI), the browser test needs the chromium binary that only the devcontainer post-create flow installs.
 
-- It is **authoritative in the full-suite-green closure gate** -- the code-reviewer's full `pytest tests/` run at epic closure (in the main checkout, where the container's chromium is present) exercises it.
-- It is **NOT wired into any CI workflow.** Do not add a CI job that installs chromium to run it; the closure gate in the live devcontainer is the intended enforcement point.
+- It is **authoritative at lifecycle step 4 VERIFY** -- the full `pytest tests/` run a chunk owes (in the main checkout, where the container's chromium is present) exercises it.
+- It is **NOT wired into any CI workflow.** Do not add a CI job that installs chromium to run it; the full-suite run in the live devcontainer is the intended enforcement point.
 
 ### Fail-closed test convention + `SKIP_BROWSER_TESTS` opt-out
 
@@ -123,7 +123,7 @@ pip install -r requirements-dev.txt && playwright install --with-deps chromium
 
 **This doc is the single source of truth for that operator step.** Other artifacts (e.g. the browser-test module) point *here* rather than restating the command -- do not create a second copy elsewhere.
 
-**Footgun 2 -- closure Step 1d gets the package but not the binary.** A change to `requirements-dev.in`/`requirements-dev.txt` is a Step 1d build-input trigger path, so adding the `playwright` package trips Step 1d at epic closure. Step 1d's sub-step-4b dependency reinstall installs the playwright **package** but **not** the chromium **binary** -- the binary comes only from `playwright install --with-deps chromium` (the post-create flow, or the Footgun 1 operator step), never from a pip reinstall. If the browser test errors on a missing binary at closure, run the Footgun 1 step.
+**Footgun 2 -- a dependency reinstall gets the package but not the binary.** `pip install -r requirements-dev.txt` installs the playwright **package** but **not** the chromium **binary** -- the binary comes only from `playwright install --with-deps chromium` (the post-create flow, or the Footgun 1 operator step), never from a pip reinstall. If the browser test errors on a missing binary, run the Footgun 1 step.
 
 ## Host Integration
 

@@ -17,12 +17,13 @@ paths:
 
 | Docs | Owner |
 |------|-------|
-| `docs/admin/`, `docs/coaching/` | docs-writer |
+| `docs/admin/`, `docs/coaching/` | the session |
 | `docs/api/**` | api-scout |
-| Other `docs/` root files | The agent that created them |
-| Agent definitions, CLAUDE.md, rules, skills | claude-architect |
+| Other `docs/` root files | the session |
+| Agent definitions, CLAUDE.md, rules, skills | the session |
 
-docs-writer may reference but MUST NOT modify agent-maintained docs in `docs/` root.
+`docs/api/**` is the one tree with a non-session owner: api-scout maintains it, so route factual
+endpoint changes through that agent rather than editing the specs by hand.
 
 ## Update Triggers
 
@@ -30,35 +31,35 @@ Documentation MUST be updated when any of these occur:
 
 1. A new feature or endpoint ships
 2. Architecture or deployment configuration changes
-3. A new agent is created or an existing agent is materially modified
+3. An agent definition, rule, or skill is created or materially modified
 4. Database schema changes (new tables, column changes, migrations)
-5. An epic completes that changes how the system works or how users interact with it
+5. A chunk lands that changes how the system works or how users interact with it
 
 ## Staleness Convention
 
 Every documentation file MUST include near the top:
 
 - **Last updated**: date (YYYY-MM-DD)
-- **Source**: epic/story ID that produced or last modified the content
+- **Source**: the spec (or epic ID, for older entries) that produced or last modified the content
 
 Files not updated in 90+ days MUST be reviewed when their domain area changes.
 
-## Mandatory Documentation Assessment (PM Responsibility)
+## Mandatory Documentation Assessment
 
-When completing any epic, the PM MUST perform a documentation assessment **after all stories are DONE and before archiving the epic**:
+Before closing any chunk, the session MUST perform a documentation assessment **after the work is verified and before the approval step**:
 
-1. Review the epic's scope against the update triggers above.
-2. **If any trigger fires**: create a documentation update task and dispatch it to docs-writer before archiving.
-3. **If no trigger fires**: record "No documentation impact" in the epic's History section.
+1. Review the chunk's scope against the update triggers above.
+2. **If any trigger fires**: make the documentation update part of this chunk, before it closes.
+3. **If no trigger fires**: record "No documentation impact" in the spec's progress log.
 
-This step is mandatory, not optional. An epic MUST NOT be archived until the documentation assessment is complete and any required doc updates are dispatched.
+This step is mandatory, not optional. A chunk MUST NOT close until the documentation assessment is complete and any required doc updates have landed.
 
-## Documentation Update Task Format
+## Documentation Update Format
 
-When dispatching a doc update to docs-writer, the PM provides:
+A doc update carries:
 
-- **What changed**: epic ID and one-sentence summary
+- **What changed**: the chunk's spec and a one-sentence summary
 - **Which docs are affected**: specific file paths in `docs/admin/` or `docs/coaching/`
 - **What needs updating**: new content, revised content, or removal of stale content
 
-This is a lightweight dispatch (direct message to docs-writer), not a full story.
+This is a lightweight edit inside the chunk, not a separate piece of work.

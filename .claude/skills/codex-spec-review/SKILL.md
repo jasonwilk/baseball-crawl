@@ -1,6 +1,7 @@
 ---
 name: codex-spec-review
 description: This skill should be used when the user says "spec review", "spec review E-NNN", "review the spec", "codex spec review", "codex spec review E-NNN", "spec review prompt", "codex spec review prompt", "generate spec review prompt", "review E-NNN spec", "check the spec for E-NNN", or "run spec review on E-NNN" -- or otherwise implies reviewing an epic's planning artifacts against the spec-review rubric. The word "spec" is the mode discriminator: a review request that LACKS it belongs to the codex-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
+disable-model-invocation: true
 ---
 
 # Skill: codex-spec-review
@@ -66,19 +67,18 @@ Codex typically takes 1-2 minutes for a standard epic (3-7 story files). Larger 
 The headless script streams Codex's output to the Bash tool result, which is truncated to a *preview* when the result is large. Triaging off that preview is the motivating failure mode: in the E-230 dispatch a triage question was fired off a ~2KB preview of a ~373KB persisted Codex result, mischaracterizing four valid findings as "2 LOW already-adjudicated." Before ANY triage tool or action runs against the review result you MUST:
 
 1. **Persist** the full review output to a file (re-run the script redirecting stdout to e.g. `/tmp/codex-spec-review-<epic>.txt`, or save the captured result there). Do NOT rely on the inline Bash preview.
-2. **Read the file to completion** and produce a complete digest of every finding (story ID/AC label/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget — see `.claude/skills/context-fundamentals/SKILL.md`), but you must process every finding.
+2. **Read the file to completion** and produce a complete digest of every finding (story ID/AC label/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget), but you must process every finding.
 3. **Emit a read-receipt derived from the actual file** — its line count (`wc -l <file>`) and its last line (`tail -n 1 <file>`) — before triage begins.
 
 The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded tool-discipline rule (`.claude/rules/tool-discipline.md` — never assert or triage content not seen cleanly); it is the structural form of the read-findings-before-triage lesson.
 
-After the receipt and complete digest are satisfied, offer the user an advisory triage session:
+After the receipt and complete digest are satisfied, triage the findings yourself:
 
-1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, agent infrastructure, UX).
-2. For a finding whose domain genuinely needs a specialist read, consult the relevant subagent in `.claude/agents/` (read the directory at runtime -- do NOT use a hardcoded roster).
-3. The triage team always includes the **product-manager** (PM owns spec work). Other agents are consultative based on the findings' domains.
-4. Offer to spawn the triage team. If the user accepts, spawn the relevant agents as named subagents via the `Agent` tool (the triage team forms implicitly on the first spawn). If the user declines, the workflow ends.
+1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, UX).
+2. Two domain subagents survive -- `api-scout` (GameChanger API archaeology) and `baseball-coach` (coaching semantics). Consult one only when a finding genuinely turns on its domain; don't delegate what a handful of tool calls finishes.
+3. Present every finding with a recommended action (refine, fix, defer, dismiss) and let the operator rule.
 
-**Triage is advisory.** The team assesses findings and recommends action (refine, fix, defer, dismiss) but does NOT implement changes directly. PM owns all epic/story file updates during triage.
+**Triage is advisory until the operator rules.** Record the dispositions in the spec's progress log.
 
 ---
 
@@ -114,7 +114,7 @@ SPEC-REVIEW REQUEST
 Rubric: /workspaces/baseball-crawl/.project/codex-spec-review.md
 Planning artifacts: {absolute epic dir}/ (all *.md files)
 
-RUNTIME CONTEXT NOTE FROM PM
+RUNTIME CONTEXT NOTE
 {note text}
 
 Instructions:
@@ -154,9 +154,8 @@ Verify prerequisites (directory exists, epic.md present, .md files exist, rubric
   |       Run codex-spec-review.sh <epic-dir> [--note]
   |       Capture and present findings
   |       No findings? -> Report clean review, stop
-  |       Findings? -> Offer advisory triage (PM + domain experts from CLAUDE.md)
-  |       User accepts? -> Spawn triage team
-  |       User declines? -> Stop
+  |       Findings? -> Triage in-session; consult a domain agent only if a finding needs it
+  |       Present dispositions; operator rules
   |
   +---> PROMPT-GEN PATH:
           Assemble lean prompt (request header, rubric path, epic path, optional note, instructions)
@@ -190,8 +189,8 @@ Report the error and stop. Do not attempt to generate a prompt or run the script
 
 ## Anti-Patterns
 
-1. **Do not hardcode an agent roster in this skill file.** Read `.claude/agents/` at runtime if a finding needs a specialist. This keeps the roster current without manual sync.
+1. **Do not spawn a subagent to run the review or its triage.** The session runs both. The only two subagents left are the domain specialists `api-scout` and `baseball-coach`, consulted on a specific domain question.
 2. **Do not offer triage in the prompt-generation path.** Triage is headless-only. The prompt-gen path assembles and presents -- nothing more.
 3. **Do not embed rubric content or planning artifact content.** The skill resolves paths and confirms existence; it does not read or cache file contents.
-4. **Do not auto-apply Codex suggestions without team review.** In headless mode, Codex findings are presented for human judgment. Even in triage, the team recommends actions -- they do not implement directly.
+4. **Do not auto-apply Codex suggestions.** Codex findings are presented for the operator's judgment; triage recommends actions, the operator rules.
 5. **Do not add separator walls, "Begin your response with" instructions, or team recommendation blocks to prompts.** The lean format has no ceremony.

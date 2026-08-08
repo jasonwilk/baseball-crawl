@@ -173,7 +173,7 @@ def is_dropped_pitch_event(raw_template: str | None) -> bool:
     ``(101 MPH Curveball)`` annotation to each pitch template (e.g.
     ``"Strike 1 looking (Curveball)"``).  The pre-E-245 parser matched only the
     un-suffixed form, so annotated pitches fell through to ``event_type='other'``
-    -- see ``.claude/agent-memory/data-engineer/pitch_type_annotation_parser_gap.md``.
+    -- see ``.project/archive/agent-memory/data-engineer/pitch_type_annotation_parser_gap.md``.
 
     The exact predicate mirrors the pitch branch of the parser's own classifier
     (``PlaysParser._classify_template`` steps 1-2), reusing its canonical grammar

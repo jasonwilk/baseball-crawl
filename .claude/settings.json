@@ -12,12 +12,6 @@
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/epic-archive-check.sh",
-            "timeout": 10,
-            "statusMessage": "Checking for unarchived completed epics..."
-          },
-          {
-            "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/secret-read-guard.sh",
             "timeout": 5,
             "statusMessage": "Checking for credential-file access..."

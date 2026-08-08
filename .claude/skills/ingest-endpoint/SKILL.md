@@ -1,6 +1,6 @@
 ---
 name: ingest-endpoint
-description: This skill should be used when the user says "ingest endpoint", "ingest the endpoint", "ingest-endpoint", "curl is ready", "new curl ready", "curl is updated", "I put a curl in the secrets file", "document this endpoint", or "new endpoint to analyze" -- or otherwise implies a fresh GameChanger API curl command is waiting in `secrets/gamechanger-curl.txt`. Runs the two-phase ingestion: api-scout executes the curl (time-sensitive -- the `gc-signature` header in POST requests expires within minutes), then claude-architect integrates the findings into the context layer.
+description: This skill should be used when the user says "ingest endpoint", "ingest the endpoint", "ingest-endpoint", "curl is ready", "new curl ready", "curl is updated", "I put a curl in the secrets file", "document this endpoint", or "new endpoint to analyze" -- or otherwise implies a fresh GameChanger API curl command is waiting in `secrets/gamechanger-curl.txt`. Runs the two-phase ingestion: api-scout executes the curl (time-sensitive -- the `gc-signature` header in POST requests expires within minutes), then the session integrates the findings into the context layer.
 ---
 
 # Skill: ingest-endpoint
@@ -12,7 +12,7 @@ description: This skill should be used when the user says "ingest endpoint", "in
 
 ## Purpose
 
-Automate the two-phase workflow for ingesting a GameChanger API endpoint from a browser traffic capture. The user captures a curl command from browser DevTools, saves it to `secrets/gamechanger-curl.txt`, and invokes this skill. The skill orchestrates api-scout (time-sensitive endpoint execution and documentation) followed by claude-architect (context layer integration).
+Automate the two-phase workflow for ingesting a GameChanger API endpoint from a browser traffic capture. The user captures a curl command from browser DevTools, saves it to `secrets/gamechanger-curl.txt`, and invokes this skill. Phase 1 spawns api-scout for the time-sensitive endpoint execution and documentation; Phase 2 is the session's own context-layer integration pass over what api-scout found.
 
 This replaces a manual multi-step process that was performed for the season-stats and game-summaries endpoints.
 
@@ -30,7 +30,7 @@ Before executing this workflow, verify:
 
 ## Phase 1: API Scout -- Endpoint Execution and Documentation
 
-**Agent**: api-scout (direct-routing exception -- no PM intermediation needed)
+**Agent**: api-scout
 **Time-sensitive**: Yes -- curl commands should be executed promptly (gc-signature headers expire within minutes)
 
 Spawn api-scout with the following instructions. Include the full curl file path and the endpoint URL (redacted) in the prompt.
@@ -295,47 +295,36 @@ When api-scout completes, review the summary. If api-scout reports expired crede
 
 ---
 
-## Phase 2: Claude Architect -- Context Layer Integration
+## Phase 2: Context Layer Integration
 
-**Agent**: claude-architect (direct-routing exception -- no PM intermediation needed)
+**Who**: the session itself -- no agent is spawned for this phase
 **Time-sensitive**: No -- this phase can proceed after api-scout regardless of credential expiry
 
-Spawn claude-architect with the api-scout findings summary and the following instructions.
+Read api-scout's findings summary, then check each of the following areas and update it if the
+findings warrant it:
 
-### Instructions for claude-architect
-
-```
-The api-scout just completed an endpoint ingestion. Review the findings and determine whether
-any context-layer updates are needed.
-
-[Include the api-scout findings summary here]
-
-Check each of the following areas and update if the findings warrant it:
-
-1. AGENT MEMORY -- Check whether any agent memory files need updates:
+1. **AGENT MEMORY** -- two agent memory directories survive; update either if the findings reach it:
    - `.claude/agent-memory/api-scout/MEMORY.md` -- new endpoint in exploration status table,
      key facts, areas not yet explored
-   - `.claude/agent-memory/data-engineer/MEMORY.md` -- if new schema-relevant fields discovered
-   - `.claude/agent-memory/software-engineer/MEMORY.md` -- if new implementation-relevant details
    - `.claude/agent-memory/baseball-coach/MEMORY.md` -- if new coaching-relevant stats discovered
 
-2. AGENT DEFINITIONS -- Check whether any agent definition files need updates:
-   - Only if the discovery changes an agent's responsibilities or adds a new reference document
+2. **AGENT DEFINITIONS** (`.claude/agents/api-scout.md`, `.claude/agents/baseball-coach.md`) --
+   only if the discovery changes what that agent is responsible for or adds a new reference
+   document it must know about.
 
-3. CLAUDE.md -- Check whether any sections need updates:
-   - Key Metrics We Track -- if new stat categories are discovered
-   - GameChanger API section -- if credential or API behavior patterns change
+3. **CLAUDE.md** -- only the `## Facts` items the discovery actually touches: the
+   **GameChanger API** item if credential or API behavior patterns change. CLAUDE.md is under a
+   hard byte cap; measure it after any edit.
 
-4. RULES -- Check whether any rule files need updates:
-   - Only if the discovery reveals a new workflow pattern or constraint
+4. **RULES** (`.claude/rules/`) -- only if the discovery reveals a new constraint. `api-docs.md`
+   is the likely one; `key-metrics.md` if new stat categories are discovered.
 
-5. STAT GLOSSARY -- If new stat abbreviations appear that are not in
+5. **STAT GLOSSARY** -- If new stat abbreviations appear that are not in
    `docs/gamechanger-stat-glossary.md`, flag them for the user (the glossary is sourced
    from the GC UI, so new abbreviations need UI verification before being added).
 
-For each area: if no update is needed, skip it silently. Only report areas where you
-made changes or identified items requiring user action.
-```
+For each area: if no update is needed, skip it silently. Report only the areas you changed or
+that need a user decision.
 
 ---
 
@@ -345,7 +334,7 @@ made changes or identified items requiring user action.
 User saves curl to secrets/gamechanger-curl.txt
   |
   v
-Team lead reads this skill
+Session reads this skill
   |
   v
 Phase 1: Spawn api-scout
@@ -363,16 +352,15 @@ Phase 1: Spawn api-scout
 [If 401/403: stop, ask user to refresh curl]
   |
   v
-Phase 2: Spawn claude-architect
+Phase 2: Session integrates the findings
   - Review findings
-  - Update agent memory files as needed
-  - Update agent definitions if needed
-  - Update CLAUDE.md if needed
+  - Update api-scout / baseball-coach memory as needed
+  - Update their agent definitions if needed
+  - Update CLAUDE.md or a rule if needed
   - Flag new stat abbreviations
-  - Return changes summary
   |
   v
-Team lead presents combined summary to user
+Session presents combined summary to user
 ```
 
 ---
@@ -411,7 +399,7 @@ If the research spike file has been archived or deleted, skip the research relev
 ## Anti-Patterns
 
 1. **Do not delay Phase 1.** Curl commands contain time-sensitive headers (gc-signature expires within minutes). Do not spend time planning, reading extensive context, or consulting other agents before executing the curl. Parse, execute, save, then document.
-2. **Do not run both phases in parallel.** Phase 2 depends on Phase 1's findings summary. Wait for api-scout to complete before spawning claude-architect.
-3. **Do not skip Phase 2.** Even if the endpoint was already documented, the context layer integration check ensures agent memory stays current with the latest verification dates and any schema changes.
+2. **Do not start Phase 2 before Phase 1 finishes.** Phase 2 works from api-scout's findings summary; wait for it.
+3. **Do not skip Phase 2.** Even if the endpoint was already documented, the context layer integration check keeps memory current with the latest verification dates and any schema changes.
 4. **Do not modify the curl file.** The file in `secrets/gamechanger-curl.txt` is the user's input. Read it; do not edit it.
 5. **Do not make the api-scout execute additional API calls beyond the provided curl.** This workflow ingests one endpoint per invocation. Follow-up exploration is a separate workflow.
