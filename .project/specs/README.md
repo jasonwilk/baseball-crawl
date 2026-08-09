@@ -28,9 +28,15 @@ Clear. Step 3 landed 2026-08-08; pick the next chunk from NEXT.
 - **Rung-c season-year filter — RULED: BUILD** (operator, 2026-08-08). Semantics settled: a team
   from one YEAR must never auto-match a team from another year; cross-season within the same
   year (spring 2026 vs summer 2026) is legitimate; a hit with `season.year` absent REFUSES
-  auto-accept (fail-closed). Compare against the member team's `teams.season_year`. Small chunk
-  (`_resolve_via_search` signature + `morning_run` caller + tests); spec
-  `2026-08-05-rung-c-season-year-filter.md`.
+  auto-accept (fail-closed). Compare against the member team's `teams.season_year`. **Spec written
+  and codex-reviewed 2026-08-09, ready to execute in a fresh session:**
+  `2026-08-05-rung-c-season-year-filter.md`. ⚠ **NOT the small chunk this entry used to call it** —
+  writing the spec found the code change strands TEN live prose sites, that `morning_run` creates
+  own-team rows with a NULL `season_year` (so fail-closed would silently kill rung (c) on a team's
+  first run), and that the ladder test fixture carries no `season` key, which would let one test
+  pass for the wrong reason. Take scope from the spec's Files table, not from this line. It also
+  carries the two folded-in residuals below (worktree-guard `CLAUDE_HOME`, extensionless PII
+  scannability) and the owed `codex-review`-vs-`codex review` comparison.
 - **Opponent org-reachability measurement — RULED: measure only** (operator, 2026-08-08). Bulk
   org discovery is DECLINED (vision non-goal). The funded question: what fraction of our real
   unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's
