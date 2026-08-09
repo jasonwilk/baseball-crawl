@@ -72,7 +72,7 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    alarm: if it is missing, stop and investigate; don't assume it ran. It is a receipt, not a
    first check.
 9. **HANDOFF** - Enumerate every spec stub you created, each with a one-line "why you should
-   care". The Status you flipped at step 7 reads `COMPLETE (this commit)`, `PARKED + why`,
+   care". The Status you flipped at step 7 reads `COMPLETE (this commit)`, `READY`, `PARKED + why`,
    `STUB`, or `OPEN + what decision is owed`; a COMPLETE one moves to `.project/specs/done/` in
    this commit - no hash needed, `git log --follow` on the spec supplies it.
    Only post-commit steps (a backfill, a migration run) earn a second small results commit, and

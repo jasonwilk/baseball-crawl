@@ -5,8 +5,11 @@ step 9 (HANDOFF) updates it: move what landed out of NOW, promote from NEXT, and
 chunk discovered as a stub or a residual.
 
 Individual chunk specs live beside this file as `<date>-<slug>.md`. Every one of them must read
-`COMPLETE`, `PARKED`, `STUB`, or `OPEN`, or belong to a chunk in flight. The vocabulary is exactly
-those four — `RULED` was retired on 2026-08-08 and its three specs re-statused to `PARKED + why`.
+`COMPLETE`, `READY`, `PARKED`, `STUB`, or `OPEN`, or belong to a chunk in flight. The vocabulary is
+exactly those five. `READY` (added 2026-08-09, operator ruling) = spec written, codex-reviewed, and
+committed — waiting only for a fresh execution session; the march's NEXT should name every READY
+spec. `PARKED` now means ONLY "set aside deliberately, + why" — its former "ruled and queued" second
+sense moved to READY. (`RULED` was retired 2026-08-08.) Audits verify READY specs are still wanted.
 
 **`specs/done/`.** At handoff, a spec whose Status you just flipped to `COMPLETE` moves to
 `.project/specs/done/` in the SAME commit. Everything still open stays in the live directory —
