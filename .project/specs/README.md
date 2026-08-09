@@ -25,9 +25,9 @@ Clear. Step 3 landed 2026-08-08; pick the next chunk from NEXT.
 
 - **Migration Step 4 — second-pass rule trim.** After ~3 more real chunks, take the ~22 surviving
   path-scoped rules through "would removing this line cause a mistake?", run `/doctor`, and
-  regenerate the cheat sheet from what actually got used. Also decide there whether `PARKED`
-  needs splitting: it now carries two meanings — "set aside indefinitely" and "ruled and queued"
-  — distinguished only by whether NEXT names the spec.
+  regenerate the cheat sheet from what actually got used. (The `PARKED`-splitting question this
+  entry used to carry is CLOSED — settled ahead of Step 4 by `4fc1f6d`, which added `READY`. Do not
+  re-open it.)
 - **Rung-c season-year filter — RULED: BUILD** (operator, 2026-08-08). Semantics settled: a team
   from one YEAR must never auto-match a team from another year; cross-season within the same
   year (spring 2026 vs summer 2026) is legitimate; a hit with `season.year` absent REFUSES
