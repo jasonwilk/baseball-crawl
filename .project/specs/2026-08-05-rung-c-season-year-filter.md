@@ -2,10 +2,10 @@
 
 # Rung (c): require a season-year match before auto-accept
 
-**Date**: 2026-08-05 (spec written 2026-08-09) · **Status**: `PARKED` — ruled BUILD and queued; the
-spec is written and codex-reviewed, awaiting a fresh EXECUTION session. (This is `PARKED`'s
-"ruled and queued" sense, not "set aside indefinitely". Splitting that overloaded word is Migration
-Step 4's open question — see `.project/specs/README.md` NEXT.)
+**Date**: 2026-08-05 (spec written 2026-08-09) · **Status**: `READY` — spec written,
+codex-reviewed, committed (`a0f0837`); awaiting a fresh EXECUTION session. (`READY` was added to
+the vocabulary 2026-08-09, `4fc1f6d`, resolving the `PARKED` double-duty this line previously
+had to gloss around — the split Step 4 had queued is settled.)
 **Source**: operator ruling 2026-08-08 (`README.md` PARKED DECISIONS #2, now in NEXT). Split out of
 `2026-08-04-rung-c-auto-accept-criteria-drift.md`; premise re-established by the codex spec review
 of `2026-08-05-rung-c-search-resolve-recoverable.md`.
