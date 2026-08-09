@@ -82,7 +82,7 @@ Use devcontainer features (from the official registry or rocker-org) for standar
 
 ## Browser-Test Infrastructure (Headless Chromium)
 
-Some closure-gate tests render a report page in a real browser (Playwright + headless Chromium) to verify print/layout behavior a headless HTTP assertion cannot reach. Chromium is a browser binary, **not** a pip artifact, so the `playwright` Python package (in `requirements-dev.txt`) is necessary but not sufficient -- the binary is installed separately.
+Some tests in the suite render a report page in a real browser (Playwright + headless Chromium) to verify print/layout behavior a headless HTTP assertion cannot reach. Chromium is a browser binary, **not** a pip artifact, so the `playwright` Python package (in `requirements-dev.txt`) is necessary but not sufficient -- the binary is installed separately.
 
 ### Install
 
@@ -103,7 +103,7 @@ This browser test is a **dev / main-checkout** capability, not a CI gate. The bo
 
 ### Fail-closed test convention + `SKIP_BROWSER_TESTS` opt-out
 
-The browser test is **fail-closed**: on the scoped dev / main-checkout environment it always attempts to launch Chromium and hard-**FAILS** if the binary is absent. It never silently no-ops to green. This is deliberate -- a postCreate-set "browser available" marker would not reach the non-interactive closure pytest, so a marker-gated skip would pass vacuously (green-with-skipped-test) and defeat the test's purpose.
+The browser test is **fail-closed**: on the scoped dev / main-checkout environment it always attempts to launch Chromium and hard-**FAILS** if the binary is absent. It never silently no-ops to green. This is deliberate -- a postCreate-set "browser available" marker would not reach the non-interactive pytest run, so a marker-gated skip would pass vacuously (green-with-skipped-test) and defeat the test's purpose.
 
 The **only** skip path is an explicit operator opt-**out** environment variable, the exact literal:
 
@@ -111,7 +111,7 @@ The **only** skip path is an explicit operator opt-**out** environment variable,
 SKIP_BROWSER_TESTS
 ```
 
-Set it (to any non-empty value) in a legitimately chromium-less contributor environment to skip the browser test. Absent that opt-out, a missing chromium binary is a hard failure, not a skip. (`SKIP_BROWSER_TESTS` is a cross-story pinned literal -- the browser test reads this exact token; do not rename it.)
+Set it (to any non-empty value) in a legitimately chromium-less contributor environment to skip the browser test. Absent that opt-out, a missing chromium binary is a hard failure, not a skip. (`SKIP_BROWSER_TESTS` is a cross-chunk pinned literal -- the browser test reads this exact token; do not rename it.)
 
 ### Install Footguns
 

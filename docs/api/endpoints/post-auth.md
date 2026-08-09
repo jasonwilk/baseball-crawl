@@ -319,7 +319,7 @@ The browser immediately retries with the refresh token.
 
 **Important:** Because the mobile client ID differs from web, the mobile client key almost certainly also differs. Do not use `GAMECHANGER_CLIENT_KEY_WEB` to compute `gc-signature` for mobile POST /auth calls. The mobile client key must be extracted from the iOS binary before programmatic mobile token refresh is possible.
 
-The mobile `eden_auth` content-type may indicate a different auth protocol version. Response bodies confirm the same schema, but whether request body format (e.g., `{"type":"refresh"}`) also matches web has not been independently confirmed from a captured request body. See `epics/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
+The mobile `eden_auth` content-type may indicate a different auth protocol version. Response bodies confirm the same schema, but whether request body format (e.g., `{"type":"refresh"}`) also matches web has not been independently confirmed from a captured request body. See `.project/archive/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
 
 ## Token Health Check Alternative
 

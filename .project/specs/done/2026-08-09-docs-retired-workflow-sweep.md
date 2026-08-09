@@ -2,7 +2,7 @@
 
 # Sweep `docs/` for the retired PM/epic/dispatch workflow
 
-**Date**: 2026-08-09 · **Status**: `READY`
+**Date**: 2026-08-09 · **Status**: `COMPLETE (this commit)`
 **Source**: `.project/specs/README.md` NEXT — "Sweep `docs/` for the retired workflow — now
 unblocked, the agents are gone." Deliberately out of migration Steps 1–3's scope.
 
@@ -534,3 +534,59 @@ it deliberately. Read each pathspec — they are not interchangeable.
   step 10, so the next session re-runs the sweep rather than trusting this inventory. (This pass
   also moved verification 8's `.claude/**` staged count from nine to **ten** — `devcontainer.md`.
   The count has now been wrong three times; count it off the Files list.)
+- **2026-08-09 — EXECUTED.** Audit first: every cited line was where the spec said, all five
+  repoint targets resolved, and V2's 6-file baseline reproduced exactly. Three spec claims did
+  not survive the audit, none load-bearing:
+  - **V10's pre-chunk baseline is 112 files, not 114** (111 at `902fb1e`). The count is not the
+    test, per the step's own text, but the figure was wrong.
+  - **`.githooks/pre-commit:125` never matches V3's grep.** The line is `for tree in epics
+    .project; do` — `epics` with no slash. The row's substance (inert, rides the scanner chunk)
+    stands; only the line cite was unsatisfiable.
+  - **`production-deployment.md`'s "Step 1d" back-reference is at `:514`, not `:511`.**
+- **2026-08-09 — Operator ruled ROADMAP (step 2): header sentence + a one-line note under §0 and
+  §6, NO line surgery.** The audit found the spec's premise incomplete in the opposite direction
+  from the codex review: §6 is a six-item list and **all six** items are imperative-present, not
+  just item 6. Past-tensing one would have left the list internally inconsistent. The section
+  notes neutralize all six and touch no recorded line.
+- **2026-08-09 — Verification 10 found SIX more sites, taking the total 5 → 8 → 12 → 18.** Run by
+  the pass-3 method with a word-boundary matcher (a positive control confirmed the matcher fires)
+  after the substring artifacts were isolated — `story`⊂`history` and `closure`⊂`disclosure`
+  accounted for most of the coarse hits, and ruling on them unopened would have been an
+  OR-pattern violation:
+  - `ephemeral/README.md` — "Create a subdirectory named after your current epic". Live
+    instruction, and `safe-data-handling.md:22` points AT it as "the full convention", so fixing
+    the pointer without the target would have left the two docs contradicting.
+  - `.claude/rules/devcontainer.md:85,106` — "closure-gate tests", "the non-interactive closure
+    pytest". A **second and third** site in a file the spec had already opened at `:114`.
+  - `.claude/rules/dependency-management.md:46` — "Derive the artifact set from this table, not
+    from a story's 'Files to Modify' list". Live imperative; a **second** site in a file the spec
+    had already opened at `:86`. The incident clause naming the implementer/PM/reviewer is left as
+    the record of what happened.
+  - `docs/admin/operations.md:309` — "Vestige, until a follow-up story removes it".
+  - `.claude/rules/python-style.md:20` — the quoted rationalization "this story does not edit that
+    function", inside live instruction.
+
+  **Four of the six sat inside files already on the edit list.** That is the same blind spot that
+  produced passes 1 and 2, reproduced by an inventory that had already been corrected twice for
+  precisely it — including once by a pass whose whole point was to catch it. The inbound inventory
+  was not evidence; only the re-run was.
+- **2026-08-09 — Three judgment calls, recorded rather than silently taken:**
+  - `scripts/codex-review.sh:58` — the `--help` example path
+    `/tmp/.worktrees/baseball-crawl-E-137`. LEFT AS IS: worktrees are live (principle H) and an
+    E-numbered directory name reads as an arbitrary illustration, not an instruction. Changing it
+    would also have added a second line to Verification 9c's usage diff.
+  - `docs/api/auth.md` and `docs/api/endpoints/post-auth.md` provenance NOT refreshed. The change
+    there is a mechanical path repair in api-scout's tree; `post-auth.md` has no `Last updated`
+    field at all, and touching `auth.md`'s `Source: E-182` would misattribute endpoint content.
+  - `docs/safe-data-handling.md` had **no** `Last updated` footer despite the rule requiring one;
+    one was added, since the file was being materially edited. `docs/ROADMAP.md` and
+    `docs/vision-signals.md` still have none and were left alone — a record with its own dated
+    header block, and a dated-entry parking lot.
+- **2026-08-09 — Verification results.** V1 control 19 files (nonempty). V2 exactly 3 files, all
+  ruled KEEP. V3 the ruled set, plus two NEW hits that are this chunk's own provenance footers
+  (`architecture.md:266`, `safe-data-handling.md:338`) — past-tense records of a removal, ruled
+  KEEP as the same class as `operations.md:1087`. V4 all 5 targets EXISTS. V5, V7 empty. V6 no
+  surprise path. V9 all three legs: `bash -n` rc=0, diff read by eye (every changed line a `#`
+  comment or the `:47` heredoc), and the usage diff exactly one line with a confirmed non-empty
+  `Usage`-bearing baseline. V10 re-run as above. No `src/`, `tests/`, or `migrations/` change, so
+  no full-suite gate.

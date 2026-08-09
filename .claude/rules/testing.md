@@ -54,11 +54,11 @@ Note the compounding case — **a fixture hardened against one hazard can be str
 
 ## Test Scope Discovery
 
-When you modify a function in an existing source module, you MUST discover and run all test files that import from that module -- not just the tests named in the story's "Files to Create or Modify."
+When you modify a function in an existing source module, you MUST discover and run all test files that import from that module -- not just the tests named in the spec's "Files" list.
 
 ### Why
 
-Story-scoped test lists are written during planning, before the implementation details are known. They cover the obvious test files but can miss cross-file dependencies. During E-085, a change to `check_single_profile()` in `src/gamechanger/credentials.py` broke `tests/test_check_credentials.py`, but the implementer only ran `tests/test_credentials.py` and `tests/test_cli_creds.py` (the story-scoped tests). The broken test was in a different file that also imports from the same module.
+Spec-scoped test lists are written during planning, before the implementation details are known. They cover the obvious test files but can miss cross-file dependencies. During E-085, a change to `check_single_profile()` in `src/gamechanger/credentials.py` broke `tests/test_check_credentials.py`, but the implementer only ran `tests/test_credentials.py` and `tests/test_cli_creds.py` (the story-scoped tests). The broken test was in a different file that also imports from the same module.
 
 ### The Discovery Pattern
 
@@ -70,7 +70,7 @@ For each source module you modified, find all test files that import from it:
    grep -rl "gamechanger.credentials" tests/
    ```
    This catches `from gamechanger.credentials import ...`, `import gamechanger.credentials`, and variant forms. False positives are harmless (extra tests run); false negatives are the real risk, and grep avoids them.
-3. Run the discovered test files in addition to any story-scoped tests:
+3. Run the discovered test files in addition to any spec-scoped tests:
    ```
    pytest tests/test_credentials.py tests/test_cli_creds.py tests/test_check_credentials.py
    ```

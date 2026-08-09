@@ -43,7 +43,7 @@ Dev dependencies are NOT declared in `pyproject.toml`. They remain in `requireme
 
 ## Common Operations
 
-> ⚠️ **A runtime dependency change recompiles BOTH lockfiles, and touches FOUR files.** `requirements-dev.in` constrains against `requirements.txt` (`-c`), so `requirements-dev.txt` pins the runtime deps too and goes stale the moment `requirements.in` moves. The File Layout table above makes this inferable — marking both `.txt` files "Generated" — but inferable is not stated, and in E-278 an implementer followed the singular "run `pip-compile`" literally, shipped three files, and left `requirements-dev.txt` stale: that would have failed CI's lockfile-drift gate (`.github/workflows/ci.yml` recompiles both and `git diff --exit-code`s both) **and silently stripped the new dependency from every fresh devcontainer**, which installs from `requirements-dev.txt`. **Derive the artifact set from this table, not from a story's "Files to Modify" list** — the reviewer caught it; both the implementer and PM had verified the story's three named files instead.
+> ⚠️ **A runtime dependency change recompiles BOTH lockfiles, and touches FOUR files.** `requirements-dev.in` constrains against `requirements.txt` (`-c`), so `requirements-dev.txt` pins the runtime deps too and goes stale the moment `requirements.in` moves. The File Layout table above makes this inferable — marking both `.txt` files "Generated" — but inferable is not stated, and in E-278 an implementer followed the singular "run `pip-compile`" literally, shipped three files, and left `requirements-dev.txt` stale: that would have failed CI's lockfile-drift gate (`.github/workflows/ci.yml` recompiles both and `git diff --exit-code`s both) **and silently stripped the new dependency from every fresh devcontainer**, which installs from `requirements-dev.txt`. **Derive the artifact set from this table, not from a spec's "Files" list** — the reviewer caught it; both the implementer and PM had verified the story's three named files instead.
 
 **Add a runtime dependency**:
 1. Add to `pyproject.toml [project.dependencies]` with a `>=` range
@@ -83,4 +83,4 @@ Dev dependencies are NOT declared in `pyproject.toml`. They remain in `requireme
 - Run `pytest` and confirm no failures.
 - Check for deprecation warnings in test output.
 
-**When you update the version**, change it in all four locations atomically and reference the story in the commit.
+**When you update the version**, change it in all four locations atomically and reference the spec in the commit.

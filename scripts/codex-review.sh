@@ -44,7 +44,7 @@ Options:
                        the script's own REPO_ROOT. In 'uncommitted' mode, the
                        diff is generated as 'git diff --diff-filter=ACMR main'
                        from <path> (pure deletions are excluded so they do not
-                       exhaust Codex's budget on large removal epics).
+                       exhaust Codex's budget on large removal chunks).
 
 Modes:
   uncommitted          Review staged, unstaged, and untracked changes
@@ -207,9 +207,9 @@ generate_uncommitted_diff() {
     local diff_output=""
 
     if [[ -n "${WORKDIR}" ]]; then
-        # Epic worktree mode: all changes relative to main (staged + unstaged).
+        # Worktree mode: all changes relative to main (staged + unstaged).
         # Default to --diff-filter=ACMR (added/copied/modified/renamed) so pure
-        # deletions do not consume Codex's budget on large removal epics and
+        # deletions do not consume Codex's budget on large removal chunks and
         # degrade the review to static-only (E-239's 2.57M-char diff dropped to
         # ~445K under ACMR). Deletions have no content to review.
         local worktree_diff
@@ -217,11 +217,9 @@ generate_uncommitted_diff() {
         if [[ -n "${worktree_diff}" ]]; then
             diff_output+="${worktree_diff}"$'\n'
         fi
-        # Note: git diff main compares the working tree to main. In the epic
-        # worktree, the working tree contains all accumulated story patches
-        # (applied via git apply and staged via git add -A), so this single
-        # diff captures the complete epic changeset. No separate --cached
-        # pass is needed.
+        # Note: git diff main compares the working tree to main, which covers
+        # both staged and unstaged content in one pass, so this single diff
+        # captures the complete changeset. No separate --cached pass is needed.
     else
         # Standard mode: separate staged, unstaged, untracked
         local staged

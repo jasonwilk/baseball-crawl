@@ -6,7 +6,9 @@ E-234/235/236/237/238/239/240). This document is retained as the reference recor
 reports-first reframe and its as-planned epic sequence. §4 (Cruft Inventory) and §5 (Proposed
 Epic Sequence) are the AS-PLANNED record — the quarantine/removal verdicts and the D1/D2 plans
 they describe have SHIPPED (D1 = E-238, D2 = E-239); read them as history, with §0 as the
-authoritative current status. (Was `DRAFT` while the sequence was being planned.)
+authoritative current status. (Was `DRAFT` while the sequence was being planned.) The
+epic/story/dispatch vocabulary throughout is the retired PM/epic/dispatch workflow's,
+preserved as written; the live process is the chunk lifecycle in `CLAUDE.md`.
 **Method**: Synthesized from parallel subagent surveys (reports critical-path trace, cruft
 inventory, forward-path gap analysis, regression-guard design) plus the 2026-06-09/10
 architecture assessments (pipeline accuracy, identity model, stability, backlog mining,
@@ -17,6 +19,9 @@ review of rev 1 (8 findings, all accepted — see §5 epic deltas and §3 correc
 ---
 
 ## 0. Roadmap Tracking
+
+*The convention and status ladder below governed this table while the roadmap ran; they
+are recorded as they stood, not as live instruction. The live process is `CLAUDE.md`.*
 
 Maps each roadmap slice (§5) to its epic and current status, so the roadmap evolves
 as epics land. **Convention**: this table is updated at two moments — at an epic's
@@ -523,6 +528,9 @@ with the §7 non-goal on tracked-opponent surfaces).
 ---
 
 ## 6. Safety Rules for All of the Above
+
+*These six rules governed the roadmap while it ran; they are recorded as they stood, not
+as live instruction. The live process is `CLAUDE.md`.*
 
 1. **No epic that touches the protected core ships without Epic A guards green** plus a
    manual report generation against real data, eyeballed against the prior output.

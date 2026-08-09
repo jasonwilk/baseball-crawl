@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: This skill should be used when the user says "codex review", "review with codex", "codex review E-NNN", "code review", "code review E-NNN", "review epic", "review epic E-NNN", "post-dev review", "codex review prompt", "code review prompt", "generate codex review prompt", or "generate code review prompt" -- or otherwise implies running a Codex code review on implementation changes. The ABSENCE of the word "spec" is the mode discriminator: a review request CONTAINING it belongs to the codex-spec-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
+description: This skill should be used when the user says "codex review", "review with codex", "code review", "post-dev review", "codex review prompt", "code review prompt", "generate codex review prompt", or "generate code review prompt" -- or otherwise implies running a Codex code review on implementation changes. The ABSENCE of the word "spec" is the mode discriminator: a review request CONTAINING it belongs to the codex-spec-review skill, not this one. A trigger containing "prompt" selects the prompt-generation path; otherwise the headless path runs.
 disable-model-invocation: true
 ---
 

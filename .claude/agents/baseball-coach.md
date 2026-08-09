@@ -137,4 +137,4 @@ Update your memory file (`/.claude/agent-memory/baseball-coach/MEMORY.md`) with:
 - Data model reviews and schema validation rationale
 - Scouting report format decisions and template evolution
 - Baseball-specific conventions (stat definitions, sample size thresholds, priorities)
-- Domain consultation outcomes -- questions asked, requirements produced, epic/story references
+- Domain consultation outcomes -- questions asked, requirements produced, spec references

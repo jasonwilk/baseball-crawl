@@ -90,7 +90,7 @@ divergence signal as diagnostic rather than something to gate away.
 ## Update (2026-07-27): the ruling is now data-validated, not just argued
 
 E-278 (the epic this idea fed) measured OQ-2 -- the frequency question I flagged as
-missing evidence when I made this ruling. Per `epics/E-278-game-identity/epic.md`
+missing evidence when I made this ruling. Per `.project/archive/E-278-game-identity/epic.md`
 ("OQ-2 -- ANSWERED"): genuine own-team unscored games are real and material across the
 project's any-`public_id` population -- present on a meaningful fraction of subject
 teams, at a per-team rate the epic records as a low-double-digit-percent range of a

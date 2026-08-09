@@ -109,16 +109,16 @@ Execute the following steps in order:
    - Include: method, path, filename link, status, auth, and a 6-10 word description.
 
 8. CHECK research spike relevance:
-   - Read `epics/E-002-data-ingestion/E-002-R-01.md` (if it exists).
+   - Read `.project/archive/E-002-data-ingestion/E-002-R-01.md` (if it exists).
    - If this endpoint discovery answers any open research questions or unblocks any
-     stories mentioned in the findings, note the specific impact.
+     open work mentioned in the findings, note the specific impact.
 
 9. SUMMARIZE findings:
    - Endpoint path and HTTP method
    - Whether this was a new or existing endpoint
    - Key fields and their types (high-level, not exhaustive)
    - Any coaching-relevant stats or data discovered
-   - Any research questions answered or stories unblocked
+   - Any research questions answered or open work unblocked
    - Any follow-up explorations suggested by the response
 ```
 
@@ -391,8 +391,10 @@ The curl file should contain exactly one curl command. If the user has pasted mu
 ### Response Too Large for data/raw/
 GameChanger responses are typically under 100KB. If a response is unusually large (>1MB), save it anyway but note the size in the api-scout summary -- it may indicate a pagination issue or an unexpectedly rich endpoint.
 
-### E-002-R-01 Does Not Exist or Is Archived
-If the research spike file has been archived or deleted, skip the research relevance check. The E-002 research questions may have been fully answered by prior ingestions.
+### E-002-R-01 Is Unreadable or Exhausted
+The research spike file lives in the archive at
+`.project/archive/E-002-data-ingestion/E-002-R-01.md`. If it is unreadable, or its research
+questions have all been answered by prior ingestions, skip the research relevance check.
 
 ---
 

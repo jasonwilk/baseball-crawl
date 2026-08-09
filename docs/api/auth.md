@@ -486,7 +486,7 @@ Mobile uses a different `Content-Type` for POST /auth requests:
 | Web | `application/json; charset=utf-8` |
 | Mobile (iOS) | `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` |
 
-The `post_eden_auth` vendor type is mobile-specific. Despite this header difference, the response schema is confirmed identical. Whether the request body format also differs is not yet confirmed -- see `epics/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
+The `post_eden_auth` vendor type is mobile-specific. Despite this header difference, the response schema is confirmed identical. Whether the request body format also differs is not yet confirmed -- see `.project/archive/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
 
 ## Source Materials
 

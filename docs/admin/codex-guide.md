@@ -1,6 +1,6 @@
 # Codex Guide
 
-*Last updated: 2026-05-31 | Source: E-229*
+*Last updated: 2026-08-09 | Source: E-229 (original), 2026-08-09-docs-retired-workflow-sweep (the retired "Claude PM system" -> the Claude context layer; progressive disclosure now points at the active spec in `.project/specs/` instead of epic or story files)*
 
 ## Overview
 
@@ -14,7 +14,7 @@ These files are part of the repo and define the project-owned Codex context:
 - `.codex/config.toml`
 - `.agents/skills/claude-context-bridge/SKILL.md`
 
-This layer is intentionally small. It tells Codex how to work in this repo without recreating the Claude PM system or depending on experimental Codex features.
+This layer is intentionally small. It tells Codex how to work in this repo without recreating the Claude context layer or depending on experimental Codex features.
 
 ## Local Runtime Layer
 
@@ -59,7 +59,7 @@ Use `claude-context-bridge` when Codex needs to pull in existing Claude context 
 The skill teaches progressive disclosure:
 
 1. start with `CLAUDE.md`
-2. read the active epic or story files when the task is scoped
+2. read the active spec in `.project/specs/` when the task is scoped
 3. read only the specific `.claude/` artifacts the task needs
 
 Do not bulk-read `.claude/`.

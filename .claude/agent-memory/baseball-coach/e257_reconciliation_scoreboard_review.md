@@ -96,4 +96,4 @@ trust on the operator side.
 
 - [[coaching-decisions]] -- stat priorities and rate-stat rationale this weighting call is built on
 - Baseline doc: `.project/research/E-245-plays-boxscore-reconciliation-baseline.md`
-- Epic stub: `epics/E-257-reconciliation-scoreboard/epic.md`
+- Epic stub: `.project/archive/E-257-reconciliation-scoreboard/epic.md`

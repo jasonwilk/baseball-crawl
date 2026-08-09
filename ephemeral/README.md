@@ -20,14 +20,14 @@ here is committed, backed up, or versioned.
 
 ## Convention
 
-Create a subdirectory named after your current epic:
+Create a subdirectory named after your current chunk's spec slug:
 
 ```
-ephemeral/E-005/     # files related to E-005 work
-ephemeral/E-012/     # files related to E-012 work
+ephemeral/2026-08-09-docs-retired-workflow-sweep/    # files for that chunk's work
+ephemeral/2026-08-04-root-team-id-namespace-collision/
 ```
 
-Use `ephemeral/scratch/` for one-off experiments not tied to a specific epic.
+Use `ephemeral/scratch/` for one-off experiments not tied to a specific chunk.
 
 ## Warning
 

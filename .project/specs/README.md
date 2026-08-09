@@ -19,8 +19,8 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-Clear. The rung-c season-year filter landed 2026-08-09 (spec in `done/`); pick the next chunk
-from NEXT.
+Clear. The `docs/` retired-workflow sweep landed 2026-08-09 (spec in `done/`); pick the next
+chunk from NEXT.
 
 ## NEXT
 
@@ -38,25 +38,22 @@ from NEXT.
   unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's
   roster surface? Read-only, needs a team→org lookup answer first; design nothing unless the
   number is material. Spec `2026-08-04-org-team-discovery-and-roster-ingest.md`.
-- **Sweep `docs/` for the retired workflow** — **READY 2026-08-09**, spec
-  `2026-08-09-docs-retired-workflow-sweep.md`. Docs-only apart from `scripts/codex-review.sh`,
-  where only comments and one `--help` line change (operator-ruled in, 2026-08-09: cannot regress
-  behavior, so no extra review is owed); step 5 is the PII gates alone. The spec's step 6 and
-  verification 9 carry the one wrinkle — the `--help` line is heredoc text, not a comment, so a
-  `#`-prefix check inverts. The spec re-ran the sweep rather than inheriting this target list, and
-  **two of that list's claims did not survive**, so read the spec, not the history below:
-  - The "four DEAD `epics/` pointers" are **not dead** — all four resolve to two files that EXIST
-    under `.project/archive/`. They are stale paths; the fix is repointing. Following the old
-    wording would have deleted live pointers to real records.
-  - The target list was an undercount again, and so were the first two corrections of it: **12
-    live surfaces it never named**, reached 5 → 8 → 12 across a term-grep pass, the
-    codex-spec-review, and a file-then-read pass run after `902fb1e`. Two of the last four sat
-    inside files already on the edit list. `docs/admin/terminal-guide.md`'s "Agent Teams" section
-    is the emblem: its headings contain neither "epic" nor "dispatch".
+- ~~**Sweep `docs/` for the retired workflow**~~ — **LANDED 2026-08-09.** Spec moved to
+  `done/2026-08-09-docs-retired-workflow-sweep.md`. `docs/admin/agent-guide.md` deleted (124
+  lines); 26 files touched; no executable line of `scripts/codex-review.sh` changed (proven by a
+  before/after diff of its `--help` output, not by a `#`-prefix check).
 
-  Carried forward unchanged: `docs/admin/agent-guide.md` is deleted outright (124 lines, about
-  nothing else); `production-deployment.md:507`'s pointer at the deleted implement skill and
-  `agent-guide.md:102`'s false `context-ratchet.sh` "survives" claim are both confirmed and fixed.
+  **The undercount ran to five passes, not three.** The spec inherited a 12-site inventory built
+  across a term-grep pass, the codex-spec-review, and a post-`902fb1e` file-then-read pass. The
+  execution session's re-run of Verification 10 found **six more**, taking it 5 → 8 → 12 → 18:
+  `ephemeral/README.md` (the per-epic convention `safe-data-handling.md` points AT as "the full
+  convention"), `.claude/rules/devcontainer.md:85,106` ("closure-gate tests"),
+  `.claude/rules/dependency-management.md:46` ("a story's Files to Modify list"),
+  `docs/admin/operations.md:309` ("until a follow-up story removes it"), and
+  `.claude/rules/python-style.md:20`. **Four of the six sat in files already on the edit list** —
+  the same blind spot that produced passes 1 and 2, reproduced by an inventory that had already
+  been corrected twice for exactly it. Re-running the sweep is what caught them; trusting the
+  inbound inventory would not have.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -77,6 +74,21 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
+- **The inert `epics/` entries in the two security controls ride the scanner-hardening chunk.**
+  `src/safety/pii_patterns.py` (`SKIP_PATHS`) and `.githooks/pre-commit:125` (`GATE_TREES`) both
+  still name `epics/`. Neither can match — nothing can be staged under a tree that does not
+  exist — so the 2026-08-09 docs sweep deliberately left them. **Why you should care**: they must
+  move WITH `.claude/rules/pii-safety.md:50,52,54`, which restates `SKIP_PATHS` accurately as the
+  code stands today. Editing either side alone breaks a doc/code agreement that is currently
+  correct. Route them through the chunk that owns the `pii_scanner --staged` rename blindness
+  below, which already owes a `/security-review`.
+- **The runtime smoke check is not a named step in the `CLAUDE.md` lifecycle.** The 2026-08-09
+  sweep retitled it to "Runtime Smoke Check" (`docs/admin/production-deployment.md`) and restated
+  its trigger as operator-run before a commit touching a runtime or build-input surface — but
+  nothing in the lifecycle tells the operator to run it. **Why you should care**: it used to fire
+  automatically at epic closure, and that trigger is now deleted, so a real gate silently became
+  opt-in. Wiring it into `CLAUDE.md` is a byte-cap trade (~23 bytes of headroom), which principle
+  I sends to the operator, not to a session.
 - ✅ **CLOSED 2026-08-09** — `worktree-guard.sh` `CLAUDE_HOME` slash normalization. It was ~3 lines,
   not the 2 estimated; the empty case needed handling and had to DIVERGE from `REPO` (empty `REPO`
   denies, empty `CLAUDE_HOME` falls back to the literal default).

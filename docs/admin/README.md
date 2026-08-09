@@ -13,7 +13,6 @@ This directory contains documentation for system operators and developers workin
 | [Operations](operations.md) | Deployment, credential rotation, backups, troubleshooting, and monitoring. Includes admin UI reference: reports management and user roles. |
 | [Production Deployment](production-deployment.md) | End-to-end runbook: bare Linux server to a running stack at `https://bbstats.ai` via Docker Compose and Cloudflare Tunnel. |
 | [Cloudflare Access Setup](cloudflare-access-setup.md) | Cloudflare Tunnel creation, DNS, and Zero Trust Access configuration for the bbstats.ai deployment. |
-| [Agent Guide](agent-guide.md) | The AI agent ecosystem: what it is, how to work with it, and how to request work. |
 | [Codex Guide](codex-guide.md) | Project-local Codex bootstrap, runtime-state split, trust model, and smoke checks. |
 | [Terminal Guide](terminal-guide.md) | ZSH and tmux setup: what changed, ZSH for bash users, tmux key bindings, connecting from iTerm2, and operating modes. |
 
@@ -28,4 +27,4 @@ These documents live outside `docs/admin/` but are referenced throughout:
 
 ---
 
-*Last updated: 2026-07-08 | Source: E-143 (original), E-239 (reports-first reframe), E-255-05 (Truth Sweep: added Production Deployment and Cloudflare Access Setup to Contents now that both runbooks live in docs/admin/, and removed the latter's stale Related Documentation entry)*
+*Last updated: 2026-08-09 | Source: 2026-08-09-docs-retired-workflow-sweep (dropped the Agent Guide row -- the page documented the retired PM/epic/dispatch agent ecosystem and was deleted; the live process is `CLAUDE.md`), E-143 (original), E-239 (reports-first reframe), E-255-05 (Truth Sweep: added Production Deployment and Cloudflare Access Setup to Contents now that both runbooks live in docs/admin/, and removed the latter's stale Related Documentation entry)*

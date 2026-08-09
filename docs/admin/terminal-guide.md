@@ -157,7 +157,7 @@ Every customized binding in this guide shows its default in italics so you can r
 
 ## Connecting from iTerm2
 
-This is the Mode C (Heavy) workflow: host iTerm2 terminal, tmux running inside the devcontainer.
+This is the Heavy mode workflow: host iTerm2 terminal, tmux running inside the devcontainer.
 
 ### Steps
 
@@ -182,11 +182,11 @@ This is the Mode C (Heavy) workflow: host iTerm2 terminal, tmux running inside t
    tmux attach -t baseball         # if session already running
    ```
 
-5. **Run Claude Code in tmux mode** (for Agent Teams / Heavy mode):
+5. **Run Claude Code** (Heavy mode):
    ```bash
    claude --dangerously-skip-permissions
    ```
-   Claude Code detects it is inside tmux and uses tmux mode for Agent Teams.
+   The session runs inside tmux, so it survives an iTerm2 disconnect.
 
 ### Verifying the Environment
 
@@ -205,17 +205,15 @@ pwd                  # should be /workspaces/baseball-crawl (or navigate there)
 
 Choose the mode that matches what you are doing.
 
-| Mode | Environment | Agent Teams | When to Use |
-|------|-------------|-------------|-------------|
-| **Solo** | VS Code integrated terminal | Not applicable | Routine development: running tests, making edits, checking status, running `bb` commands |
-| **Coordinated** | VS Code integrated terminal | In-process mode | Standard multi-agent work: dispatching epics, running the PM and implementing agents together |
-| **Heavy** | iTerm2 + tmux + devcontainer | tmux mode | Long-running or complex dispatch sessions where persistent windows and pane isolation are valuable |
+| Mode | Environment | When to Use |
+|------|-------------|-------------|
+| **Solo** | VS Code integrated terminal | Everyday work: running tests, making edits, checking status, running `bb` commands, and Claude Code sessions you will sit with start to finish |
+| **Heavy** | iTerm2 + tmux + devcontainer | Long-running sessions you need to walk away from, or work that benefits from several panes side by side |
 
 **Tradeoffs:**
 
-- **Solo**: Simplest setup. VS Code handles the terminal. No tmux overhead. Best for single-stream work.
-- **Coordinated**: Current default for AI-assisted work. Still in VS Code, still simple. In-process Agent Teams avoids the tmux requirement.
-- **Heavy**: More setup, more power. tmux panes give you persistent windows that survive VS Code disconnects. Useful for multi-hour dispatch sessions or when running Claude Code alongside other terminals simultaneously. Requires the iTerm2 connection workflow above.
+- **Solo**: Simplest setup. VS Code handles the terminal. No tmux overhead. The default for single-stream work. Closing VS Code (or losing the window) ends whatever was running.
+- **Heavy**: More setup, more power. The session lives in tmux inside the container, so it survives a disconnect -- detach with `Ctrl+A d`, reattach later with `tmux attach -t baseball`, and a long report generation or crawl keeps going in between. Panes let you watch logs beside a running command. Requires the iTerm2 connection workflow above.
 
 ---
 
@@ -253,7 +251,7 @@ Project environment variables (`.env`) are loaded by Docker Compose and availabl
 
 If `Ctrl+A` is intercepted by the application running inside the pane (e.g., a text editor using `Ctrl+A` for "select all"), press `Ctrl+A Ctrl+A` to pass a literal `Ctrl+A` through to the application.
 
-If `Ctrl+A` is not working at all from VS Code's integrated terminal, switch to Mode C (iTerm2 + tmux) where the terminal handles key events directly without VS Code interception.
+If `Ctrl+A` is not working at all from VS Code's integrated terminal, switch to Heavy mode (iTerm2 + tmux) where the terminal handles key events directly without VS Code interception.
 
 ### Landed as root in the devcontainer
 
@@ -274,4 +272,4 @@ If no sessions exist, create one: `tmux new-session -s baseball`
 
 ---
 
-*Last updated: 2026-03-07 | Story: E-066-05*
+*Last updated: 2026-08-09 | Source: E-066-05 (original), 2026-08-09-docs-retired-workflow-sweep (dropped the Agent Teams column from Terminal Modes and collapsed the three modes to the two an operator actually chooses between; removed the "for Agent Teams" framing from the iTerm2 steps and the orphaned "Mode C" back-references)*

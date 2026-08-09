@@ -50,4 +50,4 @@ Client IDs rotate with major iOS app versions. The JS bundle multi-match issue (
 
 ## Full Findings
 
-`epics/E-075-mobile-credential-capture/R-01-findings.md`
+`.project/archive/E-075-mobile-credential-capture/R-01-findings.md`

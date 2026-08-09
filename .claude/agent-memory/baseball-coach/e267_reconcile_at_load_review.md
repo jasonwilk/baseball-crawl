@@ -10,7 +10,7 @@ metadata:
 E-267 "Reconcile-at-Load Against the Fresh Crawl" (2026-07-19) makes the load pipeline
 retire stale/duplicate rows on re-scout across three grains: game, player-line, roster.
 Coach consult was missing from the original plan (DE + api-scout had already consulted);
-provided retroactively before READY re-confirmation. Epic: `epics/E-267-reconcile-against-fresh-crawl/`.
+provided retroactively before READY re-confirmation. Epic: `.project/archive/E-267-reconcile-against-fresh-crawl/`.
 
 ## Verdict 1 -- Departed-player roster semantics (E-267-04 AC-5)
 

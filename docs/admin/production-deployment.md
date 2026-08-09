@@ -500,18 +500,17 @@ backups only. The active database file (`data/app.db`) is what matters.
 
 ---
 
-## Closure Runtime Smoke (Step 1d)
+## Runtime Smoke Check
 
-Every epic closure that touches a runtime or build-input surface runs a live smoke test
-against the reports flow before the closure commit lands
-(`.claude/skills/implement/SKILL.md`, Step 1d). It runs in the main checkout, post-merge,
-against the **live dev database** -- not CI, and not the epic worktree (which has no `bb`,
-no Docker, no `.env`, no `data/`). This section documents the operator-owned setup that
-procedure depends on.
+An operator-run live smoke test against the reports flow, run before a commit that touches
+a runtime or build-input surface. It runs in the main checkout against the **live dev
+database** -- not CI, and not a worktree (which has no `bb`, no Docker, no `.env`, no
+`data/`). This section documents both the operator-owned setup it depends on and the
+procedure itself.
 
 ### The `.smoke-fixture` file
 
-Step 1d reads a gitignored, two-field file at the repo root -- `.smoke-fixture` -- **never
+The check reads a gitignored, two-field file at the repo root -- `.smoke-fixture` -- **never
 `.env`** (the credential-read guard blocks any Bash command naming `.env*`, so a fixture
 stored there would be unreadable to the reviewer that must read it). Create it once, using
 LSB's own real GameChanger identifiers:
@@ -542,9 +541,10 @@ currently pinned team happens to be terminal and needs no change.
 
 ### What the smoke checks (in order)
 
-1. **Preflight** (an environment problem, not an epic defect, if any of these fail):
-   `.smoke-fixture` present with both fields non-empty; the app stack up -- rebuilt, not
-   just started, when the closure touched a build input (`docker compose up -d --build app`);
+1. **Preflight** (an environment problem, not a defect in the change under test, if any of
+   these fail): `.smoke-fixture` present with both fields non-empty; the app stack up --
+   rebuilt, not just started, when the change touched a build input
+   (`docker compose up -d --build app`);
    credentials live for the web profile (`bb creds check --profile web` -- **not** the bare
    multi-profile `bb creds check`, which can exit 0 on a mixed state where a valid mobile
    profile masks a dead web profile, and the smoke's `bb report generate` uses the web
@@ -557,12 +557,12 @@ currently pinned team happens to be terminal and needs no change.
    That is the only assertion; **ignore the command's exit code**, which can still be
    non-zero from the vestigial baseline diff left behind by the retired ratchet gate.
 5. **`bb report morning-run --dry-run <morning-run urls>`** -- asserts exit `0` only,
-   order-independent after the health check. On an arbitrary closure date LSB usually has
+   order-independent after the health check. On an arbitrary date LSB usually has
    no games, so this step gates the entry-point wiring and schedule-read path, not the
    resolution ladder.
 
-This procedure is normally run by the code-reviewer as part of epic closure. An operator can
-run the same sequence manually at any time as a health check against the live database.
+The operator runs this sequence before a commit touching a runtime or build-input surface,
+and can run it at any other time as a health check against the live database.
 
 ---
 
@@ -581,4 +581,4 @@ run the same sequence manually at any time as a health check against the live da
 
 ---
 
-*Last updated: 2026-07-12 | Source: E-259 (E-259-06: removed the `bb report verify-aggregates` closure sub-check from the Closure Runtime Smoke procedure -- the command and the stored `player_season_*` tables it checked were retired in E-259-03/04), E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure), E-262-07 (synced Step 1d to the settled skill text: preflight now names `bb creds check --profile web`; added the terminal-fixture `generate`-target requirement, one-time bootstrap re-snapshot, and plays-coverage check to the `.smoke-fixture` section)*
+*Last updated: 2026-08-09 | Source: 2026-08-09-docs-retired-workflow-sweep (retitled "Closure Runtime Smoke (Step 1d)" to "Runtime Smoke Check" and restated its trigger and owner as operator-run before a commit touching a runtime or build-input surface -- the epic-closure trigger and the `.claude/skills/implement/SKILL.md` Step 1d citation both named deleted machinery; every technical detail of the procedure is unchanged), E-259 (E-259-06: removed the `bb report verify-aggregates` closure sub-check from the Closure Runtime Smoke procedure -- the command and the stored `player_season_*` tables it checked were retired in E-259-03/04), E-157-02 (original), E-252-05 (added OPERATING_TIMEZONE env var), E-255-05 (Truth Sweep: fixed relocation-stale operations.md/auth.md links; corrected bare host commands -- `bb creds setup web` and `python scripts/backup_db.py` -- to the `docker compose exec` form, since the package is installed only inside the app container; rewrote the dashboard-access verification to the current admin-login-plus-public-reports model), E-256-10 (required daily backup cadence + off-host copy step in Routine backup; added the Closure Runtime Smoke (Step 1d) section documenting the `.smoke-fixture` file and the operator-facing smoke procedure), E-262-07 (synced Step 1d to the settled skill text: preflight now names `bb creds check --profile web`; added the terminal-fixture `generate`-target requirement, one-time bootstrap re-snapshot, and plays-coverage check to the `.smoke-fixture` section)*

@@ -362,4 +362,4 @@ Expected: HTTP 200 with `{"status": "ok", "db": "connected"}`.
 
 ---
 
-*Last updated: 2026-07-08 | Story: E-157-02 (original), E-255-05 (Truth Sweep: rewrote the dashboard-verification steps and the Section 7 reference material to the current admin-login-plus-public-reports model -- there is no coach-facing dashboard login; reports are public links -- and fixed the Section 7.3 bypass path from the deleted `/scouting/game-day*` to `/reports/*`)*
+*Last updated: 2026-08-09 | Source: 2026-08-09-docs-retired-workflow-sweep (footer convention: `Story:` -> `Source:`), E-157-02 (original), E-255-05 (Truth Sweep: rewrote the dashboard-verification steps and the Section 7 reference material to the current admin-login-plus-public-reports model -- there is no coach-facing dashboard login; reports are public links -- and fixed the Section 7.3 bypass path from the deleted `/scouting/game-day*` to `/reports/*`)*

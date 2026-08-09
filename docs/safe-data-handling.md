@@ -12,11 +12,11 @@ All raw API responses and real data files belong in the `/ephemeral/` directory
 at the repository root. This directory is gitignored -- nothing placed there can
 be accidentally committed.
 
-Create a subdirectory for your current epic:
+Create a subdirectory for your current chunk, named for its spec slug:
 
 ```
-ephemeral/E-005/response.json
-ephemeral/E-012/roster-data.csv
+ephemeral/2026-08-09-docs-retired-workflow-sweep/response.json
+ephemeral/2026-08-04-root-team-id-namespace-collision/roster-data.csv
 ephemeral/scratch/one-off-test.json
 ```
 
@@ -60,10 +60,12 @@ any of the following prefixes are never read by the scanner:
 | `.claude/` | Agent context files |
 | `node_modules/`, `__pycache__/` | Generated artifacts |
 | `requirements.txt`, `requirements-dev.txt` | pip-compiled lockfiles (SHA256 hashes trigger phone pattern) |
-| `epics/` | Active epic and story files (planning artifacts) |
-| `.project/` | Archive, ideas, templates, and research (planning artifacts) |
+| `.project/archive/`, `.project/ideas/`, `.project/research/`, `.project/templates/` | Legacy planning artifacts |
 
-Planning artifacts (`epics/` and `.project/`) frequently reference PII-like
+Note that `.project/` itself is **not** excluded, so `.project/specs/` -- the live unit
+of work -- **is** scanned. Only the four legacy subdirectories above are skipped.
+
+Those legacy planning artifacts frequently reference PII-like
 patterns as documentation examples. They are excluded because real data from
 the API should never appear there in the first place -- if it does, the
 `/ephemeral/` convention was already violated earlier.
@@ -313,7 +315,7 @@ appropriate.
 
 | Scenario | What to do |
 |----------|------------|
-| **Store an API response** | Save to `/ephemeral/<epic>/`. Never stage it. |
+| **Store an API response** | Save to `/ephemeral/<spec-slug>/`. Never stage it. |
 | **Commit a script** | Ensure no hardcoded tokens or credentials. The hook will catch common patterns. |
 | **Add a test fixture** | Use fake data. Add `synthetic-test-data` in the first 5 lines. Commit normally. |
 | **Share data with a teammate** | Describe the API call that produced it. Do not share the file -- it contains real data. |
@@ -330,3 +332,7 @@ appropriate.
   explanations of each PII/credential category
 - `.claude/rules/pii-safety.md` -- Rules for agents modifying the scanner
 - `.claude/hooks/README.md` -- Documentation for the Claude Code PII hook
+
+---
+
+*Last updated: 2026-08-09 | Source: 2026-08-09-docs-retired-workflow-sweep (per-epic `/ephemeral/` naming restated as per-chunk by spec slug; removed the `epics/` skip-list row; corrected the `.project/` skip-list row -- the blanket entry was narrowed to four legacy subdirs on 2026-08-02, so `.project/specs/` IS scanned and the doc said otherwise)*
