@@ -38,27 +38,25 @@ from NEXT.
   unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's
   roster surface? Read-only, needs a team→org lookup answer first; design nothing unless the
   number is material. Spec `2026-08-04-org-team-discovery-and-roster-ingest.md`.
-- **Sweep `docs/` for the retired workflow — now unblocked, the agents are gone.** Deliberately
-  out of Step 2's and Step 3's scope. Operator-facing docs still teach the PM/epic/dispatch flow;
-  the Step 2 sweep measured 4 files still naming a deleted agent, of which **3 remain**
-  (`docs/admin/agent-guide.md`, 124 lines and about nothing else;
-  `docs/admin/production-deployment.md:564`; `docs/vision-signals.md:15`) — Step 3 closed the
-  fourth by deleting the `[archive-refs: BLOCKED]` section that carried `operations.md:1048`'s
-  role-name routing list. On top of that, the ~110 references across 18 files the Step 1 review
-  counted for the wider workflow prose. **This sweep owns the one seam Step 3 left open**:
-  `docs/admin/agent-guide.md:66-68,106,108` still describes `epics/` and `.project/ideas/` as live
-  surfaces, and both are frozen as of 2026-08-08. **Plus four DEAD `epics/` pointers on LIVE
-  surfaces, found by Step 3's code review and predating it** — these are not covered by the
-  historical-record exemption below, because they are live API reference and a live skill
-  instruction, not records: `docs/api/auth.md:489` and `docs/api/endpoints/post-auth.md:322`
-  (→ `epics/E-075-mobile-credential-capture/R-01-findings.md`),
-  `.claude/skills/ingest-endpoint/SKILL.md:112` (→ `epics/E-002-data-ingestion/E-002-R-01.md`), and
-  `.claude/agent-memory/api-scout/mobile-auth-notes.md:53` (→ E-075 again). Both trees have been at
-  `.project/archive/` since well before Step 3; the retired archive-refs gate should have caught
-  them and did not, which is its own evidence the gate was already inert. Also still open from
-  Step 1:
-  `docs/admin/production-deployment.md:507` points at the deleted `.claude/skills/implement/SKILL.md`
-  and `docs/admin/agent-guide.md:102` says `context-ratchet.sh` "survives," which is false.
+- **Sweep `docs/` for the retired workflow** — **READY 2026-08-09**, spec
+  `2026-08-09-docs-retired-workflow-sweep.md`. Docs-only apart from `scripts/codex-review.sh`,
+  where only comments and one `--help` line change (operator-ruled in, 2026-08-09: cannot regress
+  behavior, so no extra review is owed); step 5 is the PII gates alone. The spec's step 6 and
+  verification 9 carry the one wrinkle — the `--help` line is heredoc text, not a comment, so a
+  `#`-prefix check inverts. The spec re-ran the sweep rather than inheriting this target list, and
+  **two of that list's claims did not survive**, so read the spec, not the history below:
+  - The "four DEAD `epics/` pointers" are **not dead** — all four resolve to two files that EXIST
+    under `.project/archive/`. They are stale paths; the fix is repointing. Following the old
+    wording would have deleted live pointers to real records.
+  - The target list was an undercount again, and so were the first two corrections of it: **12
+    live surfaces it never named**, reached 5 → 8 → 12 across a term-grep pass, the
+    codex-spec-review, and a file-then-read pass run after `902fb1e`. Two of the last four sat
+    inside files already on the edit list. `docs/admin/terminal-guide.md`'s "Agent Teams" section
+    is the emblem: its headings contain neither "epic" nor "dispatch".
+
+  Carried forward unchanged: `docs/admin/agent-guide.md` is deleted outright (124 lines, about
+  nothing else); `production-deployment.md:507`'s pointer at the deleted implement skill and
+  `agent-guide.md:102`'s false `context-ratchet.sh` "survives" claim are both confirmed and fixed.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
