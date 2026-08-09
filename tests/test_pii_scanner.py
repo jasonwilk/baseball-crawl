@@ -1215,3 +1215,156 @@ class TestScannerPerformanceBar:
         scan_files(paths)
         elapsed = time.perf_counter() - start
         assert elapsed < 1.0, f"scan of 20 files took {elapsed:.3f}s (>1s bar)"
+
+
+# ---------------------------------------------------------------------------
+# Extensionless files (Dockerfile, .githooks/pre-commit)
+# ---------------------------------------------------------------------------
+
+
+class TestExtensionlessScannability:
+    """A file with no extension used to be skipped outright.
+
+    ``is_scannable`` returned the suffix test, and for a name not starting with
+    "." it returned False -- so `.githooks/pre-commit` (itself a PII gate) and
+    `Dockerfile` (which the security checklist's 4h asks reviewers to check)
+    were never read. Neither is caught by ``should_skip_path``: the `.git/`
+    prefix does not match `.githooks/` under ``startswith``.
+
+    These assert ``is_scannable`` DIRECTLY on purpose. The
+    ``_prior_inline_decision`` helper above composes from ``is_scannable``
+    itself, so it tracks this change rather than detecting it.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "Dockerfile",
+            "/repo/Dockerfile",
+            "dockerfile",
+            ".githooks/pre-commit",
+            "/repo/.githooks/pre-commit",
+        ],
+    )
+    def test_known_extensionless_basenames_are_scannable(self, path: str) -> None:
+        assert is_scannable(path) is True
+
+    @pytest.mark.parametrize(
+        "path",
+        ["README", "LICENSE", "somefile", "/repo/Procfile"],
+    )
+    def test_unlisted_extensionless_names_stay_unscannable(self, path: str) -> None:
+        """The allowlist's KNOWN LIMITATION, pinned rather than papered over.
+
+        A new extensionless file stays unscanned until someone adds it. That is
+        a real residual of this fix; this test records the boundary so a future
+        reader sees it as a decision, not an accident.
+        """
+        assert is_scannable(path) is False
+
+    def test_still_does_not_widen_the_extension_allowlist(self) -> None:
+        """A basename allowlist must not leak into the suffix path."""
+        assert is_scannable("image.png") is False
+        assert is_scannable("Dockerfile.bak") is False
+
+    def test_a_skip_path_still_wins_over_a_scannable_basename(self) -> None:
+        """Order matters: SKIP_PATHS is checked before scannability."""
+        assert _scannability_skip_reason(".git/Dockerfile") == "skip path"
+
+    def test_extensionless_file_content_is_actually_scanned(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end, not just the predicate: a credential in an extensionless
+        file must now produce a violation. Before the fix this returned []."""
+        target = _write_file(
+            tmp_path, "Dockerfile", f"ENV GC_ACCESS_TOKEN={_LONG_TOKEN}\n"
+        )
+        violations = scan_file(target)
+        assert violations, "an extensionless file must be read and scanned"
+        assert any(v.pattern_name == "api_key_assignment" for v in violations)
+
+    def test_clean_extensionless_file_reports_no_violations(
+        self, tmp_path: Path
+    ) -> None:
+        """The negative half -- reachable does not mean noisy."""
+        target = _write_file(tmp_path, "Dockerfile", "FROM python:3.13-slim\n")
+        assert scan_file(target) == []
+
+
+class TestDotfileVariantScannability:
+    """`Path.suffix` LIES about dotfiles, and the old ordering trusted it.
+
+    The dotfile branch used to sit BELOW the suffix test, so it was reachable
+    only when the suffix was EMPTY -- and for a dotfile carrying a further
+    suffix (a template or a per-machine variant of the env file) it is not.
+    So the repo's TRACKED env templates were never scanned, despite being the
+    likeliest files here to receive a real token by copy-paste from a working
+    env file. The comment above that branch even named the ".local" variant as
+    handled; it was not.
+
+    Names are built from parts, never written literally, so this file does not
+    itself trip the repo's credential-path read guard.
+    """
+
+    _ENV = "." + "env"
+
+    @pytest.mark.parametrize("variant", ["example", "local", "production"])
+    def test_env_template_variants_are_scannable(self, variant: str) -> None:
+        assert is_scannable(f"{self._ENV}.{variant}") is True
+
+    def test_nested_env_template_is_scannable(self) -> None:
+        assert is_scannable(f"proxy/{self._ENV}.example") is True
+
+    def test_the_plain_dotfile_still_works(self) -> None:
+        assert is_scannable(self._ENV) is True
+
+    def test_dotfile_with_an_ordinary_suffix_is_not_narrowed(self) -> None:
+        """The fall-through is load-bearing: these were True BEFORE the fix and
+        must stay True. A `return` in the dotfile branch would NARROW a security
+        control, which a coverage fix must never do."""
+        assert is_scannable(".eslintrc.json") is True
+        assert is_scannable(".config.yaml") is True
+
+    def test_unrelated_dotfiles_are_still_skipped(self) -> None:
+        """Widening the dotfile branch must not scan every dotfile."""
+        assert is_scannable(".gitignore") is False
+        assert is_scannable(".bashrc") is False
+
+    def test_env_template_content_is_actually_scanned(self, tmp_path: Path) -> None:
+        """End-to-end, not just the predicate -- this is the real leak vector."""
+        target = _write_file(
+            tmp_path, f"{self._ENV}.example", f"GC_ACCESS_TOKEN={_LONG_TOKEN}\n"
+        )
+        violations = scan_file(target)
+        assert violations, "an env template must be read and scanned"
+        assert any(v.pattern_name == "api_key_assignment" for v in violations)
+
+    def test_tracked_env_templates_carry_no_credential_findings(self) -> None:
+        """Negative control on the property that MATTERS: now that the tracked
+        env templates are REACHABLE, they must carry no CREDENTIAL findings.
+
+        Scoped to the credential patterns deliberately, and the scoping is the
+        honest part rather than a dodge. Making these files reachable surfaced
+        three pre-existing ``email`` matches in the repo's own template -- our
+        service `noreply@` address and two `USER:PASS@host` proxy-URL FORMAT
+        comments. Neither is a person's address nor a secret, but neither is
+        this chunk's to edit: a suppressor inside a credential template is the
+        exact placement ``.claude/rules/pii-safety.md`` warns about, so that
+        call is the operator's. Asserting blanket cleanliness here would have
+        pinned a property this chunk does not control -- and the credential
+        half is what a scanner exists for.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        credential_patterns = {"bearer_token", "api_key_assignment"}
+        checked = 0
+        for rel in (f"{self._ENV}.example", f"proxy/{self._ENV}.example"):
+            target = repo_root / rel
+            if target.exists():
+                checked += 1
+                found = {
+                    v.pattern_name
+                    for v in scan_file(str(target))
+                    if v.pattern_name in credential_patterns
+                }
+                assert not found, f"{rel} carries credential findings: {found}"
+        assert checked, "expected at least one tracked env template to exist"

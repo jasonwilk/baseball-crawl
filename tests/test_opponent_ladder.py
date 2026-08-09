@@ -44,6 +44,16 @@ _ROOT = "root-aaaa-0000"
 _PROGENITOR = "prog-bbbb-1111"
 _PUBLIC_ID = "dD9PtF0YbKad"
 
+# The member team's teams.season_year. Rung (c) drops any search hit whose
+# result.season.year differs, so every fixture hit defaults to THIS year --
+# a hit built without one would be dropped and the test would fail for a
+# reason it is not about.
+_MEMBER_SEASON_YEAR = 2026
+
+# Sentinel for "omit result.season entirely" in _search_hit_with_raw_season.
+# A bare None cannot express it: `season: null` is itself a shape under test.
+_OMIT_SEASON = object()
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -56,8 +66,9 @@ def db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     load_real_schema(conn)
     conn.execute(
-        "INSERT INTO teams (id, name, membership_type) VALUES (?, 'LSB JV', 'member')",
-        (_OUR_TEAM_ID,),
+        "INSERT INTO teams (id, name, membership_type, season_year) "
+        "VALUES (?, 'LSB JV', 'member', ?)",
+        (_OUR_TEAM_ID, _MEMBER_SEASON_YEAR),
     )
     conn.commit()
     return conn
@@ -87,9 +98,26 @@ def _manual_record(*, root_team_id: str = _ROOT) -> OpponentRecord:
     )
 
 
-def _search_hit(public_id: str, team_id: str = "11111111") -> dict[str, Any]:
+def _search_hit(
+    public_id: str,
+    team_id: str = "11111111",
+    *,
+    season_year: int = _MEMBER_SEASON_YEAR,
+    season_name: str = "spring",
+) -> dict[str, Any]:
     """A TEAM search hit. The envelope ``type`` is required -- rung (c) drops
-    non-team hits before counting, and teams OMIT ``result.type`` entirely."""
+    non-team hits before counting, and teams OMIT ``result.type`` entirely.
+
+    ⚠ ``season`` is an OBJECT ``{name, year}`` on ``POST /search``
+    (``docs/api/endpoints/post-search.md``), and is part of the CLOSED key set
+    for team hits. It is NOT the public team profile's flat ``team_season``
+    shape (bare-string ``season`` + sibling ``year``), and there is no
+    ``team_season.season.year`` path anywhere -- that is a fabrication a
+    mirrored mock would validate vacuously (``.claude/rules/testing.md``).
+
+    ``season_year`` defaults to the member team's year so a hit auto-accepts
+    unless a test deliberately mismatches it.
+    """
     return {
         "type": "team",
         "result": {
@@ -98,8 +126,25 @@ def _search_hit(public_id: str, team_id: str = "11111111") -> dict[str, Any]:
             "id": team_id,
             "number_of_players": 14,
             "staff": ["Coach One"],
+            "season": {"name": season_name, "year": season_year},
         },
     }
+
+
+def _search_hit_with_raw_season(
+    season: Any, *, public_id: str = _PUBLIC_ID, team_id: str = "11111111"
+) -> dict[str, Any]:
+    """A TEAM hit whose ``result.season`` is set VERBATIM to ``season``.
+
+    Pass ``_OMIT_SEASON`` to leave the key off entirely. Exercises the shapes
+    the fail-closed filter must drop rather than wave through.
+    """
+    hit = _search_hit(public_id, team_id)
+    if season is _OMIT_SEASON:
+        del hit["result"]["season"]
+    else:
+        hit["result"]["season"] = season
+    return hit
 
 
 def _org_hit(public_id: str, org_id: str = "99999999") -> dict[str, Any]:
@@ -423,6 +468,11 @@ def test_search_single_organization_hit_does_not_resolve(
     uniquely (measured: 2 of 15 organization names returned a single hit, both
     the organization). Organizations carry a public_id, so the pre-filter
     result would otherwise look like a clean single match.
+
+    Re-audited when the season filter landed (the same negative-property look
+    its sibling below needed): the season filter CANNOT be what produces None
+    here, because the org drop leaves zero team hits and the filter never sees
+    a hit to judge. The entity-class drop remains the sole reason.
     """
     client = MagicMock()
     client.post_json.side_effect = [{"hits": [_org_hit(_PUBLIC_ID)]}]
@@ -478,14 +528,22 @@ def test_search_two_teams_plus_organization_is_still_ambiguous(
 
     Dropping the organization must not turn an ambiguous multi-team result
     into an auto-resolve -- no new wrong-team mode is introduced.
+
+    ⚠ **Both team hits carry the MEMBER's season year on purpose.** This is a
+    negative-property test, and the season filter added later could make it pass
+    for the wrong reason: with a mismatched year both hits would be dropped and
+    the result would be None because of the SEASON filter, not because of
+    ambiguity -- certifying a property it no longer exercises
+    (``.claude/rules/testing.md``, "when a change makes an input load-bearing").
+    Matching years keep ambiguity the ONLY reason this returns None.
     """
     client = MagicMock()
     client.post_json.side_effect = [
         {
             "hits": [
                 _org_hit("org-slug"),
-                _search_hit("slug-a", "id-a"),
-                _search_hit("slug-b", "id-b"),
+                _search_hit("slug-a", "id-a", season_year=_MEMBER_SEASON_YEAR),
+                _search_hit("slug-b", "id-b", season_year=_MEMBER_SEASON_YEAR),
             ]
         }
     ]
@@ -560,6 +618,265 @@ def test_search_zero_hits_is_unresolved_mappable_not_no_presence(
     # The ladder NEVER writes the no_presence state.
     assert row["resolution_method"] is None
     assert row["resolution_method"] != "no_presence"
+
+
+# ---------------------------------------------------------------------------
+# Rung (c) season-year filter (ruled 2026-08-08): never cross-YEAR, same-year
+# cross-season is fine, an absent/unusable year REFUSES (fail-closed).
+# ---------------------------------------------------------------------------
+
+
+def test_search_single_match_with_matching_season_year_resolves(
+    db: sqlite3.Connection,
+) -> None:
+    """The unchanged happy path, stated explicitly: year equal -> auto-accept."""
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {"hits": [_search_hit(_PUBLIC_ID, season_year=_MEMBER_SEASON_YEAR)]}
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Real Team Name",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.method == METHOD_SEARCH
+    assert result.public_id == _PUBLIC_ID
+
+
+def test_search_same_year_different_season_name_still_resolves(
+    db: sqlite3.Connection,
+) -> None:
+    """Cross-SEASON within one YEAR is legitimate and must still auto-accept.
+
+    The comparison is on ``season.year`` ALONE and never on ``season.name``:
+    a spring-2026 member team facing a summer-2026 hit is the same year, so it
+    resolves. Matching on the name too would refuse this, which the operator
+    ruling explicitly excludes.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit(
+                    _PUBLIC_ID,
+                    season_year=_MEMBER_SEASON_YEAR,
+                    season_name="summer",
+                )
+            ]
+        }
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Real Team Name",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.public_id == _PUBLIC_ID
+
+
+def test_search_single_match_wrong_season_year_falls_to_operator_queue(
+    db: sqlite3.Connection,
+) -> None:
+    """A single hit from ANOTHER year is dropped -> rung (d), not a hard failure.
+
+    This is the whole point of the filter: a team from one year must never
+    auto-match a team from another year.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {"hits": [_search_hit(_PUBLIC_ID, season_year=_MEMBER_SEASON_YEAR - 1)]}
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Real Team Name",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    assert result.public_id is None
+    row = _link_row(db)
+    assert row["public_id"] is None
+    # Pending, NEVER the operator-declared no_presence state.
+    assert row["resolution_method"] is None
+
+
+@pytest.mark.parametrize(
+    ("season", "label"),
+    [
+        (_OMIT_SEASON, "season key absent entirely"),
+        (None, "season is null"),
+        ({"name": "spring"}, "season object with no year"),
+        ({"name": "spring", "year": None}, "year is null"),
+        ({"name": "spring", "year": "2026"}, "year is a string, not an int"),
+        ("spring 2026", "season is a bare string (the public-profile shape)"),
+    ],
+)
+def test_search_unusable_season_year_refuses_fail_closed(
+    db: sqlite3.Connection, season: Any, label: str
+) -> None:
+    """Every shape that is not an honest integer year DROPS the hit.
+
+    Fail-closed is the ruled behavior: an unusable year must NOT be treated as
+    matching. The bare-string case is the public team profile's flat
+    ``team_season`` shape -- carrying that parser over here would be the
+    fabricated-path trap, so it must be refused, not accommodated.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {"hits": [_search_hit_with_raw_season(season)]}
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Real Team Name",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE, label
+    assert result.public_id is None, label
+
+
+def test_search_two_teams_only_one_matching_season_resolves_that_one(
+    db: sqlite3.Connection,
+) -> None:
+    """The filter WIDENS as well as narrows -- state both sides.
+
+    Two team hits where only ONE carries the member's year now auto-accept on
+    that one: the season filter narrows the POPULATION the uniqueness bar
+    counts, exactly the way the organization drop does. The bar's PREDICATE
+    ("exactly one") is unchanged. This is a deliberate trade, not a no-op.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit(_PUBLIC_ID, "id-current", season_year=_MEMBER_SEASON_YEAR),
+                _search_hit("slug-old", "id-old", season_year=_MEMBER_SEASON_YEAR - 1),
+            ]
+        }
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Same Club Two Seasons",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.method == METHOD_SEARCH
+    assert result.public_id == _PUBLIC_ID
+
+
+def test_search_two_teams_both_wrong_season_is_unresolved(
+    db: sqlite3.Connection,
+) -> None:
+    """Every hit dropped on season -> rung (d), like a zero-hit search."""
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit("slug-a", "id-a", season_year=_MEMBER_SEASON_YEAR - 1),
+                _search_hit("slug-b", "id-b", season_year=_MEMBER_SEASON_YEAR - 2),
+            ]
+        }
+    ]
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Ambiguous Team",
+        registry=[_manual_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    assert result.public_id is None
+
+
+def test_member_team_with_null_season_year_refuses_every_auto_accept(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A member team with NULL season_year auto-accepts NOTHING at rung (c).
+
+    Fail-closed: matching a hit against a year we do not have would BE the
+    cross-year auto-match the filter exists to prevent. Pins the WARNING too --
+    this silently disables a whole rung for the team, so it must not be logged
+    at DEBUG.
+    """
+    db.execute(
+        "UPDATE teams SET season_year = NULL WHERE id = ?", (_OUR_TEAM_ID,)
+    )
+    db.commit()
+    client = MagicMock()
+    # An otherwise PERFECT hit: single, team-class, well-formed season object.
+    # The only thing missing is the member's own year.
+    client.post_json.side_effect = [{"hits": [_search_hit(_PUBLIC_ID)]}]
+
+    with caplog.at_level("WARNING", logger="src.gamechanger.opponent_ladder"):
+        result = resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="Real Team Name",
+            registry=[_manual_record()],
+        )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    assert result.public_id is None
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("no stored season_year" in m for m in warnings), warnings
+
+
+def test_null_member_year_does_not_block_rung_a(db: sqlite3.Connection) -> None:
+    """The refusal is scoped to rung (c) -- the progenitor bridge is untouched.
+
+    A NULL season_year disables auto-accept by SEARCH; it must not turn into a
+    team-wide resolution outage.
+    """
+    db.execute(
+        "UPDATE teams SET season_year = NULL WHERE id = ?", (_OUR_TEAM_ID,)
+    )
+    db.commit()
+    client = MagicMock()
+    client.get.return_value = {"public_id": _PUBLIC_ID}
+
+    result = resolve_opponent(
+        conn=db,
+        client=client,
+        our_team_id=_OUR_TEAM_ID,
+        opponent_id=_ROOT,
+        opponent_name="Linked Opp",
+        registry=[_linked_record()],
+    )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    assert result.method == METHOD_PROGENITOR
+    assert result.public_id == _PUBLIC_ID
+    client.post_json.assert_not_called()  # rung (c) never ran
 
 
 def test_search_routes_through_helper_with_real_name(
@@ -830,3 +1147,157 @@ def test_per_pairing_key_is_local_to_team(db: sqlite3.Connection) -> None:
         (_ROOT,),
     ).fetchall()
     assert [r[0] for r in rows] == [1, 2]
+
+
+def test_all_team_hits_dropped_on_season_warns(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every team hit dropped on season year is a WARNING, not a DEBUG.
+
+    The season-filter analogue of the all-hits-are-non-team warning, and it
+    earns the level for the same reason: this is how a CLASS-WIDE year mismatch
+    presents. A stale `teams.season_year` drops every hit for every opponent and
+    routes the whole team to the operator queue -- at DEBUG that is
+    indistinguishable from ordinary "not indexed" noise, which is exactly how a
+    dead rung would go unnoticed for a season.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit("slug-a", "id-a", season_year=_MEMBER_SEASON_YEAR - 1),
+                _search_hit("slug-b", "id-b", season_year=_MEMBER_SEASON_YEAR - 1),
+            ]
+        }
+    ]
+
+    with caplog.at_level("WARNING", logger="src.gamechanger.opponent_ladder"):
+        result = resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="Last Season Club",
+            registry=[_manual_record()],
+        )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    dropped = [m for m in warnings if "dropped on season year" in m]
+    assert dropped, warnings
+    # Both hits had a real, different year -- none were unparseable, so the
+    # message must attribute all of them to the year and none to a shape fault.
+    assert "2 had a different year" in dropped[0], dropped[0]
+    assert "0 had no usable year" in dropped[0], dropped[0]
+    assert "suspect the member team's stored season_year" in dropped[0]
+
+
+def test_partial_season_drop_stays_at_debug(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The WARNING is scoped to the total-wipeout case.
+
+    A partial drop that still resolves is the filter working normally -- warning
+    there would train the operator to ignore the level, which is what makes the
+    total-wipeout warning worth having.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit(_PUBLIC_ID, "id-now", season_year=_MEMBER_SEASON_YEAR),
+                _search_hit("slug-old", "id-old", season_year=_MEMBER_SEASON_YEAR - 1),
+            ]
+        }
+    ]
+
+    with caplog.at_level("DEBUG", logger="src.gamechanger.opponent_ladder"):
+        result = resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="Same Club Two Seasons",
+            registry=[_manual_record()],
+        )
+
+    assert result.outcome is ResolutionOutcome.RESOLVED
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert not any("another season year" in m for m in warnings), warnings
+    debugs = [r.getMessage() for r in caplog.records if r.levelname == "DEBUG"]
+    assert any("dropped on season year" in m for m in debugs), debugs
+
+
+def test_all_hits_unparseable_season_blames_the_api_not_the_operator(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two class-wide failures live here, and the message must tell them apart.
+
+    `_hit_season_year` fails closed to None for a renamed or dropped `season`
+    key just as it does for a genuinely different year. If GameChanger ever
+    changes that shape, EVERY hit drops -- and a message blaming the member
+    team's stored season_year would send the operator to the one place the
+    fault is NOT.
+    """
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit_with_raw_season(_OMIT_SEASON, public_id="slug-a"),
+                _search_hit_with_raw_season(_OMIT_SEASON, public_id="slug-b"),
+            ]
+        }
+    ]
+
+    with caplog.at_level("WARNING", logger="src.gamechanger.opponent_ladder"):
+        result = resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="Shape Regression Club",
+            registry=[_manual_record()],
+        )
+
+    assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    shape = [m for m in warnings if "API SHAPE problem" in m]
+    assert shape, warnings
+    # It must NOT point the operator at their own DB row.
+    assert "NOT the member team" in shape[0]
+    assert not any("had a different year" in m for m in warnings), warnings
+
+
+def test_mixed_drop_reports_both_causes_separately(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A mix of wrong-year and unparseable hits counts each cause on its own."""
+    client = MagicMock()
+    client.post_json.side_effect = [
+        {
+            "hits": [
+                _search_hit("slug-a", "id-a", season_year=_MEMBER_SEASON_YEAR - 1),
+                _search_hit_with_raw_season(_OMIT_SEASON, public_id="slug-b"),
+            ]
+        }
+    ]
+
+    with caplog.at_level("WARNING", logger="src.gamechanger.opponent_ladder"):
+        resolve_opponent(
+            conn=db,
+            client=client,
+            our_team_id=_OUR_TEAM_ID,
+            opponent_id=_ROOT,
+            opponent_name="Mixed Club",
+            registry=[_manual_record()],
+        )
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    mixed = [m for m in warnings if "dropped on season year" in m]
+    assert mixed, warnings
+    assert "1 had a different year" in mixed[0], mixed[0]
+    assert "1 had no usable year" in mixed[0], mixed[0]

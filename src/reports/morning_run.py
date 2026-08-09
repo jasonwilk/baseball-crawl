@@ -658,9 +658,84 @@ def run_morning(
                 )
                 continue
 
+            # The own team's season year, for the rung-(c) season filter. This
+            # row's season_year is the ONLY thing that filter compares against,
+            # and ensure_team_row defaults it to None -- so without this fetch a
+            # team's FIRST-EVER morning-run row is created NULL and rung (c) is
+            # silently dead for that team (fail-closed by the ruled semantics).
+            #
+            # ⚠ One extra public GET per team per run. resolve_own_team_gc_uuid
+            # already fetches this same profile internally
+            # (src/gamechanger/crawlers/opponents.py) but returns only the
+            # gc_uuid; widening its return type would churn ~10 tests, so the
+            # duplicate fetch is the cheaper trade. Once per team per morning is
+            # not a tight loop, so `.claude/rules/http-discipline.md` is
+            # satisfied -- do NOT replicate this anywhere hotter.
+            #
+            # A failed fetch degrades to None rather than aborting the team
+            # (same best-effort wrapping as the opponent display profile
+            # below).
+            try:
+                own_season_year = resolve_team(public_id).year
+            except Exception:  # noqa: BLE001 -- season fill is best-effort
+                own_season_year = None
+                logger.warning(
+                    "Could not fetch the public profile for own team %s",
+                    public_id,
+                    exc_info=True,
+                )
+            # ⚠ Validate the TYPE before it becomes durable state. resolve_team
+            # validates `name` and `sport` only, so a response-shape regression
+            # can hand us a quoted year. Writing that through would be worse
+            # than writing nothing: the read side fails closed on a non-int, and
+            # _backfill_season_year refuses to overwrite any NON-NULL value --
+            # so one malformed response would wedge rung (c) OFF for that team
+            # permanently, fixable only by hand-editing the row. Refusing the
+            # value keeps the column NULL and therefore still healable.
+            if own_season_year is not None and (
+                isinstance(own_season_year, bool)
+                or not isinstance(own_season_year, int)
+            ):
+                logger.warning(
+                    "Own team %s reported a non-integer season year %r; "
+                    "refusing to store it (a bad value here would wedge "
+                    "rung (c) off for this team permanently)",
+                    public_id,
+                    own_season_year,
+                )
+                own_season_year = None
+            # ⚠ Warn on the VALUE, not on the exception. There are TWO ways to
+            # arrive with no year and only one of them raises: `TeamProfile.year`
+            # is `int | None`, so a perfectly successful fetch can carry no year
+            # at all. Warning on the except branch alone would leave the quieter
+            # shape completely silent -- and silence is the failure mode here,
+            # because the consequence is a whole ladder rung going dark.
+            #
+            # The consequence is stated CONDITIONALLY on purpose: ensure_team_row
+            # backfills NULL->value only, so if the row already carries a stored
+            # year, rung (c) keeps working off that and nothing is disabled.
+            # Asserting "rung (c) is disabled" unconditionally would send the
+            # operator after a non-problem.
+            if own_season_year is None:
+                logger.warning(
+                    "No season year available for own team %s, so none will be "
+                    "recorded. If its teams.season_year is still NULL, rung-(c) "
+                    "auto-accept is disabled for this team's opponents this run "
+                    "(fail-closed); if a year is already stored, that one still "
+                    "applies",
+                    public_id,
+                )
+
             # Own-team row (FK target for scheduled_report_runs.own_team_id).
+            # season_year is a NULL-safe backfill in ensure_team_row
+            # (_backfill_season_year writes NULL->value only), so this also
+            # heals an existing NULL row and can never clobber a stored year.
             own_team_id = ensure_team_row(
-                conn, public_id=public_id, gc_uuid=gc_uuid, source="morning_run"
+                conn,
+                public_id=public_id,
+                gc_uuid=gc_uuid,
+                season_year=own_season_year,
+                source="morning_run",
             )
             # E-252-07 items 1 & 2 (TN-5): COMMIT the own-team row IMMEDIATELY --
             # BEFORE the network fetch below. ensure_team_row opens an implicit

@@ -111,6 +111,24 @@ SCANNABLE_EXTENSIONS: set[str] = {
     ".env", ".sh", ".bash",
 }
 
+# Extensionless files to scan, matched on the LOWERCASED BASENAME. The
+# extension allowlist above cannot reach these: a name with no dot has an empty
+# suffix and does not start with "." either, so it was skipped outright as a
+# "non-scannable extension" regardless of SKIP_PATHS. Two tracked files were
+# affected -- `.githooks/pre-commit` (itself a PII gate) and `Dockerfile` (which
+# the security checklist's 4h asks reviewers to check).
+#
+# ⚠ KNOWN LIMITATION, not a solved problem: a NEW extensionless file stays
+# UNSCANNED until someone adds its basename here. A shebang test was considered
+# and does NOT work -- `_scannability_skip_reason` runs BEFORE the content read
+# on both paths (the `--staged` path reads its blob via `git show :<path>` only
+# after the gate), so a shebang test would need the very read it gates, and
+# `Dockerfile` has no shebang at all.
+SCANNABLE_BASENAMES: set[str] = {
+    "dockerfile",
+    "pre-commit",
+}
+
 # RFC 2606 reserved domain allowlist for email filtering.
 # Email addresses using these domains are never real and are excluded from
 # findings. See TN-1 in the E-129 epic for matching strategy details.

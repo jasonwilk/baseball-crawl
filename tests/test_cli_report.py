@@ -474,10 +474,12 @@ class TestApplyOpponentMappingHelper:
 class TestSearchOverride:
     """A rung-(c) `search` resolution is correctable; nothing else is.
 
-    The gap this closes: `search` auto-accepts on a single TEAM hit with no name
-    or season corroboration, so it is the one method that can be confidently
-    wrong -- and before this, `map-opponent` refused it, leaving hand-written SQL
-    as the only recovery.
+    The gap this closes: `search` auto-accepts on a single TEAM hit from the
+    member team's own season YEAR, with no name corroboration, so it is still
+    the one method that can be confidently wrong -- a same-year name-alike
+    auto-accepts exactly as before. Before this, `map-opponent` refused it,
+    leaving hand-written SQL as the only recovery. Prevention (the season
+    filter) and recovery (this command) are complements, not substitutes.
     """
 
     def _conn(self) -> sqlite3.Connection:

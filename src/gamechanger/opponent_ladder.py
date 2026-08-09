@@ -21,14 +21,18 @@ The ladder (TN-3), in order:
   they fall through to rung (c)/(d) by design.
 * **Rung (c) -- POST /search by name.** Routes through
   :func:`search_teams_by_name` (never ``client.post_json`` directly), querying a
-  REAL name (never a slug). Organization hits are dropped first (search returns
-  BOTH entity classes); auto-resolves ONLY on an unambiguous single TEAM match;
+  REAL name (never a slug). Two filters run before the count: organization hits
+  are dropped (search returns BOTH entity classes), then hits whose
+  ``result.season.year`` does not equal the MEMBER team's ``teams.season_year``
+  are dropped. Auto-resolves ONLY on an unambiguous single surviving TEAM match;
   method ``search``. A zero-hit is ambiguous -> falls to rung (d), not a hard
-  failure. See :func:`_resolve_via_search` for what dropping organizations
-  costs -- it widens the accept surface, and the result is terminal TO THIS
-  LADDER. A ``search`` row is the ONE method an operator can override via
-  ``bb report map-opponent`` (2026-08-05); the ladder itself still never
-  re-attempts it.
+  failure. See :func:`_resolve_via_search` for what each filter costs -- both
+  narrow AND widen the accept surface, and the result is terminal TO THIS
+  LADDER. The season filter is FAIL-CLOSED: an absent or non-integer hit year
+  drops the hit, and a member team with NULL ``season_year`` auto-accepts
+  nothing at this rung. A ``search`` row is the ONE method an operator can
+  override via ``bb report map-opponent`` (2026-08-05); the ladder itself still
+  never re-attempts it.
 * **Rung (d) -- operator queue.** Persists a not-resolved pending
   ``opponent_links`` row (``public_id`` NULL, ``resolution_method`` NULL) that
   ``bb report map-opponent`` (E-240-05) later UPDATEs. Outcome
@@ -279,33 +283,75 @@ def _resolve_via_progenitor(
 # ---------------------------------------------------------------------------
 
 
+def _hit_season_year(hit: dict) -> int | None:
+    """Return a search hit's ``result.season.year`` as an int, or None.
+
+    ⚠ On ``POST /search`` ``season`` is an OBJECT ``{name, year}``
+    (``docs/api/endpoints/post-search.md``). That is NOT the public team
+    profile's shape, where ``season`` is a bare string and ``year`` is a flat
+    sibling integer -- do NOT carry a parser between the two.
+    ``.claude/rules/testing.md`` records ``team_season.season.year`` as a
+    FABRICATED path that a mirrored mock will happily validate.
+
+    Returns None (which the caller treats as "drop the hit") for every shape
+    that is not an honest integer year: no ``result``, no ``season`` object, an
+    absent year, or a non-integer one. ``bool`` is excluded explicitly because
+    it is an ``int`` subclass in Python and ``True == 1`` would otherwise
+    compare as a year.
+    """
+    result = hit.get("result")
+    if not isinstance(result, dict):
+        return None
+    season = result.get("season")
+    if not isinstance(season, dict):
+        return None
+    year = season.get("year")
+    if isinstance(year, bool) or not isinstance(year, int):
+        return None
+    return year
+
+
 def _resolve_via_search(
-    client: GameChangerClient, opponent_name: str
+    client: GameChangerClient,
+    opponent_name: str,
+    member_season_year: int | None,
 ) -> str | None:
     """Resolve a public_id via POST /search on an UNAMBIGUOUS single TEAM match.
 
     Routes through :func:`search_teams_by_name` (never ``client.post_json``).
-    Organization hits are DROPPED first (:func:`is_team_hit`); the
-    ``result.public_id`` is returned ONLY when exactly one TEAM hit remains.
-    Zero team hits (ambiguous: punctuation quirk, genuinely unindexed, or an
-    all-organization result set) or 2+ team hits (ambiguous) return ``None`` so
-    the caller falls to rung (d) -- NEVER a hard failure.
+    TWO filters run before the count: organization hits are DROPPED first
+    (:func:`is_team_hit`), then hits whose ``result.season.year`` does not equal
+    ``member_season_year`` are dropped (:func:`_hit_season_year`). The
+    ``result.public_id`` is returned ONLY when exactly one hit survives BOTH.
+    Zero survivors (ambiguous: punctuation quirk, genuinely unindexed, an
+    all-organization result set, or an all-wrong-season one) or 2+ survivors
+    (ambiguous) return ``None`` so the caller falls to rung (d) -- NEVER a hard
+    failure.
 
-    ⚠ **State both sides: dropping organizations WIDENS the auto-accept
+    ⚠ **State both sides: EACH filter both NARROWS and WIDENS the auto-accept
     surface.** The bar's PREDICATE is unchanged ("exactly one"), but its
-    POPULATION is narrower, so one team beside N organizations now
-    auto-resolves where the raw count previously sent it to the operator
-    queue. That is the deliberate trade -- refusing whenever an organization
-    appears would punt the Showdown/League-shaped queries for nothing -- but it
-    is a real widening, not a no-op, and it is STICKY *to this ladder*:
-    :func:`resolve_opponent` treats any ``opponent_links`` row with a non-NULL
-    ``resolution_method`` as terminal, so a wrong auto-resolve is **never
-    re-attempted automatically**. Note also that the name-match and season-year
-    filters documented for this rung are NOT implemented, so the single-team
-    count is the ENTIRE gate. (Criterion 1, the name match, was rejected:
+    POPULATION is not. Dropping organizations means one team beside N
+    organizations now auto-resolves where the raw count previously sent it to
+    the operator queue. The season filter behaves the same way: two team hits of
+    which only ONE carries the member's year now auto-accept on that one. Both
+    also narrow -- a single hit that fails a filter is refused where it once
+    resolved. Neither is a no-op in either direction, and this is STICKY *to
+    this ladder*: :func:`resolve_opponent` treats any ``opponent_links`` row
+    with a non-NULL ``resolution_method`` as terminal, so a wrong auto-resolve
+    is **never re-attempted automatically**.
+
+    **The season filter is FAIL-CLOSED, on ``year`` ALONE** (operator ruling,
+    2026-08-08). A team from one YEAR must never auto-match a team from another
+    year; cross-season *within* one year (spring 2026 vs summer 2026) is
+    legitimate and must still auto-accept, which is why ``season.name`` is
+    **never** compared. A hit with no usable year is dropped rather than waved
+    through, and a ``member_season_year`` of ``None`` (the member team's
+    ``teams.season_year`` is NULL) refuses EVERY auto-accept at this rung --
+    logged at WARNING, because that silently disables rung (c) for that team.
+
+    Criterion 1, the name match, remains REJECTED (not merely unimplemented):
     canonical names diverge in word order and punctuation from the free-text
-    schedule name we search with. Criterion 2, the season-year match, is still
-    OPEN -- ``.project/specs/2026-08-05-rung-c-season-year-filter.md``.)
+    schedule name we search with, so an exact match would reject correct hits.
 
     ⚠ **What DID change (2026-08-05), because the sentence above used to say
     "and never re-surfaces to the operator" and that is no longer true:** a
@@ -315,7 +361,16 @@ def _resolve_via_search(
     repair, NOT a re-attempt: nothing here re-runs, and the operator must
     notice the wrong mapping first -- the ``--dry-run`` RESOLVED line prints the
     method to make that possible. The stickiness that matters therefore stands:
-    an unnoticed wrong auto-resolve still feeds reports indefinitely.
+    an unnoticed wrong auto-resolve still feeds reports indefinitely. The season
+    filter narrows how OFTEN that happens; it does not make it recoverable.
+
+    Args:
+        client: Authenticated :class:`GameChangerClient`.
+        opponent_name: The REAL opponent name to query (never a slug).
+        member_season_year: The member team's ``teams.season_year``, or ``None``
+            when the row carries no year. REQUIRED (never defaulted): this is
+            EVIDENCE, and per ``.claude/rules/python-style.md`` an evidence
+            parameter with a default silently disables the guard it feeds.
     """
     hits = search_teams_by_name(client, opponent_name)
     # Drop organizations, THEN count. Search is heterogeneous and an
@@ -359,18 +414,101 @@ def _resolve_via_search(
             opponent_name,
         )
         return None
-    if len(team_hits) != 1:
+    # Season-year filter, AFTER the organization drop and BEFORE the uniqueness
+    # bar. The ordering is load-bearing for the log lines: running this first
+    # would make the "all hits are non-team" WARNING above unreachable, and that
+    # warning is how a class-wide entity-type failure would announce itself.
+    #
+    # FAIL-CLOSED on a NULL member year. Refusing every auto-accept is the
+    # ruled behavior (2026-08-08), not a degradation: matching a hit against a
+    # year we do not have would be the very cross-year auto-match this filter
+    # exists to prevent. WARNING rather than DEBUG because it silently disables
+    # a whole rung for this team -- morning-run fills the own-team year on
+    # ensure_team_row precisely so this stays rare, and a fired warning means
+    # that fill did not happen.
+    if member_season_year is None:
+        # Worded so it claims only what is true. An unindexed opponent (the
+        # MODAL case) reaches here with zero hits, and saying "refused an
+        # auto-accept" there would assert a refusal that never happened --
+        # the state is "rung (c) cannot run", not "rung (c) said no".
+        logger.warning(
+            "Rung (c): member team has no stored season_year, so rung (c) is "
+            "disabled for it (fail-closed) -- %r goes to the operator queue "
+            "without a season comparison being possible",
+            opponent_name,
+        )
+        return None
+    season_hits = [
+        hit for hit in team_hits if _hit_season_year(hit) == member_season_year
+    ]
+    # Compare on `year` ALONE, never `season.name`: cross-season within one year
+    # (spring 2026 vs summer 2026) is a legitimate auto-match, and only the YEAR
+    # boundary is the one a team must never cross (ruled 2026-08-08).
+    if team_hits and not season_hits:
+        # The season-filter analogue of the "all hits are non-team" WARNING
+        # above, and it earns the same level for the same reason: this is how a
+        # CLASS-WIDE failure would present. A stale or wrong teams.season_year
+        # silently drops EVERY hit for EVERY opponent and routes the whole team
+        # to the operator queue -- at DEBUG that is indistinguishable from
+        # ordinary "GameChanger has not indexed this team" noise, which is
+        # precisely the confusion that would let a dead rung run unnoticed for
+        # a season.
+        #
+        # ⚠ There are TWO class-wide failures here, not one, and the message
+        # must not name only the likelier. `_hit_season_year` fails closed to
+        # None for a missing/renamed `season` key or a non-int year, which is
+        # indistinguishable from a real mismatch at the comparison. If GC ever
+        # changes that shape, every hit drops -- and blaming the operator's own
+        # DB row would send them to the one place the fault is NOT. Counting
+        # the unparseable ones separately is what keeps the diagnosis honest.
+        unparseable = sum(1 for hit in team_hits if _hit_season_year(hit) is None)
+        if unparseable == len(team_hits):
+            logger.warning(
+                "Rung (c): all %d team hit(s) for %r carry NO usable "
+                "result.season.year -- dropped fail-closed. This is an API "
+                "SHAPE problem, not a year mismatch: suspect a renamed or "
+                "dropped `season` key upstream, NOT the member team's "
+                "season_year (%d)",
+                len(team_hits),
+                opponent_name,
+                member_season_year,
+            )
+        else:
+            logger.warning(
+                "Rung (c): all %d team hit(s) for %r were dropped on season "
+                "year (member season_year=%d; %d had a different year, %d had "
+                "no usable year) -- nothing to resolve, falling through to the "
+                "operator queue. If this repeats across opponents, suspect the "
+                "member team's stored season_year",
+                len(team_hits),
+                opponent_name,
+                member_season_year,
+                len(team_hits) - unparseable,
+                unparseable,
+            )
+    elif len(season_hits) != len(team_hits):
+        logger.debug(
+            "Rung (c): %d team hit(s) for %r, %d dropped on season year "
+            "(member season_year=%d)",
+            len(team_hits),
+            opponent_name,
+            len(team_hits) - len(season_hits),
+            member_season_year,
+        )
+    if len(season_hits) != 1:
         logger.debug(
             "Rung (c): %d search hit(s) for %r, %d team hit(s) after dropping "
-            "%d non-team hit(s) -- ambiguous, falling through",
+            "%d non-team hit(s), %d after the season-year filter -- ambiguous, "
+            "falling through",
             len(hits),
             opponent_name,
             len(team_hits),
             len(hits) - len(team_hits),
+            len(season_hits),
         )
         return None
 
-    result = team_hits[0].get("result")
+    result = season_hits[0].get("result")
     if not isinstance(result, dict):
         return None
     public_id = result.get("public_id")
@@ -382,6 +520,31 @@ def _resolve_via_search(
 # ---------------------------------------------------------------------------
 # The ladder
 # ---------------------------------------------------------------------------
+
+
+def _read_member_season_year(
+    conn: sqlite3.Connection, our_team_id: int
+) -> int | None:
+    """Return the member team's ``teams.season_year``, or None when unusable.
+
+    The ladder reads this ITSELF rather than taking it as a threaded parameter
+    (ruled 2026-08-08). ``.claude/rules/python-style.md`` requires EVIDENCE
+    parameters to be REQUIRED precisely because an omitted one silently
+    disables a guard; a value the function reads for itself cannot be omitted
+    at all, so no future caller can forget it and no public signature changes.
+
+    A missing row, a NULL year, or a non-integer stored value all return None,
+    which rung (c) treats as "refuse every auto-accept" -- fail-closed.
+    """
+    row = conn.execute(
+        "SELECT season_year FROM teams WHERE id = ?", (our_team_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    season_year = row[0]
+    if isinstance(season_year, bool) or not isinstance(season_year, int):
+        return None
+    return season_year
 
 
 def resolve_opponent(
@@ -403,7 +566,9 @@ def resolve_opponent(
         conn: Open SQLite connection (the ``opponent_links`` store).
         client: Authenticated :class:`GameChangerClient`.
         our_team_id: ``teams.id`` of the LSB team whose schedule produced this
-            slot (the local half of the per-pairing key).
+            slot (the local half of the per-pairing key). ALSO the source of
+            the ``season_year`` rung (c) filters search hits against -- a row
+            with a NULL year disables that rung's auto-accept entirely.
         opponent_id: The upcoming game's ``pregame_data.opponent_id`` -- the
             ``root_team_id`` registry namespace. NEVER fed to
             ``GET /teams/{id}``.
@@ -507,9 +672,14 @@ def resolve_opponent(
         )
         return LadderResult(outcome=ResolutionOutcome.DEFERRED_PLACEHOLDER)
 
-    # --- Rung (c): POST /search by name (unambiguous single TEAM match only) --
+    # --- Rung (c): POST /search by name (unambiguous single TEAM match whose
+    # season year equals the member team's) ---------------------------------
     if opponent_name:
-        public_id = _resolve_via_search(client, opponent_name)
+        # Read the member year HERE, not at function entry: rungs (a) and (b)
+        # resolve without it, and this keeps the query off their path.
+        public_id = _resolve_via_search(
+            client, opponent_name, _read_member_season_year(conn, our_team_id)
+        )
         if public_id:
             _upsert_resolved_positive(
                 conn,

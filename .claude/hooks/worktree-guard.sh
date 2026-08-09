@@ -47,7 +47,18 @@ REPO="${REPO%/}"
 # below as `/*`, matching every absolute path. Refuse instead -- an unusable
 # root is a misconfiguration, not permission to allow everything.
 [ -z "$REPO" ] && deny "CLAUDE_PROJECT_DIR is \"$CLAUDE_PROJECT_DIR\", which is not a usable repository root. Refusing the write rather than allowing every path."
+# CLAUDE_HOME needs the SAME normalization REPO just got. Without it,
+# HOME=/home/vscode/ builds the case arm `/home/vscode//.claude/*`, which can
+# never match the slash-collapsed FILE_PATH -- so the guard DENIES a legitimate
+# ~/.claude/ write. It fails CLOSED, so that was friction, not a hole.
 CLAUDE_HOME="${HOME:-/home/vscode}"
+CLAUDE_HOME=$(printf '%s' "$CLAUDE_HOME" | tr -s '/')
+CLAUDE_HOME="${CLAUDE_HOME%/}"
+# ⚠ DIVERGES from REPO's empty handling, deliberately -- it is not an oversight.
+# An empty REPO DENIES (an unusable project root is OUR misconfiguration), but
+# HOME=/ is not ours to refuse, and denying would kill every memory write. Fall
+# back to the same literal default the parameter expansion above uses.
+[ -z "$CLAUDE_HOME" ] && CLAUDE_HOME="/home/vscode"
 
 case "$FILE_PATH" in
   "$REPO"/*) exit 0 ;;

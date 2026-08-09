@@ -420,7 +420,9 @@ resolution + delivery + status), not the rev-1 "~150-300 LOC".
       operator. Observed share: ~6% of manual entries; GC never retroactively relabels
       them.
    c. `POST /search` by name (gc-uuid bridge quirks apply) — auto-ingest only on an
-      unambiguous single match. Name source: the `name` from `GET /public/teams/...` or
+      unambiguous single match, after dropping organization hits and hits from a
+      different season year (implemented 2026-08-09; fail-closed on a missing
+      year on either side). Name source: the `name` from `GET /public/teams/...` or
       the registry entry, never URL-slug text (slug search returns 0 hits). Expect this
       rung to fail for most manual entries: they are typically teams ABSENT from GC's
       search index entirely (HS varsity programs like "Bellevue West").

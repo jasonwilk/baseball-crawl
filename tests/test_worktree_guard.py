@@ -180,3 +180,67 @@ class TestFailOpen:
 
     def test_no_file_path_allows(self) -> None:
         assert _decision(_run("")) is None
+
+
+class TestClaudeHomeNormalization:
+    """`HOME` slash variants must not turn a legitimate `~/.claude/` write into
+    a denial.
+
+    `FILE_PATH` is slash-collapsed (`tr -s '/'`), so an un-normalized
+    `CLAUDE_HOME` builds a case arm the collapsed path can never match --
+    `HOME=/home/vscode/` yields `/home/vscode//.claude/*`. It failed CLOSED,
+    so this was friction, not a hole: memory writes were refused, not leaked.
+    """
+
+    @pytest.mark.parametrize(
+        ("mangle", "label"),
+        [
+            (lambda h: h, "already clean"),
+            (lambda h: h + "/", "trailing slash"),
+            (lambda h: "/" + h, "doubled leading slash"),
+            (lambda h: h.replace("/", "//"), "doubled throughout"),
+        ],
+    )
+    def test_claude_home_slash_variants_allow_the_write(
+        self, tmp_path: Path, mangle, label: str
+    ) -> None:
+        home = str(tmp_path)
+        result = _run(
+            f"{home}/.claude/projects/p/memory/lesson.md", home=mangle(home)
+        )
+        assert _decision(result) is None, label
+
+    @pytest.mark.parametrize(
+        ("mangle", "label"),
+        [
+            (lambda h: h + "/", "trailing slash"),
+            (lambda h: "/" + h, "doubled leading slash"),
+        ],
+    )
+    def test_normalization_does_not_widen_the_allowed_root(
+        self, tmp_path: Path, mangle, label: str
+    ) -> None:
+        """Normalizing must not turn the arm into a wildcard: everything OUTSIDE
+        `$HOME/.claude/` stays denied under every variant."""
+        home = str(tmp_path)
+        assert _decision(_run(f"{home}/.bashrc", home=mangle(home))) == "deny", label
+        assert _decision(_run("/etc/passwd", home=mangle(home))) == "deny", label
+
+    def test_root_home_falls_back_to_the_literal_default(self) -> None:
+        """`HOME=/` normalizes to EMPTY, and here that must NOT deny.
+
+        ⚠ This DIVERGES from `CLAUDE_PROJECT_DIR`, deliberately. An empty REPO
+        denies -- an unusable project root is our own misconfiguration. But
+        `HOME=/` is not ours to refuse, and denying would kill every memory
+        write, so `CLAUDE_HOME` falls back to the literal default instead.
+        """
+        assert _decision(_run("/home/vscode/.claude/memory/x.md", home="/")) is None
+
+    def test_empty_claude_home_does_not_become_a_wildcard(self) -> None:
+        """The other half of the fallback: `/` must not allow every path.
+
+        Without the fallback, an empty `CLAUDE_HOME` would build the case arm
+        `/.claude/*` -- and worse, the REPO-style bug would build `/*`.
+        """
+        assert _decision(_run("/.claude/anything.md", home="/")) == "deny"
+        assert _decision(_run("/etc/cron.d/backdoor", home="/")) == "deny"

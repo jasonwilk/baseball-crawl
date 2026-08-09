@@ -30,6 +30,7 @@ from src.safety.pii_patterns import (
     PLACEHOLDER_EMAILS,
     PII_OK_MARKER,
     RFC2606_DOMAINS,
+    SCANNABLE_BASENAMES,
     SCANNABLE_EXTENSIONS,
     SKIP_PATHS,
     SYNTHETIC_MARKER,
@@ -80,21 +81,53 @@ def should_skip_path(file_path: str) -> bool:
 
 
 def is_scannable(file_path: str) -> bool:
-    """Check if a file has a scannable extension.
+    """Check if a file has a scannable extension, dotfile name, or basename.
 
-    Handles dotfiles like .env where Path.suffix returns empty string
-    but the filename itself is a scannable "extension".
+    Three cases, tried in this order:
+
+    1. A DOTFILE (``.env``, ``.env.example``, ``.eslintrc.json``) -- matched on
+       the whole name, then on its leading dotted component, then falling
+       through to the ordinary suffix test.
+    2. A real extension, tested against ``SCANNABLE_EXTENSIONS``.
+    3. An EXTENSIONLESS name (``Dockerfile``, ``pre-commit``), tested against
+       ``SCANNABLE_BASENAMES``.
+
+    Cases 1 and 3 both used to be holes and both are widenings, never
+    narrowings. See ``SCANNABLE_BASENAMES`` for the extensionless allowlist's
+    known limitation and why a shebang test cannot replace it.
+
+    ⚠ **Still NOT covered, recorded so the boundary reads as a decision rather
+    than a claim of completeness**: non-dotfile templates whose final suffix is
+    unlisted (``docker-compose.override.yml.example``), and file types absent
+    from ``SCANNABLE_EXTENSIONS`` entirely (``migrations/*.sql``,
+    ``requirements.in``, ``*.conf``). Widening the scan surface to those is a
+    policy call, not a bug fix.
     """
     p = Path(file_path)
+    name = p.name
+    lowered = name.lower()
+    # Dotfiles FIRST, because Path.suffix lies about them. The old order tested
+    # the suffix first, so this branch was reachable only when the suffix was
+    # EMPTY -- and `Path(".env.example").suffix` is ".example", not "". The
+    # comment here used to say it handled ".env, .env.local, etc."; it handled
+    # neither `.env.local` NOR the TRACKED `.env.example` / `proxy/.env.example`,
+    # which are the likeliest files in the repo to receive a real token by
+    # copy-paste from a working env file.
+    if lowered.startswith("."):
+        # The whole name may BE the extension (".env")...
+        if lowered in SCANNABLE_EXTENSIONS:
+            return True
+        # ...or it may be a variant/template of one (".env.example",
+        # ".env.local"), in which case the LEADING dotted component decides.
+        if "." + lowered.lstrip(".").split(".")[0] in SCANNABLE_EXTENSIONS:
+            return True
+        # Deliberate fall-through, NOT an else: a dotfile with an ordinary
+        # scannable suffix (".eslintrc.json") must stay scannable. Returning
+        # here would NARROW a security control, which this fix must never do.
     suffix = p.suffix.lower()
     if suffix:
         return suffix in SCANNABLE_EXTENSIONS
-    # Handle dotfiles: .env, .env.local, etc.
-    name = p.name
-    if name.startswith("."):
-        # Treat the whole name as the extension (e.g., ".env")
-        return name.lower() in SCANNABLE_EXTENSIONS
-    return False
+    return lowered in SCANNABLE_BASENAMES
 
 
 def _scannability_skip_reason(file_path: str, check_exists: bool = True) -> str | None:

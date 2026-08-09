@@ -1,6 +1,6 @@
 # Opponent Resolution Flow
 
-> **Last updated:** 2026-08-04 | **Source:** E-240-02; access level, population rate and end-to-end chain validation from the 2026-08-03 identifier-resolution probes
+> **Last updated:** 2026-08-09 | **Source:** E-240-02; access level, population rate and end-to-end chain validation from the 2026-08-03 identifier-resolution probes; rung-(c) season-year filter from `.project/specs/2026-08-05-rung-c-season-year-filter.md`
 
 How to resolve an opponent from the authenticated API into identifiers usable across both authenticated and public endpoints.
 
@@ -68,19 +68,19 @@ Opponents with no `progenitor_team_id` key (**median ~30-38% of a team's records
 
 #### Auto-Accept Criteria
 
-**As implemented, the gate is a single condition** (`_resolve_via_search`, `src/gamechanger/opponent_ladder.py`):
+**As implemented, the gate is two filters plus a count** (`_resolve_via_search`, `src/gamechanger/opponent_ladder.py`):
 
-> **Exactly one TEAM hit** remains after organization hits are dropped (`is_team_hit()`). Zero team hits, 2+ team hits, or an all-organization result set all fall through to rung (d) — the opponent is left unlinked for one-time operator mapping via `bb report map-opponent`.
+> **Exactly one hit** remains after organization hits are dropped (`is_team_hit()`) and then hits whose `result.season.year` differs from the member team's `teams.season_year` are dropped. Zero survivors, 2+ survivors, an all-organization result set, or an all-wrong-season one all fall through to rung (d) — the opponent is left unlinked for one-time operator mapping via `bb report map-opponent`.
 
-**There is no name check and no season check.** The single-team count is the ENTIRE gate — state it that way, because that is what decides whether a wrong hit is auto-accepted.
+**There is no name check.** The season year and the single-hit count are the ENTIRE gate — state it that way, because that is what decides whether a wrong hit is auto-accepted. A same-year name-alike still auto-accepts.
 
 This section previously specified three conditions. Their dispositions differ, and they are recorded separately so no future reader reinstates the wrong one (corrected 2026-08-05, after a spec review found the original rejection rationale itself was wrong):
 
 - ⚰ **RETIRED — criterion 1, exact name match** (case-insensitive, `opponent_links.opponent_name` vs `result.name`). **Never implemented; not planned.** The stored name is scorekeeper free text off *our own* schedule (`pregame_data.opponent_name`), while `result.name` is GC's canonical index entry, and the two diverge in word order and punctuation for the same club. Shape of the divergence, from a real captured result set (names rendered as placeholders per `.claude/rules/api-docs.md`): `Anytown Eagles Navy 10U` / `Anytown Eagles 9U Navy` / `Eagles (Navy) 13U(AAA)` — same club, three orderings and two punctuation styles. An exact match would reject correct hits. (⚠ It would NOT fail for the reason once claimed here — see the `result.name` note in [post-search.md](../endpoints/post-search.md).)
-- 🔶 **OPEN — criterion 2, season-year match** (`result.season.year` vs the member team's `season_year`). **Not implemented, but NOT rejected**, and deliberately not tombstoned: the data is there. `result.season.year` is populated on 15/15 hits in the repo's captured `/search` bodies, and one capture returned a `summer 2025` hit beside `spring 2026` hits — exactly what this filter would discriminate. What is open is cost and semantics: `_resolve_via_search` does not receive the member team's `season_year`, `opponent_links` has no season column, and which season to match is undecided. Tracked in `.project/specs/2026-08-05-rung-c-season-year-filter.md`.
+- ✅ **IMPLEMENTED (2026-08-09) — criterion 2, season-year match** (`result.season.year` vs the member team's `teams.season_year`). Semantics ruled by the operator 2026-08-08: a team from one YEAR must never auto-match a team from another year; cross-season **within** one year (spring 2026 vs summer 2026) is legitimate and still auto-accepts, so the comparison is on `season.year` **alone** and never on `season.name`. **FAIL-CLOSED**: a hit whose `season.year` is absent or non-integer is dropped, and a member team whose `season_year` is NULL auto-accepts nothing at this rung (logged at WARNING). `resolve_opponent` reads the member year itself rather than taking it as a parameter, so no caller can forget to pass it. Supporting evidence: `result.season.year` is populated on 15/15 hits in the repo's captured `/search` bodies, and one capture returned a `summer 2025` hit beside `spring 2026` hits — exactly what this filter discriminates. `opponent_links` needs no season column: the comparison happens at resolution time against the member team's row.
 - ✅ **IMPLEMENTED — criterion 3**, now scoped to TEAM hits as stated above.
 
-**Recovering from a wrong auto-accept.** Because the count is the whole gate, rung (c) can auto-accept a wrong team. `bb report map-opponent` accepts a `search` mapping and overwrites it (2026-08-05); `progenitor`, `operator`, and `no_presence` mappings are refused. The morning-run RESOLVED line prints `[via <method>]` so the method is visible before an operator tries. Note the asymmetry, which is deliberate: the **ladder** never re-attempts a resolved row (its terminality gate is unchanged, and widening it would resurrect `no_presence` rows), so correction is operator-driven and requires noticing the bad mapping first.
+**Recovering from a wrong auto-accept.** The season filter removes the cross-year wrong-team mode, but a same-year name-alike is still a single surviving hit, so rung (c) can still auto-accept a wrong team. `bb report map-opponent` accepts a `search` mapping and overwrites it (2026-08-05); `progenitor`, `operator`, and `no_presence` mappings are refused. The morning-run RESOLVED line prints `[via <method>]` so the method is visible before an operator tries. Note the asymmetry, which is deliberate: the **ladder** never re-attempts a resolved row (its terminality gate is unchanged, and widening it would resurrect `no_presence` rows), so correction is operator-driven and requires noticing the bad mapping first.
 
 #### What POST /search Returns
 
@@ -100,7 +100,7 @@ This means search-resolved opponents skip the progenitor chain entirely -- a sin
 > The auto-accept gate in the section above assumes every hit is a team.
 >
 > ✅ **IMPLEMENTED (2026-08-04).** Entity-class filtering now runs ahead of them, via the shared predicate `is_team_hit()` in `src/gamechanger/search.py`, applied per hit at both consumers:
-> - `_resolve_via_search()` (`src/gamechanger/opponent_ladder.py`, rung (c)) **drops organization hits BEFORE** the single-result count, so criterion 3 is now "exactly one **team**". An all-organization result set filters to zero teams and falls through to the operator queue, exactly as a zero-hit result does.
+> - `_resolve_via_search()` (`src/gamechanger/opponent_ladder.py`, rung (c)) **drops organization hits BEFORE** the single-result count, so criterion 3 is now "exactly one **team**" (and, since 2026-08-09, one from the member's season year — see criterion 2 above). An all-organization result set filters to zero teams and falls through to the operator queue, exactly as a zero-hit result does.
 > - `resolve_gc_uuid_by_public_id()` (`src/gamechanger/search.py`) checks `public_id` first and entity class second, **skipping** a non-team match with a WARNING and continuing to page.
 >
 > The predicate is deliberately NOT applied inside `search_teams_by_name()`: that function's raw `hits` length is the has-more-pages signal, so filtering at the source would make a filtered full page read as partial and strand a team whose match sits on a later page.
@@ -145,12 +145,13 @@ omitted, not null, on manually-typed opponents. Two resolution paths apply, in o
 
 1. **POST /search fallback (automated)**: After the progenitor chain completes,
    run `POST /search` (via `search_teams_by_name()`) for each unlinked opponent,
-   **dropping organization hits** (`is_team_hit()`) and then auto-accepting only
-   on an unambiguous single **team** match. This is the primary automated
-   fallback.
+   **dropping organization hits** (`is_team_hit()`), then **dropping hits from a
+   different season year**, and auto-accepting only on an unambiguous single
+   surviving **team** match. This is the primary automated fallback.
 2. **Operator mapping (manual)**: Opponents the search fallback cannot resolve
-   (0 or 2+ team matches, an all-organization result set, or genuinely
-   unindexed teams) are surfaced to the operator
+   (0 or 2+ surviving matches, an all-organization result set, an
+   all-wrong-season one, a member team with no stored `season_year`, or
+   genuinely unindexed teams) are surfaced to the operator
    and mapped once via `bb report map-opponent <root_team_id> <public_id|GC team URL>`
    (E-240). This replaces the deleted admin resolve UI.
 
@@ -173,7 +174,7 @@ Opponents resolve through these methods:
 | Category | Method | Resolution Method Value |
 |----------|--------|------------------------|
 | Progenitor chain (Pass 1) | Automated via `progenitor_team_id` → team metadata | `'progenitor'` |
-| POST /search fallback (Pass 2) | Automated via unambiguous single **team** match | `'search'` |
+| POST /search fallback (Pass 2) | Automated via unambiguous single same-season-year **team** match | `'search'` |
 | Operator mapping | Manual via `bb report map-opponent` (replaces deleted admin UI) | `'operator'` |
 | Unresolved | No match found; awaiting operator mapping | (none) |
 

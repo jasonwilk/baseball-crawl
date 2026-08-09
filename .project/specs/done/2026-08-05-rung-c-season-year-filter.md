@@ -2,10 +2,11 @@
 
 # Rung (c): require a season-year match before auto-accept
 
-**Date**: 2026-08-05 (spec written 2026-08-09) · **Status**: `READY` — spec written,
-codex-reviewed, committed (`a0f0837`); awaiting a fresh EXECUTION session. (`READY` was added to
-the vocabulary 2026-08-09, `4fc1f6d`, resolving the `PARKED` double-duty this line previously
-had to gloss around — the split Step 4 had queued is settled.)
+**Date**: 2026-08-05 (spec written 2026-08-09) · **Status**: `COMPLETE (this commit)` — executed
+2026-08-09. Full suite green (4471), both step-5 reviews run and folded in, all three carried
+questions ruled by the operator. (`READY` was added to the vocabulary 2026-08-09, `4fc1f6d`,
+resolving the `PARKED` double-duty this line previously had to gloss around — this spec was the
+first to carry it, and it is now the first to retire it.)
 **Source**: operator ruling 2026-08-08 (`README.md` PARKED DECISIONS #2, now in NEXT). Split out of
 `2026-08-04-rung-c-auto-accept-criteria-drift.md`; premise re-established by the codex spec review
 of `2026-08-05-rung-c-search-resolve-recoverable.md`.
@@ -440,3 +441,211 @@ clean. Compare scanned-count to staged-count as CLAUDE.md step 6 requires.
     change while no longer testing ambiguity. New §7 covers it. Codex verified the two residuals by
     construction (it executed the guard against all four `HOME` forms and confirmed the scanner's
     `RC=0` silence on extensionless files), which is stronger evidence than the spec's own claim.
+- **2026-08-09 (EXECUTION session)** — Implemented. Lifecycle steps 3-4 complete.
+
+  **Step 3 audit — the spec held, with one correction to its own inventory.** Re-walked the call
+  chain: `run_morning` → `_process_opponent` → `resolve_opponent` → `_resolve_via_search`, confirmed
+  unchanged. Re-verified every load-bearing claim against the repo rather than inheriting it:
+  `_search_hit` (`tests/test_opponent_ladder.py`) carries no `season` key; the `db` fixture seeds the
+  own-team row with no `season_year`; `worktree-guard.sh` normalizes `REPO` but not `CLAUDE_HOME`;
+  `is_scannable` returns `False` outright for an extensionless name; `morning_run.py:662` calls
+  `ensure_team_row` with no `season_year`; `TeamProfile.year` and `_backfill_season_year`
+  (NULL→value only) are as described.
+
+  ⚠ **The ten-site table was an UNDERCOUNT — again, and §1 was right to say so.** Re-running the
+  token-plus-synonym sweep (the productive new terms were `single team hit`, `ENTIRE gate`,
+  `unambiguous single`, `auto-accept`) found **five more live sites**, all fixed:
+  `docs/api/flows/opponent-resolution.md:83` ("Because the count is the whole gate"), `:148-150`
+  (the null-progenitor fallback list), `:176` (the resolution-method table), `:103` (criterion 3's
+  restatement), `src/gamechanger/opponent_ladder.py:510` (the rung-(c) inline comment), and
+  `docs/ROADMAP.md:423` ("auto-ingest only on an unambiguous single match"). **Ten became fifteen.**
+  This is the third consecutive count for this one inventory (5 → 10 → 15); the lesson is not "count
+  more carefully" but that an inbound inventory is never evidence — only a re-run sweep is. Also
+  refreshed the flow doc's `Last updated` header.
+
+  **Deviation from the Files table, stated rather than hidden:** `docs/api/**` is api-scout's tree
+  (`.claude/rules/documentation.md`). These edits were made directly, not routed, because they state
+  OUR implementation status, not endpoint facts — no request param, response shape, field
+  description or observed capability was touched. That is the fidelity split the rule draws; flagging
+  it so the choice reads as a decision.
+
+  **Implementation.** `_resolve_via_search` takes a REQUIRED `member_season_year`; `resolve_opponent`
+  reads `teams.season_year` itself via `_read_member_season_year` (no public signature change, so no
+  caller can forget it). New `_hit_season_year` parses `result.season.year` from the OBJECT shape,
+  returning `None` for every non-integer form — `bool` excluded explicitly, since `True == 1` would
+  otherwise compare as a year. Filter sits after the organization drop and before the uniqueness bar,
+  keeping the "all hits are non-team" WARNING reachable. `run_morning` fetches the own-team profile
+  and passes `season_year=profile.year`, degrading to `None` with a WARNING on failure rather than
+  aborting the team. Both residuals fixed.
+
+  **Verification — every command run, none piped.** Test-scope discovery returned the expected 6
+  files. Targeted suite `RC=0`, **607 passed**. Full suite `RC=0`, **4454 passed** (`/tmp/bb-verify-full.txt`).
+  `ruff check src/ tests/` → `All checks passed!`, `RC=0`.
+
+  **Positive controls, both run BEFORE and AFTER (principle G).** Neither is a bare pass.
+  - *PII extensionless (item 5)*: against the reverted pre-fix modules the control was **`RC=0` and
+    silent** — the defect. After: **`RC=1`** with an `api_key_assignment` violation on BOTH
+    `/tmp/Dockerfile` and `/tmp/pre-commit`. The revert was asserted applied before measuring, and
+    `__pycache__` cleared on both sides. Item 6 negative control: the real tracked `Dockerfile` and
+    `.githooks/pre-commit` now report `Scanned 2 file(s), 0 violations` — the count line is what
+    makes that clean non-vacuous.
+  - *Worktree guard (item 7)*: against the unfixed script **4 of the new cases FAIL** (three slash
+    variants plus the `HOME=/` fallback); all 31 pass after. The four `HOME` forms are covered.
+  - *Season filter*: ran a real mutation (fail-OPEN on a missing year — the plausible future edit,
+    not vandalism), mutation asserted applied, `__pycache__` cleared, control run first. **6 of 6
+    fail-closed parametrized cases FAIL under the mutant**, 49 pass; restored clean at 55.
+    Per-test outcomes, not an aggregate.
+
+  **One instrument misreported and was caught by cross-check.** The `grep -c` used to confirm the
+  guard file was restored after `git stash pop` returned `0` in BOTH directions — i.e. it proved
+  nothing either way. Resolved by reading the file and `git stash list` directly (restored correctly,
+  stash empty). The discrimination evidence is the test outcomes above, not that grep. Recording it
+  because a self-confirming instrument that reads `0` twice is exactly the shape that gets believed
+  once.
+
+  **Documentation assessment**: triggers fired (behavior change + rule change). Updated
+  `docs/api/flows/opponent-resolution.md`, `docs/admin/operations.md`, `docs/ROADMAP.md`,
+  `.claude/rules/data-model.md`, `.claude/rules/canonical-seams.md`.
+
+- **2026-08-09 — the review-automation experiment (owed since Migration Step 2; RUN, not deferred
+  a third time).** All three tools were pointed at the SAME working-tree diff.
+
+  **(a) `claude -p "/code-review"` runs headless from Bash. It works.** Exact command:
+  `timeout 900 claude -p "/code-review"` from the repo root. **Exit code 0**, ~15 min, and it
+  returned FOUR real findings — not a silent no-op. It also independently re-ran the full suite and
+  re-verified the `season` object shape against `post-search.md` before reporting. Caveat worth
+  recording: it reviews the WORKING TREE, so it must be run after the edits and before/independent
+  of staging; and it is a fresh session with no chunk context, which is a feature here.
+
+  **(b) The two Codex paths found DISJOINT findings. That is the headline.** Three tools, eight
+  findings, **zero overlap** — not one finding was reported by two tools. A null result was the
+  expected outcome and this is emphatically not one.
+  - `./scripts/codex-review.sh uncommitted` (the SKILL, rubric + checklists injected) — **P1:** the
+    season fill warned only on the EXCEPTION path, so a successful `resolve_team` returning
+    `TeamProfile(year=None)` — a documented shape, `int | None` — wrote NULL and said nothing,
+    silently disabling rung (c). It verified the counterexample by construction rather than
+    asserting it. **P2:** the new tests covered only "fetch raises", never "fetch succeeds with
+    year=None", which is why the P1 stayed green.
+  - `codex review --uncommitted` (FIRST-PARTY, no custom instructions) — **P2:** the terminality
+    gate short-circuits pre-existing `resolution_method='search'` rows, so a pre-patch cross-year
+    auto-match survives this change until an operator remaps it. **P3:** `profile.year` is written
+    to `teams.season_year` unvalidated; a quoted year would persist, and since the read side fails
+    closed AND `_backfill_season_year` never overwrites a non-NULL, one malformed response would
+    wedge rung (c) OFF for that team permanently.
+  - `claude -p "/code-review"` — the stale-stored-year asymmetry (the generator force-updates the
+    same column via `COALESCE(?, season_year)`, morning-run cannot), plus three
+    logging/message-accuracy findings: no WARNING when the season filter drops EVERY hit, a
+    NULL-year WARNING that claimed a refusal on zero-hit opponents where nothing was refused, and a
+    failure message asserting "season_year stays unset / rung (c) disabled" which is false whenever
+    a year is already stored.
+
+  **Verdict on the `codex-review` skill's fate (the question this comparison was to decide):
+  KEEP BOTH — they are not substitutes.** The evidence is the disjointness, and the two paths failed
+  in *characteristic* directions rather than randomly. The rubric-injected skill found the
+  project-shaped defect (a fail-closed guard going silent — the `.claude/rules/python-style.md`
+  "missing safety signal" class the rubric names). The first-party path, carrying no instructions,
+  found the two defects a rubric would not prompt for: durable-state poisoning and the migration
+  question about already-cached rows. Dropping either would have lost real P1/P2/P3 findings on this
+  very diff. `claude -p` is additive again — it was the only one to catch prose asserting
+  consequences that do not hold, which is the `feedback_prose_is_a_claim_you_must_walk` class.
+  ⚠ Bound on this result, stated so it is not over-read: **one diff, one chunk**. It refutes "these
+  tools are redundant"; it is not a measured overlap RATE, and a single chunk cannot supply one.
+
+  **All findings triaged and FIXED except one, which is a scope decision (see below):** the
+  `year=None` silence, the missing test, the malformed-year poisoning, the all-hits-dropped WARNING,
+  and both misleading messages are all fixed with tests. Full suite re-run after the fixes:
+  **RC=0, 4460 passed**; `ruff` clean; both PII controls re-run and still correct.
+
+  **NOT fixed, deliberately — two carried to the operator as decisions, not silently dropped:**
+  (1) *Stale own-team `season_year`.* Morning-run cannot refresh a stored year, so a stale one now
+  silently drops every rung-(c) hit. Force-updating it (as `generator.py` does) would move
+  `derive_season_id_for_team` and the `season_id` games are filed under — real blast radius, well
+  outside this chunk. Mitigated by DETECTION instead: the new all-hits-dropped WARNING is exactly
+  the symptom a stale year produces, and it names the suspicion.
+  (2) *Pre-existing cached `search` rows never see the new filter.* Correct as described; the
+  terminality gate is unchanged by design and `bb report map-opponent` is the recovery path. Whether
+  to invalidate them is an operator call with data consequences, not an implementer's.
+
+- **2026-08-09 — operator-typed `/code-review` (step 5).** Three findings, **all three real**, each
+  verified against the repo before acting. It brings the tool count on this diff to FOUR and the
+  finding count to eleven, still with essentially no overlap.
+  - *MEDIUM — `is_scannable` skipped every dotfile carrying a SECOND suffix.* **Upheld, and it
+    found a hole my own fix had walked past.** The dotfile branch sat BELOW the suffix test, so it
+    was reachable only when `Path.suffix` was empty — and for the repo's TRACKED env templates it is
+    not. Verified by execution: both tracked templates returned `False`. Worse, the comment on that
+    branch named the `.local` variant as handled; it never was. That is the
+    `feedback_prose_is_a_claim_you_must_walk` class sitting inside the very function this chunk
+    edits. **Fixed** by testing dotfiles FIRST — whole name, then leading dotted component, then
+    **falling through** to the ordinary suffix test. The fall-through is load-bearing and has its own
+    test: a `return` there would have made `.eslintrc.json` unscannable, NARROWING a security
+    control while ostensibly widening it.
+  - *MEDIUM — own-team `season_year` is write-once.* **Upheld, and it REFUTES a premise I wrote
+    into this log and into a test docstring.** I had claimed `generator.py:1839`'s force-update
+    mitigates a stale year. It does not reach this row: in morning-run `generate_fn` is called with
+    the OPPONENT's `public_id`, so that UPDATE always targets the opponent's team id, never the
+    member's. **Nothing refreshes a member team's `season_year`.** So a team first seen in spring
+    2026 is pinned at 2026; in 2027 every hit carries 2027, every hit drops, and rung (c)
+    auto-accepts nothing for that team ever again, with no self-heal short of a hand-edited row.
+    The reviewer also noted `--dry-run` writes and commits this value. Corrected everywhere I had
+    asserted otherwise; NOT fixed in code (see the open decision below).
+  - *LOW — the all-hits-dropped WARNING misdiagnosed an API shape change as a year mismatch.*
+    Upheld. `_hit_season_year` fails closed to `None` for a renamed or dropped `season` key exactly
+    as it does for a different year, so the message pointed the operator at their own DB row for a
+    fault that would be upstream — in precisely the class-wide case the warning exists to catch.
+    **Fixed**: unparseable hits are counted separately and the all-unparseable case emits a distinct
+    "API SHAPE problem … NOT the member team's season_year" message. Two tests.
+
+  **Discovered while fixing the first finding, and NOT fixed here on purpose.** Making the env
+  templates reachable surfaced three pre-existing `email` matches in `.env.example`: our own
+  `noreply@` service address and two `USER:PASS@host` proxy-URL FORMAT comments. **No credential and
+  no person's address** — read and confirmed. Left alone because the remedy is a suppressor inside a
+  credential TEMPLATE, which is the exact placement `.claude/rules/pii-safety.md` warns against, and
+  that is the operator's call. The consequence to know: staging `.env.example` will now trip the
+  hook until it is addressed. The negative-control test was accordingly narrowed to the property
+  this chunk owns — no CREDENTIAL findings — rather than pinning blanket cleanliness of a file the
+  chunk does not control.
+
+  Re-verified after all fixes: full suite **RC=0, 4471 passed**; `ruff` clean; extensionless
+  positive control `RC=1`, env-template positive control `RC=1`, negative control `RC=0` with
+  `Scanned 2 file(s)`.
+
+- **2026-08-09 — operator-typed `/security-review` (step 5, second gate).** **No findings at or
+  above threshold; no HIGH or MEDIUM vulnerability introduced.**
+
+  ⚠ **The harness handed the review the WRONG DIFF, and that is worth recording as a process
+  finding.** Its `DIFF CONTENT` was the COMMITTED range (`@{upstream}...HEAD`) — docs and specs
+  only — while `GIT STATUS` correctly showed the uncommitted working tree. Since findings in
+  markdown are an excluded category, reviewing what was supplied would have returned a **vacuous
+  clean** on a chunk that modifies two security controls. The review was re-scoped by hand to
+  `git diff -- .claude/hooks/worktree-guard.sh src/ tests/`. Anyone running `/security-review`
+  against uncommitted work should check the scope before trusting the verdict.
+
+  Because both modified controls could regress SILENTLY, each was settled by proof plus a positive
+  control rather than by inspection (principle G):
+  - *`is_scannable` cannot NARROW coverage.* The new dotfile block contains no terminal
+    `return False` — it returns True or falls through to the byte-identical suffix test — and the
+    final `SCANNABLE_BASENAMES` line replaces the old `return False` on a strictly narrower
+    reachable set. So it can only turn False into True. Measured: 36,932 synthetic paths → **0
+    narrowings, 2,205 widenings**; 2,485 tracked real files → **0 narrowings, 4 widenings**.
+    Control: the same function with the early `return False` the comment warns about → **1,680
+    narrowings**, so the harness demonstrably fails when it should.
+  - *The guard cannot WIDEN the allowed write set.* The arm is `"$CLAUDE_HOME"/.claude/*`, not
+    `"$CLAUDE_HOME"/*` — even at the empty limit it requires a literal `.claude` segment, which is
+    precisely what makes the deliberate divergence from `REPO`'s deny-on-empty safe. 15 paths × 13
+    `HOME` variants: the only deltas are ALLOWs on the intended tree. Control: a mutant with the arm
+    loosened to `"$CLAUDE_HOME"/*` allows `/etc/passwd` at `HOME=/`.
+
+- **2026-08-09 — operator rulings on the three carried items. All three DECIDED; none left open.**
+  1. **Season rollover: detection-only ACCEPTED for this chunk; do NOT build the force-update.** The
+     likely real answer is OPERATIONAL — under single-season doctrine a new season starts with a
+     reset + re-scout, which recreates the rows with the new year, so the pinned value never
+     survives to matter. Derive-at-read is the fallback DESIGN if that premise proves wrong; the
+     force-update stays declined either way because it moves `season_id`. Recorded as a stub with
+     the premise written down to be CHECKED, not assumed:
+     `.project/specs/2026-08-09-member-season-year-rollover.md` (`PARKED`, revisit near spring 2027).
+  2. **Pre-existing cached `search` rows: LEAVE them.** Correctable via `bb report map-opponent`,
+     and they die at the next data reset regardless. No invalidation, no migration.
+  3. **`.env.example`: LEAVE it, no suppressor.** The three `email` matches carry no credential and
+     no person's address. If they ever block a real commit, reword the lines then — which keeps the
+     remedy at `.claude/rules/pii-safety.md`'s preferred tier (change the data) instead of planting
+     a standing suppressor inside a credential template.

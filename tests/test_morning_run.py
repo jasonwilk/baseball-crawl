@@ -1946,3 +1946,285 @@ class TestMorningRunCLI:
         result = CliRunner().invoke(app, ["morning-run", "--help"])
         assert result.exit_code == 0
         assert "morning-run" in result.output or "team" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Own-team season_year fill (feeds the rung-(c) season filter)
+# ---------------------------------------------------------------------------
+
+
+def test_own_team_row_records_season_year(db: sqlite3.Connection) -> None:
+    """run_morning writes the own team's season_year onto its teams row.
+
+    Load-bearing beyond tidiness: rung (c) compares every search hit against
+    THIS column, and ensure_team_row defaults it to None. Without the fill, a
+    team's first-ever morning-run row is created NULL and the fail-closed
+    filter silently kills rung (c) for that team.
+    """
+    client = MagicMock()
+    _run(
+        db, client,
+        team_urls=[_PUBLIC_A],
+        resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+        fetch_schedule=MagicMock(return_value=[]),
+        fetch_opponents=MagicMock(return_value=[]),
+        resolve_opponent=MagicMock(),
+        resolve_team=MagicMock(return_value=TeamProfile(
+            public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=2026,
+        )),
+    )
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()
+    assert row is not None, "own-team row was not created"
+    assert row[0] == 2026
+
+
+def test_own_team_season_year_backfills_an_existing_null_row(
+    db: sqlite3.Connection,
+) -> None:
+    """An existing NULL row HEALS on the next run -- no migration needed.
+
+    ensure_team_row's season_year backfill is NULL->value only, so this can
+    never clobber a stored year (asserted by the sibling test below).
+    """
+    db.execute(
+        "INSERT INTO teams (name, public_id, membership_type, season_year) "
+        "VALUES ('LSB JV', ?, 'member', NULL)",
+        (_PUBLIC_A,),
+    )
+    db.commit()
+
+    _run(
+        db, MagicMock(),
+        team_urls=[_PUBLIC_A],
+        resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+        fetch_schedule=MagicMock(return_value=[]),
+        fetch_opponents=MagicMock(return_value=[]),
+        resolve_opponent=MagicMock(),
+        resolve_team=MagicMock(return_value=TeamProfile(
+            public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=2026,
+        )),
+    )
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()
+    assert row[0] == 2026
+
+
+def test_own_team_season_year_never_clobbers_a_stored_year(
+    db: sqlite3.Connection,
+) -> None:
+    """A stored year survives a profile reporting a different one.
+
+    ⚠ **This pins a TRADE, and a sharp one -- do not read it as a safe
+    property.** ensure_team_row's backfill is NULL->value only, so NOTHING
+    refreshes a member team's `season_year` once set. `generator.py`'s
+    force-update (`season_year = COALESCE(?, season_year)`) does NOT cover this
+    row: in morning-run `generate_fn` is called with the OPPONENT's public_id,
+    so that update always targets the opponent's team id, never the member's.
+
+    The consequence, stated plainly: a team first seen in spring 2026 is pinned
+    at 2026 forever. In 2027 every search hit carries `season.year = 2027`,
+    every hit drops, and rung (c) auto-accepts NOTHING for that team ever again
+    -- with no self-heal short of editing the row by hand.
+
+    It is left this way because changing the write semantics moves
+    `derive_season_id_for_team` and the `season_id` games are filed under, which
+    is well outside this chunk. The mitigation is DETECTION, not a different
+    write -- the all-hits-dropped WARNING in `_resolve_via_search` is what makes
+    a stale year visible. Carried to the operator as an open decision.
+    """
+    db.execute(
+        "INSERT INTO teams (name, public_id, membership_type, season_year) "
+        "VALUES ('LSB JV', ?, 'member', 2025)",
+        (_PUBLIC_A,),
+    )
+    db.commit()
+
+    _run(
+        db, MagicMock(),
+        team_urls=[_PUBLIC_A],
+        resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+        fetch_schedule=MagicMock(return_value=[]),
+        fetch_opponents=MagicMock(return_value=[]),
+        resolve_opponent=MagicMock(),
+        resolve_team=MagicMock(return_value=TeamProfile(
+            public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=2026,
+        )),
+    )
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()
+    assert row[0] == 2025
+
+
+def test_own_team_profile_fetch_failure_does_not_abort_the_team(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed own-team profile fetch degrades to None, it does NOT abort.
+
+    The accepted fail-closed consequence is that rung (c) is disabled for this
+    team this morning -- so it is logged at WARNING rather than swallowed, and
+    the team's schedule still gets crawled.
+    """
+    fetch_schedule = MagicMock(return_value=[])
+    with caplog.at_level("WARNING", logger="src.reports.morning_run"):
+        result = _run(
+            db, MagicMock(),
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=fetch_schedule,
+            fetch_opponents=MagicMock(return_value=[]),
+            resolve_opponent=MagicMock(),
+            resolve_team=MagicMock(side_effect=GameChangerAPIError("profile 500")),
+        )
+
+    # The team was NOT aborted: the crawl still ran and the run completed.
+    fetch_schedule.assert_called_once()
+    assert result is not None
+    # The own-team row exists, with no year rather than no row.
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()
+    assert row is not None, "a failed profile fetch must not skip the team row"
+    assert row[0] is None
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("No season year available" in m for m in warnings), warnings
+
+
+def test_own_team_profile_without_a_year_also_warns(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A SUCCESSFUL fetch carrying no year must warn too.
+
+    ``TeamProfile.year`` is ``int | None``, so this is a reachable shape that
+    raises nothing. Warning only on the exception branch would leave this,
+    the quieter of the two ways to end up with no year, completely silent --
+    and silence is the failure mode, because the consequence is rung (c) going
+    dark for the team. This is the branch the exception test cannot reach.
+    """
+    with caplog.at_level("WARNING", logger="src.reports.morning_run"):
+        _run(
+            db, MagicMock(),
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=MagicMock(return_value=[]),
+            fetch_opponents=MagicMock(return_value=[]),
+            resolve_opponent=MagicMock(),
+            # Succeeds. Just carries no year -- no exception anywhere.
+            resolve_team=MagicMock(return_value=TeamProfile(
+                public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=None,
+            )),
+        )
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] is None
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("No season year available" in m for m in warnings), warnings
+
+
+def test_stored_year_survives_a_yearless_profile_without_a_false_alarm(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The warning must not assert a consequence that did not happen.
+
+    With a year already stored, a yearless profile disables NOTHING -- rung (c)
+    keeps working off the stored value. The message is conditional for exactly
+    this case; an unconditional "rung (c) is disabled" would send the operator
+    after a non-problem.
+    """
+    db.execute(
+        "INSERT INTO teams (name, public_id, membership_type, season_year) "
+        "VALUES ('LSB JV', ?, 'member', 2026)",
+        (_PUBLIC_A,),
+    )
+    db.commit()
+
+    with caplog.at_level("WARNING", logger="src.reports.morning_run"):
+        _run(
+            db, MagicMock(),
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=MagicMock(return_value=[]),
+            fetch_opponents=MagicMock(return_value=[]),
+            resolve_opponent=MagicMock(),
+            resolve_team=MagicMock(return_value=TeamProfile(
+                public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=None,
+            )),
+        )
+
+    assert db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()[0] == 2026
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    hit = [m for m in warnings if "No season year available" in m]
+    assert hit, warnings
+    # It flags the risk without asserting the outcome.
+    assert "if a year is already stored" in hit[0]
+
+
+def test_malformed_profile_year_is_refused_not_stored(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-integer profile year must never reach teams.season_year.
+
+    Writing it through would be WORSE than writing nothing: the read side fails
+    closed on a non-int, and `_backfill_season_year` refuses to overwrite any
+    non-NULL value -- so one malformed response would wedge rung (c) off for
+    this team permanently. Refusing keeps the column NULL, and therefore still
+    healable on the next run.
+    """
+    with caplog.at_level("WARNING", logger="src.reports.morning_run"):
+        _run(
+            db, MagicMock(),
+            team_urls=[_PUBLIC_A],
+            resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+            fetch_schedule=MagicMock(return_value=[]),
+            fetch_opponents=MagicMock(return_value=[]),
+            resolve_opponent=MagicMock(),
+            resolve_team=MagicMock(return_value=TeamProfile(
+                public_id=_PUBLIC_A, name="LSB JV", sport="baseball",
+                year="2026",  # a quoted year -- a response-shape regression
+            )),
+        )
+
+    stored = db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()[0]
+    assert stored is None, f"a non-integer year must not be stored, got {stored!r}"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("non-integer season year" in m for m in warnings), warnings
+
+
+def test_refused_malformed_year_still_heals_on_the_next_run(
+    db: sqlite3.Connection,
+) -> None:
+    """The point of refusing rather than storing: the row stays healable.
+
+    Had the bad value been written, `_backfill_season_year`'s NULL-only rule
+    would have locked it in.
+    """
+    patches = dict(
+        team_urls=[_PUBLIC_A],
+        resolve_uuid=MagicMock(return_value=_GC_UUID_A),
+        fetch_schedule=MagicMock(return_value=[]),
+        fetch_opponents=MagicMock(return_value=[]),
+        resolve_opponent=MagicMock(),
+    )
+    _run(db, MagicMock(), resolve_team=MagicMock(return_value=TeamProfile(
+        public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year="2026")),
+        **patches)
+    _run(db, MagicMock(), resolve_team=MagicMock(return_value=TeamProfile(
+        public_id=_PUBLIC_A, name="LSB JV", sport="baseball", year=2026)),
+        **patches)
+
+    assert db.execute(
+        "SELECT season_year FROM teams WHERE public_id = ?", (_PUBLIC_A,)
+    ).fetchone()[0] == 2026

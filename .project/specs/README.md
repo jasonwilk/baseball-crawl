@@ -19,7 +19,8 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-Clear. Step 3 landed 2026-08-08; pick the next chunk from NEXT.
+Clear. The rung-c season-year filter landed 2026-08-09 (spec in `done/`); pick the next chunk
+from NEXT.
 
 ## NEXT
 
@@ -28,18 +29,10 @@ Clear. Step 3 landed 2026-08-08; pick the next chunk from NEXT.
   regenerate the cheat sheet from what actually got used. (The `PARKED`-splitting question this
   entry used to carry is CLOSED — settled ahead of Step 4 by `4fc1f6d`, which added `READY`. Do not
   re-open it.)
-- **Rung-c season-year filter — RULED: BUILD** (operator, 2026-08-08). Semantics settled: a team
-  from one YEAR must never auto-match a team from another year; cross-season within the same
-  year (spring 2026 vs summer 2026) is legitimate; a hit with `season.year` absent REFUSES
-  auto-accept (fail-closed). Compare against the member team's `teams.season_year`. **Spec written
-  and codex-reviewed 2026-08-09, ready to execute in a fresh session:**
-  `2026-08-05-rung-c-season-year-filter.md`. ⚠ **NOT the small chunk this entry used to call it** —
-  writing the spec found the code change strands TEN live prose sites, that `morning_run` creates
-  own-team rows with a NULL `season_year` (so fail-closed would silently kill rung (c) on a team's
-  first run), and that the ladder test fixture carries no `season` key, which would let one test
-  pass for the wrong reason. Take scope from the spec's Files table, not from this line. It also
-  carries the two folded-in residuals below (worktree-guard `CLAUDE_HOME`, extensionless PII
-  scannability) and the owed `codex-review`-vs-`codex review` comparison.
+- ~~**Rung-c season-year filter**~~ — **LANDED 2026-08-09.** Spec moved to
+  `done/2026-08-05-rung-c-season-year-filter.md`. It carried both queued residuals
+  (worktree-guard `CLAUDE_HOME`, extensionless PII scannability) and settled the owed
+  `codex-review`-vs-`codex review` comparison; all three are struck from the lists below.
 - **Opponent org-reachability measurement — RULED: measure only** (operator, 2026-08-08). Bulk
   org discovery is DECLINED (vision non-goal). The funded question: what fraction of our real
   unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's
@@ -86,10 +79,40 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
-- `worktree-guard.sh`: the `CLAUDE_HOME` case arm is not slash-normalized the way `REPO` is. A
-  2-line fix; fold it into the next `src/`-touching chunk.
-- `codex-review` skill vs. first-party `codex review` — comparison owed at Step 2.
+- ✅ **CLOSED 2026-08-09** — `worktree-guard.sh` `CLAUDE_HOME` slash normalization. It was ~3 lines,
+  not the 2 estimated; the empty case needed handling and had to DIVERGE from `REPO` (empty `REPO`
+  denies, empty `CLAUDE_HOME` falls back to the literal default).
+- ✅ **CLOSED 2026-08-09** — `codex-review` skill vs. first-party `codex review`. **Verdict: KEEP
+  BOTH, they are not substitutes.** On one diff, four tools produced eleven findings with
+  essentially ZERO overlap, and the two Codex paths failed in *characteristic* directions: the
+  rubric-injected skill found the project-shaped defect (a fail-closed guard going silent), the
+  uninstructed first-party path found the two a rubric would not prompt for (durable-state
+  poisoning, and the already-cached-rows migration question). Dropping either would have lost real
+  P1/P2/P3 findings. ⚠ Bound: ONE diff — this refutes "they are redundant", it is not a measured
+  overlap rate. Feeds Migration Step 4.
 - Residual one-sided game (both identifiers on the empty side) — needs a live probe.
+- **`.env.example` carries three `email` matches and is now SCANNED** (2026-08-09). Our own
+  `noreply@` service address plus two `USER:PASS@host` proxy-URL FORMAT comments — read and
+  confirmed to hold no credential and no person's address. **Operator ruled: LEAVE, no suppressor.**
+  Consequence to know: staging `.env.example` will trip the hook. Reword the lines then — remedy #1
+  (change the data), never a `pii-ok` inside a credential template.
+- **The extensionless scan allowlist is a NAMED LIST** (`SCANNABLE_BASENAMES`, 2026-08-09). A NEW
+  extensionless file stays unscanned until someone adds its basename. A shebang test cannot replace
+  it: the scannability gate runs BEFORE the content read on both paths, and `Dockerfile` has no
+  shebang anyway.
+- **Still outside the PII scan surface entirely** (surfaced by the 2026-08-09 security review, not
+  fixed): non-dotfile templates whose final suffix is unlisted
+  (`docker-compose.override.yml.example`), and file types absent from `SCANNABLE_EXTENSIONS`
+  (`migrations/*.sql`, `requirements.in`, `*.conf`). Widening the surface to those is a policy call,
+  not a bug fix.
+- **`/security-review` can be handed the WRONG DIFF on uncommitted work** (2026-08-09). Its
+  `DIFF CONTENT` came from the COMMITTED range while `GIT STATUS` showed the working tree; since
+  markdown findings are an excluded category, it would have returned a VACUOUS CLEAN over two
+  modified security controls. Check the scope before trusting the verdict.
+- **Pre-existing `opponent_links` rows with `resolution_method='search'` never see the season-year
+  filter** — the terminality gate short-circuits them, so a pre-patch cross-year auto-match survives.
+  **Operator ruled 2026-08-09: LEAVE.** Correctable via `bb report map-opponent`, and they die at the
+  next data reset regardless. No invalidation, no migration.
 - **CLAUDE.md is at 11,241 of the 11KB (11,264-byte) cap — 23 bytes of headroom** (measured
   2026-08-08, after Step 3). It hit the cap exactly at 11,264, then went 31 bytes OVER when the
   code review's finding 4 forced a step-2 rewrite; the overrun was resolved by tightening that
@@ -125,19 +148,19 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
 
 ### Accepted residuals from Step 2
 
-- **The PII pattern scanner is blind to EXTENSIONLESS files** — `is_scannable` gates on suffix,
-  so a file with no `.` in its name is skipped as "non-scannable extension" regardless of
-  `SKIP_PATHS`. Exactly two tracked files are affected today: `.githooks/pre-commit` (which is
-  itself a PII gate) and `Dockerfile` (which the security checklist's 4h asks reviewers to check).
-  Found at Step 2 because this chunk edits the hook; both were scanned BY HAND with a positive
-  control and are clean. A one-line fix (treat a shebang or a known basename as scannable) —
-  fold it into the next `src/`-touching chunk.
+- ✅ **CLOSED 2026-08-09** — the PII scanner's blindness to EXTENSIONLESS files (`Dockerfile`,
+  `.githooks/pre-commit`), fixed with a named-basename allowlist. The fix found a SECOND hole the
+  residual had not named: `Path.suffix` lies about dotfiles carrying a further suffix, so the
+  TRACKED `.env.example` and `proxy/.env.example` were unscanned too — the likeliest files in the
+  repo to receive a real token by copy-paste. Both classes are now scanned, proven a strict
+  widening (0 narrowings over 36,932 synthetic paths and 2,485 tracked files, against a control
+  that produced 1,680).
 - **`.project/archive/`, `.project/research`, `.project/decisions`, `reviews/` keep role names and
   pre-freeze `epics/` paths.** Historical records, not pointers — they stay as written. The frozen
   `epics/` and `ideas/` trees moved under `.project/archive/` on 2026-08-08 and are history:
   salvage on demand, never bulk-migrate.
-- **The `codex-review` skill vs. first-party `codex review` comparison was owed at Step 2 and was
-  NOT done.** Carried forward at Step 3 rather than silently dropped.
+- ✅ **CLOSED 2026-08-09** — the `codex-review`-vs-`codex review` comparison, owed since Step 2 and
+  carried (not dropped) at Step 3. Verdict and its bound are in STANDING RESIDUALS above.
 
 Closed by Step 3 (2026-08-08): the `codex-spec-review` triad now takes a spec FILE path and emits a
 `RESULT_FILE` receipt; the four epic/story/spike/idea templates are gone, replaced by one

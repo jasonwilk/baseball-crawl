@@ -382,7 +382,7 @@ Morning run complete (1 team(s)): 0 generated, 0 failed, 1 unresolved, 1 deferre
 
 | `[via ...]` | What it means | Correctable with `map-opponent`? |
 |---|---|---|
-| `via search` | Matched by name search on a single team hit — **no name or season corroboration**, so this is the one that can be confidently wrong | **Yes** — re-running `map-opponent` overwrites it |
+| `via search` | Matched by name search on a single team hit **from your team's own season year** — but with **no name corroboration**, so this is still the one that can be confidently wrong (a same-year name-alike) | **Yes** — re-running `map-opponent` overwrites it |
 | `via progenitor` | GameChanger's own registry linked the opponent | No — refused |
 | `via operator` | Your own earlier mapping | No — refused |
 

@@ -397,11 +397,14 @@ def _apply_opponent_mapping(
     * ``resolution_method IS NULL`` -- the rung-(d) pending row. Filling it is
       this command's original job.
     * ``resolution_method = 'search'`` -- an OVERRIDE of a rung-(c) automatic
-      resolution. Search auto-accepts on a single TEAM hit with no name or
-      season corroboration (see :func:`_resolve_via_search`), so it is the one
-      method that can be confidently WRONG; without an override the operator
-      had no supported way to correct it, while
-      ``docs/admin/operations.md`` already instructed them to use this command.
+      resolution. Search auto-accepts on a single TEAM hit whose season YEAR
+      matches the member team's, with no NAME corroboration (see
+      :func:`_resolve_via_search`), so it is still the one method that can be
+      confidently WRONG -- the season filter narrows how often that happens
+      (never across years) but a same-year name-alike still auto-accepts.
+      Without an override the operator had no supported way to correct it,
+      while ``docs/admin/operations.md`` already instructed them to use this
+      command.
 
     ``progenitor`` / ``operator`` / ``no_presence`` rows are NOT eligible and
     are left alone -- a progenitor resolution came from GC's own registry link,
@@ -517,8 +520,8 @@ def map_opponent_cmd(
     \b
       * the pending row the ladder persisted in rung (d) (not yet resolved)
       * a row auto-resolved by name SEARCH, which this command OVERWRITES --
-        search matches on a single team hit with no name or season check, so it
-        is the one mapping that can be confidently wrong
+        search matches on a single team hit from the same season YEAR, with no
+        name check, so it is the one mapping that can be confidently wrong
 
     A `progenitor`, `operator` or `no-presence` mapping is left alone; if none
     of this opponent's rows are eligible the command changes nothing and exits
