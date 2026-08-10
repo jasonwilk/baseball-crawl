@@ -38,6 +38,12 @@ score AND identical start_time, rows created 10s apart under concurrent generati
 race-created on 2026-08-10 — the concurrency stub (`2026-08-10-admin-generate-concurrency.md`)
 owns the race; this spec owns merging the row and the detection rule.
 
+## Candidate twin groups (verify each; genuine doubleheaders stay unmerged)
+
+Post-load validation flagged two MORE groups during the 2026-08-10 serial repair, beyond the
+four from the log audit: 2026-07-15 (teams 3/5) and 2026-04-10 (teams 427/642). Six candidate
+groups total now; every one needs the doubleheader-vs-twin adjudication before any merge.
+
 ## Also observed, separate
 
 - One never-crawled orphan one-sided game for the same team (created 2026-07-25, absent from
