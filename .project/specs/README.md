@@ -81,14 +81,15 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
-- ⚠ **CI's whole-tree PII scan is RED on `main`** (found 2026-08-10 by the scanner-hardening chunk's
-  `/code-review`; NOT introduced by it). The 2026-08-09 dotfile widening made `.env.example` scannable and it
-  carries three `email` matches, so CI's own command —
-  `git ls-files -z | xargs -0 python3 -m src.safety.pii_scanner` — exits **123**, and under `pipefail`
-  `ci.yml:95` fails on the next push. **Why you should care**: the "LEAVE, no suppressor" ruling three bullets
-  down was made against only HALF this consequence — it names the pre-commit hook and not CI. **An operator
-  decision is owed.** If the ruling moves, the instrument is remedy #1 (reword to `USER:PASS@host` and an
-  RFC 2606 address), never a suppressor inside a credential template.
+- ✅ **CLOSED 2026-08-10** — CI's whole-tree PII scan was RED on `main`, found by the scanner-hardening
+  chunk's `/code-review` and NOT introduced by it. The 2026-08-09 dotfile widening made `.env.example`
+  scannable and it carried three `email` matches, so CI's own command exited **123**, failing `ci.yml:95`
+  under `pipefail`. **The operator ruling changed** — the earlier "LEAVE, no suppressor" was made against
+  only half the consequence (it named the pre-commit hook, not CI). Fixed by remedy #1, changing the data:
+  the FROM address moved to an RFC 2606 domain, and the two proxy-URL format comments to angle-bracket
+  placeholders. Same command now exits **0**. Positive control: re-adding the old address returns RC=1, so
+  the instrument still fires. **The lesson worth keeping**: a consequence stated for one gate is not the
+  whole consequence — this ruling named the hook and missed CI, and nothing re-checked it for eight days.
 - **`tests/fixtures/*.sql` are outside the scan surface and the residual below does not name them.** The
   `SCANNABLE_EXTENSIONS` gap recorded for `migrations/*.sql` also leaves `tests/fixtures/seed.sql`,
   `parity_consistent.sql`, and `recon_scoreboard_seed.sql` unscanned. **Why you should care**: seed fixtures
@@ -135,11 +136,14 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   P1/P2/P3 findings. ⚠ Bound: ONE diff — this refutes "they are redundant", it is not a measured
   overlap rate. Feeds Migration Step 4.
 - Residual one-sided game (both identifiers on the empty side) — needs a live probe.
-- **`.env.example` carries three `email` matches and is now SCANNED** (2026-08-09). Our own
-  `noreply@` service address plus two `USER:PASS@host` proxy-URL FORMAT comments — read and
-  confirmed to hold no credential and no person's address. **Operator ruled: LEAVE, no suppressor.**
-  Consequence to know: staging `.env.example` will trip the hook. Reword the lines then — remedy #1
-  (change the data), never a `pii-ok` inside a credential template.
+- ✅ **SUPERSEDED 2026-08-10** — `.env.example` was SCANNED and carried three `email` matches (2026-08-09):
+  our own `noreply@` service address plus two proxy-URL FORMAT comments, read and confirmed to hold no
+  credential and no person's address. **The 2026-08-09 ruling was "LEAVE, no suppressor", and it named the
+  consequence as only "staging `.env.example` will trip the hook."** That was half of it — CI's whole-tree
+  scan was also failing, which nobody checked for eight days. **Ruling reversed 2026-08-10: reworded, still
+  no suppressor**, by remedy #1 exactly as this bullet prescribed. The file now scans clean. What survives
+  from the original: the three matches never were PII, and a `pii-ok` inside a credential template is still
+  the wrong instrument.
 - **The extensionless scan allowlist is a NAMED LIST** (`SCANNABLE_BASENAMES`, 2026-08-09). A NEW
   extensionless file stays unscanned until someone adds its basename. A shebang test cannot replace
   it: the scannability gate runs BEFORE the content read on both paths, and `Dockerfile` has no
