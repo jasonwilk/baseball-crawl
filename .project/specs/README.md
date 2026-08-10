@@ -54,6 +54,13 @@ chunk from NEXT.
   the same blind spot that produced passes 1 and 2, reproduced by an inventory that had already
   been corrected twice for exactly it. Re-running the sweep is what caught them; trusting the
   inbound inventory would not have.
+- **PII scanner hardening** — **READY 2026-08-10**, spec
+  `2026-08-10-pii-scanner-hardening.md`. Closes both `get_staged_files()` enumeration bypasses (`ACM`→`ACMR`
+  and `-z`), each behind a RED test proven failing first, and takes the two inert `epics/` entries out with
+  every restatement of them. Execution needs a FRESH session and owes `/code-review` **and**
+  `/security-review`, operator-typed as two separate messages. It also carries a pre-registered review
+  experiment (all arms against one frozen diff, criterion stated before the data) that feeds Audit 4 — run it
+  as written; fixing between passes is what muddied the last measurement.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -74,6 +81,27 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
+- ⚠ **CI's whole-tree PII scan is RED on `main`** (found 2026-08-10 by the scanner-hardening chunk's
+  `/code-review`; NOT introduced by it). The 2026-08-09 dotfile widening made `.env.example` scannable and it
+  carries three `email` matches, so CI's own command —
+  `git ls-files -z | xargs -0 python3 -m src.safety.pii_scanner` — exits **123**, and under `pipefail`
+  `ci.yml:95` fails on the next push. **Why you should care**: the "LEAVE, no suppressor" ruling three bullets
+  down was made against only HALF this consequence — it names the pre-commit hook and not CI. **An operator
+  decision is owed.** If the ruling moves, the instrument is remedy #1 (reword to `USER:PASS@host` and an
+  RFC 2606 address), never a suppressor inside a credential template.
+- **`tests/fixtures/*.sql` are outside the scan surface and the residual below does not name them.** The
+  `SCANNABLE_EXTENSIONS` gap recorded for `migrations/*.sql` also leaves `tests/fixtures/seed.sql`,
+  `parity_consistent.sql`, and `recon_scoreboard_seed.sql` unscanned. **Why you should care**: seed fixtures
+  are the higher-risk half — the plausible landing spot for a real player name or email, the same class that
+  once put a real minor's name in a planning file.
+- **The `codex-spec-review` rubric is stale on spec Status.**
+  `.project/codex-spec-review.md:48` still lists FOUR statuses and calls a fifth a finding, but `READY` was
+  added 2026-08-09. **Why you should care**: it flags every `READY` spec — it flagged the one committed
+  today, and codex noted the conflict itself. One-line docs fix; it does not belong inside a security chunk.
+- **`.project/ideas/` is inert in `SKIP_PATHS`** (found 2026-08-10). No such directory exists — ideas live at
+  `.project/specs/IDEAS.md`, history at `.project/archive/ideas/`. **Operator ruled 2026-08-10: LEAVE.**
+  Unlike `epics/`, which can never return, this tree plausibly could, and the re-measured TN-2 noise
+  rationale still covers it. Recorded so the next sweep does not re-discover it as a defect.
 - **The inert `epics/` entries in the two security controls ride the scanner-hardening chunk.**
   `src/safety/pii_patterns.py` (`SKIP_PATHS`) and `.githooks/pre-commit:125` (`GATE_TREES`) both
   still name `epics/`. Neither can match — nothing can be staged under a tree that does not
@@ -82,6 +110,12 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   code stands today. Editing either side alone breaks a doc/code agreement that is currently
   correct. Route them through the chunk that owns the `pii_scanner --staged` rename blindness
   below, which already owes a `/security-review`.
+
+  **ROUTED 2026-08-10** — spec `2026-08-10-pii-scanner-hardening.md`, Status `READY`. ⚠ **The coupling claim
+  above was AUDITED and is over-broad — do not execute it as written.** Only `:54` restates `SKIP_PATHS` and
+  must move. `:52` is a section heading (cosmetic). **`:50` is REFUTED and must be LEFT ALONE**: its `epics/`
+  mentions are historical provenance plus an illustration mirrored verbatim at `scripts/check_doc_pii.sh:57`,
+  so editing it would CREATE the divergence this residual exists to prevent. The spec carries the evidence.
 - **The runtime smoke check is not a named step in the `CLAUDE.md` lifecycle.** The 2026-08-09
   sweep retitled it to "Runtime Smoke Check" (`docs/admin/production-deployment.md`) and restated
   its trigger as operator-run before a commit touching a runtime or build-input surface — but
@@ -151,6 +185,13 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   gap is in the by-hand command CLAUDE.md step 6 tells every session to run. Same defect class
   `.claude/rules/pii-safety.md` already records as a live bypass for the frozen-archive gate. A
   one-line fix that touches a security control — give it its own spec and a `/security-review`.
+
+  **ROUTED 2026-08-10** — spec `2026-08-10-pii-scanner-hardening.md`, Status `READY`. Two corrections to the
+  above. The citation **`:320` has drifted to `:353`** (the file grew when the extensionless fix landed
+  2026-08-09). And it is **not** a one-line fix: the same function has a SECOND documented bypass — no `-z`,
+  so a C-quoted path names no readable file — which the operator ruled rides along, so the chunk is two fixes,
+  two RED tests, and the `epics/` removals above. It also reaches further than "the by-hand command":
+  `.claude/hooks/pii-check.sh:35` runs `--staged` as a PreToolUse gate on **every agent commit**.
 - **A `git mv` into `specs/done/` strands pointers.** Step 3 moved seven specs and stranded six
   references across four live specs; two were repointed (path-shaped / "See" navigation), four
   provenance records were left as written per the criterion-vs-evidence rule. Any future `done/`
