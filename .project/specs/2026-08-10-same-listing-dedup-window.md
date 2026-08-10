@@ -29,6 +29,15 @@ season record and every aggregate double-count the game ("35 of 34 games").
    2026-07-25 — the last is sub-second and today's rule should already catch it; verify).
    Then regenerate the affected report(s). Regeneration is DESTRUCTIVE; backup first.
 
+## Addendum (2026-08-10 log audit)
+
+Two facts for the spec's detection half: (1) a **960ms-apart** pair (2026-07-25 group) sits
+WITHIN the 1.0s tolerance and still did not collapse — so the tolerance branch is not reached
+on at least one path; establish why before redesigning the rule. (2) A new twin (identical
+score AND identical start_time, rows created 10s apart under concurrent generation) was
+race-created on 2026-08-10 — the concurrency stub (`2026-08-10-admin-generate-concurrency.md`)
+owns the race; this spec owns merging the row and the detection rule.
+
 ## Also observed, separate
 
 - One never-crawled orphan one-sided game for the same team (created 2026-07-25, absent from
