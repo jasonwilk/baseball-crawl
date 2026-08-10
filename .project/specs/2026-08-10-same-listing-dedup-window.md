@@ -44,6 +44,13 @@ Post-load validation flagged two MORE groups during the 2026-08-10 serial repair
 four from the log audit: 2026-07-15 (teams 3/5) and 2026-04-10 (teams 427/642). Six candidate
 groups total now; every one needs the doubleheader-vs-twin adjudication before any merge.
 
+**Seventh group, and a NEW EVASION SHAPE (2026-08-10 probe):** a same-date, same-score,
+same-start pair where the two rows record DIFFERENT home_team_ids for the same real opponent —
+the natural key ({away, home_a} vs {away, home_b}) structurally cannot match them, so this class
+evades the dedup entirely regardless of any timing window. Both rows carry full spray/plays, so
+stats double-count. The detection redesign must handle opponent-identity divergence, not only
+timing.
+
 ## Also observed, separate
 
 - One never-crawled orphan one-sided game for the same team (created 2026-07-25, absent from
