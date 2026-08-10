@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -260,7 +261,9 @@ def _read_staged_blob(file_path: str) -> str | None:
         )
         return result.stdout
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.warning("Could not read staged blob for %s: %s", file_path, e)
+        logger.warning(
+            "Could not read staged blob for %s: %s", _display_path(file_path), e
+        )
         return None
 
 
@@ -298,15 +301,22 @@ def scan_staged(file_paths: list[str]) -> tuple[list[Violation], list[str]]:
     read; ``main`` fails CLOSED (non-zero exit + operator-visible refusal) on
     any such path, so the scanner never reports "clean" on content it did not
     actually scan. Real findings on other paths are still returned.
+
+    Paths are used EXACTLY as given -- never trimmed. A leading or trailing
+    space is a legal filename character, and stripping one silently rewrites the
+    path: where the trimmed form collides with another staged path (a clean
+    ``x.md`` beside a credential-bearing ``" x.md"``), ``git show :<path>`` reads
+    the WRONG blob and the scanner certifies clean over content it never saw --
+    the precise failure ``get_staged_files``'s ``-z`` exists to prevent. The
+    ``--stdin`` caller strips its own line delimiters before calling in.
     """
     all_violations: list[Violation] = []
     unreadable: list[str] = []
     for file_path in file_paths:
-        fp = file_path.strip()
-        violations, is_unreadable = _scan_staged_one(fp)
+        violations, is_unreadable = _scan_staged_one(file_path)
         all_violations.extend(violations)
         if is_unreadable:
-            unreadable.append(fp)
+            unreadable.append(file_path)
     return all_violations, unreadable
 
 
@@ -333,32 +343,78 @@ def scan_files(file_paths: list[str]) -> list[Violation]:
     Args:
         file_paths: List of file paths to scan.
 
+    Paths are used EXACTLY as given -- see :func:`scan_staged` for why trimming
+    is unsafe. The ``--stdin`` caller strips its own line delimiters.
+
     Returns:
         Aggregated list of all violations found across all files.
     """
     all_violations: list[Violation] = []
     for file_path in file_paths:
-        all_violations.extend(scan_file(file_path.strip()))
+        all_violations.extend(scan_file(file_path))
     return all_violations
 
 
 def get_staged_files() -> list[str]:
     """Get the list of staged files from git.
 
+    Enumerates the SAME staged set as ``.githooks/pre-commit`` (see its lines
+    83-95). Both halves of the flag set are load-bearing, and both are here
+    because the enumerations drifted apart once already:
+
+    - ``R`` is included because ``--diff-filter=ACM`` alone drops a staged
+      rename, and git scores a move-AND-edit as ``R<score>``. When the rename is
+      the only staged change the returned list is EMPTY, so a rename carrying a
+      planted credential reached no gate at all. ``--name-only`` reports a
+      rename's DESTINATION path, which is the path to scan. ``D`` stays excluded
+      -- a deleted path has no blob to read.
+    - ``-z`` is the only safe enumeration: without it git C-quotes any path
+      containing a non-ASCII byte, a double-quote, or a backslash, and such a
+      path names no readable file, so ``git show :<path>`` cannot resolve it and
+      the content goes unscanned. ``core.quotePath=false`` covers only the
+      non-ASCII case.
+
+    This is the SECOND time an ``ACMR`` fix has had to be applied to a sibling
+    enumeration -- the hook's own was 2026-07-28, recorded as a finding in
+    ``.project/research/2026-08-08-migration-audit-3.md:41``. Keep the reason
+    beside the flags; a bare flag with no rationale is what let them drift.
+
+    The output is read as BYTES and decoded with :func:`os.fsdecode`, NOT with
+    ``text=True``. A filename is a byte string on POSIX and need not be valid
+    UTF-8; ``text=True`` would raise ``UnicodeDecodeError`` -- which is not in
+    the caught tuple below -- so one undecodable path would abort the scan of the
+    WHOLE staged set. ``os.fsdecode`` round-trips such bytes through surrogate
+    escapes, and ``subprocess`` re-encodes them with ``os.fsencode``, so
+    ``git show :<path>`` still resolves the blob and the content is actually
+    scanned. (``text=True`` would also silently translate a ``\\r`` inside a
+    path, breaking the byte-exactness promised below.)
+
     Returns:
-        List of staged file paths (Added, Copied, Modified only).
+        List of staged file paths (Added, Copied, Modified, Renamed -- not
+        Deleted), exactly as git reports them (never C-quoted, never trimmed).
     """
     try:
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"],
             capture_output=True,
-            text=True,
             check=True,
         )
-        return [f for f in result.stdout.strip().splitlines() if f]
+        return [os.fsdecode(f) for f in result.stdout.split(b"\0") if f]
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         logger.warning("Could not get staged files: %s", e)
         return []
+
+
+def _display_path(file_path: str) -> str:
+    """Render a path safely for stdout/stderr.
+
+    A path decoded by :func:`os.fsdecode` can carry surrogate escapes for bytes
+    that are not valid UTF-8, and printing one raises ``UnicodeEncodeError``.
+    That would turn a REPORTED violation into a crash -- failing closed, but
+    losing the operator-visible reason. Undecodable bytes render as ``\\x``
+    escapes instead.
+    """
+    return os.fsencode(file_path).decode("utf-8", "backslashreplace")
 
 
 def report_violations(violations: list[Violation]) -> None:
@@ -369,7 +425,7 @@ def report_violations(violations: list[Violation]) -> None:
     """
     for v in violations:
         print(
-            f"[PII BLOCKED] {v.file_path}:{v.line_number}: "
+            f"[PII BLOCKED] {_display_path(v.file_path)}:{v.line_number}: "
             f"matched '{v.pattern_name}' pattern",
             file=sys.stderr,
         )
@@ -390,8 +446,10 @@ def _count_scannable(file_paths: list[str], check_exists: bool = True) -> int:
     """
     count = 0
     for file_path in file_paths:
-        fp = file_path.strip()
-        if _scannability_skip_reason(fp, check_exists=check_exists) is None:
+        # Not trimmed -- this count is reconciled against the staged-path count
+        # at lifecycle step 6, so it must agree with what scan_staged actually
+        # read, path for path.
+        if _scannability_skip_reason(file_path, check_exists=check_exists) is None:
             count += 1
     return count
 
@@ -408,7 +466,7 @@ def main() -> int:
     parser.add_argument(
         "--staged",
         action="store_true",
-        help="Scan git staged files (Added, Copied, Modified)",
+        help="Scan git staged files (Added, Copied, Modified, Renamed)",
     )
     parser.add_argument(
         "--stdin",
@@ -464,7 +522,8 @@ def main() -> int:
         # still reported -- the unreadable handling does not mask them.
         for path in unreadable:
             print(
-                f"[pii-scan] REFUSING to certify clean: unreadable staged blob {path}"
+                "[pii-scan] REFUSING to certify clean: unreadable staged blob "
+                f"{_display_path(path)}"
             )
         exit_code = 1
 

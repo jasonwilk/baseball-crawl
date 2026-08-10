@@ -185,7 +185,8 @@ SKIP_PATHS: set[str] = {
     # produces only noise. (TN-2) Measured 2026-08-02 with the skip lifted: 43
     # such matches across 15 files -- API-spec key assignments, 10-digit runs
     # reading as phone numbers -- so the noise is real and these stay skipped.
-    "epics/",
+    # `epics/` was dropped 2026-08-10: the tree was frozen and deleted, so the
+    # entry could never match. Do not re-add it without the tree.
     ".project/archive/", ".project/ideas/",
     ".project/research/", ".project/templates/",
     # `.project/` itself is NOT skipped, so `.project/specs/` -- the unit of

@@ -2,7 +2,7 @@
 
 # PII scanner hardening — `--staged` enumeration bypasses + the inert `epics/` entries
 
-**Date**: 2026-08-10 · **Status**: `READY`
+**Date**: 2026-08-10 · **Status**: `COMPLETE (this commit)`
 **Source**: `.project/specs/README.md` STANDING RESIDUALS — the `pii_scanner.py --staged` rename blindness
 (found 2026-08-08, Step 3) and the inert `epics/` entries in the two security controls, which that residual
 explicitly routes through this chunk.
@@ -329,3 +329,78 @@ Redirect pytest to a file and capture `$?` separately — never trust a piped ex
   stubs** (see Out of scope): the live CI break on `.env.example`, and `tests/fixtures/*.sql` sitting outside
   the scan surface. A third finding (a wasted `POST /search` round-trip in `opponent_ladder._resolve_via_search`
   when the member season year is NULL) belongs to the rung-(c) chunk, not this one — `IDEAS.md` material.
+- **2026-08-10 — EXECUTED (lifecycle steps 3-9).** Spec audited against the repo first; every load-bearing
+  claim held. Two deltas: the CI `.env.example` break in Out of scope was fixed by `6a4a3d1` earlier the same
+  day (re-measured: `RC=0`, 468 files), and two of the step-9 stubs were already in STANDING RESIDUALS.
+
+  **RED tests, per-test, never aggregated.** Test A's FIRST run failed for a **fixture** reason — git scored
+  the move `D`+`A`, not `R`, because `_LONG_TOKEN` (56 chars) appended to a 70-byte body lands just under the
+  50% rename threshold. Per this spec's own instruction that a fixture-reason failure proves nothing, the body
+  was enlarged to 60 lines; the precondition then passed and the test failed on the real bypass
+  (`'renamed.md' in []` — enumeration EMPTY). Test B failed 3/3 on the C-quoting
+  (`['"r\303\251p.md"'] != ['rép.md']`, and the quote/backslash forms). Both GREEN after the fix.
+  ⚠ **The sibling fixture at `tests/test_doc_pii_hook.py:517` scores `R054` — 4 points of margin.** It has an
+  explicit `R` precondition so it fails loudly rather than vacuously, but it is one edit from flipping.
+  **Verification:** full suite **4474 passed, RC=0** (unpiped, RC captured separately). Enumeration
+  differential on a constructed index: `ACM`=0, `ACMR`=1, `get_staged_files()`=1 returning the DESTINATION —
+  as pre-registered; the 17-vs-284 figures were correctly left as motivation. Positive control on the
+  retargeted `test_doc_pii_hook.py` fixtures: mutating `GATE_TREES` to drop `.project` drove **17 tests RED**
+  (the hook then printed `[pii-hook] PII scan passed.` and committed) — the instrument fires;
+  `.githooks/pre-commit` restored byte-identical.
+
+  **Review experiment — all five arms run against one frozen index (tree `06d77b0`), nothing fixed until every
+  arm reported.** 8 distinct findings; no arm found more than 5; only ONE finding (F2) was caught by 4 of 5.
+
+  | # | Finding | a bare | b enrich | c typed CR | d typed SR | e codex | class |
+  |---|---|---|---|---|---|---|---|
+  | F1 | `.strip()` re-opens the bypass `-z` closes | ✅ | ❌ | ✅ HIGH | ✅ | ❌ | **interaction** |
+  | F2 | `text=True` → UnicodeDecodeError | ✅ | ✅ | ✅ | ⚠ seen, judged OK | ❌ | in-diff |
+  | F3 | `return []` fail-OPEN on git failure | ✅ | ❌ | ✅ | ❌ | ❌ | pre-existing |
+  | F4 | hook `--stdin` reads WORKING TREE | ❌ | ✅ | ✅ | ✅ | ❌ | pre-existing |
+  | F5 | byte-gate coverage claim backwards | ✅ | ✅ | ❌ | ❌ | ❌ | in-diff |
+  | F6 | my new `pre-commit` comment overclaims | ❌ | ❌ | ✅ | ❌ | ❌ | in-diff |
+  | F7 | typechange `T` reaches zero gates | ❌ | ❌ | ❌ | ✅ | ❌ | pre-existing |
+  | F8 | `epics/` removal = coverage regression | ❌ | ❌ | ❌ | ⚠ informational | ✅ P1 | disputed |
+
+  **VERDICT — the criterion was pre-registered and it resolved cleanly: typed reviews STAY for all `src/`
+  chunks.** Enriched-headless missed F1, the highest-severity finding on the chunk, and F1 is exactly the
+  interaction class the criterion named: unchanged code (`.strip()`, untouched by the diff) made newly
+  load-bearing BY the diff, and newly contradicted by a docstring the diff adds. The gap persisted with the
+  spec fed in, so we stop wondering.
+
+  **The unwelcome result worth keeping: enrichment made it WORSE, not better.** Bare-headless (a) caught F1;
+  enriched-headless (b), given the spec and the line of march, did not — and returned 3 findings to (a)'s 4.
+  Feeding a reviewer the author's framing appears to ANCHOR it to that framing: (b) reported findings that
+  track the spec's own concerns and missed the one the spec never contemplated. This inverts the intuition the
+  experiment was built on, so do not re-derive "more context is better" for reviewers. Codex (e) contributed
+  exactly one finding, unique and disputed (F8).
+
+  **Findings taken: F1, F2, F5, F6** — each either introduced by this diff or falsified by prose it adds.
+  F2 was **mine**: `-z` delivers raw bytes and `text=True` raised `UnicodeDecodeError`, absent from the caught
+  tuple, so ONE undecodable path aborted the scan of the whole staged set — the exact non-ASCII class `-z`
+  exists to close, and my three parametrized cases were all UTF-8-encodable so the suite stayed green over it.
+  Fixed with `os.fsdecode` (bytes round-trip back through `git show`) plus `_display_path`, because arm (b)
+  verified that fixing only the decode moves the crash downstream into `print()`. F1 removed `.strip()` from
+  `scan_staged` / `scan_files` / `_count_scannable`; the `--stdin` line-strip in `main()` stays, as that is a
+  real delimiter artifact. Two new RED tests, both proven failing individually against the pre-fix code
+  (`UnicodeDecodeError`; and `[] == ['api_key_assignment']` — the credential silently unscanned).
+  **A stale test was MUST-FIXed, not deleted**: `test_count_scannable_still_strips_whitespace` asserted the
+  strip as correct behavior — it pinned the defect. Re-authored to pin the new contract, with the reversal
+  recorded in its docstring.
+
+  **A process note that cost a cycle:** my first `scan_staged` edit placed the new paragraph AFTER the closing
+  `"""`, producing a `SyntaxError` I did not see because I went straight to the mutation run rather than
+  re-running the suite after the edit. The syntax check inside the mutation harness caught it. Parse the file
+  after any docstring edit; do not let the next command be the one that discovers it.
+
+  ⚠ **`git mv` stages the SOURCE'S INDEX BLOB, not the working tree — and it cost this commit its own step 7.**
+  The Status flip and this log were edited BEFORE the `git mv` into `done/` but never `git add`-ed after, so
+  the rename carried the OLD committed blob: the first commit landed the spec as a **pure rename still marked
+  `READY`**, and step 6 reconciled its counts against content that no longer existed. Fixed by staging the
+  spec and amending (nothing was pushed). **The evidence was in plain sight and I read past it** — the
+  diffstat printed `{ => done}/…spec.md | 0`, and I relayed that as "R100" without asking why a file I had
+  just rewritten showed ZERO changed lines. That is precisely the rule in `.claude/rules/tool-discipline.md`:
+  an unexpected COUNT is a cross-check trigger, in EITHER direction. Zero is a count. **The step-9 move must
+  be `git mv` THEN `git add <destination>`**, and the step-6 reconciliation must be run after that, not
+  before — otherwise the closing chunk certifies clean over a blob it never opened, which is the same defect
+  class as the `.strip()` finding this very chunk fixed.

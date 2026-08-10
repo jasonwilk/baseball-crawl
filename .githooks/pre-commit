@@ -115,14 +115,18 @@ if [ $EXIT_CODE -ne 0 ]; then
 fi
 
 # --- doc-PII byte-gate over the planning trees -------------------------------
-# The pattern scanner skips epics/ and .project/ (shape heuristics are all noise
-# there). The byte-gate greps them for literal known identifiers instead.
+# The pattern scanner skips the four legacy .project/ subdirs -- archive/,
+# ideas/, research/, templates/ -- where the shape heuristics are all noise.
+# (.project/specs/ IS scanned.) The byte-gate below greps the whole .project/
+# tree -- the skipped subdirs included -- for literal known identifiers, which
+# is the class the scanner cannot detect. Nothing OUTSIDE .project/ is byte-
+# gated here: GATE_TREES is that one tree.
 DOC_PII="$REPO_ROOT/scripts/check_doc_pii.sh"
 
 # Path prefixes are matched literally: `.project` as a regex would let a staged
 # `aproject/x.md` select the .project tree.
 GATE_TREES=()
-for tree in epics .project; do
+for tree in .project; do
   for staged in "${STAGED_ARR[@]}"; do
     case "$staged" in
       "$tree"/*) GATE_TREES+=("$tree"); break ;;

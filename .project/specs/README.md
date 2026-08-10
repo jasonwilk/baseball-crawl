@@ -103,6 +103,42 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   `.project/specs/IDEAS.md`, history at `.project/archive/ideas/`. **Operator ruled 2026-08-10: LEAVE.**
   Unlike `epics/`, which can never return, this tree plausibly could, and the re-measured TN-2 noise
   rationale still covers it. Recorded so the next sweep does not re-discover it as a defect.
+- ✅ **CLOSED 2026-08-10** — three PII-scanner residuals below (`--staged` rename blindness, the `-z`
+  C-quoting bypass, the inert `epics/` entries) all landed in the scanner-hardening chunk. Spec moved to
+  `.project/specs/done/`. **Four NEW residuals that chunk's five-arm review surfaced are recorded above** —
+  read those, not these.
+- **`pii_scanner.get_staged_files()` fails OPEN when git itself fails** (found 2026-08-10, `/code-review` +
+  bare-headless). `except (CalledProcessError, FileNotFoundError): return []`, and `main()` then hits
+  `if not file_paths: return 0` — printing NOTHING and exiting 0. Reproduced from a non-repo cwd: `rc=0`,
+  silent. `.claude/hooks/pii-check.sh` reads exit 0 as "no PII found, allow the commit". **Why you should
+  care**: this is the same fail-open class the unreadable-blob handler 100 lines below explicitly refuses —
+  that path prints `REFUSING to certify clean` and exits non-zero; this one certifies clean silently. Not
+  fixed in the hardening chunk because raising changes the contract for every caller and needs its own RED
+  test and `/security-review`.
+- **The git pre-commit hook scans the WORKING TREE, not the staged blob** (found 2026-08-10 by three of five
+  review arms independently). `.githooks/pre-commit:107` pipes paths to `pii_scanner --stdin`, which routes
+  `scan_files` → `scan_file` → `Path.read_text()`. Reproduced side by side: stage a token, blank the
+  working-tree copy, commit → `Scanned 1 file(s), 0 violations`, rc=0, token in `HEAD`; the same path under
+  `--staged` → `[PII BLOCKED]`, rc=1. **Why you should care**: `.claude/rules/pii-safety.md` advertises
+  staged-blob reading as a scanner capability, and it is real — but ONLY in `--staged`, which is the agent
+  PreToolUse hook. A human `git commit` does not get it. The byte-gate half of the hook judges the index
+  correctly; it is only the pattern-scanner half that reads the working tree. This is a LARGER divergence
+  than the flag drift the hardening chunk just closed.
+- **A typechange (`T`) reaches zero PII gates, and empties the hook's staged set so the byte-gate is skipped
+  too** (found 2026-08-10, `/security-review`, reproduced). Replacing a tracked symlink with a regular file
+  scores `T`, which `--diff-filter=ACMR` drops on BOTH enumerations. Executed: a `T`-only staged set returns
+  zero bytes → scanner rc=0 with no output, and in the hook `STAGED_ARR` is empty so it `exit 0`s at line
+  100-102 **above** the byte-gate. **Why you should care**: the repo currently tracks no symlinks, so this
+  needs a two-step sequence — that is what makes it a residual and not a live hole. Fix is `ACMRT` in both
+  enumerations in ONE commit, or invert to `--diff-filter=d` so a future status letter defaults to *scanned*.
+- **DISPUTED, owed an operator ruling: does removing `epics/` from `GATE_TREES` reduce coverage?** Codex
+  (2026-08-10, P1) reproduced that with `epics/` gone from the gate, staging `epics/E-999-demo/epic.md` with a
+  denylisted identifier now commits clean, and cites `AGENTS.md:8` still naming `epics/` as a work location.
+  The counter-argument, which the spec and the prior operator ruling rest on: the tree is retired and deleted,
+  nothing is under it, and keeping dead entries forever is the drift `CLAUDE.md` warns against. **Both are
+  true** — the entry was doing LATENT work, and the session did not silently overrule the ruling. **Why you
+  should care**: the real question is whether the byte-gate should gate ALL staged paths rather than a tree
+  allowlist, which would moot the argument permanently. Decide the general form, not the `epics/` instance.
 - **The inert `epics/` entries in the two security controls ride the scanner-hardening chunk.**
   `src/safety/pii_patterns.py` (`SKIP_PATHS`) and `.githooks/pre-commit:125` (`GATE_TREES`) both
   still name `epics/`. Neither can match — nothing can be staged under a tree that does not

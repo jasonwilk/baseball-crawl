@@ -81,7 +81,7 @@ jobs:
       # `--staged` is the pre-commit mode with no staged set on a CI checkout,
       # so neither would actually scan. `git ls-files -z | xargs -0` feeds the
       # whole checked-out tree as explicit file args; the scanner's own
-      # SKIP_PATHS (epics/, the four legacy .project/ subdirs, lockfiles, ...)
+      # SKIP_PATHS (the four legacy .project/ subdirs, lockfiles, ...)
       # still apply -- `.project/specs/` is scanned. With bash
       # `pipefail` (the GitHub Actions default), any violation exits the scanner
       # non-zero and fails this step.

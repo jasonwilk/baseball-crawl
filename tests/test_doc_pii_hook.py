@@ -1,8 +1,15 @@
 """Integration tests for the doc-PII byte-gate wrapper in .githooks/pre-commit.
 
-The gate runs `scripts/check_doc_pii.sh` against the staged `epics/` and
-`.project/` trees. Exit disposition: 0 pass, 1 block, 2 block (fail closed),
-3 announce but do not block.
+The gate runs `scripts/check_doc_pii.sh` against the staged `.project/` tree.
+Exit disposition: 0 pass, 1 block, 2 block (fail closed), 3 announce but do not
+block.
+
+Fixtures target `.project/research/` deliberately: it is in the scanner's
+`SKIP_PATHS`, so exactly ONE gate is in play on the path under test. That
+matters for the hostile-filename cases, where the point is knowing unambiguously
+which gate blocked. `.project/specs/` would also work -- the sentinel below
+matches none of the scanner's regexes, so that tree scans clean and the
+byte-gate is still what blocks -- but it leaves two gates live on the path.
 
 Every identifier used here is fabricated. The real denylist
 (secrets/pii-denylist.txt) is never read: each test either points
@@ -110,7 +117,7 @@ class TestExitCodeDisposition:
     def test_denylist_absent_announces_and_does_not_block(self, tmp_path: Path) -> None:
         # AC-5: a fresh clone (denylist gitignored, hence absent) stays committable.
         repo = _init_repo(tmp_path)
-        _stage_file(repo, "epics/E-999-demo/epic.md", "# Demo epic\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", "# Demo epic\n")
         result = _commit(repo)
         assert result.returncode == 0, _output(result)
         assert "[doc-pii: INCONCLUSIVE" in _output(result)
@@ -118,7 +125,7 @@ class TestExitCodeDisposition:
     def test_clean_tree_with_real_denylist_passes(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        _stage_file(repo, "epics/E-999-demo/epic.md", "# Demo epic\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", "# Demo epic\n")
         result = _commit(repo, denylist)
         assert result.returncode == 0, _output(result)
         assert "[doc-pii: REAL, 0 matches]" in _output(result)
@@ -127,7 +134,7 @@ class TestExitCodeDisposition:
         # AC-6, with a fabricated identifier in both the denylist and the artifact.
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        _stage_file(repo, "epics/E-999-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
         result = _commit(repo, denylist)
         assert result.returncode != 0
         assert "[doc-pii: BLOCKED]" in _output(result)
@@ -135,7 +142,7 @@ class TestExitCodeDisposition:
     def test_malformed_denylist_blocks_commit(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, "bogustype something\n")
-        _stage_file(repo, "epics/E-999-demo/epic.md", "# Demo epic\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", "# Demo epic\n")
         result = _commit(repo, denylist)
         assert result.returncode != 0
         assert "[doc-pii: BLOCKED]" in _output(result)
@@ -143,7 +150,10 @@ class TestExitCodeDisposition:
 
 @pytest.mark.integration
 class TestGatedTrees:
-    """AC-1: both planning trees are gated; other paths are not."""
+    """AC-1: the planning tree is gated; other paths are not.
+
+    One tree, not two, since `epics/` left `GATE_TREES` on 2026-08-10.
+    """
 
     def test_dot_project_tree_is_gated(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
@@ -410,7 +420,7 @@ class TestIndexNotWorkingTree:
     ) -> None:
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        path = _stage_file(repo, "epics/E-999-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
+        path = _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
         path.write_text("# scrubbed in the working tree only\n")
         result = _commit(repo, denylist)
         assert result.returncode != 0
@@ -419,7 +429,7 @@ class TestIndexNotWorkingTree:
     def test_working_tree_identifier_does_not_block_a_clean_index(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        path = _stage_file(repo, "epics/E-999-demo/epic.md", "# Demo epic\n")
+        path = _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", "# Demo epic\n")
         path.write_text(f"Unstaged edit: {FAKE_TOKEN}\n")
         result = _commit(repo, denylist)
         assert result.returncode == 0, _output(result)
@@ -428,14 +438,14 @@ class TestIndexNotWorkingTree:
     def test_skip_worktree_entry_still_blocks(self, tmp_path: Path) -> None:
         """`git checkout-index` omits skip-worktree entries unless told otherwise.
 
-        Without --ignore-skip-worktree-bits the snapshot lacks epics/ entirely,
+        Without --ignore-skip-worktree-bits the snapshot lacks .project/ entirely,
         the gate certifies a snapshot the index disagrees with, and the
         identifier rides into the commit.
         """
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        _stage_file(repo, "epics/E-999-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
-        _git(repo, "git", "update-index", "--skip-worktree", "epics/E-999-demo/epic.md")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
+        _git(repo, "git", "update-index", "--skip-worktree", ".project/research/2026-08-10-demo/epic.md")
         result = _commit(repo, denylist)
         assert result.returncode != 0, _output(result)
         assert "[doc-pii: BLOCKED]" in _output(result)
@@ -456,7 +466,7 @@ class TestGateNeverSilentlySkips:
 
     def test_missing_gate_script_blocks_planning_commit(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path, with_scripts=False)
-        _stage_file(repo, "epics/E-999-demo/epic.md", "# Demo epic\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", "# Demo epic\n")
         result = _commit(repo)
         assert result.returncode != 0, _output(result)
         assert "[doc-pii: BLOCKED]" in _output(result)
@@ -478,7 +488,7 @@ class TestGateNeverSilentlySkips:
         )
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        _stage_file(repo, "epics/E-999-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
+        _stage_file(repo, ".project/research/2026-08-10-demo/epic.md", f"Opponent: {FAKE_TOKEN}\n")
         result = _commit(repo, denylist, bash_env=shim)
         assert result.returncode != 0, _output(result)
         assert "[doc-pii: BLOCKED]" in _output(result)
@@ -496,7 +506,7 @@ class TestGateNeverSilentlySkips:
         """
         repo = _init_repo(tmp_path)
         denylist = _write_denylist(tmp_path, f"plain {FAKE_TOKEN}\n")
-        _stage_file(repo, f"epics/E-999-demo/{name}", f"Opponent: {FAKE_TOKEN}\n")
+        _stage_file(repo, f".project/research/2026-08-10-demo/{name}", f"Opponent: {FAKE_TOKEN}\n")
         result = _commit(repo, denylist)
         assert result.returncode != 0, _output(result)
         assert "[doc-pii: BLOCKED]" in _output(result)

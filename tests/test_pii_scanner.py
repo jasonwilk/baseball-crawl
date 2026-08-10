@@ -13,6 +13,7 @@ All test data uses obviously fake values:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ from src.safety.pii_scanner import (
     is_rfc2606_email,
     is_scannable,
     main,
+    report_violations,
     scan_file,
     scan_files,
     scan_staged_file,
@@ -530,13 +532,13 @@ class TestRfc2606DomainAllowlist:
 # ---------------------------------------------------------------------------
 
 class TestNewSkipPaths:
-    """epics/ and the legacy .project/ subdirs are excluded; specs/ is not."""
+    """The legacy .project/ subdirs are excluded; specs/ is not.
 
-    def test_epics_path_skipped(self) -> None:
-        assert should_skip_path("epics/E-129-01-rfc2606-domain-allowlist.md") is True
-
-    def test_epics_nested_path_skipped(self) -> None:
-        assert should_skip_path("epics/E-129-pii-scanner-allowlists/epic.md") is True
+    The `epics/` assertions that sat here were retired 2026-08-10 with the
+    `SKIP_PATHS` entry: the tree is gone, so an assertion either way pins
+    nothing. Nested-prefix matching is still covered by the parametrized
+    legacy-subdir case below.
+    """
 
     def test_specs_not_skipped(self) -> None:
         # Specs are the unit of work under the spec-based flow, so they must be
@@ -571,15 +573,8 @@ class TestNewSkipPaths:
         assert should_skip_path("tests/test_pii_scanner.py") is False
 
 
-class TestEpicsPathExclusionIntegration:
-    """AC-1/AC-2/AC-7: epics/ and the legacy .project/ subdirs are skipped."""
-
-    def test_epics_file_skipped(self, tmp_path: Path) -> None:
-        """AC-1: epics/ file with real email produces no finding."""
-        # Write the file under a simulated epics/ path by using should_skip_path
-        # directly -- we can't create epics/ under tmp_path and test via scan_file
-        # because scan_file uses the path string for prefix matching.
-        assert should_skip_path("epics/E-129-pii-scanner-allowlists/E-129-01-rfc2606-domain-allowlist.md") is True
+class TestLegacyProjectSubdirExclusionIntegration:
+    """AC-1/AC-2/AC-7: the legacy .project/ subdirs are skipped, specs/ is not."""
 
     def test_project_ideas_file_skipped(self) -> None:
         """AC-2: .project/ideas/ file with email address is skipped."""
@@ -603,13 +598,14 @@ class TestEpicsPathExclusionIntegration:
         violations = scan_file(".project/specs/2026-08-03-example.md")
         assert [v.pattern_name for v in violations] == ["email"]
 
-    def test_scan_file_skips_epics_path(self, tmp_path: Path) -> None:
-        """scan_file returns empty when the path string starts with epics/."""
-        # Create a real file but pass it with an epics/ prefix path
-        real_file = tmp_path / "story.md"
-        real_file.write_text("coach@realdomain.com\n")
-        # Simulate what the scanner sees: the path as reported by git
-        violations = scan_file("epics/fake-story.md")
+    def test_scan_file_skips_a_legacy_project_subdir_path(self, tmp_path: Path) -> None:
+        """scan_file skips on the PATH STRING prefix, not on what is on disk.
+
+        Retargeted from `epics/` 2026-08-10 with that entry's removal. The point
+        of the case is the string-prefix semantics -- the path handed in need not
+        exist -- so it needs a live SKIP_PATHS entry to keep meaning anything.
+        """
+        violations = scan_file(".project/research/does-not-exist.md")
         assert violations == []
 
 
@@ -902,11 +898,19 @@ class TestScannabilityGateEquivalence:
         expected = sum(1 for p in cases if _scannability_skip_reason(p) is None)
         assert _count_scannable(cases) == expected
 
-    def test_count_scannable_still_strips_whitespace(self, tmp_path: Path) -> None:
-        """Unchanged behavior: ``_count_scannable`` strips each path before the
-        gate, so a whitespace-padded scannable path still counts."""
+    def test_count_scannable_does_not_trim_paths(self, tmp_path: Path) -> None:
+        """CONTRACT CHANGED 2026-08-10 -- this test previously asserted the
+        opposite, that ``_count_scannable`` strips each path before the gate.
+
+        The strip was the defect. This count is reconciled against the staged
+        path count at lifecycle step 6, so it must agree with what
+        ``scan_staged`` actually READ, path for path. A padded path is a
+        different path: it is not scanned, so it must not be counted either.
+        Counting it produced a reassuring number over a blob nobody opened.
+        """
         real_py = _write_file(tmp_path, "ws.py", "x = 1\n")
-        assert _count_scannable([f"  {real_py}  "]) == 1
+        assert _count_scannable([real_py]) == 1
+        assert _count_scannable([f"  {real_py}  "]) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1086,7 +1090,7 @@ class TestStagedBlobScanning:
 
         monkeypatch.chdir(repo)
         staged = pii_scanner.get_staged_files()
-        assert "creds.env" in staged  # still Added per --diff-filter=ACM
+        assert "creds.env" in staged  # still Added per --diff-filter=ACMR
         violations = scan_staged_files(staged)
         assert len(violations) == 1
         assert violations[0].pattern_name == "api_key_assignment"
@@ -1109,7 +1113,7 @@ class TestStagedBlobScanning:
     def test_staged_deletion_skipped_without_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AC-7: a staged file DELETION (git rm) is excluded by --diff-filter=ACM,
+        """AC-7: a staged file DELETION (git rm) is excluded by --diff-filter=ACMR,
         so it is skipped without error (distinct from AC-5's staged-add-then-rm)."""
         repo = _init_git_repo(tmp_path)
         (repo / "notes.env").write_text("GC_ACCESS_TOKEN=\n")  # clean committed file
@@ -1119,8 +1123,139 @@ class TestStagedBlobScanning:
 
         monkeypatch.chdir(repo)
         staged = pii_scanner.get_staged_files()
-        assert "notes.env" not in staged  # D excluded by ACM
+        assert "notes.env" not in staged  # D excluded by ACMR
         assert scan_staged_files(staged) == []
+
+
+class TestStagedEnumeration:
+    """`get_staged_files()` must enumerate the same staged set the pre-commit
+    hook does (`.githooks/pre-commit:98`). Two bypasses lived in the divergence:
+    a rename was dropped entirely, and a path git C-quotes came back as a quoted
+    string naming no readable file.
+    """
+
+    def test_rename_with_edit_is_enumerated_and_scanned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A `git mv` carrying a content edit reaches the scanner.
+
+        `--diff-filter=ACM` drops the `R`, and when the rename is the only staged
+        change the returned list is EMPTY -- so the planted token is never read.
+        """
+        # Built at runtime rather than written as a literal assignment: this
+        # file's synthetic marker covers it, but the shape is what the sibling
+        # fixture in tests/test_doc_pii_hook.py must use, so keep them alike.
+        credential = "GC_REFRESH_TOKEN=" + _LONG_TOKEN
+        # 60 lines, not 10: git's default rename threshold is 50% similarity, and
+        # appending a ~73-byte credential to a 70-byte body lands just UNDER it,
+        # scoring the change delete-plus-add. The precondition below would then
+        # fail for a fixture reason instead of proving anything.
+        body = "".join(f"line {n}\n" for n in range(60))
+
+        repo = _init_git_repo(tmp_path)
+        (repo / "notes.md").write_text(body)
+        _git(repo, "add", "notes.md")
+        _git(repo, "commit", "-qm", "seed")
+
+        _git(repo, "mv", "notes.md", "renamed.md")
+        (repo / "renamed.md").write_text(body + credential + "\n")
+        _git(repo, "add", "-A")
+
+        # Precondition: git must score this `R`. Below the rename threshold it
+        # stages as an `A`, which `ACM` already caught -- the test would then
+        # pass vacuously without exercising the enumeration it exists to pin.
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--name-status"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert status.startswith("R"), f"precondition: expected a rename, got: {status!r}"
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert "renamed.md" in staged  # the DESTINATION path is what gets scanned
+        violations = scan_staged_files(staged)
+        assert [v.pattern_name for v in violations] == ["api_key_assignment"]
+        assert violations[0].file_path == "renamed.md"
+
+    @pytest.mark.parametrize("name", ['rép.md', 'a"b.md', "a\\b.md"])
+    def test_hostile_filename_is_enumerated_and_scanned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """A non-ASCII byte, a double-quote, or a backslash each make
+        `--name-only` emit a C-quoted string. That string names no readable file,
+        so `git show :<path>` cannot resolve it and the content goes unscanned.
+        `core.quotePath=false` would cover only the non-ASCII case; `-z` has no
+        quoting layer at all. Same three classes `tests/test_doc_pii_hook.py`
+        already pins for the hook.
+        """
+        credential = "GC_REFRESH_TOKEN=" + _LONG_TOKEN
+
+        repo = _init_git_repo(tmp_path)
+        (repo / name).write_text(credential + "\n")
+        _git(repo, "add", "-A")
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert staged == [name]  # exact, unquoted
+        violations = scan_staged_files(staged)
+        assert [v.pattern_name for v in violations] == ["api_key_assignment"]
+        assert violations[0].file_path == name
+
+    def test_undecodable_filename_is_enumerated_and_scanned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A filename is a BYTE string on POSIX and need not be valid UTF-8.
+
+        Reading the enumeration with `text=True` raises UnicodeDecodeError --
+        absent from the caught tuple -- so ONE undecodable path aborts the scan
+        of the whole staged set. The three cases above are all UTF-8-encodable,
+        so they cannot detect this; `os.fsdecode` is what makes the byte path
+        round-trip back through `git show`.
+        """
+        name = os.fsdecode(b"bad\xe9name.md")
+        credential = "GC_REFRESH_TOKEN=" + _LONG_TOKEN
+
+        repo = _init_git_repo(tmp_path)
+        (repo / name).write_text(credential + "\n")
+        _git(repo, "add", "-A")
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert staged == [name]
+        violations = scan_staged_files(staged)
+        # Not merely "did not crash": the blob must actually have been READ.
+        assert [v.pattern_name for v in violations] == ["api_key_assignment"]
+        # And the path must be printable -- a surrogate escape reaching print()
+        # would turn a reported violation into a UnicodeEncodeError.
+        report_violations(violations)
+
+    def test_space_padded_sibling_is_not_confused_for_its_neighbour(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A leading space is a legal filename character, and trimming one makes
+        `git show :<path>` read a DIFFERENT staged blob.
+
+        With a clean `x.md` staged beside a credential-bearing `" x.md"`, a
+        `.strip()` anywhere in the scan path reads `x.md` twice and reports
+        `Scanned 2 file(s), 0 violations` -- certifying clean over a blob it
+        never opened, which is exactly what the `-z` enumeration exists to stop.
+        """
+        credential = "GC_REFRESH_TOKEN=" + _LONG_TOKEN
+
+        repo = _init_git_repo(tmp_path)
+        (repo / "x.md").write_text("nothing to see here\n")
+        (repo / " x.md").write_text(credential + "\n")
+        _git(repo, "add", "-A")
+
+        monkeypatch.chdir(repo)
+        staged = pii_scanner.get_staged_files()
+        assert sorted(staged) == [" x.md", "x.md"]
+        violations = scan_staged_files(staged)
+        assert [v.pattern_name for v in violations] == ["api_key_assignment"]
+        assert violations[0].file_path == " x.md"
 
 
 class TestStagedBlobReadFailure:
