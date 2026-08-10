@@ -1,4 +1,5 @@
 <!-- NO REAL NAMES OR IDENTIFIERS — no person's name, ever; for teams, orgs, ids and UUIDs use the PII-Safe Placeholder Taxonomy in `.claude/rules/api-docs.md`. -->
+<!-- SPEC WEIGHT SCALES WITH CHUNK RISK: a docs chunk earns a page, not 500 lines (a 12-hour spec preceded a 27-minute execution once — audit 4). Spec sessions leave at boundaries too; polishing past executable is the spec eating the chunk. Add READY to Status choices when reviewed+committed, awaiting execution. -->
 
 # <Title>
 
