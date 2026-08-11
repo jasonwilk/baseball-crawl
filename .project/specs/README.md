@@ -61,6 +61,15 @@ chunk from NEXT.
   `/security-review`, operator-typed as two separate messages. It also carries a pre-registered review
   experiment (all arms against one frozen diff, criterion stated before the data) that feeds Audit 4 — run it
   as written; fixing between passes is what muddied the last measurement.
+- **Plays final-score recovery (seed §2)** — **READY 2026-08-10**, spec
+  `2026-08-10-plays-final-score-recovery.md`. Recovers the game-ending run that GameChanger puts on
+  a trailing play our parser skips: **91 units / 88 games, 102 runs**, and youth is hit ~2.5× harder
+  than high school (7.9% vs 3.2%). Execution needs a FRESH session and owes `/code-review`;
+  `/security-review` is explicitly NOT needed (no auth/serving/PII/delete surface) — the spec says
+  so rather than leaving it assumed. **Read Verification 0 first**: it gates on score sums and the
+  step-6 count, NOT on `player_game_*` row counts, which drift on their own. A post-commit backfill
+  (backup → reset → re-scout) follows in its own session; its success criterion is **91 → the
+  abandoned-charting residual, NOT → 0**.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -81,6 +90,37 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
+- **The reconciliation gate CANNOT work on a growing corpus, and this is a design fault, not drift**
+  (found 2026-08-10). `evaluate_gate` ratchets on ABSOLUTE deltas, so data growth alone fails it:
+  across one ingest, pitching-BF accuracy moved 98.8% → 98.5% while its abs-Δ went 132 → 464. Nothing
+  got worse; the corpus tripled. **Why you should care**: `CLAUDE.md` calls `reconcile-scoreboard`
+  "a diagnostic, not a gate", but the CLI still calls `evaluate_gate`, exits non-zero, and its
+  docstring calls itself "the north-star ratchet" — so every session that runs it sees a red FAILED
+  it must be told to ignore. Reviving it needs RATE-based thresholds; retiring it means deleting the
+  gate half. Operator ruling owed. ⚠️ **The nearest prior record, `IDEA-195`, is ARCHIVED
+  (`.project/archive/ideas/`, not live `IDEAS.md`) and its PREMISE IS NOW REFUTED**: it calls the
+  machinery "vestigial" and the scoreboard "a pure diagnostic with no verdict to trip". Measured
+  2026-08-10 — the CLI calls `evaluate_gate`, prints `Reconciliation gate FAILED`, and exits **RC=1**.
+  It is live, not vestigial. Read that idea before acting anyway: it carries a real footgun about two
+  ratchets sharing this vocabulary, and says to scope any deletion by FILE, never by grepping
+  "baseline"/"ratchet"/`--update-baseline`.
+- **Row counts cannot detect an UPDATE — do not use them as a "DB is settled" check** (found
+  2026-08-10, cost two rounds of wrong numbers in one spec). `games` and `plays` counts held
+  identical at 2,303 / 143,613 across an entire session while `games.home_score` changed underneath,
+  moving a measured population from 92 units to 91 and invalidating a 90-game validation run.
+  **Why you should care**: every before/after measurement in this repo rests on a stability
+  assumption, and the obvious check is the one that fails silently. Gate on CONTENT (score sums, the
+  detection count itself), and only on the tables the chunk actually depends on.
+- **The plays endpoint doc is silent on the terminal play's score fields** (found 2026-08-10).
+  `docs/api/endpoints/` records the `${uuid} at bat` trailing play as "1 per game, always last,
+  empty final_details" — but not that it carries `0`/`0` with `did_score_change: false` normally,
+  and the REAL final with `did_score_change: true` when the last PA was unresolved mid-scoring.
+  **Why you should care**: that silence is the entire defect the §2 chunk fixes, and the doc as
+  written invites the exact rule that would zero every score in the DB. One paragraph.
+- **`teams.classification` is unset on ALL 1,029 teams; `innings_per_game` is fetched for 66**
+  (found 2026-08-10). **Why you should care**: any future segmentation by level (youth vs HS vs
+  Legion) has no direct column to use — the §2 chunk's 2.5× youth skew rests on regulation-innings
+  as a proxy over a 66-team basis. A real level analysis needs one of these backfilled first.
 - ✅ **CLOSED 2026-08-10** — CI's whole-tree PII scan was RED on `main`, found by the scanner-hardening
   chunk's `/code-review` and NOT introduced by it. The 2026-08-09 dotfile widening made `.env.example`
   scannable and it carried three `email` matches, so CI's own command exited **123**, failing `ci.yml:95`
