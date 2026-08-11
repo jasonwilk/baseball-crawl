@@ -1,0 +1,44 @@
+-- ===========================================================================
+-- Migration 013: game_perspectives plays-derived final score
+-- ===========================================================================
+-- Spec: .project/specs/2026-08-10-plays-final-score-recovery.md
+--
+-- WHAT: Adds two nullable INTEGER columns to game_perspectives:
+--       - plays_final_home_score
+--       - plays_final_away_score
+--       The game's true final score as derived from the RAW plays payload,
+--       recorded per perspective by PlaysLoader.
+--
+-- WHY:  PlaysParser drops the game's last play whenever it hits a skip path
+--       (abandoned plate appearance with empty final_details, or a non-PA
+--       "Runner Out" / "Inning Ended" marker).  Walk-off and run-rule endings
+--       finish exactly that way, so the game-ending run is lost from the
+--       plays-derived score.  Measured on a settled dev DB: 91 of 2,459
+--       game-perspective units (3.7%), across 88 games, are short a total of
+--       102 runs.  The parser now walks the raw payload backwards past inert
+--       plays to recover the true final; this column is where it is stored.
+--
+-- GRAIN: game_perspectives, NOT games.  Two perspectives of one game genuinely
+--   disagree (verified in the live DB: one play_order reads 8-7 under one
+--   perspective and 10-7 under the other).  A game-level column would be
+--   last-writer-wins and would manufacture a false discrepancy.
+--   game_perspectives is already PK(game_id, perspective_team_id) -- the same
+--   grain recon_scoreboard.py uses.
+--
+-- DESIGN: NULLABLE BY DESIGN.  NULL = not yet derived (a row written before
+--   this chunk, or a payload with no plays / only inert plays).  Same contract
+--   as teams.innings_per_game (migration 012): do NOT add a DEFAULT, a NOT
+--   NULL, or a backfill here -- a default 0 is indistinguishable from a real
+--   0-0 final and would erase the not-yet-derived signal.  Existing rows are
+--   repaired by a separate post-commit re-scout, not by this migration.
+--
+-- IDEMPOTENCY: SQLite has no "ADD COLUMN IF NOT EXISTS", but the migration
+--   runner (apply_migrations.py) tracks applied migrations by filename in
+--   _migrations and applies each exactly once, so an ADD COLUMN never re-runs.
+--   The target table game_perspectives already exists (migration 001).  Its
+--   only writer (game_loader.py) uses an explicit column list, so adding
+--   trailing nullable columns is backward-compatible.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE game_perspectives ADD COLUMN plays_final_home_score INTEGER;
+ALTER TABLE game_perspectives ADD COLUMN plays_final_away_score INTEGER;

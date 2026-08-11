@@ -106,8 +106,12 @@ _HOME_TEAM_ID = 1
 _AWAY_TEAM_ID = 2
 
 
-def _parse(plays: list[dict]) -> list[ParsedPlay]:
-    """Convenience: wrap plays in JSON and parse."""
+def _parse_full(plays: list[dict]):
+    """Convenience: wrap plays in JSON and parse, returning the full result.
+
+    Use this when the test cares about the derived final score; use
+    :func:`_parse` when it only cares about the parsed plays.
+    """
     return PlaysParser.parse_game(
         _make_raw_json(plays),
         game_id=_GAME_ID,
@@ -115,6 +119,11 @@ def _parse(plays: list[dict]) -> list[ParsedPlay]:
         home_team_id=_HOME_TEAM_ID,
         away_team_id=_AWAY_TEAM_ID,
     )
+
+
+def _parse(plays: list[dict]) -> list[ParsedPlay]:
+    """Convenience: wrap plays in JSON and parse, returning just the plays."""
+    return _parse_full(plays).plays
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +139,7 @@ class TestBasicParsing:
         result = PlaysParser.parse_game(
             raw, _GAME_ID, _SEASON_ID, _HOME_TEAM_ID, _AWAY_TEAM_ID,
         )
-        assert result == []
+        assert result.plays == []
 
     def test_single_play_parses_correctly(self):
         plays = [_make_play()]
@@ -1305,6 +1314,261 @@ class TestNonPAOutcomeSkip:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Final-score recovery -- the two rejected seeding rules
+# ---------------------------------------------------------------------------
+
+
+class TestFinalScoreRejectedRules:
+    """Guard the seeding rule against the two rules that were tried and rejected.
+
+    Both cases come from real payloads.  Each test is paired with a mutation
+    that re-demonstrates it: seeding from ``plays[-1]`` fails the first,
+    seeding from ``max()`` fails the second.
+    """
+
+    def test_inert_phantom_does_not_zero_final_score(self):
+        """A trailing inert phantom carrying 0/0 must not zero the final score.
+
+        Every observed payload ends with a phantom play that has empty
+        ``final_details``, ``did_score_change: false``, and -- critically --
+        ``home_score``/``away_score`` of INTEGER ZERO, not null.  A "last raw
+        play" or "last non-NULL score" rule reads that phantom and sets every
+        game's final to 0-0.
+        """
+        plays = [
+            _make_play(
+                order=0, inning=7, half="bottom",
+                home_score=5, away_score=3, did_score_change=True,
+            ),
+            # The trailing inert phantom: empty final_details AND no score
+            # change, carrying integer 0/0.
+            _make_play(
+                order=1, inning=8, half="top",
+                at_plate_details=[], final_details=[],
+                home_score=0, away_score=0, did_score_change=False,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert result.final_home_score == 5
+        assert result.final_away_score == 3
+
+    def test_non_monotone_payload_does_not_overshoot_final_score(self):
+        """A rescinded run leaves a non-monotone score; ``max()`` overshoots it.
+
+        When a scorekeeper enters a run and then corrects it away, the running
+        score in the payload goes DOWN.  ``max()`` over all raw plays latches
+        onto the retracted run and reports 6-6 where the official final is 6-5.
+        """
+        plays = [
+            # The scorekeeper's entered-then-rescinded run: away reads 6 here.
+            _make_play(
+                order=0, inning=6, half="top",
+                home_score=6, away_score=6, did_score_change=True,
+            ),
+            # The correction, and the game's last real play: away is back to 5.
+            _make_play(
+                order=1, inning=6, half="bottom",
+                home_score=6, away_score=5, did_score_change=False,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert result.final_home_score == 6
+        assert result.final_away_score == 5
+
+
+# ---------------------------------------------------------------------------
+# Tests: Final-score recovery across every parser skip path
+# ---------------------------------------------------------------------------
+
+
+class TestFinalScoreAcrossSkipPaths:
+    """The game-ending run is recovered whichever skip path drops its play.
+
+    Walk-offs end on an abandoned plate appearance; run-rule endings reach the
+    parser through the ``Runner Out`` / ``Inning Ended`` path instead.  A fix
+    keyed to one path leaves the other broken and still looks correct, so each
+    path is asserted separately: the final play must produce NO extra ``plays``
+    row AND still contribute the correct final score.
+    """
+
+    # A completed play preceding the game-ending one, at 7-7.
+    @staticmethod
+    def _opening_play() -> dict:
+        return _make_play(
+            order=0, inning=7, half="bottom",
+            home_score=7, away_score=7, did_score_change=False,
+        )
+
+    def test_final_abandoned_pa_recovers_walk_off_run(self):
+        """Path (a): the walk-off run lands on an abandoned PA.
+
+        The plate appearance is unresolved -- empty ``final_details`` -- so the
+        parser skips it, but ``did_score_change`` is true, which is what marks
+        it as the run-carrier rather than the trailing phantom.  Emptiness
+        alone cannot tell the two apart.
+        """
+        plays = [
+            self._opening_play(),
+            _make_play(
+                order=1, inning=7, half="bottom",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[],
+                home_score=8, away_score=7, did_score_change=True,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert len(result.plays) == 1
+        assert result.final_home_score == 8
+        assert result.final_away_score == 7
+
+    def test_final_runner_out_recovers_run_rule_ending(self):
+        """Path (b): a run-rule ending finishing on a ``Runner Out`` marker."""
+        plays = [
+            self._opening_play(),
+            _make_play(
+                order=1, inning=7, half="bottom", outcome="Runner Out",
+                at_plate_details=[
+                    {"template": f"${{{_RUNNER_UUID}}} out at home"},
+                ],
+                final_details=[
+                    {"template": f"${{{_RUNNER_UUID}}} out at home, left fielder to catcher"},
+                ],
+                home_score=8, away_score=7, did_score_change=True,
+                outs=3, did_outs_change=True,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert len(result.plays) == 1
+        assert result.final_home_score == 8
+        assert result.final_away_score == 7
+
+    def test_final_inning_ended_recovers_run_rule_ending(self):
+        """Path (b): the same ending arriving as an ``Inning Ended`` marker."""
+        plays = [
+            self._opening_play(),
+            _make_play(
+                order=1, inning=7, half="bottom", outcome="Inning Ended",
+                at_plate_details=[],
+                final_details=[{"template": "Inning ended"}],
+                home_score=8, away_score=7, did_score_change=True,
+                outs=3, did_outs_change=True,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert len(result.plays) == 1
+        assert result.final_home_score == 8
+        assert result.final_away_score == 7
+
+    def test_final_unextractable_batter_recovers_run(self):
+        """Path (c): ``final_details`` carrying no batter UUID.
+
+        The parser cannot identify the batter, so it skips the play -- but the
+        run it carries still belongs in the final score.
+        """
+        plays = [
+            self._opening_play(),
+            _make_play(
+                order=1, inning=7, half="bottom",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[{"template": "Run scored on a wild pitch"}],
+                home_score=8, away_score=7, did_score_change=True,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert len(result.plays) == 1
+        assert result.final_home_score == 8
+        assert result.final_away_score == 7
+
+    def test_run_carrier_recovered_through_trailing_phantom(self):
+        """The real shape: run-carrier, then the inert phantom after it.
+
+        Both have empty ``final_details``.  Only ``did_score_change``
+        separates them, and the backwards walk must step past the phantom to
+        reach the carrier.
+        """
+        plays = [
+            self._opening_play(),
+            # The walk-off run, on an abandoned PA.
+            _make_play(
+                order=1, inning=7, half="bottom",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[],
+                home_score=8, away_score=7, did_score_change=True,
+            ),
+            # The trailing phantom, carrying integer 0/0.
+            _make_play(
+                order=2, inning=8, half="top",
+                at_plate_details=[], final_details=[],
+                home_score=0, away_score=0, did_score_change=False,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert len(result.plays) == 1
+        assert result.final_home_score == 8
+        assert result.final_away_score == 7
+
+
+# ---------------------------------------------------------------------------
+# Tests: Final-score derivation returns None rather than a fabricated 0
+# ---------------------------------------------------------------------------
+
+
+class TestFinalScoreAbsence:
+    """``None`` means "not derivable" and must never collapse into a real 0."""
+
+    def test_empty_payload_yields_no_final_score(self):
+        result = _parse_full([])
+
+        assert result.plays == []
+        assert result.final_home_score is None
+        assert result.final_away_score is None
+
+    def test_all_inert_payload_yields_no_final_score(self):
+        """Every play inert: nothing to parse and nothing to seed from."""
+        plays = [
+            _make_play(
+                order=0, at_plate_details=[], final_details=[],
+                home_score=0, away_score=0, did_score_change=False,
+            ),
+            _make_play(
+                order=1, at_plate_details=[], final_details=[],
+                home_score=0, away_score=0, did_score_change=False,
+            ),
+        ]
+        result = _parse_full(plays)
+
+        assert result.plays == []
+        assert result.final_home_score is None
+        assert result.final_away_score is None
+
+    def test_final_play_missing_score_keys_does_not_write_zero(self):
+        """Absent score keys yield None, NOT the parser's per-play 0 default.
+
+        ``ParsedPlay.home_score`` defaults an absent key to 0 because the
+        column is NOT NULL.  The derived final must not inherit that default:
+        a stored 0 would be indistinguishable from a real 0-0 game.
+        """
+        last = _make_play(order=1, inning=7, half="bottom")
+        del last["home_score"]
+        del last["away_score"]
+        earlier = _make_play(order=0, home_score=4, away_score=2)
+
+        result = _parse_full([earlier, last])
+
+        # The walk stops at the terminal non-inert play and reports what it
+        # found there -- it does not keep walking back to the earlier 4-2.
+        assert result.final_home_score is None
+        assert result.final_away_score is None
+
+
+# ---------------------------------------------------------------------------
 # Tests: All 24 outcome types handled (AC-12)
 # ---------------------------------------------------------------------------
 
@@ -1570,7 +1834,7 @@ class TestRealFixture:
             season_id=_FIXTURE_SEASON_ID,
             home_team_id=_FIXTURE_HOME_TEAM_ID,
             away_team_id=_FIXTURE_AWAY_TEAM_ID,
-        )
+        ).plays
 
     def test_correct_play_count_excludes_abandoned(self, parsed_plays: list[ParsedPlay]):
         """All 3 plays in the fixture have final_details; none should be skipped."""

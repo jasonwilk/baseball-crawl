@@ -1,8 +1,9 @@
 """Parser for GameChanger plays API responses.
 
 Pure-function module that transforms raw plays JSON into structured dataclass
-records.  No database dependency -- accepts raw JSON + context IDs, returns
-a list of ``ParsedPlay`` dataclass records ready for database insertion.
+records.  No database dependency -- accepts raw JSON + context IDs, returns a
+``ParsedGamePlays`` carrying the ``ParsedPlay`` records ready for database
+insertion plus the game's plays-derived final score.
 
 The parser:
 - Classifies each at_plate_details event (pitch, baserunner, substitution, other)
@@ -10,19 +11,23 @@ The parser:
 - Counts pitches and computes ``is_first_pitch_strike`` per TN-1
 - Computes ``is_qab`` per TN-2 (all 7 conditions)
 - Skips abandoned plate appearances (empty final_details)
+- Derives the game's final score from the RAW payload, so a game-ending run on
+  a skipped play is not lost (see ``_derive_final_score``)
 - Logs unknown templates at WARNING level
 
 Usage::
 
     from src.gamechanger.parsers.plays_parser import PlaysParser
 
-    plays = PlaysParser.parse_game(
+    result = PlaysParser.parse_game(
         raw_json=response_dict,
         game_id="abc-123",
         season_id="2026",
         home_team_id=1,
         away_team_id=2,
     )
+    plays = result.plays
+    final = (result.final_home_score, result.final_away_score)
 """
 
 from __future__ import annotations
@@ -216,6 +221,29 @@ class ParsedPlay:
     events: list[ParsedEvent] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ParsedGamePlays:
+    """A game's parsed plays plus its plays-derived final score.
+
+    The final score is carried alongside the plays rather than read off the
+    last ``ParsedPlay`` because the game-ending run frequently lands on a play
+    the parser SKIPS -- an abandoned plate appearance, a ``Runner Out``, or an
+    ``Inning Ended`` marker.  Walk-off and run-rule endings finish exactly that
+    way, so the last parsed play is systematically short of the true final.
+
+    Attributes:
+        plays: The parsed plate appearances, in payload order.
+        final_home_score: Plays-derived final home score, or None when the
+            payload has no plays, only inert plays, or a terminal play carrying
+            no score keys.  None means "not derivable", NEVER a real 0.
+        final_away_score: Same, for the away side.
+    """
+
+    plays: list[ParsedPlay]
+    final_home_score: int | None
+    final_away_score: int | None
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -235,7 +263,7 @@ class PlaysParser:
         season_id: str,
         home_team_id: int,
         away_team_id: int,
-    ) -> list[ParsedPlay]:
+    ) -> ParsedGamePlays:
         """Parse a raw plays API response into structured records.
 
         Args:
@@ -247,11 +275,14 @@ class PlaysParser:
             away_team_id: Internal team ID of the away team.
 
         Returns:
-            List of ``ParsedPlay`` records (abandoned PAs excluded).
+            ``ParsedGamePlays`` carrying the ``ParsedPlay`` records (abandoned
+            PAs excluded) and the game's raw-payload-derived final score.
         """
         plays_data = raw_json.get("plays", [])
         if not plays_data:
-            return []
+            return ParsedGamePlays(
+                plays=[], final_home_score=None, final_away_score=None,
+            )
 
         # Pitcher state tracked per half-inning (TN-5).
         pitcher_state: dict[str, str | None] = {
@@ -399,7 +430,71 @@ class PlaysParser:
                 if p.pitcher_id is None:
                     p.pitcher_id = first_known_pitcher
 
-        return parsed
+        final_home, final_away = cls._derive_final_score(plays_data)
+
+        return ParsedGamePlays(
+            plays=parsed,
+            final_home_score=final_home,
+            final_away_score=final_away,
+        )
+
+    # ------------------------------------------------------------------
+    # Final-score derivation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _derive_final_score(
+        plays_data: list[dict[str, Any]],
+    ) -> tuple[int | None, int | None]:
+        """Derive the game's final score from the RAW payload.
+
+        Walks the raw plays backwards from the end, skipping INERT plays, and
+        takes the first non-inert play's ``home_score``/``away_score``.  A play
+        is inert when ``final_details`` is empty AND ``did_score_change`` is
+        false -- the trailing phantom every observed payload ends with.
+
+        Reading the RAW payload rather than the parsed list is what makes this
+        immune to WHICH skip path dropped the game's last play.  The winning
+        run lands on an abandoned plate appearance in a walk-off, but run-rule
+        endings reach the parser through the ``Runner Out`` / ``Inning Ended``
+        path instead; a fix keyed to either one alone leaves the other broken
+        while still looking correct.
+
+        Three rules were tried against real payloads and REJECTED -- do not
+        reintroduce any of them:
+
+        * "last raw play" / "last non-NULL score" -- the trailing phantom
+          carries 0/0 as INTEGER ZERO, not null, so this sets every game's
+          final to 0-0.
+        * "last play with non-empty ``final_details``" -- the run-carrier HAS
+          empty ``final_details``, so emptiness cannot separate it from the
+          phantom and the runs stay lost.
+        * ``max()`` over all raw plays -- fixes most games but BREAKS the ones
+          where a scorekeeper entered a run and then rescinded it, leaving a
+          non-monotone running score that ``max`` latches onto (measured: 15-6
+          against an official 14-6).
+
+        The backwards walk never ran more than one step in observed data
+        (trailing-inert run length was 1 in 107 games, 0 in 7, never >= 2).
+        The loop is kept because it costs nothing and fails safe, but it is
+        DEFENSIVE -- not validated beyond one step.
+
+        Returns:
+            ``(home, away)`` from the last non-inert play.  Either element is
+            None when that key is absent -- deliberately NOT defaulted to 0,
+            because absent must stay distinguishable from a real 0.  Returns
+            ``(None, None)`` when there are no plays or all of them are inert.
+        """
+        for play in reversed(plays_data):
+            is_inert = (
+                not play.get("final_details")
+                and not play.get("did_score_change", False)
+            )
+            if is_inert:
+                continue
+            return play.get("home_score"), play.get("away_score")
+
+        return None, None
 
     # ------------------------------------------------------------------
     # Event classification (TN-4)

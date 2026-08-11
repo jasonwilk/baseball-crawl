@@ -11,6 +11,8 @@ The loader:
 - Parses each game via ``PlaysParser.parse_game()``
 - Creates stub player rows for unknown batter/pitcher IDs (FK-safe)
 - Inserts all plays + events in a per-game transaction
+- Records the parser's plays-derived final score on ``game_perspectives``,
+  warning when it disagrees with the stored ``games`` scores
 - Isolates per-game errors: logs and skips, continues loading
 
 Usage::
@@ -124,9 +126,11 @@ class PlaysLoader:
         Returns:
             ``LoadResult`` for this game.
         """
-        # Game FK guard -- verify game exists in games table.
+        # Game FK guard -- verify game exists in games table.  The scores come
+        # along for the derived-vs-stored disagreement check below.
         game_row = self._db.execute(
-            "SELECT season_id, home_team_id, away_team_id FROM games WHERE game_id = ?",
+            "SELECT season_id, home_team_id, away_team_id, home_score, away_score "
+            "FROM games WHERE game_id = ?",
             (game_id,),
         ).fetchone()
 
@@ -136,7 +140,7 @@ class PlaysLoader:
             )
             return LoadResult(skipped=1)
 
-        season_id, home_team_id, away_team_id = game_row
+        season_id, home_team_id, away_team_id, game_home, game_away = game_row
 
         # Whole-game idempotency -- skip if plays exist for this perspective.
         perspective_team_id = self._team_ref.id
@@ -153,7 +157,7 @@ class PlaysLoader:
 
         # Parse the plays payload.
         try:
-            parsed_plays = PlaysParser.parse_game(
+            parsed = PlaysParser.parse_game(
                 raw_json=raw_json,
                 game_id=game_id,
                 season_id=season_id,
@@ -164,17 +168,26 @@ class PlaysLoader:
             logger.error("Parse error for game %s: %s", game_id, exc)
             return LoadResult(errors=1)
 
-        if not parsed_plays:
-            logger.debug(
-                "No plays parsed for game %s; nothing to insert.", game_id,
-            )
-            return LoadResult(skipped=1)
-
-        # Per-game transaction -- all plays + events commit together.
+        # Per-game transaction -- all plays + events + the derived final score
+        # commit together.
+        #
+        # There is deliberately NO "no parsed plays -> return early" guard here.
+        # A payload can yield zero insertable plays and still carry a real final
+        # score, because EVERY skip path can be the play that carries the
+        # game-ending run -- which is the whole reason this chunk exists.
+        # Returning before the persist would drop exactly the score the parser
+        # just recovered.  ``_insert_game_plays`` is a no-op on an empty list.
         try:
-            plays_inserted = self._insert_game_plays(parsed_plays, perspective_team_id)
+            plays_inserted = self._insert_game_plays(parsed.plays, perspective_team_id)
+            self._persist_final_score(
+                game_id=game_id,
+                perspective_team_id=perspective_team_id,
+                final_home=parsed.final_home_score,
+                final_away=parsed.final_away_score,
+                game_home=game_home,
+                game_away=game_away,
+            )
             self._db.commit()
-            return LoadResult(loaded=plays_inserted)
         except Exception as exc:  # noqa: BLE001 -- per-game error isolation
             logger.error(
                 "Insert error for game %s: %s", game_id, exc,
@@ -182,9 +195,83 @@ class PlaysLoader:
             self._db.rollback()
             return LoadResult(errors=1)
 
+        if not plays_inserted:
+            logger.debug(
+                "No plays parsed for game %s; recorded final score only.", game_id,
+            )
+            return LoadResult(skipped=1)
+        return LoadResult(loaded=plays_inserted)
+
     # ------------------------------------------------------------------
     # DB operations
     # ------------------------------------------------------------------
+
+    def _persist_final_score(
+        self,
+        *,
+        game_id: str,
+        perspective_team_id: int,
+        final_home: int | None,
+        final_away: int | None,
+        game_home: int | None,
+        game_away: int | None,
+    ) -> None:
+        """Record the plays-derived final score for this game perspective.
+
+        Writes to ``game_perspectives`` at its own grain: two perspectives of
+        one game genuinely disagree about the running score, so a game-level
+        column would be last-writer-wins.
+
+        UPSERT rather than a bare UPDATE: the row is normally created earlier
+        in the pipeline by ``GameLoader`` (``INSERT OR IGNORE``), but a bare
+        UPDATE would silently no-op if it were absent, losing the score with
+        no signal.
+
+        The UPDATE half is GUARDED so an underivable result never overwrites a
+        score already stored.  NULL here is load-bearing provenance ("not
+        derived"), so a re-derivation from a payload carrying no usable score
+        must leave a real stored final alone -- the write is one-way.  The pair
+        is written together because both values come from the SAME play;
+        per-column COALESCE would mix a fresh value with a stale one.
+
+        Also logs a WARNING when the derived final disagrees with the stored
+        ``games`` scores.  That is the standing detector for the two known
+        legitimate-disagreement classes -- two scorebooks kept separately, and
+        a scorekeeper who abandoned charting mid-game -- and for any payload
+        shape the measured population does not contain.
+
+        Does NOT commit -- the caller owns the per-game transaction.
+        """
+        self._db.execute(
+            """
+            INSERT INTO game_perspectives (
+                game_id, perspective_team_id,
+                plays_final_home_score, plays_final_away_score
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(game_id, perspective_team_id) DO UPDATE SET
+                plays_final_home_score = excluded.plays_final_home_score,
+                plays_final_away_score = excluded.plays_final_away_score
+            WHERE excluded.plays_final_home_score IS NOT NULL
+               OR excluded.plays_final_away_score IS NOT NULL
+            """,
+            (game_id, perspective_team_id, final_home, final_away),
+        )
+
+        derived_known = final_home is not None and final_away is not None
+        stored_known = game_home is not None and game_away is not None
+        if derived_known and stored_known and (
+            final_home != game_home or final_away != game_away
+        ):
+            logger.warning(
+                "Plays-derived final score disagrees with the games row for "
+                "game=%s perspective=%s: plays %s-%s vs games %s-%s.",
+                game_id,
+                perspective_team_id,
+                final_home,
+                final_away,
+                game_home,
+                game_away,
+            )
 
     def _insert_game_plays(self, plays: list[ParsedPlay], perspective_team_id: int) -> int:
         """Insert all plays and their events for a single game.

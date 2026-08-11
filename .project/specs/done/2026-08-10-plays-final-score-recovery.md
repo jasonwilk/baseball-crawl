@@ -1,6 +1,6 @@
 # Plays final-score recovery — the game-ending run dropped on a skipped final play
 
-**Date**: 2026-08-10 · **Status**: `READY`
+**Date**: 2026-08-10 · **Status**: `COMPLETE (this commit)`
 **Source**: `.project/research/ingestion-fidelity-seed.md` §2, taken as a chunk by operator ask.
 The seed is a CLAIM and was audited against the repo and the live API before this spec; every
 number below is re-measured on a **settled** dev DB, not inherited.
@@ -272,3 +272,133 @@ Run in order. Redirect pytest to a file and capture `$?` separately — never pi
   it now carries exact test names, a runnable `pytest -k` invocation, expected RC before and
   after, and the two mutations that re-demonstrate each guard. Pinned values re-verified after
   the edits: `28677 / 877775 / 2303`, step 6 = `91`.
+- **2026-08-11 (execute)** — Implemented as specced; no deviation from the seeding rule.
+
+  **V0 settle probe — corpus quiet.** Three samples over 70+s all read
+  `28677 / 877775 / 2303`; step 6 read `91` twice. One reference number differs and it is NOT a
+  stop condition: `no_plays_units` read **2250**, not the spec's 2252. That counter's population
+  is `player_game_pitching` + `player_game_batting` rows (boxscore units with no matching plays),
+  i.e. exactly the tables V0 names as drifting on their own. Every fidelity stat matched the
+  reference table byte-for-byte.
+
+  **V1** — migration `013` applied cleanly; `PRAGMA table_info(game_perspectives)` shows
+  `plays_final_home_score` and `plays_final_away_score`, both INTEGER, `notnull=0`, no DEFAULT.
+
+  **V3 positive control (per-test outcomes, never an aggregate).**
+  - BEFORE the fix: **RC=1, 2 failed** — both on `AttributeError: 'list' object has no attribute
+    'final_home_score'`, the legitimate red the spec predicted.
+  - AFTER: **RC=0, 2 passed.**
+  - Mutation `plays[-1]`: `inert_phantom_does_not_zero` **FAILED** (`assert 0 == 5` — the
+    predicted 0-0 zeroing); `non_monotone_...overshoot` PASSED (that payload has no trailing
+    phantom, so `plays[-1]` is already its terminal play).
+  - Mutation `max()`: `non_monotone_...overshoot` **FAILED** (`assert 6 == 5` — overshoots by
+    exactly 1); `inert_phantom_does_not_zero` PASSED (`max` survives a 0/0 phantom).
+  - Each guard catches its own case and only its own. `__pycache__` cleared before every run and
+    before each restore; restore re-verified green.
+
+  **V4 test-scope discovery** returned `test_plays_loader.py`, `test_plays_parser.py`,
+  `test_script_entry_points.py`, `test_player_upsert.py` — all four run, 202 passed. **The
+  selector was NOT sufficient**: the full suite then caught 6 failures in two files it does not
+  name (below). The selector is a locator, not an enumerator.
+
+  **V2 full suite** — first run **RC=1, 6 failed / 4485 passed**. Both clusters were stale
+  schema fixtures owed by this contract change, not defects in the new code:
+  1. `tests/test_report_plays.py` hand-lists a MIGRATION SUBSET (001/007/008/012). The loader now
+     writes the new columns, so every plays insert failed with
+     `table game_perspectives has no column named plays_final_home_score`. Added `013` to that
+     list — the same precedent 007 and 012 already set there, each with the same comment shape.
+  2. `tests/test_migrations.py::TestE220UpgradeGuard` (2 tests) builds a synthetic pre-E-220 DB
+     carrying just enough tables for every PENDING migration to apply before the guard fires; it
+     had no `game_perspectives`, so `013` raised `OperationalError` instead of the expected
+     `RuntimeError`. Added a stub table. Checked first that this does not weaken the guard: it
+     reads only `player_game_batting` / `player_game_pitching` / `spray_charts` / `plays`
+     (`apply_migrations.py`), and `game_perspectives` is not among them.
+
+     Swept for the same shape elsewhere: of the 12 test files that curate schema without
+     `run_migrations`, the rest route through `conftest.load_real_schema`, which GLOBS every
+     numbered migration and so picked up `013` with no edit.
+
+  Re-run: **RC=0, 4491 passed.**
+
+  **V5 scoreboard, BEFORE and AFTER — byte-identical, which is the PASSING result** (the
+  scoreboard measures no runs stat, so identical numbers prove no other stat moved). Both
+  readings: pitching BF 98.5/473 · SO 99.6/61 · BB 98.9/139 · H 99.2/151 · HBP 99.9/16; batting
+  AB 99.7/191 · H 99.9/57 · BB 100.0/15 · SO 100.0/30 · HBP 100.0/5; `dropped_pitch_events 0`,
+  `no_plays_units 2250`, `self_games 0`; gate FAILED, RC=1 against the stale Jul-21 baseline, as
+  the spec says to expect. `--update-baseline` NOT run.
+
+  **V6 before/after — 91 both times, as predicted.** No stored data changes without a re-ingest.
+  Corroborated directly: all 2,464 `game_perspectives` rows still read NULL for both new columns,
+  so nothing was silently backfilled. The columns are proven by test, not by the dev DB.
+
+  **Beyond the spec's Files list** (flagged for approval, not silently folded in): a
+  `game_perspectives` entry in `.claude/rules/data-model.md` recording the new columns and their
+  load-bearing NULL contract, mirroring the `teams.innings_per_game` entry the spec cites as the
+  precedent for that contract.
+- **2026-08-11 (review round — `/code-review` + codex, run independently)** — Four real defects,
+  all fixed. **The two reviewers overlapped on exactly one finding and each found something the
+  other missed**, which is the case for running both.
+
+  1. **`src/db/game_merge.py` silently DROPPED both new columns on a duplicate-game merge**
+     (`/code-review` only; codex missed it). The union `INSERT..SELECT` names an explicit column
+     list, so it is a COPY, not a re-point. Reproduced on the real migrated schema: perspective 2
+     went in at `(8, 7)` and came out `(None, None)` while its `plays` were re-pointed intact.
+     **It never self-heals** — whole-game plays idempotency skips the game forever — and the
+     exposure is real, because `bb data merge-duplicate-games` after a plays load is precisely
+     the ordering the backfill stub plans. This is the Cleanup-Detection Mirror Invariant on a
+     COPY path: the column set grew, the copy's column list did not. Fixed, plus
+     `test_merge_preserves_every_game_perspectives_column`, a drift guard derived from
+     `PRAGMA table_info` so it fails on the NEXT forgotten column without needing an edit.
+     Swept the module graph first: `game_merge.py:354` is the ONLY copy path; every other
+     `game_perspectives` site is a SELECT, a DELETE, or an `INSERT OR IGNORE` of the key alone.
+  2. **A derivable final score was discarded when every play was skipped** (BOTH reviewers; codex
+     P1, `/code-review` #2 — the one overlap). `if not parsed_plays: return` fired before the
+     persist, so a payload whose only play is a score-carrying abandoned PA / `Runner Out` /
+     unextractable-batter marker stored NULL. Verified independently before fixing: parser derived
+     `8-7`, loader returned `skipped=1`, columns NULL. That is the chunk's own premise inverted —
+     every skip path can carry the game-ending run — so the guard is now gone and
+     `_insert_game_plays` (a no-op on an empty list) carries the empty case.
+  3. **The UPSERT could overwrite a stored score with NULL** (`/code-review` only). `DO UPDATE`
+     wrote unconditionally, so a re-derivation from a payload with no score keys downgraded real
+     provenance. Guarded with a `WHERE excluded... IS NOT NULL` so the write is one-way. The pair
+     is written together, never per-column `COALESCE`, because both values come from the SAME
+     play and mixing them would fabricate a score no play ever reported.
+  4. **Migration scope/dry-run evidence was missing** (codex P1). Legitimate against
+     `bug-pattern-checklist.md:29`, which demands it whenever a migration is in the diff; a clean
+     apply plus `PRAGMA table_info` is not that evidence. Supplied below.
+
+  **Positive controls on all three code fixes** (per-test, one mutation at a time — a
+  simultaneous double-mutation cannot attribute):
+  - pre-fix merge → `test_merge_preserves_plays_final_score` FAILED `(None, None) == (8, 7)` and
+    the drift guard FAILED naming `['plays_final_home_score', 'plays_final_away_score']`;
+  - early-return mutation ALONE → `..._persisted_when_every_play_is_skipped` FAILED (`[]`), the
+    other PASSED;
+  - unguarded-UPDATE mutation ALONE → `..._underivable_..._does_not_overwrite` FAILED
+    (`[(1, None, None)]`), the other PASSED. Clean 1:1.
+
+  **Migration 013 dry-run — production-shaped copy** (`VACUUM INTO` off the live dev DB: 2,303
+  games / 143,613 plays / 2,464 `game_perspectives` / 1,029 teams; `013` rolled OFF to reconstruct
+  the pre-migration state, then applied; copy deleted afterward, `data/app.db` never touched).
+  - **Scope assertion — what it touches**: `game_perspectives` only, adding
+    `plays_final_home_score` and `plays_final_away_score` as nullable INTEGER.
+  - **What it deliberately does NOT touch**: every other table's DDL, all 59 index/trigger/view
+    objects (59 before, 59 after), and all data. Full `sqlite_master` diff = **one line**, on
+    `game_perspectives`.
+  - **Row counts, all 28 tables before/after**: identical except `_migrations` 12 → 13 (the
+    migration's own bookkeeping row). No data table moved.
+  - **No unintended writes**: after apply, `game_perspectives` = 2,464 rows with **0 non-NULL** in
+    either new column.
+
+  **A THIRD hand-curated schema fixture surfaced from the merge fix.**
+  `tests/test_loaders/test_game_dedup.py` also stops short of the current migration set, so the
+  twin merge failed there with `no column named plays_final_home_score` (3 tests). Added `013`.
+  Also added it PREEMPTIVELY to `tests/test_loaders/test_game_loader.py` (two fixture sites, no
+  test failing): that loader writes `game_perspectives`, so a fixture missing the columns diverges
+  from the schema under test and is the next trap. Standing residual updated from two files to
+  four. Deliberately NOT converted to `conftest.load_real_schema`'s glob — `test_game_dedup.py`
+  stops at 001+008 on purpose and layers `010` only where a test needs it, so globbing would
+  change what those tests exercise. Recorded as the residual's open question, not done blind.
+
+  **Final gates after all four fixes**: full suite **RC=0, 4495 passed**; scoreboard re-run
+  BYTE-IDENTICAL to the BEFORE reading a third time (the merge fix touches an ingestion path, so
+  it was re-measured rather than assumed).

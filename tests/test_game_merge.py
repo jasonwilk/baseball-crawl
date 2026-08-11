@@ -505,3 +505,84 @@ def test_offline_predicate_refuses_zero_playcount() -> None:
         source_play_count=0,
         canonical_play_count=0,
     ) is False
+
+
+# ---------------------------------------------------------------------------
+# The merge COPIES game_perspectives rows, so its column list can silently
+# drop a newly-added column (migration 013 added two).
+# ---------------------------------------------------------------------------
+
+
+def test_merge_preserves_plays_final_score(conn: sqlite3.Connection) -> None:
+    """A perspective's recovered final score survives the merge onto canonical.
+
+    The perspective's ``plays`` are re-pointed, so losing the score here would
+    never self-heal: whole-game plays idempotency skips any game that already
+    has plays, so a re-scout can never restore it.
+    """
+    _seed_perspective(conn, _CANON, perspective=_PERSP_CANON)
+    conn.execute(
+        "INSERT INTO game_perspectives (game_id, perspective_team_id, "
+        "plays_final_home_score, plays_final_away_score) VALUES (?, ?, ?, ?)",
+        (_SOURCE, _PERSP_SOURCE, 8, 7),
+    )
+    conn.commit()
+
+    merge_duplicate_game(conn, _SOURCE, _CANON)
+    conn.commit()
+
+    assert conn.execute(
+        "SELECT plays_final_home_score, plays_final_away_score "
+        "FROM game_perspectives WHERE game_id = ? AND perspective_team_id = ?",
+        (_CANON, _PERSP_SOURCE),
+    ).fetchone() == (8, 7)
+
+
+def test_merge_preserves_every_game_perspectives_column(
+    conn: sqlite3.Connection,
+) -> None:
+    """Drift guard: the merge's hand-written column list must stay complete.
+
+    ``merge_duplicate_game`` COPIES game_perspectives rows (INSERT..SELECT with
+    an explicit column list) rather than re-pointing them, so a column added to
+    the table but not to that list is silently dropped on every merge. This
+    test is derived from ``PRAGMA table_info``, so it fails when the NEXT column
+    is added and forgotten -- it does not need updating for each one.
+    """
+    columns = [
+        r[1] for r in conn.execute("PRAGMA table_info(game_perspectives)").fetchall()
+    ]
+    # game_id is rewritten by the merge (that IS the merge); every other column
+    # must arrive unchanged.
+    carried = [c for c in columns if c != "game_id"]
+    assert "plays_final_home_score" in carried, "fixture lost its own target"
+
+    # Give every carried column a distinctive non-default value.
+    values: dict[str, object] = {}
+    for i, col in enumerate(carried):
+        values[col] = _PERSP_SOURCE if col == "perspective_team_id" else (
+            "2020-01-02 03:04:05" if col == "loaded_at" else 40 + i
+        )
+    conn.execute(
+        f"INSERT INTO game_perspectives (game_id, {', '.join(carried)}) "  # noqa: S608
+        f"VALUES (?, {', '.join('?' for _ in carried)})",
+        (_SOURCE, *[values[c] for c in carried]),
+    )
+    conn.commit()
+
+    merge_duplicate_game(conn, _SOURCE, _CANON)
+    conn.commit()
+
+    row = conn.execute(
+        f"SELECT {', '.join(carried)} FROM game_perspectives "  # noqa: S608
+        "WHERE game_id = ? AND perspective_team_id = ?",
+        (_CANON, _PERSP_SOURCE),
+    ).fetchone()
+    assert row is not None, "the merged row is missing entirely"
+    dropped = [
+        col for col, got in zip(carried, row, strict=True) if got != values[col]
+    ]
+    assert dropped == [], (
+        f"merge_duplicate_game dropped {dropped} -- add them to the "
+        "INSERT..SELECT column list in src/db/game_merge.py"
+    )

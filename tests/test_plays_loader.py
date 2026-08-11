@@ -17,6 +17,7 @@ No real network calls.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -111,12 +112,19 @@ def _insert_game(
     home_team_id: int,
     away_team_id: int,
     season_id: str = _SEASON_ID,
+    home_score: int | None = None,
+    away_score: int | None = None,
 ) -> None:
-    """Insert a game row required by FK constraints."""
+    """Insert a game row required by FK constraints.
+
+    ``home_score``/``away_score`` default to NULL (a game whose official score
+    is not stored); pass them to exercise the derived-vs-stored comparison.
+    """
     db.execute(
-        "INSERT OR IGNORE INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
-        "VALUES (?, ?, ?, ?, ?, 'completed')",
-        (game_id, season_id, "2026-04-10", home_team_id, away_team_id),
+        "INSERT OR IGNORE INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
+        "status, home_score, away_score) "
+        "VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)",
+        (game_id, season_id, "2026-04-10", home_team_id, away_team_id, home_score, away_score),
     )
     db.commit()
 
@@ -1061,3 +1069,339 @@ def test_load_payload_perspective_uses_member_team_pk(
     ).fetchall()
     assert len(rows) == 1
     assert rows[0][0] == team_ref.id
+
+
+# ---------------------------------------------------------------------------
+# Plays-derived final score persistence
+# ---------------------------------------------------------------------------
+
+
+def _make_walk_off_json(
+    batter_id: str = _BATTER_1,
+    pitcher_id: str = _PITCHER_1,
+    final_home: int = 8,
+    final_away: int = 7,
+) -> dict:
+    """Build a payload whose game-ending run lands on a SKIPPED final play.
+
+    Three plays: a completed PA at 7-7, then the walk-off run on an abandoned
+    plate appearance (empty ``final_details``, so the parser skips it, but
+    ``did_score_change`` true), then the trailing inert phantom carrying 0/0.
+    Only the first play becomes a ``plays`` row.
+    """
+    return {
+        "sport": {"batting_style": "normal"},
+        "team_players": {},
+        "plays": [
+            {
+                "order": 0,
+                "inning": 7,
+                "half": "bottom",
+                "name_template": {"template": "Single"},
+                "at_plate_details": [
+                    {"template": "Strike 1 looking"},
+                    {"template": "In play"},
+                ],
+                "final_details": [
+                    {"template": f"${{{batter_id}}} singles to left field"},
+                    {"template": f"${{{pitcher_id}}} pitching"},
+                ],
+                "home_score": 7,
+                "away_score": 7,
+                "did_score_change": False,
+                "outs": 1,
+                "did_outs_change": False,
+            },
+            {
+                "order": 1,
+                "inning": 7,
+                "half": "bottom",
+                "name_template": {"template": "Single"},
+                "at_plate_details": [{"template": "In play"}],
+                "final_details": [],
+                "home_score": final_home,
+                "away_score": final_away,
+                "did_score_change": True,
+                "outs": 1,
+                "did_outs_change": False,
+            },
+            {
+                "order": 2,
+                "inning": 8,
+                "half": "top",
+                "name_template": {"template": ""},
+                "at_plate_details": [],
+                "final_details": [],
+                "home_score": 0,
+                "away_score": 0,
+                "did_score_change": False,
+                "outs": 0,
+                "did_outs_change": False,
+            },
+        ],
+    }
+
+
+def _read_final_score(db: sqlite3.Connection, game_id: str) -> list[tuple]:
+    return db.execute(
+        "SELECT perspective_team_id, plays_final_home_score, plays_final_away_score "
+        "FROM game_perspectives WHERE game_id = ? ORDER BY perspective_team_id",
+        (game_id,),
+    ).fetchall()
+
+
+def test_load_payload_persists_plays_final_score(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """The derived final score is written to game_perspectives at its own grain."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+
+    result = loader.load_payload({_GAME_ID_1: _make_walk_off_json()})
+
+    # The game-ending play is still skipped -- this chunk adds no plays row.
+    assert result.loaded == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM plays WHERE game_id = ?", (_GAME_ID_1,)
+    ).fetchone()[0] == 1
+
+    # ...but its run is no longer lost.
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+
+def test_final_score_upserts_onto_existing_game_perspectives_row(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """The normal pipeline order: GameLoader created the row first.
+
+    A bare UPDATE would work here but silently no-op when the row is absent,
+    so the write is an UPSERT.  This asserts the conflict branch updates in
+    place rather than raising or duplicating.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+    # Mirror GameLoader's INSERT OR IGNORE, which runs earlier in the pipeline.
+    db.execute(
+        "INSERT OR IGNORE INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+        (_GAME_ID_1, team_ref.id),
+    )
+    db.commit()
+
+    loader.load_payload({_GAME_ID_1: _make_walk_off_json()})
+
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+
+def test_final_score_is_not_persisted_when_load_is_skipped(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """A game already loaded for this perspective writes nothing at all."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+    loader.load_payload({_GAME_ID_1: _make_walk_off_json()})
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+    # Re-load the same perspective with a DIFFERENT final; idempotency skips it,
+    # so the stored score must not move.
+    result = loader.load_payload(
+        {_GAME_ID_1: _make_walk_off_json(final_home=99, final_away=1)},
+    )
+
+    assert result.skipped == 1
+    assert result.loaded == 0
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+
+def test_final_score_disagreement_with_games_row_warns(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    caplog,
+) -> None:
+    """A derived final that disagrees with the games row is the standing detector.
+
+    Two legitimate classes produce this -- two scorebooks kept separately, and
+    a scorekeeper who abandoned charting mid-game -- plus any payload shape the
+    measured population does not contain.  The score is still stored; the
+    WARNING is how an operator finds out.
+    """
+    _insert_season(db)
+    # Official score is 8-13; the payload's plays only reach 8-12.
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=13)
+
+    with caplog.at_level(
+        logging.WARNING, logger="src.gamechanger.loaders.plays_loader",
+    ):
+        loader.load_payload(
+            {_GAME_ID_1: _make_walk_off_json(final_home=8, final_away=12)},
+        )
+
+    disagreements = [
+        r for r in caplog.records
+        if "disagrees with the games row" in r.getMessage()
+    ]
+    assert len(disagreements) == 1
+    assert disagreements[0].levelno == logging.WARNING
+    message = disagreements[0].getMessage()
+    assert "plays 8-12" in message
+    assert "games 8-13" in message
+
+    # The derived value is still recorded -- the warning reports, it does not veto.
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 12)]
+
+
+def test_final_score_agreement_does_not_warn(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    caplog,
+) -> None:
+    """Negative control: the detector stays quiet when the scores agree.
+
+    Without this, the warning test above would pass against a loader that
+    warns unconditionally.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+
+    with caplog.at_level(
+        logging.WARNING, logger="src.gamechanger.loaders.plays_loader",
+    ):
+        loader.load_payload({_GAME_ID_1: _make_walk_off_json()})
+
+    assert [
+        r for r in caplog.records
+        if "disagrees with the games row" in r.getMessage()
+    ] == []
+
+
+def test_final_score_absent_when_payload_has_no_score_keys(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """A payload carrying no score keys stores NULL, never a fabricated 0.
+
+    NULL is load-bearing provenance: "not derived" must stay distinguishable
+    from a real 0-0 game.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=3, away_score=2)
+    payload = _make_plays_json()
+    del payload["plays"][0]["home_score"]
+    del payload["plays"][0]["away_score"]
+
+    result = loader.load_payload({_GAME_ID_1: payload})
+
+    assert result.loaded == 1
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, None, None)]
+
+
+def test_final_score_persisted_when_every_play_is_skipped(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """A payload yielding ZERO insertable plays can still carry a real final.
+
+    Every skip path can be the play that carries the game-ending run -- that is
+    the premise of this whole chunk -- so a degenerate payload whose only play
+    is skipped must not lose its score to an early return.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+    payload = _make_walk_off_json()
+    # Drop the one completed PA, leaving only the skipped run-carrier and the
+    # inert phantom.
+    payload["plays"] = payload["plays"][1:]
+
+    result = loader.load_payload({_GAME_ID_1: payload})
+
+    # Nothing insertable -- still correctly reported as skipped, not loaded.
+    assert result.loaded == 0
+    assert result.skipped == 1
+    assert result.errors == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM plays WHERE game_id = ?", (_GAME_ID_1,)
+    ).fetchone()[0] == 0
+
+    # ...but the recovered score is not lost.
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+
+def test_underivable_final_score_does_not_overwrite_a_stored_one(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """NULL provenance is one-way: "not derived" must not erase a real score.
+
+    Reachable because the plays-delete and the game_perspectives row are not
+    deleted together, so a game whose row already carries a score can be
+    re-loaded from a payload that derives nothing.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+    loader.load_payload({_GAME_ID_1: _make_walk_off_json()})
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+    # Re-open the load path the way a plays-only delete does, then re-load a
+    # payload carrying no usable score.  play_events FK plays(id), so they go
+    # first; the game_perspectives row is deliberately left in place -- that is
+    # the shape that makes this reachable.
+    db.execute(
+        "DELETE FROM play_events WHERE play_id IN "
+        "(SELECT id FROM plays WHERE game_id = ?)",
+        (_GAME_ID_1,),
+    )
+    db.execute("DELETE FROM plays WHERE game_id = ?", (_GAME_ID_1,))
+    db.commit()
+    payload = _make_plays_json()
+    del payload["plays"][0]["home_score"]
+    del payload["plays"][0]["away_score"]
+
+    result = loader.load_payload({_GAME_ID_1: payload})
+
+    assert result.loaded == 1
+    assert _read_final_score(db, _GAME_ID_1) == [(team_ref.id, 8, 7)]
+
+
+def test_two_perspectives_record_their_own_final_scores(
+    db: sqlite3.Connection,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+) -> None:
+    """The grain rationale, asserted: perspectives genuinely disagree.
+
+    Verified in the live DB, where one game's last play reads 8-7 under one
+    perspective and 10-7 under the other.  A game-level column would be
+    last-writer-wins and would manufacture a false discrepancy.
+    """
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id, home_score=8, away_score=7)
+
+    PlaysLoader(db, owned_team_ref=team_ref).load_payload(
+        {_GAME_ID_1: _make_walk_off_json()},
+    )
+    PlaysLoader(db, owned_team_ref=opponent_ref).load_payload(
+        {_GAME_ID_1: _make_walk_off_json(final_home=10, final_away=7)},
+    )
+
+    assert _read_final_score(db, _GAME_ID_1) == sorted([
+        (team_ref.id, 8, 7),
+        (opponent_ref.id, 10, 7),
+    ])

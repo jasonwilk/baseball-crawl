@@ -43,6 +43,12 @@ _MIGRATION_008 = (
 _MIGRATION_012 = (
     _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
 )
+# Migration 013 adds game_perspectives.plays_final_{home,away}_score. The loader
+# writes game_perspectives, and the twin merge COPIES these columns, so the
+# fixture must carry them or it diverges from the schema under test.
+_MIGRATION_013 = (
+    _PROJECT_ROOT / "migrations" / "013_game_perspectives_plays_final_score.sql"
+)
 
 
 @pytest.fixture()
@@ -55,6 +61,7 @@ def db() -> sqlite3.Connection:
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_013.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -2190,6 +2197,7 @@ def _fresh_db() -> sqlite3.Connection:
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_013.read_text(encoding="utf-8"))
     conn.commit()
     return conn
 

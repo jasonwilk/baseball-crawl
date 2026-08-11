@@ -1129,6 +1129,11 @@ class TestE220UpgradeGuard:
             -- is present because 011's refuse-on-member-row preflight reads it.
             CREATE TABLE player_season_batting (id INTEGER PRIMARY KEY, stat_completeness TEXT);
             CREATE TABLE player_season_pitching (id INTEGER PRIMARY KEY, stat_completeness TEXT);
+            -- game_perspectives must exist so pending additive migration 013
+            -- (ALTER TABLE game_perspectives ADD COLUMN plays_final_*_score)
+            -- applies cleanly before the E-220 guard runs; not a perspective-
+            -- checked table, so its shape is otherwise immaterial here.
+            CREATE TABLE game_perspectives (game_id TEXT, perspective_team_id INTEGER);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
@@ -1198,6 +1203,11 @@ class TestE220UpgradeGuard:
             -- sibling test above for the rationale).
             CREATE TABLE player_season_batting (id INTEGER PRIMARY KEY, stat_completeness TEXT);
             CREATE TABLE player_season_pitching (id INTEGER PRIMARY KEY, stat_completeness TEXT);
+            -- game_perspectives must exist so pending additive migration 013
+            -- (ALTER TABLE game_perspectives ADD COLUMN plays_final_*_score)
+            -- applies cleanly before the E-220 guard runs; not a perspective-
+            -- checked table, so its shape is otherwise immaterial here.
+            CREATE TABLE game_perspectives (game_id TEXT, perspective_team_id INTEGER);
             INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )

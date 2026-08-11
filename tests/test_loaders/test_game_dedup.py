@@ -57,6 +57,12 @@ _MIGRATION_010 = (
 _MIGRATION_012 = (
     _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql"
 )
+# Migration 013 adds game_perspectives.plays_final_{home,away}_score, which the
+# twin merge COPIES onto the canonical game -- apply it so the merge's column
+# list matches the schema.
+_MIGRATION_013 = (
+    _PROJECT_ROOT / "migrations" / "013_game_perspectives_plays_final_score.sql"
+)
 
 
 @pytest.fixture()
@@ -69,6 +75,7 @@ def db() -> sqlite3.Connection:
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_008.read_text(encoding="utf-8"))
     conn.executescript(_MIGRATION_012.read_text(encoding="utf-8"))
+    conn.executescript(_MIGRATION_013.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()

@@ -350,9 +350,21 @@ def merge_duplicate_game(
     # are combined onto the canonical game via INSERT OR IGNORE, then the
     # source's rows are deleted. Disjointness makes IGNORE a no-op here, but it
     # keeps the "union" contract explicit and robust.
+    # ⚠ This column list must name EVERY game_perspectives column. It is a COPY,
+    # not a re-point, so a column omitted here is silently DROPPED on merge --
+    # the row lands on the canonical game with that column reset to its default
+    # while the perspective's plays are re-pointed intact, and it never
+    # self-heals (whole-game plays idempotency skips the game forever).
+    # `plays_final_*` was added to game_perspectives in migration 013 and had to
+    # be added here too; `test_merge_preserves_every_game_perspectives_column`
+    # fails if a future column is added to the table but not to this list.
     conn.execute(
-        "INSERT OR IGNORE INTO game_perspectives (game_id, perspective_team_id, loaded_at) "
-        "SELECT ?, perspective_team_id, loaded_at FROM game_perspectives WHERE game_id = ?",
+        "INSERT OR IGNORE INTO game_perspectives "
+        "(game_id, perspective_team_id, loaded_at, "
+        " plays_final_home_score, plays_final_away_score) "
+        "SELECT ?, perspective_team_id, loaded_at, "
+        "       plays_final_home_score, plays_final_away_score "
+        "FROM game_perspectives WHERE game_id = ?",
         (canonical_game_id, source_game_id),
     )
     gp_deleted = conn.execute(

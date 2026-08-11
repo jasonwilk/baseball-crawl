@@ -40,6 +40,9 @@ _MIGRATIONS = [
     # E-264-01: teams.innings_per_game -- ensure_team_row's INSERT now references
     # it, so the teams schema fixture must carry the new column.
     _PROJECT_ROOT / "migrations" / "012_teams_innings_per_game.sql",
+    # game_perspectives.plays_final_{home,away}_score -- the plays loader now
+    # records the derived final score, so the fixture must carry the columns.
+    _PROJECT_ROOT / "migrations" / "013_game_perspectives_plays_final_score.sql",
 ]
 
 

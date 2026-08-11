@@ -19,8 +19,8 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-Clear. The `docs/` retired-workflow sweep landed 2026-08-09 (spec in `done/`); pick the next
-chunk from NEXT.
+Clear. Plays final-score recovery landed 2026-08-11 (spec in `done/`); pick the next chunk from
+NEXT. Its backfill is the natural follow-on and is stubbed there.
 
 ## NEXT
 
@@ -61,15 +61,34 @@ chunk from NEXT.
   `/security-review`, operator-typed as two separate messages. It also carries a pre-registered review
   experiment (all arms against one frozen diff, criterion stated before the data) that feeds Audit 4 — run it
   as written; fixing between passes is what muddied the last measurement.
-- **Plays final-score recovery (seed §2)** — **READY 2026-08-10**, spec
-  `2026-08-10-plays-final-score-recovery.md`. Recovers the game-ending run that GameChanger puts on
-  a trailing play our parser skips: **91 units / 88 games, 102 runs**, and youth is hit ~2.5× harder
-  than high school (7.9% vs 3.2%). Execution needs a FRESH session and owes `/code-review`;
-  `/security-review` is explicitly NOT needed (no auth/serving/PII/delete surface) — the spec says
-  so rather than leaving it assumed. **Read Verification 0 first**: it gates on score sums and the
-  step-6 count, NOT on `player_game_*` row counts, which drift on their own. A post-commit backfill
-  (backup → reset → re-scout) follows in its own session; its success criterion is **91 → the
-  abandoned-charting residual, NOT → 0**.
+- ~~**Plays final-score recovery (seed §2)**~~ — **LANDED 2026-08-11.** Spec moved to
+  `done/2026-08-10-plays-final-score-recovery.md`. Parser returns `ParsedGamePlays` (plays + derived
+  final), loader persists it to `game_perspectives` (migration `013`), full suite green at **4,495**.
+  The corpus was quiet and every pinned number held. **Two stubs it routed are in NEXT below**; read
+  the backfill one before reading any 91 as a failure.
+
+  **The review round mattered more than the build.** `/code-review` and codex were run
+  independently and overlapped on exactly ONE of four findings — each caught something the other
+  missed, which is the strongest single-diff evidence yet for the "keep both" verdict already in
+  these residuals. The one only `/code-review` found was the serious one: `merge_duplicate_game`
+  COPIES `game_perspectives` rows through a hand-written column list, so it silently DROPPED both
+  new columns on every twin merge — reproduced `(8,7) → (None,None)` while the plays re-pointed
+  intact, and it never self-heals. That is the Cleanup-Detection Mirror Invariant on a COPY path,
+  and it was reachable by exactly the ordering the backfill stub plans. Now guarded by a
+  `PRAGMA table_info`-derived drift test that fails on the NEXT forgotten column.
+- **Plays final-score BACKFILL** — **STUB 2026-08-11**, spec
+  `2026-08-11-plays-final-score-backfill.md`. The fix landed but **no stored data moved**: the
+  detection query still reads **91** and all 2,464 `game_perspectives` rows are NULL, because
+  whole-game plays idempotency skips any game that already has plays. Backup → reset → re-scout, in
+  its own session, naming `bb report generate` as destructive first. **Success is 91 → the
+  abandoned-charting residual (≥1), NOT → 0** — 87 of 88 recover, and one game's run is genuinely
+  absent from the payload.
+- **Runs as a reconciliation-scoreboard stat** — **STUB 2026-08-11**, spec
+  `2026-08-11-runs-as-scoreboard-stat.md`. The scoreboard measures no runs stat, so **the north-star
+  instrument was blind to the 102-run defect the recovery chunk just fixed**. Add it UNGATED first
+  (gating raises `BaselineError`/exit 4 against a baseline lacking the key), and treat the 9
+  two-scorebook units and the non-monotone units as legitimate disagreement. ⚠ Read the gate residual
+  below before gating anything.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -117,6 +136,26 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   and the REAL final with `did_score_change: true` when the last PA was unresolved mid-scoring.
   **Why you should care**: that silence is the entire defect the §2 chunk fixes, and the doc as
   written invites the exact rule that would zero every score in the DB. One paragraph.
+  **Still open after §2 landed (2026-08-11)** — the CODE now encodes the distinction
+  (`PlaysParser._derive_final_score`'s docstring carries the three rejected rules and their
+  evidence, and `.claude/rules/data-model.md` carries the column contract), but the ENDPOINT doc
+  was not touched and still describes the trailing play without its score semantics.
+- **FOUR test files hand-build a schema, so an ADDITIVE migration can red the suite from files no
+  test-scope grep names** (found 2026-08-11, cost 9 failures across two rounds on migration `013`).
+  `tests/test_report_plays.py`, `tests/test_loaders/test_game_dedup.py` and
+  `tests/test_loaders/test_game_loader.py` each hand-LIST a migration subset (each entry added,
+  with a comment, by the chunk that needed it), and
+  `tests/test_migrations.py::TestE220UpgradeGuard` builds a synthetic pre-E-220 DB carrying just
+  enough tables for every PENDING migration to apply before the guard fires. Adding two columns to
+  `game_perspectives` broke three of them; the fourth (`test_game_loader.py`) was aligned
+  preemptively because it writes `game_perspectives` too. **Why you should care**: the spec's
+  test-scope grep selector named NONE of them, and the `test_game_dedup.py` breakage appeared only
+  AFTER a review fix touched the merge seam -- so ONE full-suite run is not enough either; a chunk
+  touching `migrations/` owes one per round. Everything else routes through
+  `conftest.load_real_schema`, which GLOBS every numbered migration and needed no edit.
+  **Open question, deliberately not answered blind**: should the three subsets just use the glob?
+  `test_game_dedup.py` stops at 001+008 ON PURPOSE and layers `010` only where a test needs it, so
+  a blind glob would silently change what those tests exercise.
 - **`teams.classification` is unset on ALL 1,029 teams; `innings_per_game` is fetched for 66**
   (found 2026-08-10). **Why you should care**: any future segmentation by level (youth vs HS vs
   Legion) has no direct column to use — the §2 chunk's 2.5× youth skew rests on regulation-innings
