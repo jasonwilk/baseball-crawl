@@ -178,10 +178,16 @@ from src.db.game_merge import _PERSPECTIVE_CHILD_TABLES
 # ``bb data dedup-players`` would merge, so it must fold names EXACTLY as
 # detection does -- a second local fold would silently diverge on the Unicode
 # and diacritic cases ``_fold_name`` exists to handle, and the diagnostic would
-# name pairs the instrument it recommends cannot see. Top-level rather than
-# function-local: ``player_dedup`` imports nothing from ``src``, so there is no
-# cycle to dodge.
+# name pairs the instrument it recommends cannot see. The placeholder stub beside
+# it is the same claim on detection's OTHER name exclusion.
+#
+# Top-level rather than function-local, and still cycle-free: ``player_dedup``
+# imports exactly one ``src`` module, ``src.db.players``, which imports only
+# stdlib. (That sentence used to read "imports nothing from ``src``" and stopped
+# being true when the placeholder guard landed -- the import placement rests on
+# it, so it is stated as measured rather than as a habit.)
 from src.db.player_dedup import _fold_name
+from src.db.players import PLACEHOLDER_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -1676,11 +1682,30 @@ def _dedup_candidate_victims(
             # there would again name an instrument that cannot act -- and the
             # jersey half below still catches the blank-named re-issue that
             # keeps its number.
+            # SECOND mirrored exclusion, same reason as the non-empty guard
+            # above and added when detection grew it: ``find_duplicate_players``
+            # now excludes the ``PLACEHOLDER_NAME`` stub, because two ids carrying
+            # it fold to IDENTICAL names and would otherwise collapse two
+            # different humans. A stub is not a blank string, so the non-empty
+            # guard does not cover it -- ``"unknown"`` is a prefix of itself, so
+            # without this clause a stub victim beside a stub survivor
+            # name-matches here while the instrument this WARN names cannot act on
+            # the pair. Same defect class as the blank-name false positive, one
+            # dimension over.
+            #
+            # NAME half only, deliberately. The jersey half below is already a
+            # documented over-name relative to detection (which has no jersey rule
+            # at all), so a stub-named re-issue that KEEPS its number is still
+            # caught there -- and that is the case where the operator has a real
+            # signal to act on, jersey corroboration, rather than two absent names.
+            placeholder = _fold_name(PLACEHOLDER_NAME)
             name_match = (
                 bool(v_last)
                 and v_last == s_last
                 and bool(v_first)
                 and bool(s_first)
+                and v_first != placeholder
+                and s_first != placeholder
                 and (v_first.startswith(s_first) or s_first.startswith(v_first))
             )
             # The half that survives a DISPLAYED-NAME change -- the ``Mike`` ->

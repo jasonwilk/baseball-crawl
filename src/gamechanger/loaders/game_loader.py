@@ -569,6 +569,18 @@ class GameLoader:
         # guard still reads "complete", and the canonical game is then hard-
         # deleted (Fable review, E-267 closure).
         self.processed_event_ids: set[str] = set()
+        # Teams whose ``team_rosters`` rows THIS run created or touched, recorded
+        # as a side effect of ``_upsert_roster_jersey``. Same per-run
+        # side-effect-set pattern as the two above, and naturally scoped for the
+        # same reason: GameLoader is constructed fresh per report run.
+        #
+        # It exists because ``_load_team_stats`` runs for BOTH sides of every
+        # boxscore, so this loader writes roster rows for the scouted team's
+        # OPPONENTS as well -- while the dedup sweep in ScoutingLoader was scoped
+        # to the scouted team alone, leaving every opponent's split identities
+        # unmerged. League play is cyclic, so no generation order converges.
+        # ScoutingLoader reads this to dedup every team it actually wrote.
+        self.rostered_team_ids: set[int] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -2180,6 +2192,15 @@ class GameLoader:
             player_id: GameChanger player UUID.
             jersey_number: Jersey number string from boxscore (or ``None``).
         """
+        # Record the team BEFORE the write, and unconditionally: both INSERT
+        # branches live in this method, which makes it the single choke point for
+        # boxscore-sourced roster rows on BOTH sides of the game. Recording after
+        # the branch, or in only one of them, would silently under-report the set
+        # ScoutingLoader's dedup loop iterates. A membership record for a row that
+        # already existed is harmless -- dedup on an already-converged team is a
+        # no-op -- so there is no reason to condition this on the row being new.
+        self.rostered_team_ids.add(team_id)
+
         if jersey_number is None:
             # Still ensure the roster row exists (position stays NULL).
             self._db.execute(

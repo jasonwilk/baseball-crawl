@@ -1862,19 +1862,32 @@ def test_regime_B_unmergeable_churn_deletes_the_prior_generation_on_run_3(
     assert fired == [3]
 
 
-def test_regime_B_on_the_OPPONENT_block_has_no_closer_in_any_shape(
+def test_regime_B_on_the_OPPONENT_block_is_closed_by_the_dedup_sweep(
     db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC-14 regime B, second trigger -- the one that gets forgotten.
+    """AC-14 regime B on the opponent block -- INVERTED, and deliberately kept.
 
-    ``dedup_team_players`` is scoped to the SCOUTED team (``_load_team_core``
-    passes that team's id), while the opponent block's ``player_game_*`` rows are
-    written under ``opp_team_id``. So the opponent block has **no closer in ANY
-    shape** -- not a weaker one: none, including the one shape that DOES close on
-    the own block.
+    This test previously asserted the opposite property under the name
+    ``test_regime_B_on_the_OPPONENT_block_has_no_closer_in_any_shape``: that
+    ``dedup_team_players`` was scoped to the SCOUTED team while the opponent
+    block's rows are written under ``opp_team_id``, so the opponent block had **no
+    closer in ANY shape**. That is precisely the defect the opponent-roster dedup
+    chunk removed -- the sweep now runs for every team whose ``team_rosters`` rows
+    the load wrote -- so the assertions are inverted rather than deleted, and the
+    pinned sequence is re-derived from an EXECUTED run, not edited by hand.
 
-    Executed here on the HARDEST shape: an IDENTICAL-name re-issue, precisely the
-    churn the sweep is supposed to close. Same numbers as the own-block case.
+    Still the HARDEST shape: an IDENTICAL-name re-issue, the churn the sweep
+    exists to close.
+
+    **The regime-B coverage is the part to preserve, and it survives intact: the
+    closer is the DEDUP SWEEP, not the retire.** The player-line retire still
+    REFUSES on run 2 exactly as before (the gate sees a fresh block vouching for 0
+    of 9 prior lines, and its population is the pre-upsert snapshot), so nothing
+    about the gate got weaker. What changed is that the sweep collapses the two
+    generations inside the same load, so the accumulation the run-2 refusal used
+    to strand never forms -- and the accumulate-then-delete predicate, which fired
+    on run 3, now never fires. The unmergeable-churn sibling above keeps the
+    coverage for the shape where no closer exists in any regime.
     """
     team = _insert_team(db)
     block = 9
@@ -1931,41 +1944,66 @@ def test_regime_B_on_the_OPPONENT_block_has_no_closer_in_any_shape(
 
     rows_per_run = []
     originals_alive = []
+    churn_alive = []
     for index, (result, _records, live) in enumerate(runs):
         assert result.errors == 0, f"run {index + 1} raised and was swallowed"
         rows_per_run.append(len(live))
         originals_alive.append(len(live & set(originals)))
+        churn_alive.append(len(live & set(churn)))
 
-    assert rows_per_run == [9, 18, 9, 9]
-    assert originals_alive == [9, 9, 0, 0]
+    # One block's worth of lines at EVERY step -- run 2 no longer doubles. The
+    # 18-row accumulation the old pin recorded is what the sweep now prevents.
+    assert rows_per_run == [9, 9, 9, 9]
+    # The generations swap inside run 2: the sweep merges each original into its
+    # re-issued twin, so the originals are gone by the end of that run instead of
+    # surviving until a run-3 deletion. WHICH id survives is fixture-incidental --
+    # both names are "Jordan Sur<n>" of equal length with equal stat counts, so the
+    # component canonical falls through to the alphabetical player_id tiebreak and
+    # ``churn-*`` < ``orig-*``. It is the COUNT that carries the property.
+    assert originals_alive == [9, 0, 0, 0]
+    assert churn_alive == [0, 9, 9, 9]
 
     key = (_GAME, "player_game_batting", opp_team)
     gates = [records[key] for _result, records, _obs in runs]
+    # UNCHANGED from the pre-fix run, and that is the regime-B half worth keeping:
+    # the retire still refuses on run 2 over the same (9, 0) population. The gate
+    # did not get weaker; a different mechanism resolved the churn.
     assert (gates[1].gate_prior_count, gates[1].gate_comparable_count) == (9, 0)
     assert gates[1].gate_permitted is False
-    assert (gates[2].gate_prior_count, gates[2].gate_comparable_count) == (18, 9)
+    assert gates[1].refused_by == "gate"
+    # Run 3's prior population is ONE block (9), not the stranded 18: with nothing
+    # accumulated, the fresh block vouches for all of it and there is nothing
+    # absent left to delete.
+    assert (gates[2].gate_prior_count, gates[2].gate_comparable_count) == (9, 9)
     assert gates[2].gate_permitted is True
 
-    # AC-14 records the accumulate-then-delete predicate as firing on the
-    # OPPONENT block too, so assert the predicate itself rather than only the
-    # run-3 tuple it happens to be computed from.
+    # The accumulate-then-delete window is CLOSED on the opponent block. Asserted
+    # via the predicate itself (it fired on run 3 before this chunk), not via the
+    # tuple it is computed from.
     fired = [
         index + 2
         for index, (prev, cur) in enumerate(zip(gates, gates[1:], strict=False))
         if _accumulate_then_delete_fires(prev, cur)
     ]
-    assert fired == [3]
+    assert fired == []
 
-    # The own block is untouched throughout -- this is the opponent side's
-    # residual, not a whole-payload effect.
+    # No run has anything absent-and-mergeable left for the victim diagnostic to
+    # name, because the sweep merged the pair before a later run could delete it.
+    # The diagnostic itself is still covered on the shapes that reach it (see the
+    # jersey-corroborated and cross-season cases below).
+    for gate in gates:
+        assert not gate.matched_victim_player_ids
+    assert not [m for m in _retire_warnings(caplog) if "bb data dedup-players" in m]
+
+    # The own block is untouched throughout -- the sweep reaching the opponent is
+    # an addition, not a whole-payload behavior change.
     assert _batting_ids_for_team(db, team) == set(own)
 
-    # AC-15: the run-3 deletion looked routine and was a re-issued id. The
-    # diagnostic is the only thing that says so.
-    assert set(gates[2].matched_victim_player_ids) == set(originals)
-    assert any(
-        "bb data dedup-players" in message for message in _retire_warnings(caplog)
-    )
+    # The convergence is on the ROSTER too, which is where a coach sees it: the
+    # report's roster block prints one entry per row with no grouping.
+    assert db.execute(
+        "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (opp_team,)
+    ).fetchone()[0] == block
 
 
 def test_partial_churn_at_production_SEASON_scale_deletes_on_run_2(
@@ -2527,6 +2565,183 @@ def test_a_blank_first_name_does_not_manufacture_a_match(
     ]
 
 
+def test_the_content_refusal_leaves_regime_B_open_on_a_DIFFERING_opponent_line(
+    db: sqlite3.Connection
+) -> None:
+    """The boundary of what the opponent sweep closes -- pinned, not assumed.
+
+    The sibling test above shows the sweep closing the accumulate-then-delete
+    window on the opponent block. It closes it only where the merge is SAFE. When
+    the re-issued id's line DISAGREES with the prior generation's for the same
+    ``(game_id, perspective_team_id)`` -- a scorekeeper edit between re-scouts --
+    the content-aware refusal declines the component, and this grain reverts to
+    the regime-B sequence exactly as it behaved before the sweep reached
+    opponents at all: ``[9, 18, 9, 9]``, prior generation hard-deleted on run 3.
+
+    **Unimproved subset, NOT a regression** -- that pinned sequence is character
+    for character the one the pre-chunk test asserted for ALL opponent churn.
+    What is worth seeing is the shape of the interaction: the content refusal
+    stops the DEDUP path from deleting a differing row, and then the player-line
+    retire deletes it anyway on run 3 -- after which the component carries no
+    conflict, the sweep merges it, and run 4 is converged. So the guard defers
+    that deletion to the grain the operator already ruled on (surface it, do not
+    gate it -- a permanent refusal there doubles the coach-facing season
+    aggregate; IDEA-185), rather than preventing it outright.
+
+    Found by ``/code-review`` on this chunk, which is why it is a test and not a
+    sentence: the assertion is what stops the boundary moving silently.
+    """
+    team = _insert_team(db)
+    block = 9
+    own = _gen("own", 3)
+    originals = _gen("orig", block)
+    churn = _gen("churn", block)
+
+    def _opp_block(ids: list[str], ab: int) -> dict:
+        """One opponent block whose AB value marks the generation."""
+        return {
+            "players": [
+                _player(pid, "Jordan", f"Sur{pid.rsplit('-', 1)[1]}") for pid in ids
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {
+                            "player_id": pid,
+                            "stats": {"AB": ab, "R": 1, "H": 1, "RBI": 1,
+                                      "BB": 0, "SO": 0},
+                        }
+                        for pid in ids
+                    ],
+                    "extra": [],
+                },
+                {"category": "pitching", "stats": [], "extra": []},
+            ],
+        }
+
+    def _opp_crawl(ids: list[str], ab: int) -> SimpleNamespace:
+        return _crawl(
+            team,
+            {_GAME: _boxscore(_SLUG_A, _team_block(own), _opp_block(ids, ab))},
+        )
+
+    def _opponent_lines(conn: sqlite3.Connection) -> set[str]:
+        return {
+            r[0]
+            for r in conn.execute(
+                "SELECT player_id FROM player_game_batting "
+                "WHERE game_id = ? AND team_id != ?",
+                (_GAME, team),
+            )
+        }
+
+    # AB 3 -> 4 is the scorekeeper edit: same game, same perspective, different
+    # content, so the colliding rows disagree and the component is refused.
+    runs = _drive(
+        db,
+        [_opp_crawl(originals, 3), *[_opp_crawl(churn, 4) for _ in range(3)]],
+        observe=_opponent_lines,
+    )
+
+    rows_per_run = [len(live) for _r, _rec, live in runs]
+    originals_alive = [len(live & set(originals)) for _r, _rec, live in runs]
+    assert all(result.errors == 0 for result, _rec, _live in runs)
+
+    # The pre-chunk sequence, reproduced exactly: run 2 accumulates both
+    # generations because the refusal declines to merge them, run 3 deletes the
+    # prior one through the player-line grain.
+    assert rows_per_run == [9, 18, 9, 9]
+    assert originals_alive == [9, 9, 0, 0]
+
+    opp_team = db.execute(
+        "SELECT DISTINCT team_id FROM player_game_batting "
+        "WHERE game_id = ? AND team_id != ?",
+        (_GAME, team),
+    ).fetchone()[0]
+    gates = [records[(_GAME, "player_game_batting", opp_team)]
+             for _r, records, _o in runs]
+    assert gates[1].gate_permitted is False
+    assert (gates[2].gate_prior_count, gates[2].gate_comparable_count) == (18, 9)
+    assert gates[2].gate_permitted is True
+    fired = [
+        index + 2
+        for index, (prev, cur) in enumerate(zip(gates, gates[1:], strict=False))
+        if _accumulate_then_delete_fires(prev, cur)
+    ]
+    assert fired == [3], "the window this shape leaves open must stay visible"
+
+    # ...and once the retire has removed the conflicting rows, the component is
+    # mergeable again and the roster converges. The refusal is a deferral, not a
+    # permanent split.
+    assert db.execute(
+        "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?", (opp_team,)
+    ).fetchone()[0] == block
+
+
+def test_a_placeholder_first_name_does_not_manufacture_a_match(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The stub sibling of the blank-name case above, one dimension over.
+
+    ``"Unknown"`` is not a blank string, so the non-empty guard does not cover
+    it -- and ``"unknown"`` IS a prefix of itself, so two placeholder-named ids
+    under one surname name-matched here. Detection now EXCLUDES that pair (two ids
+    carrying the stub are not evidence they are one human; merging them destroyed a
+    real pitching appearance on the live corpus), so an unguarded diagnostic would
+    name a re-issue and point the operator at ``bb data dedup-players``, which
+    cannot act on it. Same false-positive channel, same reason it matters: the
+    population concentrates precisely on the players GC gave no name for.
+
+    The jersey half is deliberately still able to catch these -- so this fixture
+    gives the two ids DIFFERENT numbers, isolating the name half under test.
+    """
+    team = _insert_team(db)
+    stable = ["p-a", "p-b", "p-c"]
+    # Two DIFFERENT humans, both nameless in the boxscore, different jerseys.
+    names = {
+        "stub-1": ("Unknown", "Unknown"),
+        "stub-2": ("Unknown", "Unknown"),
+    }
+    numbers = {"stub-1": "7", "stub-2": "23"}
+
+    def _crawl_with(block_ids: list[str]) -> SimpleNamespace:
+        return _crawl(
+            team,
+            {
+                _GAME: _boxscore(
+                    _SLUG_A, _team_block(block_ids, names=names, numbers=numbers)
+                )
+            },
+        )
+
+    ScoutingLoader(db).load_team(_crawl_with([*stable, "stub-1"]))
+    assert db.execute(
+        "SELECT first_name FROM players WHERE player_id = 'stub-1'"
+    ).fetchone()[0] == "Unknown", "the fixture must actually store the stub name"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING), _capture_player_line_results() as captured:
+        second = ScoutingLoader(db).load_team(_crawl_with([*stable, "stub-2"]))
+
+    assert second.errors == 0
+    _assert_captured_result_objects(captured)
+    gate = _batting_gate(captured[-1][1], team)
+    assert gate.gate_permitted is True, "the retire must still be permitted"
+    assert gate.matched_victim_player_ids == ()
+    assert not [m for m in _retire_warnings(caplog) if "bb data dedup-players" in m]
+
+    # ...and the instrument the WARN would have recommended agrees.
+    from src.db.player_dedup import find_duplicate_players
+
+    pairs = find_duplicate_players(db, team_id=team, season_id=_SEASON)
+    assert not [
+        p
+        for p in pairs
+        if {p.canonical_player_id, p.duplicate_player_id} == {"stub-1", "stub-2"}
+    ]
+
+
 @pytest.mark.parametrize("churn_block", [9, 10, 11])
 def test_sub_boundary_churn_stays_co_resident_and_never_deletes(
     db: sqlite3.Connection, churn_block: int
@@ -2670,3 +2885,5 @@ def test_a_jersey_reused_in_a_DIFFERENT_season_is_not_a_match(
         victim_ids=["v-same"],
         surviving_fresh_ids=["s-cross"],
     ) == ("v-same",), "a same-season jersey collision must still be named"
+
+

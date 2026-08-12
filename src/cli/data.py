@@ -159,19 +159,26 @@ def dedup_players(
             typer.echo(f"Error finding duplicate players: {exc}", err=True)
             raise SystemExit(1) from exc
 
-        if not plan.collapses and not plan.refused_forks:
+        if (
+            not plan.collapses
+            and not plan.refused_forks
+            and not plan.refused_conflicts
+        ):
             typer.echo("No duplicate players found.")
             raise SystemExit(0)
 
         mode = "DRY RUN" if is_dry_run else "EXECUTE"
         total_merges = sum(len(c.duplicates) for c in plan.collapses)
-        team_ids_seen = {c.team_id for c in plan.collapses} | {
-            f.team_id for f in plan.refused_forks
-        }
+        team_ids_seen = (
+            {c.team_id for c in plan.collapses}
+            | {f.team_id for f in plan.refused_forks}
+            | {r.team_id for r in plan.refused_conflicts}
+        )
 
         typer.echo(
             f"[{mode}] {len(plan.collapses)} collapsible component(s) "
-            f"({total_merges} merge(s)), {len(plan.refused_forks)} refused fork(s).\n"
+            f"({total_merges} merge(s)), {len(plan.refused_forks)} refused fork(s), "
+            f"{len(plan.refused_conflicts)} refused for conflicting content.\n"
         )
 
         if plan.collapses:
@@ -204,6 +211,32 @@ def dedup_players(
                     f"({len(fork.members)} member(s) left unmerged)"
                 )
 
+        # Same surfacing for the content refusal, on both dry-run and execute.
+        # This class is NOT ambiguous about who the player is -- it is ambiguous
+        # about which of two disagreeing stat rows is right, which a merge would
+        # settle by deleting one. Deciding that is out of scope here, so the
+        # operator gets the location and adjudicates.
+        if plan.refused_conflicts:
+            typer.echo(
+                "\nRefused -- merging would delete conflicting content "
+                "(left unmerged, review manually):"
+            )
+            for refusal in plan.refused_conflicts:
+                names = ", ".join(
+                    sorted({f"{m.first_name} {m.last_name}" for m in refusal.members})
+                )
+                typer.echo(
+                    f"  team {refusal.team_name!r} (team_id={refusal.team_id}): "
+                    f"{names} -- {len(refusal.conflicts)} conflicting row pair(s) "
+                    f"({len(refusal.members)} member(s) left unmerged)"
+                )
+                for conflict in refusal.conflicts:
+                    typer.echo(
+                        f"      {conflict.table} game={conflict.game_id} "
+                        f"perspective_team_id={conflict.perspective_team_id} "
+                        f"differs on: {', '.join(conflict.differing_columns)}"
+                    )
+
         if is_dry_run:
             # Per-duplicate preview of the rows each merge would touch.
             typer.echo("\nPer-duplicate row counts:")
@@ -227,7 +260,8 @@ def dedup_players(
             typer.echo("")
             typer.echo(
                 f"Found {total_merges} merge(s) across {len(team_ids_seen)} team(s); "
-                f"{len(plan.refused_forks)} fork(s) refused."
+                f"{len(plan.refused_forks)} fork(s) refused; "
+                f"{len(plan.refused_conflicts)} refused for conflicting content."
             )
             raise SystemExit(0)
 
@@ -242,6 +276,26 @@ def dedup_players(
                 fork.team_id,
                 ", ".join(fork.terminal_names),
                 len(fork.members),
+            )
+
+        # One WARN per content-refused component (mirrors the load path's
+        # dedup_team_players).
+        for refusal in plan.refused_conflicts:
+            first = refusal.conflicts[0]
+            logger.warning(
+                "dedup-players: refused component on team %r (team_id=%d): "
+                "merging it would DELETE a conflicting stat row whose content "
+                "differs (%d conflict(s); first: %s game=%s "
+                "perspective_team_id=%s columns=%s); leaving all %d member(s) "
+                "unmerged",
+                refusal.team_name,
+                refusal.team_id,
+                len(refusal.conflicts),
+                first.table,
+                first.game_id,
+                first.perspective_team_id,
+                ", ".join(first.differing_columns),
+                len(refusal.members),
             )
 
         merged = 0
@@ -276,7 +330,8 @@ def dedup_players(
         typer.echo(
             f"\nSummary: {total_merges} merge(s) detected, "
             f"{merged} merged, {failed} failed, "
-            f"{len(plan.refused_forks)} fork(s) refused."
+            f"{len(plan.refused_forks)} fork(s) refused, "
+            f"{len(plan.refused_conflicts)} refused for conflicting content."
         )
 
     # AC-5: surface execute-time merge failures as a non-zero exit so the

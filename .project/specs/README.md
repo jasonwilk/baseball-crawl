@@ -19,9 +19,22 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-Execute `2026-08-10-opponent-roster-dedup-gap.md` (READY at `4d34c16`) in a fresh session. It
-leads the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"): no
-report generation until it lands, and one full regenerate later replaces the repair passes.
+**Decide the deferred acceptance pass for the dedup chunk** (below), then continue the ruled
+sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"): same-listing detection
+→ generate-concurrency cap → runs-as-scoreboard instrument → full regenerate. The generation
+freeze from that ruling is **lifted for correctness** — the lossy-merge hazard it protected against
+is fixed — but the plays half-pair clobber below wants to land before the regenerate.
+
+- ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12.** Spec moved to
+  `done/2026-08-10-opponent-roster-dedup-gap.md` (`git log --follow` for history). The sweep now
+  runs for every team a load writes roster rows for, scouted team first; two guards ship with it.
+  Suite 4,495 → 4,513.
+- **⚠️ Its live acceptance pass was NOT run and is owed a ruling.** Verification 4 in that spec
+  predates the regeneration ruling, which de-scopes repair halves — so the five-team pass is now
+  partly superseded. The trade, and the recommendation, are in the spec's closing progress entry:
+  run team 47 ALONE after `bb db backup` (it is the only one carrying an `Unknown Unknown` pair,
+  so a guard regression shows on run 1) and let the regenerate cover the rest. Every figure that
+  verification predicts was measured PRE-guard and needs re-measuring regardless.
 
 ## NEXT
 
@@ -106,6 +119,15 @@ report generation until it lands, and one full regenerate later replaces the rep
   deleted row differs from the survivor (33 on NAMED players), 61 Unknown collapses merging away
   443 ids. Consequently the acceptance criterion is **"excess == Unknown-name duplicates only"**,
   NOT bare `rows == names` — team 47 legitimately keeps one excess row post-guard.
+- **Plays final-score half-pair clobber** — **STUB 2026-08-12**, spec
+  `2026-08-12-plays-final-score-half-pair-clobber.md`. `_persist_final_score`'s UPSERT guard is
+  `OR` while both columns are assigned from `excluded`, so a half-derived pair `(5, NULL)` landing
+  on a stored `(NULL, 7)` **NULLs a real score** — contradicting the docstring three lines above,
+  which promises an all-or-nothing write. Found by codex review of a different chunk's diff.
+  **Why you should care**: it is LATENT today (all 2,464 rows are NULL) and **the full regenerate
+  is what fires it**, so it must land BEFORE that regenerate, not after. Not the one-character fix
+  it looks like — `OR`→`AND` also discards a half we legitimately derived, so measure whether real
+  payloads produce half-pairs before choosing.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS

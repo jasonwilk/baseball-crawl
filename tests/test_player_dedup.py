@@ -1447,3 +1447,265 @@ class TestLikeMetacharacterDetection:
         assert len(plan.refused_forks) == 0
 
 
+
+
+# ---------------------------------------------------------------------------
+# Placeholder-name guard + content-aware refusal (opponent-roster dedup gap)
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownPlaceholderGuard:
+    """Two ``Unknown Unknown`` stubs are not evidence of one human.
+
+    ``find_duplicate_players`` guards only ``LENGTH(folded first_name) > 0``, so
+    two placeholder ids fold to IDENTICAL names, form a single-terminal-name
+    component, and COLLAPSE. Fork refusal cannot catch this -- it fires on
+    DISTINCT names, so "zero refused forks" is what this hazard looks like
+    rather than evidence of safety.
+    """
+
+    def test_two_unknown_stubs_in_one_game_are_not_detected_as_duplicates(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """The placeholder name carries no identity signal, so it yields no pair."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-unknown-a", "Unknown", "Unknown")
+        _seed_player(db, "p-unknown-b", "Unknown", "Unknown")
+        _seed_roster(db, 1, "p-unknown-a", "2026")
+        _seed_roster(db, 1, "p-unknown-b", "2026")
+
+        assert find_duplicate_players(db, 1, season_id="2026") == []
+
+    def test_two_unknown_pitchers_in_one_game_both_survive(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Two placeholder ids in the SAME game/perspective are two pitchers.
+
+        Measured shape from the live corpus: 4 outs / 3 ER versus 6 outs / 0 ER
+        under one perspective of one game. The merge's conflict handler ranks
+        completeness, ties, and DELETES the loser -- destroying a real
+        appearance.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-unknown-a", "Unknown", "Unknown")
+        _seed_player(db, "p-unknown-b", "Unknown", "Unknown")
+        _seed_roster(db, 1, "p-unknown-a", "2026")
+        _seed_roster(db, 1, "p-unknown-b", "2026")
+        _seed_game(db, "g-unknown", "2026", 1)
+        _seed_game_pitching(db, "g-unknown", "p-unknown-a", 1, ip_outs=4, er=3, bb=2)
+        _seed_game_pitching(db, "g-unknown", "p-unknown-b", 1, ip_outs=6, er=0, bb=1)
+
+        merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM players WHERE player_id IN "
+            "('p-unknown-a', 'p-unknown-b')"
+        ).fetchone()[0] == 2
+        lines = db.execute(
+            "SELECT player_id, ip_outs, er FROM player_game_pitching "
+            "ORDER BY player_id"
+        ).fetchall()
+        assert lines == [("p-unknown-a", 4, 3), ("p-unknown-b", 6, 0)]
+
+
+class TestContentAwareRefusal:
+    """A merge that would DELETE differing content refuses the whole component.
+
+    The refusal is at PLAN time, never mid-merge: skipping one conflicting
+    delete leaves the blanket ``UPDATE {table} SET player_id = ?`` to hit the
+    UNIQUE and abort the component anyway.
+    """
+
+    def _seed_conflicting_pair(self, db: sqlite3.Connection) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-jordan-a", "Jordan", "Rivera")
+        _seed_player(db, "p-jordan-b", "Jordan", "Rivera")
+        _seed_roster(db, 1, "p-jordan-a", "2026")
+        _seed_roster(db, 1, "p-jordan-b", "2026")
+        _seed_game(db, "g-conflict", "2026", 1)
+        # Same (game_id, perspective_team_id) -- a real UNIQUE conflict -- with
+        # DIFFERING content, so whichever row loses takes real data with it.
+        _seed_game_batting(db, "g-conflict", "p-jordan-a", 1, ab=4, h=2, rbi=1)
+        _seed_game_batting(db, "g-conflict", "p-jordan-b", 1, ab=3, h=0, rbi=0)
+
+    def test_plan_refuses_component_whose_conflicting_rows_differ(
+        self, db: sqlite3.Connection
+    ) -> None:
+        self._seed_conflicting_pair(db)
+
+        plan = plan_player_dedup(db, 1, season_id="2026")
+
+        assert plan.collapses == []
+        assert len(plan.refused_conflicts) == 1
+        refused = plan.refused_conflicts[0]
+        assert refused.team_id == 1
+        assert {m.player_id for m in refused.members} == {
+            "p-jordan-a",
+            "p-jordan-b",
+        }
+        # The refusal names WHERE the content differs, so an operator can go look.
+        assert refused.conflicts
+        assert refused.conflicts[0].table == "player_game_batting"
+        assert refused.conflicts[0].game_id == "g-conflict"
+        assert set(refused.conflicts[0].differing_columns) == {"ab", "h", "rbi"}
+
+    def test_refused_component_is_left_intact_with_a_warning(
+        self, db: sqlite3.Connection,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._seed_conflicting_pair(db)
+
+        with caplog.at_level(logging.WARNING, logger="src.db.player_dedup"):
+            merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM players WHERE player_id IN "
+            "('p-jordan-a', 'p-jordan-b')"
+        ).fetchone()[0] == 2
+        rows = db.execute(
+            "SELECT player_id, ab, h, rbi FROM player_game_batting "
+            "ORDER BY player_id"
+        ).fetchall()
+        assert rows == [("p-jordan-a", 4, 2, 1), ("p-jordan-b", 3, 0, 0)]
+        assert any(
+            "conflicting" in record.message.lower()
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        ), f"expected a refusal WARN; got {[r.message for r in caplog.records]}"
+
+    def test_byte_identical_conflicts_still_merge(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """The refusal is content-aware, not conflict-aware.
+
+        A conflicting pair whose rows are byte-identical loses nothing when one
+        is deleted, and MUST still collapse -- that is the ordinary
+        cross-perspective duplicate this sweep exists to close.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-casey-a", "Casey", "Nolan")
+        _seed_player(db, "p-casey-b", "Casey", "Nolan")
+        _seed_roster(db, 1, "p-casey-a", "2026")
+        _seed_roster(db, 1, "p-casey-b", "2026")
+        _seed_game(db, "g-identical", "2026", 1)
+        _seed_game_batting(db, "g-identical", "p-casey-a", 1, ab=4, h=2, rbi=1)
+        _seed_game_batting(db, "g-identical", "p-casey-b", 1, ab=4, h=2, rbi=1)
+
+        merged = dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        assert merged == 1
+        assert db.execute(
+            "SELECT COUNT(*) FROM player_game_batting"
+        ).fetchone()[0] == 1
+
+
+class TestPlaceholderSurnameGuard:
+    """The surname half of the placeholder guard, and why it is NARROW.
+
+    Detection needs BOTH halves of its signal to be real evidence: equal
+    surnames AND a first-name prefix. When both surnames are the
+    ``PLACEHOLDER_NAME`` stub the equality is satisfied by two ABSENCES, so a
+    prefix pair rests on the first name alone with no corroboration -- the same
+    vacuous-match shape as the blank-first-name case, one dimension over.
+    """
+
+    def test_placeholder_surname_with_prefix_first_names_is_not_detected(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """``Alex Unknown`` / ``Alexander Unknown`` -- no surname corroboration."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-alex", "Alex", "Unknown")
+        _seed_player(db, "p-alexander", "Alexander", "Unknown")
+        _seed_roster(db, 1, "p-alex", "2026")
+        _seed_roster(db, 1, "p-alexander", "2026")
+
+        assert find_duplicate_players(db, 1, season_id="2026") == []
+
+    def test_placeholder_surname_with_EQUAL_first_names_still_merges(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """The guard must NOT swallow the shape that actually occurs.
+
+        GameChanger sometimes puts the WHOLE name in ``first_name`` and leaves
+        the surname absent, so the live corpus carries pairs like
+        ``('Riley Vance', 'Unknown')`` twice over. Those are unambiguous
+        duplicates -- the identity evidence is entirely inside the first name,
+        and the absent surname takes nothing away from it. Measured: all 6
+        placeholder-surname pairs in the 2026 corpus are of this equal-name
+        shape, so a blanket surname guard would block 6 real merges to close a
+        hazard that has zero live instances.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-vance-a", "Riley Vance", "Unknown")
+        _seed_player(db, "p-vance-b", "Riley Vance", "Unknown")
+        _seed_roster(db, 1, "p-vance-a", "2026")
+        _seed_roster(db, 1, "p-vance-b", "2026")
+
+        pairs = find_duplicate_players(db, 1, season_id="2026")
+        assert len(pairs) == 1
+        assert {pairs[0].canonical_player_id, pairs[0].duplicate_player_id} == {
+            "p-vance-a",
+            "p-vance-b",
+        }
+
+
+class TestRosterMetadataPreservedOnMerge:
+    """A merge must not blank coach-visible roster metadata.
+
+    ``_delete_or_update_rosters`` resolves a ``PK(team_id, player_id,
+    season_id)`` collision by DELETING the duplicate's row -- so a jersey or
+    position that exists only on that row went with it. The report's roster
+    block reads both columns, and widening the sweep to every opponent multiplies
+    the traffic through this helper across hundreds of teams.
+    """
+
+    def test_jersey_is_backfilled_from_the_row_being_deleted(
+        self, db: sqlite3.Connection
+    ) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-samuel", "Samuel", "Webb")
+        _seed_player(db, "p-sam", "Sam", "Webb")
+        _seed_season(db, "2026")
+        # Canonical (longer name) has NO jersey; the duplicate carries it.
+        db.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number, position) "
+            "VALUES (1, 'p-samuel', '2026', NULL, NULL)"
+        )
+        db.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number, position) "
+            "VALUES (1, 'p-sam', '2026', '23', 'CF')"
+        )
+
+        merge_player_pair(db, "p-samuel", "p-sam", manage_transaction=True)
+
+        row = db.execute(
+            "SELECT jersey_number, position FROM team_rosters WHERE player_id = 'p-samuel'"
+        ).fetchone()
+        assert row == ("23", "CF"), (
+            "the surviving roster row must inherit metadata the deleted row held"
+        )
+
+    def test_an_existing_jersey_is_never_overwritten(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Backfill-only, mirroring ``_upsert_roster_jersey``'s own semantics."""
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-samuel", "Samuel", "Webb")
+        _seed_player(db, "p-sam", "Sam", "Webb")
+        _seed_season(db, "2026")
+        db.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
+            "VALUES (1, 'p-samuel', '2026', '7')"
+        )
+        db.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
+            "VALUES (1, 'p-sam', '2026', '23')"
+        )
+
+        merge_player_pair(db, "p-samuel", "p-sam", manage_transaction=True)
+
+        assert db.execute(
+            "SELECT jersey_number FROM team_rosters WHERE player_id = 'p-samuel'"
+        ).fetchone()[0] == "7"

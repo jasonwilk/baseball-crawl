@@ -362,21 +362,80 @@ class ScoutingLoader:
         # Hook 1: dedup sweep after boxscore loading. Collapses same-team
         # duplicate player entries; season aggregates are derived at query time
         # (E-259) so there is no post-dedup recompute.
-        try:
-            from src.db.player_dedup import dedup_team_players
+        #
+        # EVERY team whose team_rosters rows this load wrote, not just the scouted
+        # one. ``_upsert_roster_jersey`` runs for both sides of every boxscore, so
+        # an opponent-side write re-splits an identity a previous run collapsed;
+        # scoping the sweep to ``team_id`` alone meant league play (cyclic) never
+        # converged under ANY generation order.
+        #
+        # THE SCOUTED TEAM GOES FIRST, AND THAT IS LOAD-BEARING, NOT COSMETIC.
+        # ``_reconcile_departed_roster`` above already exempted this team's
+        # pending-collapse ids from retirement, and that exemption's safety rests
+        # on ``P1 ⊆ P2`` -- the plan it computed being a subset of the plan the
+        # sweep recomputes (see ``_pending_collapse_player_ids``). An opponent
+        # merge re-points roster rows GLOBALLY (``UPDATE team_rosters SET
+        # player_id = ?  WHERE player_id = ?``, player_dedup.py) and deletes
+        # ``players`` rows, so running one first can ADD a node to this team's
+        # component -- turning a P1 collapse into a refused fork and stranding
+        # exactly the ids the exemption protected. Sorted opponents after the
+        # scouted team keeps the order deterministic and the argument intact.
+        #
+        # Opponents dedup under the SCOUTED team's ``db_season_id``: that is the
+        # season their rows were actually written under (``GameLoader`` binds every
+        # boxscore-sourced roster row to its own ``_season_id``), not whatever
+        # season the opponent's own metadata would derive.
+        #
+        # Per-team SAVEPOINT + try/except, so one opponent's failure neither
+        # skips the rest nor rides the commit below.
+        #
+        # A per-item catch-and-continue on a SHARED connection is the documented
+        # partial-commit footgun (`.claude/rules/architecture-subsystems.md`):
+        # the failed item's uncommitted writes stay pending and are swept up by
+        # the next commit -- here the single ``self._db.commit()`` a few lines
+        # down. **A bare ``rollback()`` is the WRONG remedy at this seam**, and
+        # this is the reason the shape differs from the loop the rule describes:
+        # there is no per-item commit to isolate against, so a rollback would
+        # discard the whole transaction -- both reconcile grains' pending retires
+        # AND every opponent already merged in this loop -- to contain one
+        # team's failure. A SAVEPOINT contains exactly that team's writes, which
+        # is the same reason ``execute_collapse`` uses one per component.
+        #
+        # Reaching the except with anything pending is already unlikely --
+        # ``dedup_team_players`` catches per-component failures and
+        # ``execute_collapse`` rolls its own savepoint back -- so this is
+        # defense in depth for the case where that machinery is what failed.
+        # Found by ``/security-review`` (as a non-security observation).
+        #
+        # The savepoint name interpolates an INT (``team_id`` values read from
+        # the DB into ``rostered_team_ids: set[int]``), never a string, so it
+        # cannot escape the identifier context.
+        dedup_team_ids = [team_id] + sorted(
+            game_loader.rostered_team_ids - {team_id}
+        )
+        for dedup_team_id in dedup_team_ids:
+            savepoint = f"dedup_sweep_{int(dedup_team_id)}"
+            self._db.execute(f"SAVEPOINT {savepoint}")
+            try:
+                from src.db.player_dedup import dedup_team_players
 
-            dedup_team_players(
-                self._db, team_id, db_season_id,
-                manage_transaction=False,
-            )
-        except Exception:  # noqa: BLE001
-            logger.error(
-                "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
-                "continuing",
-                team_id,
-                db_season_id,
-                exc_info=True,
-            )
+                dedup_team_players(
+                    self._db, dedup_team_id, db_season_id,
+                    manage_transaction=False,
+                )
+                self._db.execute(f"RELEASE {savepoint}")
+            except Exception:  # noqa: BLE001
+                self._db.execute(f"ROLLBACK TO {savepoint}")
+                self._db.execute(f"RELEASE {savepoint}")
+                logger.error(
+                    "Post-boxscore dedup sweep failed for team_id=%d season=%s "
+                    "(scouted team_id=%d); rolled back that team's partial work "
+                    "and continuing with the remaining teams",
+                    dedup_team_id,
+                    db_season_id,
+                    team_id,
+                    exc_info=True,
+                )
 
         self._db.commit()
         logger.info(
@@ -534,10 +593,14 @@ class ScoutingLoader:
 
         Uses ``plan_player_dedup`` -- the shared planner, NOT raw
         ``find_duplicate_players`` pairs. That distinction is the whole point:
-        the planner separates EXECUTABLE collapses from REFUSED forks, and only
-        collapse members may be exempt. Exempting a fork member would preserve a
-        row the planner will never merge, i.e. a permanently unretirable roster
-        entry -- swapping this defect for a worse one.
+        the planner separates EXECUTABLE collapses from REFUSALS, and only
+        collapse members may be exempt. Exempting a refused member would preserve
+        a row the planner will never merge, i.e. a permanently unretirable roster
+        entry -- swapping this defect for a worse one. There are now TWO refusal
+        classes (``refused_forks`` and ``refused_conflicts``) and this reasoning
+        covers both without change, because it turns on "will never merge", not on
+        WHY: reading ``plan.collapses`` alone is what keeps that true, so do not
+        "improve" this by enumerating the refusal classes and subtracting them.
 
         This plan is computed for the EXEMPTION only; it is deliberately NOT
         executed here. The existing ``dedup_team_players`` sweep later in
@@ -615,11 +678,11 @@ class ScoutingLoader:
             # is ever removed, the exempt count must move into the WARN itself.
             logger.info(
                 "Roster retire: exempting %d id(s) pending a dedup collapse for "
-                "team_id=%d season=%s: %s. (%d refused fork(s) deliberately NOT "
-                "exempt -- a fork is never merged, so its members must stay "
-                "retirable.)",
+                "team_id=%d season=%s: %s. (%d refused fork(s) and %d "
+                "content-refused component(s) deliberately NOT exempt -- neither "
+                "is ever merged, so their members must stay retirable.)",
                 len(exempt), team_id, season_id, sorted(exempt),
-                len(plan.refused_forks),
+                len(plan.refused_forks), len(plan.refused_conflicts),
             )
         return exempt
 

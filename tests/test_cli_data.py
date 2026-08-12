@@ -903,3 +903,97 @@ def test_resolve_db_path_precedence(tmp_path: Path) -> None:
     env_without = {k: v for k, v in os.environ.items() if k != "DATABASE_PATH"}
     with patch.dict(os.environ, env_without, clear=True):
         assert resolve_db_path() == _DEFAULT_DB_PATH
+
+
+# ---------------------------------------------------------------------------
+# bb data dedup-players -- the content-aware refusal class
+# ---------------------------------------------------------------------------
+
+
+def _seed_content_conflict(db_file: Path) -> None:
+    """Two same-named ids whose colliding batting rows DISAGREE."""
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-jordan-a", "Jordan", "Rivera")
+    _seed_player(conn, "p-jordan-b", "Jordan", "Rivera")
+    _seed_roster(conn, 1, "p-jordan-a", "2026")
+    _seed_roster(conn, 1, "p-jordan-b", "2026")
+    _seed_game(conn, "g-conflict", "2026", 1)
+    _seed_game_batting(conn, "g-conflict", "p-jordan-a", 1, ab=4, h=2)
+    _seed_game_batting(conn, "g-conflict", "p-jordan-b", 1, ab=3, h=0)
+    conn.commit()
+    conn.close()
+
+
+def test_dedup_players_dry_run_surfaces_the_content_refusal(tmp_path: Path) -> None:
+    """The operator must be able to tell this class from a fork.
+
+    A fork is ambiguous about WHICH human the ids name; this component is
+    ambiguous about which of two disagreeing stat rows is right. The preview
+    names the table, game and differing columns so the operator can adjudicate
+    what the planner refuses to.
+    """
+    db_file = _make_db_file(tmp_path)
+    _seed_content_conflict(db_file)
+
+    result = runner.invoke(app, ["data", "dedup-players", "--db", str(db_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "conflicting content" in result.output
+    assert "player_game_batting" in result.output
+    assert "g-conflict" in result.output
+    assert "ab" in result.output and "h" in result.output
+    # Nothing is presented as mergeable.
+    assert "0 collapsible component(s)" in result.output
+
+
+def test_dedup_players_execute_leaves_a_content_refused_component_intact(
+    tmp_path: Path,
+) -> None:
+    """--execute must not merge it either: the refusal is at PLAN time."""
+    db_file = _make_db_file(tmp_path)
+    _seed_content_conflict(db_file)
+
+    result = runner.invoke(
+        app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _surviving_player_ids(db_file) == {"p-jordan-a", "p-jordan-b"}
+    assert "1 refused for conflicting content" in result.output
+    conn = sqlite3.connect(str(db_file))
+    try:
+        rows = conn.execute(
+            "SELECT player_id, ab, h FROM player_game_batting ORDER BY player_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("p-jordan-a", 4, 2), ("p-jordan-b", 3, 0)]
+
+
+def test_dedup_players_reports_placeholder_stubs_as_no_duplicates(
+    tmp_path: Path,
+) -> None:
+    """Two ``Unknown Unknown`` stubs are not a duplicate pair at all.
+
+    The guard is in DETECTION, so they never reach the plan -- the command must
+    say "no duplicates", not "refused". A regression here reads as a clean run
+    while the planner quietly collapses two different players.
+    """
+    db_file = _make_db_file(tmp_path)
+    conn = sqlite3.connect(str(db_file))
+    _seed_team(conn, 1, "LSB Varsity")
+    _seed_player(conn, "p-unknown-a", "Unknown", "Unknown")
+    _seed_player(conn, "p-unknown-b", "Unknown", "Unknown")
+    _seed_roster(conn, 1, "p-unknown-a", "2026")
+    _seed_roster(conn, 1, "p-unknown-b", "2026")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(
+        app, ["data", "dedup-players", "--execute", "--db", str(db_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No duplicate players found." in result.output
+    assert _surviving_player_ids(db_file) == {"p-unknown-a", "p-unknown-b"}

@@ -1595,3 +1595,305 @@ def test_public_scoreless_doubleheader_stays_two_rows(
     assert {"dh-1", "dh-2"} <= game_ids, (
         "a scoreless public doubleheader must remain two rows, not collapse"
     )
+
+
+# ---------------------------------------------------------------------------
+# Opponent-roster dedup gap: the dedup sweep must reach every team whose
+# team_rosters rows THIS load wrote, not only the scouted one.
+# ---------------------------------------------------------------------------
+
+# Two ids for one human on the OPPONENT side of the boxscore. GameChanger mints
+# a distinct player UUID per perspective AND per game, so the same person
+# arrives under a fresh uuid while the prior one is still rostered.
+_OPP_PLAYER_A = "opp-player-uuid-001"
+_OPP_PLAYER_B = "opp-player-uuid-002"
+
+
+def _boxscore_with_opponent_pair(own_key: str, opp_key: str = _OPP_UUID) -> dict:
+    """Boxscore whose OPPONENT block carries two same-named ids for one human.
+
+    The two batting lines are byte-identical apart from ``player_id`` -- the
+    real shape of a re-issued id, and the conflict class the merge resolves by
+    deleting one row without losing content.
+    """
+    line = {"AB": 3, "R": 1, "H": 1, "RBI": 1, "BB": 0, "SO": 1}
+    return {
+        own_key: {
+            "players": [
+                {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"}
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [{"player_id": _PLAYER_1, "stats": dict(line)}],
+                }
+            ],
+        },
+        opp_key: {
+            "players": [
+                {"id": _OPP_PLAYER_A, "first_name": "Jordan", "last_name": "Rivera"},
+                {"id": _OPP_PLAYER_B, "first_name": "Jordan", "last_name": "Rivera"},
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {"player_id": _OPP_PLAYER_A, "stats": dict(line)},
+                        {"player_id": _OPP_PLAYER_B, "stats": dict(line)},
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def test_opponent_roster_duplicates_converge_on_the_same_load(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """The load that WRITES an opponent's roster rows must also dedup them.
+
+    ``_upsert_roster_jersey`` creates a ``team_rosters`` row for every player in
+    every boxscore -- both sides -- while the Hook-1 dedup sweep was scoped to
+    the scouted team alone. So generating team A collapsed only A and left A's
+    opponents split. League play is cyclic, so no generation order converges.
+    """
+    team_pk = _insert_team(db)
+
+    loader.load_team(
+        _crawl_result(
+            team_pk,
+            games=_make_games("opp-dedup-game-1"),
+            boxscores={
+                "opp-dedup-game-1": _boxscore_with_opponent_pair(_PUBLIC_ID)
+            },
+        )
+    )
+
+    opp_team_id = db.execute(
+        "SELECT id FROM teams WHERE id != ?", (team_pk,)
+    ).fetchone()[0]
+
+    roster_ids = {
+        r[0]
+        for r in db.execute(
+            "SELECT player_id FROM team_rosters WHERE team_id = ?", (opp_team_id,)
+        )
+    }
+    assert len(roster_ids) == 1, (
+        f"the opponent's two ids for one human must collapse to one roster row; "
+        f"got {sorted(roster_ids)}"
+    )
+
+    # The collapse is a real merge, not a roster-only tidy: the merged-away
+    # players row is gone and the surviving batting line belongs to the survivor.
+    surviving = roster_ids.pop()
+    assert db.execute(
+        "SELECT COUNT(*) FROM players WHERE player_id IN (?, ?)",
+        (_OPP_PLAYER_A, _OPP_PLAYER_B),
+    ).fetchone()[0] == 1
+    batting = db.execute(
+        "SELECT player_id FROM player_game_batting WHERE team_id = ?",
+        (opp_team_id,),
+    ).fetchall()
+    assert [r[0] for r in batting] == [surviving]
+
+
+_OPP_UUID_2 = "22223333-4444-5555-6666-bbbbccccdddd"
+
+
+def _boxscore_with_opponent_players(
+    own_key: str, opp_key: str, opp_player_ids: list[str]
+) -> dict:
+    """Boxscore whose opponent block carries the given ids (one batting line each)."""
+    line = {"AB": 3, "R": 1, "H": 1, "RBI": 1, "BB": 0, "SO": 1}
+    return {
+        own_key: {
+            "players": [
+                {"id": _PLAYER_1, "first_name": "John", "last_name": "Doe", "number": "14"}
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [{"player_id": _PLAYER_1, "stats": dict(line)}],
+                }
+            ],
+        },
+        opp_key: {
+            "players": [
+                {"id": pid, "first_name": "Alex", "last_name": f"Sur{index}"}
+                for index, pid in enumerate(opp_player_ids)
+            ],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {"player_id": pid, "stats": dict(line)}
+                        for pid in opp_player_ids
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def _two_opponent_crawl(team_pk: int) -> SimpleNamespace:
+    """One game against each of two distinct opponents, both blocks populated."""
+    games = [
+        {
+            "id": "multi-opp-1",
+            "game_status": "completed",
+            "home_away": "home",
+            "start_ts": "2025-04-10T18:00:00Z",
+            "score": {"team": 5, "opponent_team": 3},
+        },
+        {
+            "id": "multi-opp-2",
+            "game_status": "completed",
+            "home_away": "away",
+            "start_ts": "2025-04-12T18:00:00Z",
+            "score": {"team": 2, "opponent_team": 4},
+        },
+    ]
+    return _crawl_result(
+        team_pk,
+        games=games,
+        boxscores={
+            "multi-opp-1": _boxscore_with_opponent_players(
+                _PUBLIC_ID, _OPP_UUID, ["oppA-1", "oppA-2"]
+            ),
+            "multi-opp-2": _boxscore_with_opponent_players(
+                _PUBLIC_ID, _OPP_UUID_2, ["oppB-1", "oppB-2"]
+            ),
+        },
+    )
+
+
+def test_dedup_sweep_runs_for_the_scouted_team_first(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """The scouted team leads the loop, and that ordering is load-bearing.
+
+    ``_reconcile_departed_roster`` already exempted this team's pending-collapse
+    ids from retirement, and that exemption rests on ``P1 subset P2`` -- the plan
+    it computed being a subset of the plan the sweep recomputes. An opponent merge
+    re-points ``team_rosters`` rows GLOBALLY and deletes ``players`` rows, so
+    running one first can add a node to the scouted team's component, turn a
+    collapse into a refused fork, and strand exactly the ids the exemption
+    protected.
+    """
+    team_pk = _insert_team(db)
+    calls: list[int] = []
+
+    real = None
+    import src.db.player_dedup as dedup_mod
+
+    real = dedup_mod.dedup_team_players
+
+    def _record(conn, team_id, season_id, **kwargs):
+        calls.append(team_id)
+        return real(conn, team_id, season_id, **kwargs)
+
+    with patch.object(dedup_mod, "dedup_team_players", _record):
+        loader.load_team(_two_opponent_crawl(team_pk))
+
+    assert calls, "the dedup sweep did not run at all"
+    assert calls[0] == team_pk, (
+        f"the scouted team must be deduped first; order was {calls}"
+    )
+    # Every team whose roster rows this load wrote is swept, exactly once each.
+    opponent_ids = {
+        r[0] for r in db.execute("SELECT id FROM teams WHERE id != ?", (team_pk,))
+    }
+    assert set(calls) == {team_pk} | opponent_ids
+    assert len(calls) == len(set(calls))
+    # Deterministic tail: opponents follow in sorted id order.
+    assert calls[1:] == sorted(opponent_ids)
+
+
+def test_one_opponents_dedup_failure_does_not_skip_the_rest(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """Per-team isolation: a raising opponent must not strand the remaining teams.
+
+    Without a per-team try/except one opponent's transient failure (a WAL lock
+    outlasting ``busy_timeout`` is the realistic one -- this connection is shared
+    with the admin UI and the morning-run cron) would skip every team after it,
+    silently leaving them split until some later run happened to order them
+    differently.
+    """
+    team_pk = _insert_team(db)
+    attempted: list[int] = []
+
+    import src.db.player_dedup as dedup_mod
+
+    def _fail_on_first_opponent(conn, team_id, season_id, **kwargs):
+        attempted.append(team_id)
+        if team_id != team_pk and len(attempted) == 2:
+            raise sqlite3.OperationalError("database is locked")
+        return 0
+
+    with patch.object(dedup_mod, "dedup_team_players", _fail_on_first_opponent):
+        result = loader.load_team(_two_opponent_crawl(team_pk))
+
+    opponent_ids = {
+        r[0] for r in db.execute("SELECT id FROM teams WHERE id != ?", (team_pk,))
+    }
+    assert len(opponent_ids) == 2, "fixture must produce two distinct opponents"
+    assert set(attempted) == {team_pk} | opponent_ids, (
+        f"a failure stopped the loop early; attempted {attempted}"
+    )
+    # The load itself still succeeds -- a failed cleanup never loses a good load.
+    assert result.errors == 0
+
+
+def test_a_failing_teams_partial_write_does_not_ride_the_commit(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """Per-team SAVEPOINT isolation on the shared connection.
+
+    The loop catches per-team failures and continues, then commits ONCE at the
+    end -- the shared-connection partial-commit footgun in
+    `.claude/rules/architecture-subsystems.md`. A failed team's uncommitted
+    writes must not be swept up by that commit.
+
+    A bare ``rollback()`` would be the wrong remedy here and this test would not
+    distinguish it -- hence the second assertion: the team deduped BEFORE the
+    failure must keep its work, which a rollback would discard along with both
+    reconcile grains' pending retires.
+    """
+    team_pk = _insert_team(db)
+    seen: list[int] = []
+
+    import src.db.player_dedup as dedup_mod
+
+    def _write_then_maybe_fail(conn, team_id, season_id, **kwargs):
+        seen.append(team_id)
+        # Every team writes a marker row; the SECOND one then blows up.
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            (f"marker-{team_id}", "Marker", "Row"),
+        )
+        if len(seen) == 2:
+            raise sqlite3.OperationalError("database is locked")
+        return 0
+
+    with patch.object(dedup_mod, "dedup_team_players", _write_then_maybe_fail):
+        result = loader.load_team(_two_opponent_crawl(team_pk))
+
+    assert len(seen) == 3, f"the loop must attempt every team; attempted {seen}"
+    surviving = {
+        r[0]
+        for r in db.execute(
+            "SELECT player_id FROM players WHERE player_id LIKE 'marker-%'"
+        )
+    }
+    # The failed team's write is gone...
+    assert f"marker-{seen[1]}" not in surviving, (
+        "the failing team's partial write rode the commit"
+    )
+    # ...and the teams either side of it kept theirs.
+    assert f"marker-{seen[0]}" in surviving, (
+        "a rollback discarded work that a savepoint would have kept"
+    )
+    assert f"marker-{seen[2]}" in surviving
+    assert result.errors == 0

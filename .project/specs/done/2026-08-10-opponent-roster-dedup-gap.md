@@ -2,8 +2,10 @@
 
 # Roster dedup runs only for the generated team; opponent rosters re-split
 
-**Date**: 2026-08-10 · **Status**: `READY` — spec written, codex-reviewed, committed; needs a
-fresh execution session. **Source**: stubbed from the 13-team serial regeneration repair
+**Date**: 2026-08-10 · **Status**: `COMPLETE (this commit)` — built, reviewed three ways
+(`/code-review`, codex, `/security-review`), full suite green at 4,513. The post-commit live
+acceptance pass is NOT part of this commit and is owed a separate operator ruling; see the closing
+progress entry. **Source**: stubbed from the 13-team serial regeneration repair
 (2026-08-10; pre-repair state in backup `app-2026-08-10T145722.db`, per-team before/after table
 in that repair's report). The stub's mechanism was INFERENCE FROM LOGS; it is verified against
 the code below, and every figure is re-measured on `data/app.db` on 2026-08-11 — none inherited.
@@ -242,6 +244,141 @@ teams 49, 61, 43, 293 have zero Unknown-bearing duplicate groups. The gate is:
   two different pitchers that destroys a real line — which added both guards and moved the
   acceptance criterion off bare `rows == names`. Operator rulings: dedup every touched team; live
   pass after the commit; backlog as a stub.
+- **2026-08-12, EXECUTE** — audited the spec against the repo BEFORE writing code. **Every
+  load-bearing citation held**: `dedup_team_players`'s single `src/` call site (`scouting_loader.py
+  :366-371`; `cli/data.py:236` is a comment, not a call), `_load_team_stats` at `:1014`/`:1019`,
+  `_upsert_roster_jersey` at `:1362`/`:1452` with both INSERTs at `:2187`/`:2197`, `_season_id` at
+  `:552-554`, `scouting_loader.py:976`, and the three destructive writers. The
+  `_pending_collapse_player_ids` ordering argument is CONFIRMED with its mechanism named:
+  `merge_player_pair` re-points `team_rosters` GLOBALLY (`:816`, unscoped `WHERE player_id = ?`)
+  and deletes `players` rows (`:663`), so an opponent merge run first can ADD a node to the
+  scouted team's component and turn a P1 collapse into a refused fork — stranding exactly the ids
+  the exemption protected. Scouted-team-first preserves today's behavior byte for byte.
+  **One spec miscount, not load-bearing**: the `refused_forks` read sites are 8 in `cli/data.py`
+  (162, 169, 174, 197, 199, 230, 237, 279), not 6 — 12 reads total, not 10. All mirrored.
+  Three RED tests written first, each failing for the right reason; the byte-identical-conflict
+  control passed from the start, so the refusal is content-aware and not conflict-aware.
+  **Suite: 4,507 passed, RC=0** (baseline 4,495 + 12 new). Ruff clean.
+  Positive controls, per the mutation protocol (`__pycache__` cleared each way, no-mutation
+  control first, per-test outcomes): opponents-first → only the ordering test fails; try/except
+  hoisted out of the loop → only the isolation test fails; placeholder guard removed from the
+  reconcile diagnostic → it named `stub-1` where detection returns nothing.
+  **Two additions beyond the spec's Files list, both forced by the change and invisible in its
+  diff.** (1) `src/db/reconcile_at_load.py` — `_dedup_candidate_victims` documents that it mirrors
+  detection's name guards precisely so it never names a pair `bb data dedup-players` cannot act
+  on; the new placeholder exclusion had to be mirrored there or that claim became false (proven by
+  the mutation above). Its jersey half is a deliberate over-name and was left alone. Its import
+  comment's cycle claim ("`player_dedup` imports nothing from `src`") also stopped being true and
+  was restated as measured. (2) `src/db/players.py` — `PLACEHOLDER_NAME` added as the canonical
+  name for the stub value, imported by detection; the SQL literals in that module and in
+  `game_loader` still spell it out, which the constant's comment states rather than hides.
+  Docs swept by file → read → ruled: `docs/admin/operations.md:579` said the command "only merges
+  within the *scouted* team (an opponent block has no closer at all)" — now false, corrected; the
+  `bb data dedup-players` section gained both refusal classes and the placeholder note;
+  `.claude/rules/data-model.md` gained the four durable invariants. The 579 hit is the one a token
+  grep for "dedup" would have found but a grep for "opponent roster" would not.
+- **2026-08-12, `/code-review`** — 5 findings, each VERIFIED against the repo before triage; 4
+  folded in, 1 routed out as another chunk's code. Two were caught only because the reviewer read
+  the interaction rather than the diff.
+  1. **(medium) The content refusal re-opens regime B on a differing opponent line.** REAL,
+     reproduced: with a scorekeeper edit between generations the sequence is
+     `[9, 18, 9, 9]` — character for character the pre-chunk pin. **Unimproved subset, not a
+     regression**, and the mechanism is worth stating: the refusal stops the DEDUP path deleting a
+     differing row, then the player-line retire deletes it on run 3 anyway, after which the
+     component is conflict-free and merges. So the guard DEFERS that deletion to the grain the
+     operator already ruled on (IDEA-185), rather than preventing it. Now pinned by
+     `test_the_content_refusal_leaves_regime_B_open_on_a_DIFFERING_opponent_line`; docs qualified.
+  2. **(low) The operator-doc closer claim was unqualified** on placeholder-named ids. Correct —
+     detection excludes the stub, so that shape has no closer at all. Both open shapes now
+     enumerated at `operations.md`. (The reviewer's "disproportionately opponent-side" frequency
+     claim is NOT restated: unmeasured.)
+  3. **(low) `plays_loader._persist_final_score` uses `OR`, so a half-derived pair nulls a stored
+     counterpart.** VERIFIED as real: the parser returns two independent `.get`s, and the
+     docstring three lines up promises an all-or-nothing write. **NOT this chunk's code** — it
+     landed with the plays final-score recovery — and all 2,464 rows are NULL today, so it is
+     LATENT and would first fire during the planned full regenerate. Routed to the operator, not
+     bundled.
+  4. **(low) My `PLACEHOLDER_NAME` comment's producer list was incomplete** — it named the two
+     `GameLoader` sites and missed `PlaysLoader` (×2) and `ScoutingSprayChartLoader`. My own prose,
+     my own defect; corrected, and the correction now records the distinction that matters (only
+     the `GameLoader` path writes `team_rosters`, so only it is visible to detection).
+  5. **(low) `team_id` was excluded from the content comparison but is NOT in
+     `UNIQUE(game_id, player_id, perspective_team_id)`** — the one column an exclusion-based
+     definition gets wrong. FIXED by including it, after measuring that this is FREE: component-
+     member collisions differing ONLY in `team_id` number **zero** across both seasons and all
+     16,230 detected pairs, so no refusal is added and the fleet-wide 488 figure is unchanged. (The
+     raw corpus has 1,575 such batting pairs — every one two unrelated players sharing a game and
+     perspective, never co-rostered. Counting those would have been the wrong number.) The spec's
+     "19 and 14 non-key columns" therefore reads 20 and 15.
+  Suite after the fixes: **4,508 passed, RC=0**; ruff clean.
+- **2026-08-12, codex review** (`scripts/codex-review.sh uncommitted`, `RESULT_FILE` read whole) —
+  2 findings, **ZERO overlap with `/code-review`'s 5**, which is now the strongest single-diff
+  evidence yet for the standing "keep both" verdict. Both verified and fixed; both were forward
+  hazards with zero live instances, and in both cases the MEASUREMENT changed the fix.
+  1. **(high) The placeholder guard covered `first_name` only, while the loaders write the stub
+     into `last_name` too.** Correct, and it is my scoping error: detection requires equal
+     surnames AND a first-name prefix, so when both surnames are the stub the equality is
+     satisfied by two ABSENCES and a prefix pair rests on nothing — the vacuous-match shape one
+     dimension over from the blank-name case codex's own predecessor found. **But the obvious fix
+     was wrong.** Measured before writing it: all 6 placeholder-surname pairs in the 2026 corpus
+     are `('Riley Vance','Unknown')` twice over — GC writing the WHOLE name into `first_name` — so a
+     blanket surname guard would have destroyed 6 real merges to close a hazard with 0 live
+     instances. Shipped the narrow rule instead: a stub surname voids only a STRICT-PREFIX pair,
+     never an equal-first-name one. Post-fix detection is byte-identical to pre-fix (35 / 16,195),
+     with all 6 still detected.
+  2. **(medium) `_delete_or_update_rosters` deletes the duplicate's roster row without preserving
+     `jersey_number` / `position`.** Reproduced (`canonical=(NULL,NULL)` + `('23','CF')` →
+     survivor still `(NULL,NULL)`). Coach-visible: the report roster block renders both. Codex's
+     real contribution was the EXPOSURE argument — this chunk multiplies traffic through that
+     helper from one team to hundreds. Fixed by BACKFILLING before the delete, never overwriting,
+     mirroring `_upsert_roster_jersey`'s own NULL-only semantics. Note this also VINDICATES the
+     spec's decision to keep `team_rosters` out of the content-refusal definition: the right
+     remedy was to stop losing the data, not to refuse the merge over it. Zero live instances (no
+     detected pair has a jersey on the duplicate and none on the canonical); `position` is NULL on
+     all 13,934 rows.
+  Suite: **4,512 passed, RC=0**; ruff clean.
+  **Routed OUT, on the operator's ruling**: the `plays_loader._persist_final_score` `OR`-guard
+  defect became `.project/specs/2026-08-12-plays-final-score-half-pair-clobber.md` (`STUB`). It
+  must land BEFORE the full regenerate — that regenerate is what would first write the damage.
+- **2026-08-12, the live acceptance pass is DEFERRED, not skipped — operator ruling owed.**
+  Verification 4 below predates the "Regeneration hazard — RULED 2026-08-12" entry in
+  `.project/specs/README.md`, which de-scopes REPAIR halves in favor of one full regenerate. Read
+  as written, this chunk's five-team pass IS a repair pass, so the ruling reaches it and it must be
+  adjudicated rather than run by default. **Not run in this commit.** The argument each way, for
+  the operator: the pass is no longer needed to FIX those five teams (the regenerate supersedes
+  it), but it is the only evidence that the fix behaves correctly against real data BEFORE the
+  regenerate depends on it — and the regenerate is a much larger destructive action to take on
+  test-only confidence. The cheap middle exists and is what I would recommend: run team 47 ALONE
+  (it is the only one carrying an `Unknown Unknown` pair, so a guard regression shows on run 1),
+  after `bb db backup`, and treat the other four as superseded. Every figure Verification 4
+  predicts was measured pre-guard and needs re-measuring against the shipped code either way,
+  since the guards changed what merges.
+- **2026-08-12, `/security-review`** — **the diff-scope residual FIRED, and the review as handed
+  over was VACUOUS.** Its `DIFF CONTENT` was the COMMITTED range: the file list contained none of
+  the six `src/` files this chunk touches, so **500 lines of uncommitted `src/` changes were
+  invisible to it**, and the only three hits for this chunk's identifiers sat inside committed
+  spec MARKDOWN — an excluded category, so they could yield nothing. A clean verdict over that
+  input would have certified nothing. Re-run against `git diff HEAD -- src/` (762 lines).
+  **Result on the correct diff: no finding at confidence ≥ 7**, and the clean result carries a
+  POSITIVE CONTROL — detection was shown FIRING (`Jo`/`John`, and the `Riley Vance` stub-surname
+  pair) before its exclusions were trusted. Cleared with evidence, not by inspection: every
+  interpolated value in the new dynamic SQL traced to ground (module-literal table names;
+  column names from `PRAGMA table_info`, with **no runtime DDL anywhere in `src/`**, so columns can
+  only originate in `migrations/`; count-derived placeholders) while the attacker-influenced
+  values — player UUIDs from the third-party payload — are BOUND; parameter alignment executed
+  live in both scoped and unscoped forms; the new `team_rosters` COALESCE executed against decoy
+  rows on another team AND another season, crossing neither; deletion authorization intact (every
+  path into `generate_report` is admin-gated); no new PII class in the logs.
+- **2026-08-12, the one fix the security pass produced** (raised as a non-security observation):
+  the per-team `except` did not roll back before continuing, and the loop shares ONE transaction
+  committed at the end — the shared-connection partial-commit footgun. **The prescribed remedy was
+  wrong for this seam**: that rule addresses a loop with a per-item COMMIT, and a bare
+  `rollback()` here would discard the whole transaction — both reconcile grains' pending retires
+  AND every opponent already merged this run — to contain one team's failure. Fixed with a per-team
+  SAVEPOINT instead, the same shape `execute_collapse` uses per component. The test rejects BOTH
+  wrong remedies and each mutation fails on its own assertion: no savepoint → "the failing team's
+  partial write rode the commit"; bare rollback → "a rollback discarded work that a savepoint would
+  have kept". Final suite: **4,513 passed, RC=0**; ruff clean.
 - **2026-08-11, codex-spec-review** (`scripts/codex-spec-review.sh`) — 5 findings, each verified
   against the repo before folding in, all folded: acceptance pass was NOT EXECUTABLE (`bb report
   generate` takes a `public_id`, not a `team_id` — lookup step added); `/security-review` was

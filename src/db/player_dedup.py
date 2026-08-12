@@ -20,6 +20,8 @@ import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from src.db.players import PLACEHOLDER_NAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,11 +147,52 @@ class RefusedFork:
 
 
 @dataclass
+class StatConflict:
+    """One conflicting stat-row pair whose CONTENT disagrees.
+
+    ``player_ids`` are the two component members holding the colliding rows;
+    ``differing_columns`` are the non-key columns whose values disagree. Both are
+    carried so an operator can go look at the rows rather than take the refusal
+    on faith.
+    """
+
+    table: str
+    game_id: str
+    perspective_team_id: int
+    player_ids: tuple[str, str]
+    differing_columns: list[str]
+
+
+@dataclass
+class RefusedConflict:
+    """A component refused because merging it would DELETE differing content.
+
+    Structurally the sibling of :class:`RefusedFork`: the component is left
+    entirely unmerged and surfaced via a single WARN per component. The
+    DIFFERENCE is what makes it a separate class -- a fork is ambiguous about
+    WHICH human the ids name, while this component is unambiguous about the human
+    and ambiguous about which of two disagreeing stat rows is right. This chunk
+    refuses; it does not adjudicate.
+    """
+
+    team_id: int
+    team_name: str
+    members: list[PlayerRef] = field(default_factory=list)
+    conflicts: list[StatConflict] = field(default_factory=list)
+
+
+@dataclass
 class DedupPlan:
-    """The full dedup plan for a scope: collapses to execute + forks to refuse."""
+    """The full plan for a scope: collapses to execute + components to refuse.
+
+    Two refusal classes, and a consumer that reads only one of them will report a
+    refused component as "nothing to do". Anything asking "did the planner decline
+    anything?" must read BOTH ``refused_forks`` and ``refused_conflicts``.
+    """
 
     collapses: list[CollapsePlan] = field(default_factory=list)
     refused_forks: list[RefusedFork] = field(default_factory=list)
+    refused_conflicts: list[RefusedConflict] = field(default_factory=list)
 
 
 def find_duplicate_players(
@@ -165,6 +208,31 @@ def find_duplicate_players(
     - last_name matches (case-insensitive)
     - One first_name is a prefix of the other (case-insensitive)
     - The shorter first_name has LENGTH > 0 (guards against empty strings)
+    - NEITHER first_name is the ``PLACEHOLDER_NAME`` stub, and the pair is not a
+      STRICT-PREFIX match under a stub last_name (see below)
+
+    **Placeholder guard.** ``"Unknown"`` is what the loaders write when a
+    boxscore omits a name, so it marks ABSENT identity rather than a name -- and
+    two ids carrying it fold to IDENTICAL names, which makes them a
+    single-terminal-name component that COLLAPSES. Fork refusal structurally
+    cannot catch that: it fires on DISTINCT terminal names, so a placeholder
+    collapse shows up as ZERO refused forks. Measured on the live corpus: two
+    ``Unknown Unknown`` ids in the same game under the same perspective were two
+    different pitchers (4 outs / 3 ER versus 6 outs / 0 ER), and the merge's
+    conflict handler would have deleted one of the two real appearances. Scoped
+    to that exact stub value, deliberately -- not a broader "looks like a
+    placeholder" heuristic.
+
+    The two name components are guarded ASYMMETRICALLY, because they carry
+    different weight. The FIRST name is where prefix matching draws its identity
+    signal, so a stub there voids the pair outright. A stub LAST name instead
+    voids only the surname EQUALITY -- two absences agreeing is not agreement --
+    and that matters only when the first names are a STRICT PREFIX rather than
+    equal, since a prefix pair has nothing else holding it up. An
+    equal-first-name pair under a stub surname stays detectable, and must: GC
+    sometimes writes the whole name into ``first_name`` with no surname, and all
+    6 such pairs in the live 2026 corpus are exactly that shape (``Riley Vance`` /
+    ``Riley Vance``), while ZERO are strict-prefix. Found by codex review.
 
     Canonical selection (TN-3):
     - Longer first_name wins
@@ -201,6 +269,34 @@ def find_duplicate_players(
     params.append(season_id)
 
     where_clause = "AND " + " AND ".join(filters)
+
+    # Placeholder guard (see the docstring). Compared on the FOLDED first names
+    # so it is case- and diacritic-insensitive exactly like every other name
+    # comparison here, and bound as parameters -- never interpolated. This clause
+    # is appended AFTER ``where_clause`` in the query text, so its parameters are
+    # appended after ``params`` to keep the positional binding aligned.
+    placeholder_clause = (
+        "AND _dedup_fold(p1.first_name) != ? "
+        "AND _dedup_fold(p2.first_name) != ? "
+        # The SURNAME half, and deliberately NARROWER than the first-name half.
+        # Detection needs BOTH of its signals to be real evidence: equal
+        # surnames AND a first-name prefix. When the surname is the stub the
+        # equality is satisfied by two ABSENCES, so a STRICT-PREFIX pair
+        # (``Alex`` / ``Alexander``) rests on the first name alone with nothing
+        # corroborating it -- vacuous, exactly like the blank-first-name match.
+        # But an EQUAL-first-name pair is not vacuous, and blanket-excluding the
+        # stub surname would destroy it: GameChanger sometimes puts the WHOLE
+        # name in ``first_name`` and leaves the surname absent, so the corpus
+        # carries ``('Riley Vance', 'Unknown')`` twice over -- unambiguous
+        # duplicates whose identity lives entirely in the first name. Measured:
+        # ALL 6 placeholder-surname pairs in 2026 are that equal-name shape and
+        # ZERO are strict-prefix, so this clause costs nothing today and closes
+        # the hazard going forward. Only p1's surname is tested because the
+        # query already requires the two folded surnames to be equal.
+        "AND NOT (_dedup_fold(p1.last_name) = ? "
+        "         AND _dedup_fold(p1.first_name) != _dedup_fold(p2.first_name))"
+    )
+    placeholder_params = [_fold_name(PLACEHOLDER_NAME)] * 3
 
     # Detection folds names through _fold_name (E-253-08): Unicode case- AND
     # diacritic-insensitive, matching the planner's _terminal_names fold so the
@@ -253,10 +349,11 @@ def find_duplicate_players(
                           LENGTH(_dedup_fold(p2.first_name))) = _dedup_fold(p2.first_name))
           )
           {where_clause}
+          {placeholder_clause}
         ORDER BY t.name, p1.last_name COLLATE NOCASE
     """
 
-    rows = db.execute(query, params).fetchall()
+    rows = db.execute(query, [*params, *placeholder_params]).fetchall()
 
     if not rows:
         return []
@@ -792,6 +889,23 @@ def _delete_or_update_rosters(
 
     If canonical already has a roster entry for the same (team_id, season_id),
     delete the duplicate's row. Otherwise, update player_id to canonical.
+
+    **The delete BACKFILLS first, and that is not cosmetic.** ``jersey_number``
+    and ``position`` are coach-visible -- the report's roster block renders both
+    -- and they are per-ROW, so a value that exists only on the row being deleted
+    is simply gone. The two ids are the same human by construction here, so the
+    duplicate's jersey is that human's jersey. Backfill-only, never overwrite:
+    the same semantics ``GameLoader._upsert_roster_jersey`` already applies when
+    it fills a NULL jersey from a boxscore, so a merge cannot silently change a
+    number that was already recorded.
+
+    Found by codex review, which noted the exposure rather than the arithmetic:
+    widening the load-path sweep to every touched opponent routes far more merges
+    through this helper, across hundreds of teams instead of one. Measured at
+    zero live instances today (no detected pair has a jersey on the duplicate and
+    none on the canonical), so this is a forward guard, not a repair -- and the
+    canonical is chosen by name length and stat count, neither of which has any
+    bearing on which row carries the jersey.
     """
     conflicts = db.execute(
         """
@@ -806,6 +920,24 @@ def _delete_or_update_rosters(
     ).fetchall()
 
     for team_id, season_id in conflicts:
+        # Backfill BEFORE the delete -- afterwards the source row is gone.
+        db.execute(
+            """
+            UPDATE team_rosters
+               SET jersey_number = COALESCE(jersey_number, (
+                       SELECT jersey_number FROM team_rosters
+                        WHERE team_id = ? AND player_id = ? AND season_id = ?)),
+                   position = COALESCE(position, (
+                       SELECT position FROM team_rosters
+                        WHERE team_id = ? AND player_id = ? AND season_id = ?))
+             WHERE team_id = ? AND player_id = ? AND season_id = ?
+            """,
+            (
+                team_id, duplicate_id, season_id,
+                team_id, duplicate_id, season_id,
+                team_id, canonical_id, season_id,
+            ),
+        )
         db.execute(
             "DELETE FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
             (team_id, duplicate_id, season_id),
@@ -880,6 +1012,135 @@ def _terminal_names(
         if is_terminal:
             distinct.setdefault(folded, first)
     return distinct
+
+
+# The columns a conflict-delete would DESTROY, defined by exclusion: every
+# column of the two per-game stat tables EXCEPT the row's own identity. Derived
+# from ``PRAGMA table_info`` at call time rather than hand-listed, because a
+# hand-written column list on a merge path is a defect this repo has already
+# shipped once -- ``merge_duplicate_game`` silently dropped two new columns on
+# every twin merge. A future stat column joins the comparison automatically.
+#
+# IDENTITY here is exactly ``UNIQUE(game_id, player_id, perspective_team_id)``
+# plus the surrogate PK -- and NOT ``team_id``, which is the trap in an
+# exclusion-based definition. ``team_id`` reads like a key column and is not one:
+# it is absent from that UNIQUE, so two colliding rows can disagree on it, and
+# the delete would silently discard the participant-team attribution. Excluding
+# it would leave the one column this design's "a future column joins
+# automatically" argument does not actually cover (found by ``/code-review``).
+#
+# Including it is FREE, not a trade: measured over every detected pair in the
+# live corpus (16,195 in 2026, 35 in 2025), the number of component-member
+# collisions differing ONLY in ``team_id`` is **zero** in both seasons, so this
+# adds no refusal today and the fleet-wide 488 differing-content figure the
+# acceptance pass is gated on is unchanged. (The raw corpus has 1,575 such
+# batting pairs, but every one is two unrelated players who merely share a game
+# and perspective -- never co-rostered component members.) The spec's "19 and 14
+# non-key columns" therefore reads 20 and 15 here, deliberately.
+_STAT_IDENTITY_COLUMNS = frozenset(
+    {"id", "game_id", "player_id", "perspective_team_id"}
+)
+
+# The tables whose rows a merge conflict-DELETES and whose content is a real
+# observation. Deliberately NOT ``team_rosters`` (a jersey/position difference is
+# not a lost observation, and counting it refuses ~2.6x more components) and NOT
+# ``reconciliation_discrepancies`` (a derived diagnostic that a re-run
+# regenerates).
+_CONFLICT_CONTENT_TABLES = ("player_game_batting", "player_game_pitching")
+
+
+def _comparable_columns(db: sqlite3.Connection, table: str) -> list[str]:
+    """Non-identity columns of a stat table, in schema order."""
+    return [
+        row[1]
+        for row in db.execute(f"PRAGMA table_info({table})")
+        if row[1] not in _STAT_IDENTITY_COLUMNS
+    ]
+
+
+def _component_content_conflicts(
+    db: sqlite3.Connection,
+    member_ids: list[str],
+) -> list[StatConflict]:
+    """Find stat-row collisions within a component whose CONTENT disagrees.
+
+    A merge re-points every non-conflicting row and resolves each
+    ``UNIQUE(game_id, player_id, perspective_team_id)`` collision by DELETING one
+    of the two rows (:func:`_delete_or_update_game_stats` ranks
+    ``stat_completeness``, ties, and drops the loser). When the two rows are
+    byte-identical that costs nothing -- it is the ordinary cross-perspective
+    duplicate. When they DIFFER, a real observation is destroyed, and this
+    function is what lets the planner refuse instead.
+
+    ``stat_completeness`` is INSIDE the comparison, and that is deliberate even
+    though the conflict handler resolves a completeness-only difference by keeping
+    the better row rather than losing anything. Two reasons: it is the definition
+    the fleet-wide measurement was taken under (488 differing-content deletions
+    over the 2026 plan, 33 on named players), so changing it here would divorce
+    the code from the number the acceptance pass is checked against; and it errs
+    toward REFUSING a merge rather than performing one, which is the safe
+    direction for a pass whose failure mode is a silent delete. Narrowing it is a
+    decision to make against a fresh measurement, not a tidy-up.
+
+    Compared over ALL UNORDERED PAIRS of component members, not just
+    canonical-vs-each-duplicate. ``execute_collapse`` merges duplicates into the
+    canonical SEQUENTIALLY, so by the time duplicate *i* is merged the canonical
+    may be holding rows that arrived from duplicates 1..*i*-1 -- a collision that
+    a canonical-vs-duplicate check done on the PRE-merge state cannot see. Rows
+    are only ever moved or deleted, never rewritten, so every collision reachable
+    in any merge order is a collision between two ORIGINAL member rows, and the
+    all-pairs comparison covers them exactly. Components are small, so the O(n^2)
+    pass is cheap.
+
+    Returns:
+        Every differing collision found (empty when the component is safe to
+        merge). Read-only -- writes nothing.
+    """
+    conflicts: list[StatConflict] = []
+    if len(member_ids) < 2:
+        return conflicts
+
+    for table in _CONFLICT_CONTENT_TABLES:
+        columns = _comparable_columns(db, table)
+        if not columns:
+            continue
+        select_list = ", ".join(f"a.{c}" for c in columns)
+        select_list += ", " + ", ".join(f"b.{c}" for c in columns)
+        rows = db.execute(
+            f"SELECT a.game_id, a.perspective_team_id, a.player_id, b.player_id, "  # noqa: S608
+            f"       {select_list} "
+            f"FROM {table} a "
+            f"JOIN {table} b "
+            f"    ON  b.game_id = a.game_id "
+            f"   AND b.perspective_team_id = a.perspective_team_id "
+            f"   AND b.player_id > a.player_id "
+            f"WHERE a.player_id IN ({','.join('?' for _ in member_ids)}) "
+            f"  AND b.player_id IN ({','.join('?' for _ in member_ids)})",
+            [*member_ids, *member_ids],
+        ).fetchall()
+
+        width = len(columns)
+        for row in rows:
+            game_id, perspective_team_id, pid_a, pid_b = row[:4]
+            values_a = row[4 : 4 + width]
+            values_b = row[4 + width :]
+            differing = [
+                col
+                for col, va, vb in zip(columns, values_a, values_b, strict=True)
+                if va != vb
+            ]
+            if differing:
+                conflicts.append(
+                    StatConflict(
+                        table=table,
+                        game_id=game_id,
+                        perspective_team_id=perspective_team_id,
+                        player_ids=(pid_a, pid_b),
+                        differing_columns=differing,
+                    )
+                )
+
+    return conflicts
 
 
 def plan_player_dedup(
@@ -967,6 +1228,26 @@ def plan_player_dedup(
                         team_name=team_names[tid],
                         members=[PlayerRef(pid, f, ln) for pid, f, ln in members],
                         terminal_names=sorted(distinct_terminals.values()),
+                    )
+                )
+                continue
+
+            # Content-aware refusal, at PLAN time and never mid-merge. Skipping
+            # one conflicting DELETE inside the merge would leave the blanket
+            # ``UPDATE {table} SET player_id = ?`` to hit the UNIQUE and abort the
+            # whole component anyway, so the decision has to be made before any
+            # write. Refusing the WHOLE component (not the offending pair) is for
+            # the same reason.
+            content_conflicts = _component_content_conflicts(
+                db, [pid for pid, _f, _l in members]
+            )
+            if content_conflicts:
+                plan.refused_conflicts.append(
+                    RefusedConflict(
+                        team_id=tid,
+                        team_name=team_names[tid],
+                        members=[PlayerRef(pid, f, ln) for pid, f, ln in members],
+                        conflicts=content_conflicts,
                     )
                 )
                 continue
@@ -1103,7 +1384,11 @@ def dedup_team_players(
     """
     plan = plan_player_dedup(db, team_id=team_id, season_id=season_id)
 
-    if not plan.collapses and not plan.refused_forks:
+    if (
+        not plan.collapses
+        and not plan.refused_forks
+        and not plan.refused_conflicts
+    ):
         logger.info(
             "dedup_team_players: 0 duplicates found for team_id=%d season=%s",
             team_id,
@@ -1121,6 +1406,25 @@ def dedup_team_players(
             fork.team_id,
             ", ".join(fork.terminal_names),
             len(fork.members),
+        )
+
+    # Same shape for the content refusal: one WARN per component, naming where
+    # the disagreement is so an operator can adjudicate what this pass will not.
+    for refusal in plan.refused_conflicts:
+        first = refusal.conflicts[0]
+        logger.warning(
+            "dedup_team_players: refused component on team %r (team_id=%d): "
+            "merging it would DELETE a conflicting stat row whose content "
+            "differs (%d conflict(s); first: %s game=%s perspective_team_id=%s "
+            "columns=%s); leaving all %d member(s) unmerged",
+            refusal.team_name,
+            refusal.team_id,
+            len(refusal.conflicts),
+            first.table,
+            first.game_id,
+            first.perspective_team_id,
+            ", ".join(first.differing_columns),
+            len(refusal.members),
         )
 
     merged = 0
@@ -1149,10 +1453,11 @@ def dedup_team_players(
             )
 
     logger.info(
-        "dedup_team_players: %d duplicate(s) merged, %d fork(s) refused for "
-        "team_id=%d season=%s",
+        "dedup_team_players: %d duplicate(s) merged, %d fork(s) refused, "
+        "%d conflicting component(s) refused for team_id=%d season=%s",
         merged,
         len(plan.refused_forks),
+        len(plan.refused_conflicts),
         team_id,
         season_id,
     )
