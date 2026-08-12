@@ -19,22 +19,24 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-**Decide the deferred acceptance pass for the dedup chunk** (below), then continue the ruled
-sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"): same-listing detection
-→ generate-concurrency cap → runs-as-scoreboard instrument → full regenerate. The generation
-freeze from that ruling is **lifted for correctness** — the lossy-merge hazard it protected against
-is fixed — but the plays half-pair clobber below wants to land before the regenerate.
+Continue the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"):
+same-listing detection → generate-concurrency cap → runs-as-scoreboard instrument → full
+regenerate. **The generation freeze is LIFTED** — the lossy-merge hazard it protected against is
+fixed and proven on live data. The plays half-pair clobber below must land BEFORE the regenerate.
 
-- ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12.** Spec moved to
-  `done/2026-08-10-opponent-roster-dedup-gap.md` (`git log --follow` for history). The sweep now
-  runs for every team a load writes roster rows for, scouted team first; two guards ship with it.
-  Suite 4,495 → 4,513.
-- **⚠️ Its live acceptance pass was NOT run and is owed a ruling.** Verification 4 in that spec
-  predates the regeneration ruling, which de-scopes repair halves — so the five-team pass is now
-  partly superseded. The trade, and the recommendation, are in the spec's closing progress entry:
-  run team 47 ALONE after `bb db backup` (it is the only one carrying an `Unknown Unknown` pair,
-  so a guard regression shows on run 1) and let the regenerate cover the rest. Every figure that
-  verification predicts was measured PRE-guard and needs re-measuring regardless.
+- ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12** at `9f1f930`, acceptance pass PASSED.
+  Spec moved to `done/2026-08-10-opponent-roster-dedup-gap.md` (`git log --follow` for history).
+  The sweep now runs for every team a load writes roster rows for, scouted team first, each under
+  its own savepoint; two guards ship with it. Suite 4,495 → 4,513.
+
+  **Read the acceptance numbers before reading any roster count.** Three report generations took
+  repo-wide roster excess **7,048 → 4,347** across **271 → 224** teams; run 1 alone swept 20 teams
+  and merged 1,227 ids. Content destroyed: **zero** — 331 stat rows were deleted but the set of
+  distinct content signatures is byte-identical before and after, verified against
+  `data/backups/app-2026-08-12T022220.db`. The content-aware refusal **fired in production** on its
+  first outing (team 301, a merge that would have deleted a differing `rbi`). ⚠️ A converged roster
+  is still NOT "one row per human": jersey-corroborated scorekeeper spelling variants remain
+  visible to a coach and are deliberately out of scope.
 
 ## NEXT
 

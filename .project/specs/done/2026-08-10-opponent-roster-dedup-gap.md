@@ -2,10 +2,11 @@
 
 # Roster dedup runs only for the generated team; opponent rosters re-split
 
-**Date**: 2026-08-10 · **Status**: `COMPLETE (this commit)` — built, reviewed three ways
-(`/code-review`, codex, `/security-review`), full suite green at 4,513. The post-commit live
-acceptance pass is NOT part of this commit and is owed a separate operator ruling; see the closing
-progress entry. **Source**: stubbed from the 13-team serial regeneration repair
+**Date**: 2026-08-10 · **Status**: `COMPLETE` — built at `9f1f930`, reviewed three ways
+(`/code-review`, codex, `/security-review`), full suite green at 4,513, and the live acceptance
+pass RUN AND PASSED (see the 2026-08-12 acceptance entry: excess == the Unknown-name pair only,
+zero content destroyed, verified against a backup). **Source**: stubbed from the 13-team serial
+regeneration repair
 (2026-08-10; pre-repair state in backup `app-2026-08-10T145722.db`, per-team before/after table
 in that repair's report). The stub's mechanism was INFERENCE FROM LOGS; it is verified against
 the code below, and every figure is re-measured on `data/app.db` on 2026-08-11 — none inherited.
@@ -340,7 +341,42 @@ teams 49, 61, 43, 293 have zero Unknown-bearing duplicate groups. The gate is:
   **Routed OUT, on the operator's ruling**: the `plays_loader._persist_final_score` `OR`-guard
   defect became `.project/specs/2026-08-12-plays-final-score-half-pair-clobber.md` (`STUB`). It
   must land BEFORE the full regenerate — that regenerate is what would first write the damage.
-- **2026-08-12, the live acceptance pass is DEFERRED, not skipped — operator ruling owed.**
+- **2026-08-12, LIVE ACCEPTANCE PASS — RUN, AND IT PASSES.** Operator ruled: run it. Code at
+  `9f1f930`; backup `data/backups/app-2026-08-12T022220.db` taken FIRST. Three generations, not
+  five: after team 47, teams 49 and 61 had ALREADY converged as its opponents, so only 43 and 293
+  still needed a run of their own. That is the fix's whole thesis demonstrating itself.
+
+  **The gate: all 13 repaired teams at 280 rows / 279 names / excess 1, and that 1 IS the
+  Unknown-name pair** (`stub_excess == 1`, `collapses == 0` on every one of the 13 — nothing left
+  the planner can merge). Zero re-bloat: 49 and 61 stayed converged through runs 2 and 3.
+
+  **Reach, measured**: run 1 alone swept 20 teams and performed 1,227 merges. Repo-wide excess
+  **7,048 → 4,347** across **271 → 224** affected teams — 38% of the backlog cleared by three
+  reports, which is the opportunistic healing this spec predicted rather than a repair pass.
+
+  **No content was destroyed, verified against the backup rather than trusted from the refusal
+  counter.** 274 batting and 57 pitching rows were deleted, yet the set of DISTINCT content
+  signatures (every column but `id`/`player_id`) is IDENTICAL before and after — 48,009 and 11,723
+  — with ZERO signatures vanishing. Every deleted row was a byte-identical duplicate. `games`
+  unchanged at 2,303; no sweep failure, no savepoint rollback, zero ERROR lines.
+
+  **The predictions land within one row each, and every shortfall has the SAME cause — the guard**:
+  batting 91 (predicted 92), pitching 19 (predicted 20), roster 103 (predicted 104). All three
+  predictions were measured PRE-guard; team 47's retained `Unknown` pair is exactly one unmerged
+  pair, hence exactly one surviving row in each table. Not a divergence — the difference IS the
+  guard.
+
+  **The content-aware refusal FIRED IN PRODUCTION, on its first real outing**: a 7-member component
+  on team 301 refused because merging would have DELETED a `player_game_batting` row differing in
+  `rbi`. Pre-fix that RBI was gone. This is the guard's reason for existing, observed on live data.
+
+  **Coach-visible, the thing this was all for**: team 47's report went from **123 roster entries
+  over 27 names to 25 entries over 24 names**, the single exact duplicate being the deliberately
+  retained stub pair. ⚠️ Still visible to a coach, and correctly OUT OF SCOPE: a few
+  jersey-corroborated scorekeeper spelling variants (one-letter surname and non-prefix first-name
+  differences) render as separate entries. This spec named that class and excluded it — a passing
+  gate is NOT "one row per human", exactly as written.
+- **2026-08-12, the deferral this supersedes — recorded because the reasoning still binds.**
   Verification 4 below predates the "Regeneration hazard — RULED 2026-08-12" entry in
   `.project/specs/README.md`, which de-scopes REPAIR halves in favor of one full regenerate. Read
   as written, this chunk's five-team pass IS a repair pass, so the ruling reaches it and it must be
