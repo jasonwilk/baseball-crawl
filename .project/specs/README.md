@@ -127,6 +127,14 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
+- **⚠ OPEN HAZARD, operator ruling pending (2026-08-12): report generation before the
+  opponent-roster-dedup chunk lands can DESTROY stat rows.** The current fleet dedup plan
+  contains 61 Unknown-name collapses (one is two different pitchers in the same game) and 33
+  named differing-content merges; every one executes the moment a generation touches its team.
+  Trainer recommendation: generate NO reports (including the plays backfill, which regenerates)
+  until `2026-08-10-opponent-roster-dedup-gap.md` executes — it ships the guards. Recorded here
+  because the session that found it closed before the ruling landed.
+
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
 - **The reconciliation gate CANNOT work on a growing corpus, and this is a design fault, not drift**
   (found 2026-08-10). `evaluate_gate` ratchets on ABSOLUTE deltas, so data growth alone fails it:
