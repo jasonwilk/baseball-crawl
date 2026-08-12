@@ -89,6 +89,25 @@ NEXT. Its backfill is the natural follow-on and is stubbed there.
   (gating raises `BaselineError`/exit 4 against a baseline lacking the key), and treat the 9
   two-scorebook units and the non-monotone units as legitimate disagreement. ⚠ Read the gate residual
   below before gating anything.
+- **Opponent-roster dedup gap** — **READY 2026-08-11**, spec
+  `2026-08-10-opponent-roster-dedup-gap.md`. Dedup runs only for the generated team while the
+  crawl writes opponent roster rows undeduped, so league play (cyclic) never converges. Mechanism
+  is now verified in code, not inferred from logs. **Read this before reading any roster count**:
+  the damage is **51% of the roster stock** — 7,083 of 13,934 rows across 274 of 502 teams — not
+  the 104 rows the stub named, and it renders as a report roster block printing one player up to
+  nine times (123 entries for 27 names on one measured report). The stub's "splits a player's
+  stats" claim is REFUTED: `get_season_*` filter by perspective, so split ids contribute nothing
+  to the stat tables.
+
+  ⚠ **The chunk ships two guards, and the reason is the finding.** An adversarial review of the
+  investigation caught that two `Unknown Unknown` placeholder ids fold to IDENTICAL names, so fork
+  refusal — which fires on DISTINCT names — cannot see them, and the planner happily collapses
+  two different pitchers in one game/perspective, destroying a real appearance via the
+  conflict-delete. **"Zero refused forks" is what that hazard looks like, not evidence of safety**,
+  and reading it as safety was the spec author's error. Fleet-wide: 488 conflict-deletions whose
+  deleted row differs from the survivor (33 on NAMED players), 61 Unknown collapses merging away
+  443 ids. Consequently the acceptance criterion is **"excess == Unknown-name duplicates only"**,
+  NOT bare `rows == names` — team 47 legitimately keeps one excess row post-guard.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
@@ -178,6 +197,8 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   `.project/codex-spec-review.md:48` still lists FOUR statuses and calls a fifth a finding, but `READY` was
   added 2026-08-09. **Why you should care**: it flags every `READY` spec — it flagged the one committed
   today, and codex noted the conflict itself. One-line docs fix; it does not belong inside a security chunk.
+  **Fired a SECOND time on 2026-08-11** (the opponent-roster-dedup spec), costing a finding slot in a
+  5-finding review. Two occurrences in two days; it is now the cheapest open residual on this list.
 - **`.project/ideas/` is inert in `SKIP_PATHS`** (found 2026-08-10). No such directory exists — ideas live at
   `.project/specs/IDEAS.md`, history at `.project/archive/ideas/`. **Operator ruled 2026-08-10: LEAVE.**
   Unlike `epics/`, which can never return, this tree plausibly could, and the re-measured TN-2 noise
