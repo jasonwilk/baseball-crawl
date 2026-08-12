@@ -19,8 +19,9 @@ real history. Someday-work does not live here at all; it is one line in `IDEAS.m
 
 ## NOW
 
-Clear. Plays final-score recovery landed 2026-08-11 (spec in `done/`); pick the next chunk from
-NEXT. Its backfill is the natural follow-on and is stubbed there.
+Execute `2026-08-10-opponent-roster-dedup-gap.md` (READY at `4d34c16`) in a fresh session. It
+leads the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"): no
+report generation until it lands, and one full regenerate later replaces the repair passes.
 
 ## NEXT
 
@@ -54,13 +55,10 @@ NEXT. Its backfill is the natural follow-on and is stubbed there.
   the same blind spot that produced passes 1 and 2, reproduced by an inventory that had already
   been corrected twice for exactly it. Re-running the sweep is what caught them; trusting the
   inbound inventory would not have.
-- **PII scanner hardening** — **READY 2026-08-10**, spec
-  `2026-08-10-pii-scanner-hardening.md`. Closes both `get_staged_files()` enumeration bypasses (`ACM`→`ACMR`
-  and `-z`), each behind a RED test proven failing first, and takes the two inert `epics/` entries out with
-  every restatement of them. Execution needs a FRESH session and owes `/code-review` **and**
-  `/security-review`, operator-typed as two separate messages. It also carries a pre-registered review
-  experiment (all arms against one frozen diff, criterion stated before the data) that feeds Audit 4 — run it
-  as written; fixing between passes is what muddied the last measurement.
+- ~~**PII scanner hardening**~~ — **LANDED 2026-08-10** at `26bf605`. Spec moved to
+  `done/2026-08-10-pii-scanner-hardening.md` (`git log --follow` for history). Both
+  `get_staged_files()` enumeration bypasses closed (`ACM`→`ACMR` and `-z`); its frozen-diff
+  review experiment ran and fed Audit 4's ruling.
 - ~~**Plays final-score recovery (seed §2)**~~ — **LANDED 2026-08-11.** Spec moved to
   `done/2026-08-10-plays-final-score-recovery.md`. Parser returns `ParsedGamePlays` (plays + derived
   final), loader persists it to `game_perspectives` (migration `013`), full suite green at **4,495**.
@@ -127,13 +125,20 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
-- **⚠ OPEN HAZARD, operator ruling pending (2026-08-12): report generation before the
-  opponent-roster-dedup chunk lands can DESTROY stat rows.** The current fleet dedup plan
-  contains 61 Unknown-name collapses (one is two different pitchers in the same game) and 33
-  named differing-content merges; every one executes the moment a generation touches its team.
-  Trainer recommendation: generate NO reports (including the plays backfill, which regenerates)
-  until `2026-08-10-opponent-roster-dedup-gap.md` executes — it ships the guards. Recorded here
-  because the session that found it closed before the ruling landed.
+- **Regeneration hazard — RULED 2026-08-12.** Operator ruling (verbatim intent): existing
+  scouting data is NOT precious — "I don't care if we lose everything that is there and I have
+  to regenerate absolutely everything. Whatever gets us to 'correct ingestion' the fastest and
+  most accurately." Two consequences (the first is the ruling, the second is trainer synthesis
+  from it — re-adjudicate at spec time, not silently):
+  1. Still generate no reports until `2026-08-10-opponent-roster-dedup-gap.md` lands — not to
+     protect rows, but because pre-fix generation writes the same wrong merges (61 Unknown-name
+     collapses, 33 lossy named merges loaded) into any fresh output. Correct ingestion first.
+  2. REPAIR halves of open stubs are de-scoped; DETECTION/fix halves stay. One full regenerate
+     after the correctness chunks land replaces the fleet roster repair pass, the seven
+     twin-group merges, and the standalone plays backfill — the backfill's success criterion
+     (91 → abandoned-charting residual ≥1, not 0) transfers to that regenerate's acceptance.
+     Sequencing that follows: dedup fix → same-listing detection → generate-concurrency cap →
+     runs-as-scoreboard instrument (so the regenerate is verifiable) → full regenerate.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
 - **The reconciliation gate CANNOT work on a growing corpus, and this is a design fault, not drift**

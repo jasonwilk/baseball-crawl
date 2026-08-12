@@ -45,7 +45,7 @@ Check each item and report findings:
 - Does the spec name its **out of scope** -- what a reader would reasonably expect here and will not find, and where it lives instead?
 - Does it carry a **progress log**?
 - Does it name a **person**? No spec may. Real team/org identifiers belong to the placeholder taxonomy in `.claude/rules/api-docs.md`; a person's name is never acceptable.
-- Does its **Status** read one of the four values in CLAUDE.md step 9 -- `COMPLETE (this commit)`, `PARKED + why`, `STUB`, `OPEN + what decision is owed` -- or explicitly claim a chunk in flight? A fifth status is a finding.
+- Does its **Status** read one of the five values in CLAUDE.md step 9 -- `COMPLETE (this commit)`, `READY`, `PARKED + why`, `STUB`, `OPEN + what decision is owed` -- or explicitly claim a chunk in flight? A sixth status is a finding.
 
 ## Re-Review Protocol
 
