@@ -102,25 +102,9 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   (gating raises `BaselineError`/exit 4 against a baseline lacking the key), and treat the 9
   two-scorebook units and the non-monotone units as legitimate disagreement. ⚠ Read the gate residual
   below before gating anything.
-- **Opponent-roster dedup gap** — **READY 2026-08-11**, spec
-  `2026-08-10-opponent-roster-dedup-gap.md`. Dedup runs only for the generated team while the
-  crawl writes opponent roster rows undeduped, so league play (cyclic) never converges. Mechanism
-  is now verified in code, not inferred from logs. **Read this before reading any roster count**:
-  the damage is **51% of the roster stock** — 7,083 of 13,934 rows across 274 of 502 teams — not
-  the 104 rows the stub named, and it renders as a report roster block printing one player up to
-  nine times (123 entries for 27 names on one measured report). The stub's "splits a player's
-  stats" claim is REFUTED: `get_season_*` filter by perspective, so split ids contribute nothing
-  to the stat tables.
-
-  ⚠ **The chunk ships two guards, and the reason is the finding.** An adversarial review of the
-  investigation caught that two `Unknown Unknown` placeholder ids fold to IDENTICAL names, so fork
-  refusal — which fires on DISTINCT names — cannot see them, and the planner happily collapses
-  two different pitchers in one game/perspective, destroying a real appearance via the
-  conflict-delete. **"Zero refused forks" is what that hazard looks like, not evidence of safety**,
-  and reading it as safety was the spec author's error. Fleet-wide: 488 conflict-deletions whose
-  deleted row differs from the survivor (33 on NAMED players), 61 Unknown collapses merging away
-  443 ids. Consequently the acceptance criterion is **"excess == Unknown-name duplicates only"**,
-  NOT bare `rows == names` — team 47 legitimately keeps one excess row post-guard.
+- ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12**; see NOW for the acceptance numbers.
+  Spec moved to `done/2026-08-10-opponent-roster-dedup-gap.md`. The "zero refused forks is what
+  the hazard looks like" lesson this entry carried is preserved in the spec and the jot list.
 - **Plays final-score half-pair clobber** — **STUB 2026-08-12**, spec
   `2026-08-12-plays-final-score-half-pair-clobber.md`. `_persist_final_score`'s UPSERT guard is
   `OR` while both columns are assigned from `excluded`, so a half-derived pair `(5, NULL)` landing
