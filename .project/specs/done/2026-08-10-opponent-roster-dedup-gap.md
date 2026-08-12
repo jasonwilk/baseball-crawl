@@ -322,7 +322,12 @@ teams 49, 61, 43, 293 have zero Unknown-bearing duplicate groups. The gate is:
      satisfied by two ABSENCES and a prefix pair rests on nothing — the vacuous-match shape one
      dimension over from the blank-name case codex's own predecessor found. **But the obvious fix
      was wrong.** Measured before writing it: all 6 placeholder-surname pairs in the 2026 corpus
-     are `('Riley Vance','Unknown')` twice over — GC writing the WHOLE name into `first_name` — so a
+     share one shape — GC writing the WHOLE name into `first_name` with the surname stubbed, both
+     rows of each pair name-equal (e.g. `('Riley Vance','Unknown')` twice over) — splitting 3/3
+     across two teams. [Corrected 2026-08-12: this sentence originally read "all 6 pairs ARE
+     `('Riley Vance','Unknown')`", welding one example's name to the whole count; the measurement
+     in the session transcript shows two distinct names, 3 pairs each. The SHAPE claim the fix
+     rests on held for all 6.] So a
      blanket surname guard would have destroyed 6 real merges to close a hazard with 0 live
      instances. Shipped the narrow rule instead: a stub surname voids only a STRICT-PREFIX pair,
      never an equal-first-name one. Post-fix detection is byte-identical to pre-fix (35 / 16,195),
