@@ -49,6 +49,13 @@ Check each item and report findings:
 
 ## Re-Review Protocol
 
+**Review rounds are a tripwire, not a treadmill** (operator ruling 2026-08-15, from a measured
+7-round loop where rounds 5 and 6 were largely reviewing defects earlier fold-ins introduced).
+After round 2, continue only if the latest round found a P1/P2 that is NOT an artifact of a prior
+fold-in. A spec still generating fresh blockers at round 3+ is usually too big to hold its own
+consistency — stop reviewing, bring the operator the split-or-shrink trade, and let the next
+round review a smaller thing.
+
 Round 2+ reviews (after the findings are incorporated) follow a scoped process:
 
 1. Read the change summary identifying what was modified.
