@@ -2449,13 +2449,20 @@ class GameLoader:
         ``games`` row silently strands those stages -- a skip, not an error.
         Two entries need attention and both cost one line:
 
-        * the deleted row's OWN id, added unconditionally. At spec time the
-          deleted row usually belongs to a different perspective's earlier run,
-          so its id is normally absent from this run's crawl set and the entry
-          is harmless insurance -- but "usually" is not a guarantee worth
-          relying on at a seam whose failure mode is a silent skip.
+        * the deleted row's OWN id, added unconditionally. It is insurance on
+          BOTH callers, but for OPPOSITE reasons -- state the caller, because
+          the reasons do not transfer. On the PROMOTION path the deleted row is
+          the CANONICAL one, which usually belongs to a different perspective's
+          earlier run, so its id is normally absent from this run's crawl set.
+          On the REDIRECT path it is the reverse: the deleted row is this very
+          game's SOURCE id, so it is definitionally IN the crawl set -- and the
+          entry is redundant there only because the redirect site already keyed
+          it before the merge ran. Add it unconditionally either way; do NOT
+          reason about whether this run could have produced the id, at a seam
+          whose failure mode is a silent skip.
         * any entry already POINTING AT the deleted row, which must follow it.
-          Those are invisible from the deleted id alone.
+          Those are invisible from the deleted id alone, and BOTH deleting
+          callers owe this half -- it is the defect codex found in ``0464f52``.
         """
         for source, destination in list(self.redirect_map.items()):
             if destination == deleted_game_id:
