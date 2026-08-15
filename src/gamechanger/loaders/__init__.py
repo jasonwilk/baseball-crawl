@@ -33,14 +33,24 @@ class LoadResult:
             ⚠️ IT IS NO LONGER CROSS-PERSPECTIVE-ONLY (2026-08-15). Two distinct
             entry shapes now exist and they point in OPPOSITE directions:
 
-            * REDIRECT (E-244, unchanged): the incoming game is filed under an
-              existing canonical row, so the key is the INCOMING source event
-              id and no row is deleted.
+            * REDIRECT (E-244): the incoming game is filed under an existing
+              canonical row, so the key is the INCOMING source event id.
+              USUALLY nothing is deleted -- but when a ``games`` row already
+              existed under that source id, the in-pipeline twin merge DELETES
+              it, so this route deletes a row too.
             * PROMOTION (opponent-identity divergence): the incoming row wins
               and the canonical stub-headed row is MERGED AWAY AND DELETED, so
               the key is the DELETED row's event id -- an id that had a row a
-              moment ago. Entries already pointing AT that deleted row are
-              rewritten to follow it.
+              moment ago.
+
+            ⚠️ BOTH DELETING PATHS OWE THE CHAIN REPAIR, and reading it as
+            promotion-only is how the defect codex found in ``0464f52`` gets
+            reintroduced. Whenever a route deletes a ``games`` row, entries
+            already POINTING AT that row must be rewritten to follow it
+            (``_record_deleted_row_redirect``) -- a chain ``Y -> S`` then
+            ``S -> C`` otherwise strands ``Y`` on a deleted row, and the
+            plays/spray stages FK-SKIP that game SILENTLY. Any FUTURE route
+            that deletes a ``games`` row inherits this obligation.
 
             So a key here means "this id does not resolve to a games row",
             NOT "this id belonged to another perspective". Code reasoning about

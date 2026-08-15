@@ -875,4 +875,26 @@ Neither review can be launched from inside a session — the execution session m
   ready. ⚠ Known and NOT silently converted: the other 24 tests in this chunk still use the
   hand-built fixture — the weakness this session had already flagged when asked "did we write good
   tests?", now covered by an explicit ruling rather than by a session's judgement.
+- **2026-08-15 — `/code-review` of the follow-up commit `223bc52`: 1 MEDIUM, 3 LOW. All four real,
+  all fixed.** The production change was traced clean (all three exits of `_merge_twin_or_rollback`,
+  the `list(...)` snapshot, transitive chains, and `_reconcile_absent_games`'s `redirect_targets`).
+  * **MEDIUM — the `redirect_map` contract doc was FALSE at the exact seam that commit changed.**
+    `LoadResult.redirect_map` still said the REDIRECT route "deletes nothing" and attributed the
+    chain repair to PROMOTION alone, when the redirect route's twin-merge sub-path now does both.
+    That is the doc a future author reads before adding a third collapse route — believing it
+    reproduces the P1 verbatim. **FOURTH inbound-sweep miss in this chunk, and the sharpest:
+    I wrote that contract paragraph myself two commits earlier and did not re-read it when I
+    changed the behaviour it describes.** All three sites now state that BOTH deleting paths owe
+    the repair, and that any future `games`-deleting route inherits the obligation.
+  * **LOW ×2 — the same stale claim** in `.claude/rules/architecture-subsystems.md` (the file that
+    auto-loads for reports work, so the likeliest place to pick up the wrong premise) and in
+    `.claude/rules/perspective-provenance.md`'s incomplete route enumeration. Both corrected.
+  * **LOW — one of the two new tests was VACUOUS with respect to the defect its class documented.**
+    `redirect_map[_TWIN_E] == _CANON_X` is established by the plain keying at the redirect site
+    BEFORE any merge, not by the repair, so it stayed green with the fix removed. ⚠ **My own
+    mutation run had already shown this and I did not read it** — the per-test output named exactly
+    one catching test and I reported it without asking what the sibling contributed. That is what
+    the "report per-test outcomes, never an aggregate" rule exists to make visible, and it was
+    visible. Re-scoped into its own context class named for the E-244 keying it actually guards,
+    with a docstring recording that it does NOT discriminate the repair and that mutation proves it.
 

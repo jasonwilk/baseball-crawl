@@ -2942,7 +2942,41 @@ class TestTwinMergeWhenAnEarlierRedirectPointsAtTheSourceRow:
     ) -> None:
         assert merged.redirect_map["earlier-source-Y"] == _CANON_X
 
-    def test_the_deleted_row_own_id_also_resolves_to_the_survivor(
+
+class TestRedirectWhenTheSourceEventIsCollapsedOntoACanonicalRow:
+    """The E-244 keying: the collapsed source id itself resolves to the survivor.
+
+    ⚠️ THIS DOES NOT PIN THE CHAIN REPAIR, and it was briefly filed as though it
+    did. The assertion is satisfied by the plain
+    ``redirect_map[source_event_id] = canonical_id`` written at the redirect site
+    BEFORE any merge runs -- verified by mutation: removing
+    ``_record_deleted_row_redirect`` leaves this GREEN. Its sibling
+    ``TestTwinMergeWhenAnEarlierRedirectPointsAtTheSourceRow`` is the one that
+    discriminates the repair. Kept, and moved out of that class, because the
+    E-244 keying is a real contract worth a guard -- just not this defect's.
+    """
+
+    @pytest.fixture()
+    def merged(self, real_schema_db: sqlite3.Connection) -> GameLoader:
+        db = real_schema_db
+        loader = _make_loader(db)
+        _seed_canonical_row(
+            db, loader, game_id=_CANON_X,
+            home_score=5, away_score=2, perspectives=("opp",),
+        )
+        db.commit()
+
+        loader.load_payload(
+            _make_boxscore(),
+            _make_summary(event_id=_TWIN_E, game_stream_id=_TWIN_E,
+                          owning_score=5, opponent_score=2),
+            opponent_name=_OPP_NAME,
+        )
+
+        return loader
+
+    def test_the_source_id_resolves_to_the_canonical_row(
         self, merged: GameLoader,
     ) -> None:
         assert merged.redirect_map[_TWIN_E] == _CANON_X
+
