@@ -24,6 +24,18 @@ same-listing detection → generate-concurrency cap → runs-as-scoreboard instr
 regenerate. **The generation freeze is LIFTED** — the lossy-merge hazard it protected against is
 fixed and proven on live data. The plays half-pair clobber below must land BEFORE the regenerate.
 
+- **Same-listing detection — SPECCED 2026-08-13 at `0ad3dbe`, Status `READY`**, spec
+  `2026-08-13-same-listing-dedup-detection.md`. Needs a FRESH execution session; nothing is built.
+  Two premises from the source stub were REFUTED during spec work, so do not carry the stub's
+  framing forward: the 1.0s tolerance branch **is** reached (the twin survives because
+  `merge_duplicate_game` refuses a pair sharing a perspective — a same-perspective twin cannot
+  self-heal in place, which is why the regenerate is the repair), and there is **no deterministic
+  `event_id` key** (probed live, positive-controlled; the stored-data form of that test is vacuous).
+  ⚠ It is **not** a read-only chunk: the identity-bearing promotion routes through
+  `merge_duplicate_game`, which hard-deletes a `games` row, so `/security-review` is owed at step 5
+  alongside `/code-review`. Seven codex-spec-review rounds; the last one changed the RULE (mixed
+  opponent identity became a trigger condition, not just a tie-break).
+
 - ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12** at `9f1f930`, acceptance pass PASSED.
   Spec moved to `done/2026-08-10-opponent-roster-dedup-gap.md` (`git log --follow` for history).
   The sweep now runs for every team a load writes roster rows for, scouted team first, each under
@@ -114,6 +126,13 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   is what fires it**, so it must land BEFORE that regenerate, not after. Not the one-character fix
   it looks like — `OR`→`AND` also discards a half we legitimately derived, so measure whether real
   payloads produce half-pairs before choosing.
+- **Same-listing dedup detection** — **READY 2026-08-13**, spec
+  `2026-08-13-same-listing-dedup-detection.md`. See NOW for the two refuted premises and the
+  `/security-review` obligation. The source stub `2026-08-10-same-listing-dedup-window.md` stays
+  `STUB` for the residual observations it also carries (the orphan one-sided game, the one-sided
+  perspective predicate mismatch); its DETECTION half is superseded by the spec above and its REPAIR
+  half died with the 2026-08-12 regeneration ruling. Re-pointing the stub's text is listed in the
+  new spec's Files and happens at execution.
 - **Morning-of-game scheduled reports** — the forward product feature (`docs/ROADMAP.md`).
 
 ## PARKED DECISIONS
