@@ -640,15 +640,12 @@ Neither review can be launched from inside a session — the execution session m
   docstring and the message were corrected in this commit; a hit there is expected and benign.
   Found by `/code-review`; it is the THIRD inbound-sweep miss in this chunk, and the first in a
   file the spec's Files list never named.
-- **The PRE-EXISTING twin-merge path carries the same stranding hazard, unguarded.** At the
-  redirect site the E-261 twin merge deletes the row under `source_event_id`; `redirect_map[source]
-  = canonical` is already set, but any EARLIER entry pointing AT `source` (a chain `Y -> S`, then
-  `S -> C`, reachable in a 3-way twin group within one run) is left pointing at a deleted row —
-  the same silent-skip failure `_record_deleted_row_redirect` exists to prevent, and that site does
-  not call it. The fix is one line (`self._record_deleted_row_redirect(source_event_id,
-  canonical_id)` after a successful merge). NOT applied here: it changes a pre-existing destructive
-  path after every review had already run, and this chunk's discipline is not to ship unreviewed
-  edits to a delete seam. Offered to the operator; cheap to land in its own chunk.
+- ~~**The PRE-EXISTING twin-merge path carries the same stranding hazard, unguarded.**~~
+  **CLOSED in the follow-up commit.** Recorded here as a residual and offered rather than shipped,
+  because it changes a pre-existing destructive path after every review had run. codex review of
+  the landed commit then rated it **P1 and reproduced it directly** (seeded `redirect_map['Y'] =
+  S`, ran the merge, watched the redirect go stale), so it was fixed and pinned: after a twin merge
+  deletes the source row, entries pointing AT it now follow it to the survivor. Mutation-proven.
 - **The divergence branch does not consult `incoming_schedule_count`.** Recorded rather than fixed:
   it looks like a free fail-closed narrowing, but a double-listing can itself appear twice in the
   own schedule, so a `>= 2` refusal could silently disable the branch entirely. The cost cannot be
@@ -859,4 +856,23 @@ Neither review can be launched from inside a session — the execution session m
   written for the wider rule. Every site now states the window-INDEPENDENT figure instead:
   **28 of 28 mixed pairs at every delta (26 at 0s, 1 at 1,800s, 1 at 3,600s)**. Peer's three
   requested records were already in place (acceptance table, honesty line, trigger's true width).
+- **2026-08-15 — codex review of the LANDED commit `0464f52`: 1 P1, 1 P2, no others.** Both were
+  the same defect this spec had already recorded as a residual and offered rather than shipped —
+  codex independently reproduced it, which is what moved it from "cheap to land later" to fixed
+  now. The ordinary redirect+twin-merge seam deletes the source row without rewriting earlier
+  `redirect_map` entries that pointed at it (`Y -> S`, then `S -> C`, strands `Y`), and no test
+  covered the chain. Fixed at the seam, mutation-proven, and the test drives the REAL load path
+  rather than seeding the merge by hand — unlike its promotion-path sibling, this shape IS
+  reachable.
+- **2026-08-15 — the test authoring standard (`72d3972`) landed AFTER `0464f52`.** It is
+  forward-binding and explicitly declines a suite migration ("4,513 passing tests with a
+  zero-escape record are the instrument, not the debt"), so this chunk's already-committed tests
+  stand as written. The ONE test written after it — the chain-redirect test above — was authored to
+  the standard: a context class named for the situation, one behavior per test named as a sentence,
+  unlabelled arrange/act/assert, and the loader tier routed through `conftest.load_real_schema`
+  instead of this file's hand-built partial schema (the ban the ruling promotes out of spec text).
+  A new `real_schema_db` fixture carries it, so the next test in this file has the compliant seam
+  ready. ⚠ Known and NOT silently converted: the other 24 tests in this chunk still use the
+  hand-built fixture — the weakness this session had already flagged when asked "did we write good
+  tests?", now covered by an explicit ruling rather than by a session's judgement.
 

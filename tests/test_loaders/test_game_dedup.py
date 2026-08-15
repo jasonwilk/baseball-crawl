@@ -33,6 +33,7 @@ from src.gamechanger.loaders.game_loader import (
 )
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.types import TeamRef
+from tests.conftest import load_real_schema
 from src.reports.generator import (
     _query_recent_games,
     _query_record,
@@ -2866,3 +2867,82 @@ def test_promotion_remaps_entries_that_pointed_at_the_deleted_row(
         "or the plays/spray stages silently skip that game"
     )
     assert loader_i.redirect_map[_EVENT_ID_1] == _EVENT_ID_2
+
+
+# ---------------------------------------------------------------------------
+# Test authoring standard (operator ruling 2026-08-15, `72d3972`)
+# ---------------------------------------------------------------------------
+#
+# Forward-binding, so it governs THIS block and not the tests above it -- the
+# ruling explicitly declines a suite migration. Three of its clauses bind here:
+# the loader tier routes through `conftest.load_real_schema` rather than this
+# file's hand-built partial schema (the ban the ruling promotes out of spec
+# text); the context is a class named for the situation with each test one
+# behavior named as a sentence; and arrange/act/assert are separated by
+# structure, never by label.
+
+
+@pytest.fixture()
+def real_schema_db() -> sqlite3.Connection:
+    """In-memory SQLite carrying the REAL schema -- every numbered migration.
+
+    The module-level ``db`` fixture above hand-builds 001+008+012+013, which the
+    2026-08-15 ruling bans for the loader tier: a hand-built schema is how drift
+    slips past a green suite. New tests in this file use this fixture instead.
+    """
+    conn = sqlite3.connect(":memory:")
+    load_real_schema(conn)
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.commit()
+    yield conn
+    conn.close()
+
+
+class TestTwinMergeWhenAnEarlierRedirectPointsAtTheSourceRow:
+    """The ordinary redirect+twin-merge seam DELETES the source ``games`` row.
+
+    An entry recorded EARLIER in the same run that points AT that row -- a chain
+    ``Y -> S`` followed by ``S -> C`` -- is invisible from the source id alone.
+    The generator resolves every source event id through ``redirect_map`` before
+    filing plays and spray, and an id resolving to a missing ``games`` row is
+    FK-skipped SILENTLY: no error, just a game quietly absent from the
+    plays-derived stats. Found by codex review of `0464f52`, which reproduced it.
+    """
+
+    @pytest.fixture()
+    def merged(self, real_schema_db: sqlite3.Connection) -> GameLoader:
+        db = real_schema_db
+        loader = _make_loader(db)
+        _seed_canonical_row(
+            db, loader, game_id=_CANON_X,
+            home_score=5, away_score=2, perspectives=("opp",),
+        )
+        _seed_canonical_row(
+            db, loader, game_id=_TWIN_E,
+            home_score=5, away_score=2, perspectives=("own",),
+        )
+        db.commit()
+        loader.redirect_map["earlier-source-Y"] = _TWIN_E
+
+        loader.load_payload(
+            _make_boxscore(),
+            _make_summary(event_id=_TWIN_E, game_stream_id=_TWIN_E,
+                          owning_score=5, opponent_score=2),
+            opponent_name=_OPP_NAME,
+        )
+
+        assert db.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1, (
+            "fixture guard: the twin merge must actually delete the source row, "
+            "or nothing below proves anything about stranding"
+        )
+        return loader
+
+    def test_the_earlier_redirect_follows_the_deleted_row(
+        self, merged: GameLoader,
+    ) -> None:
+        assert merged.redirect_map["earlier-source-Y"] == _CANON_X
+
+    def test_the_deleted_row_own_id_also_resolves_to_the_survivor(
+        self, merged: GameLoader,
+    ) -> None:
+        assert merged.redirect_map[_TWIN_E] == _CANON_X

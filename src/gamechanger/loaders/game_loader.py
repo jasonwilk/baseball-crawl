@@ -985,6 +985,20 @@ class GameLoader:
                     # A sqlite3.Error during the merge already rolled back and
                     # returned errors=1 -- do not proceed with the upsert.
                     return merged
+                # This merge DELETES the source row, so it owes the same repair
+                # the promotion path makes: any EARLIER entry pointing AT that
+                # row must follow it to the survivor. Without this, a chain
+                # ``Y -> S`` recorded earlier in this run, followed by
+                # ``S -> C`` here, leaves ``Y`` resolving to a deleted ``games``
+                # row -- and the plays/spray stages then FK-SKIP that game
+                # silently rather than erroring. The line above already keys
+                # ``source_event_id`` itself; what it cannot see is what points
+                # at it. A REFUSED merge leaves the source row standing, so the
+                # row itself is the arbiter of whether anything is rewritten.
+                if not self._game_row_exists(source_event_id):
+                    self._record_deleted_row_redirect(
+                        source_event_id, canonical_id
+                    )
 
         return self._upsert_game_and_stats(
             summary, game_date,
