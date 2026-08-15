@@ -6,6 +6,36 @@ paths:
 
 # Testing Rules
 
+## Test authoring standard (operator ruling 2026-08-15)
+
+Binds every test written from this date forward. Existing tests convert only when a chunk is
+already rewriting them — there is no migration effort; the suite's value is its defect-catching
+record, not its uniformity.
+
+- **The suite only ratchets up.** A chunk's full-suite passed count must end ≥ where it started;
+  deleting a test requires naming it and why in the spec. (A true coverage-percent ratchet waits
+  on pytest-cov tooling — do not fake one with counts.)
+- **BDD shape, in pytest idiom.** Context is a class named for the situation; each test is ONE
+  behavior whose name reads as a sentence: `class TestGenerateReport_WhenNotSignedIn:` /
+  `def test_redirects_to_login(self):`. Default one assertion per test; when one behavior's proof
+  is inseparable (an exit code plus the message explaining it), keep the pair together rather
+  than splitting the behavior. No new plugins — plain pytest classes.
+- **Arrange/act/assert by structure, never by label.** Blank lines separate the three phases; do
+  not write the words.
+- **Dependency injection over monkeypatching.** Inject fakes and stubs at constructor/parameter
+  seams; reach for `monkeypatch` only where no injection seam exists, and say so.
+- **Two database tiers, strictly.** Pure-logic tests (parsers, stat math, formatting, argument
+  handling) touch NO database of any kind — mock the boundary. Loader/merge/dedup/report tests
+  use in-memory SQLite with the REAL schema, routed through `conftest.load_real_schema`, never a
+  hand-built partial schema — hand-built schemas are how drift slips past a green suite, and that
+  tier is where the column-drop and dedup regressions were caught. No test ever opens
+  `data/app.db`.
+- **Input matrix per function under test.** Happy path first with realistic values, then at least
+  one case per parameter for each of: None/missing, empty, wrong type, malformed value. Use
+  parametrize; vary one axis at a time unless the interaction itself is under test.
+- **Red/green/refactor through features.** Write the failing test first and SHOW it failing —
+  RC captured unpiped, per the execution gotchas below — before the code that turns it green.
+
 - Use pytest as the test runner
 - IMPORTANT: Never make real HTTP requests in tests -- use mocks or fixtures
 - Use pytest fixtures for test data setup
