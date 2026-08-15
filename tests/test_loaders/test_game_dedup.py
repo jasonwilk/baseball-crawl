@@ -21,9 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from src.db.game_merge import GameMergeError
-from src.gamechanger.loaders import ensure_season_row
+from src.db.game_merge import GameMergeError, GameMergeResult
+from src.gamechanger.loaders import LoadResult, ensure_season_row
 from src.gamechanger.loaders.game_loader import (
+    _DIVERGENCE_MAX_DELTA_SECONDS,
+    _SAME_LISTING_MAX_DELTA_SECONDS,
+    _UNKNOWN_OPPONENT_NAME,
     GameLoader,
     GameSummaryEntry,
     _is_same_listing_delta,
@@ -1647,32 +1650,41 @@ def _load_listing(
     event_id: str,
     stream_id: str,
     start_time: str,
-    owning_score: int,
-    opponent_score: int,
+    owning_score: int = 4,
+    opponent_score: int = 1,
     game_date: str = _DL_DATE,
     date_source_instant: str | None = None,
-) -> None:
-    """Load one schedule listing through the real load path."""
-    loader.load_payload(
-        _make_boxscore(),
+    opponent_name: str | None = None,
+    home_away: str = "home",
+    boxscore: dict | None = None,
+) -> LoadResult:
+    """Load one schedule listing through the real load path.
+
+    ``opponent_name`` selects WHICH opponent team row the load resolves to,
+    which is what makes a divergence fixture expressible; ``boxscore`` supplies
+    a single-envelope payload for the second perspective. Both default to the
+    pre-existing same-pair behaviour, so this is one helper rather than two --
+    and a two-helper split meant the divergence tests could not drive
+    ``date_source_instant``, the anti-vacuity control the note above requires.
+    """
+    return loader.load_payload(
+        _make_boxscore() if boxscore is None else boxscore,
         _make_summary(
             event_id=event_id,
             game_stream_id=stream_id,
+            home_away=home_away,
             owning_score=owning_score,
             opponent_score=opponent_score,
             start_time=start_time,
             game_date=game_date,
             date_source_instant=date_source_instant,
         ),
+        opponent_name=opponent_name,
     )
 
 
 def _stored_dates(db: sqlite3.Connection) -> list[str]:
-    return [
-        r[0] for r in db.execute(
-            "SELECT game_date FROM games ORDER BY game_id"
-        ).fetchall()
-    ]
+    return [row[5] for row in _stored_games(db)]
 
 
 def test_same_perspective_double_listing_collapses_to_one_row(
@@ -1903,3 +1915,954 @@ def test_delta_helper_never_raises_on_any_parseable_shape() -> None:
     # ...while a bare date really is hours away and is correctly outside it.
     # (False here is a computed answer, not a swallowed error.)
     assert _is_same_listing_delta("2026-07-25", aware) is False
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-13 same-listing DETECTION: widened window + opponent-divergence pass
+# ---------------------------------------------------------------------------
+#
+# Two classes, one predicate -- "the shared team appears twice on one date,
+# close in time, with an agreeing scoreline":
+#
+#   Class 1 (same-listing): the SAME unordered team pair, minutes apart. The
+#     1.0s window missed these; the corpus's two post-fix twins sit at 300s and
+#     600s and the probable twin at exactly 1,800s.
+#   Class 2 (divergence): the shared team on the SAME SIDE with two DIFFERENT
+#     opponent team rows standing for one real opponent, so the natural key
+#     {home, away} structurally cannot match them.
+#
+# ⚠ The shared team is STRUCTURAL -- whichever team both rows carry on the same
+# side -- and NOT "the perspective team". Measured against live data 2026-08-13:
+# in all 26 in-window mixed corpus pairs the shared team is a perspective of
+# exactly ONE row, and uniformly the STUB-headed one. Keying the pass on the
+# perspective team would fire only when the stub-headed row loads SECOND, which
+# is decided by generation order -- and would leave the identity-bearing
+# promotion unreachable. Both load orders are pinned below for that reason.
+#
+# ⚠ RED vs CONTROL. The tests asserting a NEW collapse fail pre-change. The
+# tests asserting two rows SURVIVE pass pre-change by construction (pre-change
+# nothing collapses); they are negative controls whose discriminating power
+# comes from the mutation pass, not from RED. Do not read their pre-change
+# green as "not testing the change".
+
+_DIV_START_1 = "2026-07-25T21:00:00.000Z"
+_DIV_START_2 = "2026-07-25T21:30:00.000Z"   # +1800s, the inclusive boundary
+
+# Two team rows standing for ONE real opponent: one carries a GC identity, the
+# other is the bare-name stub a boxscore created. Invented names (epic TN-10).
+_STUB_OPP_NAME = "Riverbend Stub Opponent"
+_STUB_OPP_NAME_2 = "Riverbend Stub Opponent Two"
+_IDENTITY_OPP_NAME = "Riverbend Identity Opponent"
+_IDENTITY_OPP_NAME_2 = "Riverbend Identity Opponent Two"
+_IDENTITY_OPP_PUBLIC_ID = "identity-opp-public-0001"
+_IDENTITY_OPP_UUID = "identity-opp-uuid-0001"
+_IDENTITY_OPP_SLUG_2 = "identity-opp-public-0002"
+
+_EVENT_ID_3 = "event-third-003"
+_STREAM_ID_3 = "stream-ccc-003"
+
+
+def _insert_identity_team(
+    db: sqlite3.Connection,
+    *,
+    name: str,
+    public_id: str,
+    gc_uuid: str | None = None,
+    membership_type: str = "tracked",
+) -> int:
+    """Insert an IDENTITY-BEARING team row (carries a public_id, and maybe a uuid).
+
+    The divergence gate's trigger reads exactly this: ``gc_uuid IS NOT NULL OR
+    public_id IS NOT NULL``. ``GameLoader._ensure_team_row`` always passes
+    ``gc_uuid=None``, so a loader-created opponent is NEVER identity-bearing --
+    an identity-bearing opponent row only exists because some other path (a
+    scout of that team) created it. Seeding it here reproduces that.
+    """
+    cur = db.execute(
+        "INSERT INTO teams (name, gc_uuid, public_id, membership_type, "
+        "is_active, season_year) VALUES (?, ?, ?, ?, 1, 2025)",
+        (name, gc_uuid, public_id, membership_type),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def _team_id_by_name(db: sqlite3.Connection, name: str) -> int:
+    return db.execute("SELECT id FROM teams WHERE name = ?", (name,)).fetchone()[0]
+
+
+def _insert_bare_stub(db: sqlite3.Connection, name: str) -> int:
+    """A team row carrying NEITHER a gc_uuid NOR a public_id."""
+    cur = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) "
+        "VALUES (?, 'tracked', 0, 2025)",
+        (name,),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def _single_envelope_boxscore(own_key: str) -> dict:
+    """A one-team boxscore keyed by ``own_key``.
+
+    Used for the CROSS-perspective half of the divergence fixtures: the second
+    perspective's payload carries only its own envelope, so ``opp_key`` is None
+    and the opponent resolves BY NAME -- which is precisely how the corpus's
+    stub opponent rows came to exist.
+    """
+    full = _make_boxscore()
+    return {own_key: full[_OWN_TEAM_SLUG]}
+
+
+def _stored_games(db: sqlite3.Connection) -> list[tuple]:
+    return db.execute(
+        "SELECT game_id, home_team_id, away_team_id, home_score, away_score, "
+        "game_date FROM games ORDER BY game_id"
+    ).fetchall()
+
+
+def _opponent_team_ids(db: sqlite3.Connection, own_team_id: int) -> list[int]:
+    """The non-shared team id of every stored game row."""
+    return [
+        (away if home == own_team_id else home)
+        for _gid, home, away, _hs, _as, _d in _stored_games(db)
+    ]
+
+
+# --- Class 1: the widened same-listing window -----------------------------
+
+
+def test_same_listing_minutes_apart_collapses(db: sqlite3.Connection) -> None:
+    """RED: the corpus's post-fix twins sit 300s and 600s apart, not 0.96s.
+
+    The 1.0s window was fitted to ONE observed pair; the two double-listings
+    filed AFTER that fix landed are minutes apart and recur on the regenerate.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T21:00:00.000Z",
+                  owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T21:10:00.000Z",   # +600s
+                  owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 1, f"a 600s double-listing must collapse, got {dates}"
+    assert dates[0] == _DL_DATE  # anti-vacuity: not the sentinel date
+
+
+def test_same_listing_at_exactly_1800s_collapses(db: sqlite3.Connection) -> None:
+    """RED + BOUNDARY: the comparison is ``<=``, and the corpus's probable twin
+    sits precisely at 1,800s.
+
+    This is the mutant that matters -- a ``< 1800`` implementation is caught
+    here and nowhere else.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DIV_START_1, owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_DIV_START_2,      # exactly +1800s
+                  owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 1, f"1800s is INSIDE the window (<=), got {dates}"
+    assert dates[0] == _DL_DATE
+
+
+def test_same_listing_at_1801s_stays_two_rows(db: sqlite3.Connection) -> None:
+    """CONTROL + BOUNDARY: one second past the bound must NOT collapse."""
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DIV_START_1, owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T21:30:01.000Z",   # +1801s
+                  owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2, f"1801s is OUTSIDE the window, got {dates}"
+    assert dates == [_DL_DATE, _DL_DATE]  # anti-vacuity: neither is the sentinel
+
+
+def test_same_listing_doubleheader_at_corpus_floor_stays_split(
+    db: sqlite3.Connection,
+) -> None:
+    """CONTROL: the observed same-pair doubleheader floor is 5,400s.
+
+    92 corpus doubleheaders sit at or above it and every one must remain two
+    rows. The 1,800s bound keeps a 3x margin to this floor.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T17:00:00.000Z",
+                  owning_score=0, opponent_score=3)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T18:30:00.000Z",   # +5400s
+                  owning_score=0, opponent_score=3)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2, (
+        f"the corpus doubleheader floor must stay two rows, got {dates}"
+    )
+    assert dates == [_DL_DATE, _DL_DATE]
+
+
+def test_same_listing_identical_scoreline_doubleheader_stays_split(
+    db: sqlite3.Connection,
+) -> None:
+    """CONTROL: the corpus holds exactly ONE doubleheader with an IDENTICAL
+    per-team scoreline, 7,200s apart.
+
+    Score agreement is the TRIGGER, so this pair is separated by the window
+    alone -- it is the single row that proves the window is load-bearing rather
+    than decorative.
+    """
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T17:00:00.000Z",
+                  owning_score=6, opponent_score=4)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T19:00:00.000Z",   # +7200s, same score
+                  owning_score=6, opponent_score=4)
+    db.commit()
+
+    dates = _stored_dates(db)
+    assert len(dates) == 2, (
+        f"an identical-scoreline doubleheader must stay two rows, got {dates}"
+    )
+    assert dates == [_DL_DATE, _DL_DATE]
+
+
+# --- Class 2: opponent-identity divergence --------------------------------
+
+
+def test_divergence_same_side_score_agreeing_collapses(
+    db: sqlite3.Connection,
+) -> None:
+    """RED: two rows, shared team on the SAME side, two different opponent rows.
+
+    The natural key {home, away} cannot match these, so the team-pair pass
+    returns nothing and the divergence pass must. Here the canonical already
+    names the identity-bearing opponent, so the collapse is a PLAIN redirect --
+    no merge, no delete.
+    """
+    own_id = _insert_own_team(db)
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+        gc_uuid=_IDENTITY_OPP_UUID,
+    )
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 1, f"a divergence twin must collapse, got {rows}"
+    assert rows[0][5] == _DL_DATE  # anti-vacuity: not the sentinel date
+    surviving_opponents = _opponent_team_ids(db, own_id)
+    identity_id = db.execute(
+        "SELECT id FROM teams WHERE public_id = ?", (_IDENTITY_OPP_PUBLIC_ID,)
+    ).fetchone()[0]
+    assert surviving_opponents == [identity_id], (
+        "the surviving row must name the identity-bearing opponent"
+    )
+
+
+def test_divergence_minutes_apart_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """The divergence branch requires IDENTICAL recorded instants, not 1,800s.
+
+    Operator ruling 2026-08-15 on a code-review finding. The mixed-identity
+    trigger does not discriminate the way it reads -- in 27 of 27 in-window
+    corpus pairs the identity-bearing side is the LOADING TEAM ITSELF, which
+    carries a `public_id` by construction -- so at minutes apart two genuinely
+    different games (tournament pool play; a program's varsity and JV both
+    facing one opponent) are indistinguishable from one double-listed game.
+
+    ⚠️ Passing this does NOT make the branch safe, and the residual says so:
+    two real games CAN share a recorded start instant, because `start_time` is
+    RECORDED and not observed. Delta-0 shrinks the window the hazard needs; it
+    does not close it. The direction is chosen by the asymmetry -- a wrong merge
+    hard-deletes a real game forever, a missed duplicate stays visible in a
+    report until someone widens the rule.
+    """
+    _own_id, loader = _seed_same_perspective_divergence(db)
+    # Everything the gate asks for EXCEPT an identical instant: same side, same
+    # scoreline, mixed identity, 1,500s apart.
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time="2026-07-25T21:25:00.000Z",   # +1500s
+                      opponent_name=_STUB_OPP_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"the divergence branch must NOT collapse rows minutes apart -- that is "
+        f"the same-pair window's bound, not this branch's; got {rows}"
+    )
+    assert [r[5] for r in rows] == [_DL_DATE, _DL_DATE]
+    # POSITIVE CONTROL: the identical fixture at delta 0 DOES collapse -- that is
+    # `test_divergence_same_side_score_agreeing_collapses` -- so two rows here
+    # are the instant check firing, not a fixture that never reached the pass.
+
+
+def test_divergence_disagreeing_scores_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """CONTROL: pairwise score agreement is MANDATORY on the divergence branch.
+
+    Same date, same side, same instant, mixed identity -- everything but the
+    scoreline. Two genuinely different games against two different opponents
+    look exactly like this.
+    """
+    _own_id, loader = _seed_same_perspective_divergence(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME,
+                      owning_score=4, opponent_score=1)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME,
+                      owning_score=3, opponent_score=2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, f"disagreeing scores must not collapse, got {rows}"
+    assert [r[5] for r in rows] == [_DL_DATE, _DL_DATE]
+
+
+def test_divergence_orientation_flipped_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """CONTROL: the shared team must be on the SAME side in both rows.
+
+    Measured 2026-08-13: within the window there are 6 flipped shared-team
+    pairs and 0 agree on score under either comparison. Flipped pairs are a
+    deliberate fail-closed narrowing -- on a flipped pair a raw home-to-home
+    comparison pits the shared team's score against its opponent's, so a
+    "match" there can be an artifact.
+    """
+    _own_id, loader = _seed_same_perspective_divergence(db)
+    # Row 1: own team HOME -> (home, away) = (own, identity), scores (4, 1).
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME,
+                      home_away="home", owning_score=4, opponent_score=1)
+    # Row 2: own team AWAY -> (home, away) = (stub, own). The stored score tuple
+    # is deliberately the SAME (4, 1), so ONLY the side check separates them.
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME,
+                      home_away="away", owning_score=1, opponent_score=4)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, f"a flipped pair must not collapse, got {rows}"
+    assert {(r[3], r[4]) for r in rows} == {(4, 1)}, (
+        "fixture guard: both rows must carry the SAME stored score tuple, or "
+        "the score gate -- not the side check -- is what kept them apart"
+    )
+
+
+def test_divergence_both_identity_bearing_refused(
+    db: sqlite3.Connection,
+) -> None:
+    """CONTROL: MIXED identity is a TRIGGER condition, not a survivor tie-break.
+
+    Both corpus non-twins (the 9,000s genuine doubleheader and the 62,400s
+    different-games pair) are the ONLY both-identity-bearing pairs, and every
+    in-window twin is mixed. Two rows that BOTH carry a GC identity are more
+    likely two genuinely different opponents -- so refuse.
+
+    Honest bound: n=2 on the both-identity side. This is a fail-closed
+    narrowing justified by a mechanism, NOT a validated discriminator -- never
+    re-read it as "both-identity proves a doubleheader".
+    """
+    _insert_own_team(db)
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+    )
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME_2, public_id=_IDENTITY_OPP_SLUG_2,
+    )
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, f"both-identity-bearing must REFUSE, got {rows}"
+    # Fixture guard: both opponents really are identity-bearing, or this test
+    # is refusing for the wrong reason.
+    own_id = db.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_UUID,)
+    ).fetchone()[0]
+    _assert_opponents_identity_bearing(db, own_id, expected=True)
+
+    # Pin the TRIGGER, not just the outcome. A row count alone can be satisfied
+    # downstream -- by the merge refusing, or by nothing having matched at all --
+    # so ask the detection pass directly.
+    identity_2 = _team_id_by_name(db, _IDENTITY_OPP_NAME_2)
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_3, _DL_DATE, own_id, identity_2, 4, 1, _DIV_START_1,
+    ) is None, "both-identity-bearing must be REFUSED by the divergence pass"
+    # POSITIVE CONTROL: the same call with a STUB on the incoming side is MIXED
+    # and must match -- without it the None above could just mean "no candidate".
+    stub_id = _insert_bare_stub(db, _STUB_OPP_NAME)
+    # Pass _EVENT_ID_2 so the query's `game_id != ?` excludes that row, leaving
+    # exactly ONE candidate -- with both rows in play the AMBIGUITY refusal
+    # fires and the control could not tell "refused" from "no candidate".
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_2, _DL_DATE, own_id, stub_id, 4, 1, _DIV_START_1,
+    ) == _EVENT_ID_1, "positive control: a single MIXED candidate must match"
+
+
+def test_divergence_both_stub_refused(db: sqlite3.Connection) -> None:
+    """CONTROL: two bare-name stubs also REFUSE -- an accepted loss of 1 pair.
+
+    Exactly one corpus delta-0 pair is both-stub, and it is also the single
+    SAME-perspective pair in the bucket, so it is refused twice over. Step 6's
+    acceptance expects it to SURVIVE the regenerate: `(c) 0s -> 1`, not 0.
+    """
+    _insert_own_team(db)
+    loader = _make_loader(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, f"both-stub must REFUSE, got {rows}"
+    own_id = db.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_UUID,)
+    ).fetchone()[0]
+    _assert_opponents_identity_bearing(db, own_id, expected=False)
+
+    # ⚠️ THE ROW COUNT ABOVE DOES NOT PROVE THE TRIGGER FIRED. A cross-perspective
+    # both-stub pair is structurally impossible on the load path -- a loader's own
+    # team is always a participant and always carries an identifier, so both rows
+    # of a both-stub pair necessarily share the shared team's perspective. The
+    # merge would therefore refuse even with the trigger removed (verified by
+    # mutation), leaving two rows for the wrong reason. Ask the pass directly.
+    stub_2 = _team_id_by_name(db, _STUB_OPP_NAME_2)
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_3, _DL_DATE, own_id, stub_2, 4, 1, _DIV_START_1,
+    ) is None, "both-stub must be REFUSED by the divergence pass"
+    # POSITIVE CONTROL: an identity-bearing incoming side is MIXED and must match.
+    identity_id = _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+    )
+    # _EVENT_ID_2 excludes itself, leaving exactly ONE candidate -- see the
+    # sibling test for why two would trip the ambiguity refusal instead.
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_2, _DL_DATE, own_id, identity_id, 4, 1, _DIV_START_1,
+    ) == _EVENT_ID_1, "positive control: a single MIXED candidate must match"
+
+
+# --- Identity-bearing promotion at the redirect site ----------------------
+#
+# Which row is canonical is otherwise decided by LOAD ORDER, which the
+# regenerate does not control -- so the surviving row naming the identity-
+# bearing opponent must hold under BOTH orders. The cross-perspective shape
+# below is the corpus's actual one: the stub-headed row is the shared team's
+# own scout, and the identity-bearing row is the opponent's own scout.
+
+
+def _seed_same_perspective_divergence(
+    db: sqlite3.Connection,
+) -> tuple[int, GameLoader]:
+    """Own team + ONE identity-bearing opponent row + a loader for the own team.
+
+    The single-perspective divergence shape: the shared team is the loading
+    team, and the two differing opponents are one identity-bearing row and one
+    bare-name stub created by the boxscore.
+    """
+    own_id = _insert_own_team(db)
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+    )
+    return own_id, _make_loader(db)
+
+
+def _assert_opponents_identity_bearing(
+    db: sqlite3.Connection, own_id: int, *, expected: bool,
+) -> None:
+    """Fixture guard: every stored row's non-shared team has (or lacks) identity.
+
+    Restates the production predicate rather than calling
+    ``loader._team_is_identity_bearing`` -- an independent control, stated once.
+    """
+    for opp in _opponent_team_ids(db, own_id):
+        bearing = db.execute(
+            "SELECT gc_uuid IS NOT NULL OR public_id IS NOT NULL FROM teams "
+            "WHERE id = ?", (opp,),
+        ).fetchone()[0]
+        assert bool(bearing) is expected, (
+            f"fixture guard: team {opp} must "
+            f"{'be identity-bearing' if expected else 'be a bare stub'}"
+        )
+
+
+def _make_identity_loader(db: sqlite3.Connection) -> GameLoader:
+    """A loader whose OWN team is the identity-bearing opponent row.
+
+    This is the second perspective in the corpus shape: the real opponent
+    scouted in its own right, which is exactly how it came to carry a
+    ``public_id``/``gc_uuid`` while the shared team's boxscore only ever
+    produced a bare-name stub for it.
+    """
+    row = db.execute(
+        "SELECT id FROM teams WHERE public_id = ?", (_IDENTITY_OPP_PUBLIC_ID,)
+    ).fetchone()
+    pk = row[0]
+    loader = GameLoader(
+        db,
+        owned_team_ref=TeamRef(
+            id=pk, gc_uuid=_IDENTITY_OPP_UUID, public_id=_IDENTITY_OPP_PUBLIC_ID,
+        ),
+    )
+    ensure_season_row(db, loader._season_id)
+    return loader
+
+
+def _seed_cross_perspective_divergence(
+    db: sqlite3.Connection,
+) -> tuple[int, int, GameLoader, GameLoader]:
+    """Own team + identity-bearing opponent + a loader for each perspective."""
+    own_id = _insert_own_team(db)
+    identity_id = _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+        gc_uuid=_IDENTITY_OPP_UUID, membership_type="member",
+    )
+    return own_id, identity_id, _make_loader(db), _make_identity_loader(db)
+
+
+def _load_stub_headed(loader: GameLoader, *, event_id: str, stream_id: str) -> None:
+    """The shared team's OWN scout: names the opponent by name only -> stub row."""
+    _load_listing(
+        loader, event_id=event_id, stream_id=stream_id,
+        start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME,
+        home_away="home", owning_score=4, opponent_score=1,
+    )
+
+
+def _load_identity_headed(
+    loader: GameLoader, *, event_id: str, stream_id: str
+) -> None:
+    """The real opponent's OWN scout: (home, away) = (shared, identity), 4-1."""
+    _load_listing(
+        loader, event_id=event_id, stream_id=stream_id,
+        start_time=_DIV_START_1, opponent_name=_OWN_TEAM_UUID,
+        home_away="away", owning_score=1, opponent_score=4,
+        boxscore=_single_envelope_boxscore(_IDENTITY_OPP_PUBLIC_ID),
+    )
+
+
+def test_promotion_keeps_identity_bearing_opponent_when_stub_loaded_first(
+    db: sqlite3.Connection,
+) -> None:
+    """RED: the stub-headed row is canonical, so the collapse must PROMOTE.
+
+    A plain redirect here would file the game under the row naming a bare-name
+    stub and discard the opponent's GC identity. Instead the incoming row is
+    upserted under its own event id and the stub-headed row is merged INTO it,
+    which hard-deletes the stub-headed ``games`` row.
+    """
+    own_id, identity_id, loader_s, loader_i = _seed_cross_perspective_divergence(db)
+    _load_stub_headed(loader_s, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1)
+    _load_identity_headed(loader_i, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 1, f"the divergence twin must collapse, got {rows}"
+    game_id, home, away, hs, as_, gdate = rows[0]
+    assert gdate == _DL_DATE  # anti-vacuity: not the sentinel date
+    assert (home, away) == (own_id, identity_id), (
+        "the surviving row must name the IDENTITY-BEARING opponent, not the stub"
+    )
+    assert (hs, as_) == (4, 1)
+    assert game_id == _EVENT_ID_2, "the identity-bearing row must be the survivor"
+    assert loader_i.redirect_map.get(_EVENT_ID_1) == _EVENT_ID_2, (
+        "the DELETED row's event id must be remapped, or the generator's "
+        "plays/spray stages strand on a games row that no longer exists"
+    )
+
+
+def test_promotion_keeps_identity_bearing_opponent_when_identity_loaded_first(
+    db: sqlite3.Connection,
+) -> None:
+    """RED: the same end state under the OPPOSITE load order.
+
+    Here the canonical already names the identity-bearing opponent, so the
+    collapse is a plain redirect and no row is deleted -- but the surviving
+    orientation tuple must be identical to the stub-first case.
+    """
+    own_id, identity_id, loader_s, loader_i = _seed_cross_perspective_divergence(db)
+    _load_identity_headed(loader_i, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1)
+    _load_stub_headed(loader_s, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 1, f"the divergence twin must collapse, got {rows}"
+    game_id, home, away, hs, as_, gdate = rows[0]
+    assert gdate == _DL_DATE
+    assert (home, away) == (own_id, identity_id), (
+        "load order must NOT decide which opponent identity survives"
+    )
+    assert (hs, as_) == (4, 1)
+    assert game_id == _EVENT_ID_1
+    assert loader_s.redirect_map.get(_EVENT_ID_2) == _EVENT_ID_1
+
+
+def test_promotion_same_perspective_pair_leaves_both_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """ORDERING PIN -- the sharpest hazard in the chunk.
+
+    ``merge_duplicate_game`` refuses only when the two perspective sets
+    INTERSECT. An EMPTY set on either side yields no intersection and the merge
+    PROCEEDS. So if the promotion merge ran BEFORE the incoming upsert recorded
+    the new row's ``game_perspectives`` row, a same-perspective pair would NOT
+    refuse and the fail-closed fallback would be VACUOUS -- the "absence of
+    refusal is not safety" shape this repo has been bitten by.
+
+    Both listings here carry the SAME single perspective, so a correct
+    implementation refuses and leaves BOTH rows. One row means the merge ran
+    too early.
+    """
+    own_id, loader = _seed_same_perspective_divergence(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"a SAME-perspective divergence pair must refuse the merge and leave "
+        f"both rows; one row means the merge ran before the incoming "
+        f"perspective was recorded, got {rows}"
+    )
+    # Fixture guard: the perspectives really do intersect, or the refusal above
+    # proves nothing about ordering.
+    perspectives = [
+        {
+            r[0] for r in db.execute(
+                "SELECT perspective_team_id FROM game_perspectives "
+                "WHERE game_id = ?", (gid,),
+            ).fetchall()
+        }
+        for gid, *_ in rows
+    ]
+    assert perspectives[0] & perspectives[1] == {own_id}, (
+        f"fixture guard: both rows must share the perspective, got {perspectives}"
+    )
+    assert loader.redirect_map.get(_EVENT_ID_1) is None, (
+        "a REFUSED merge leaves the source row alive -- remapping its event id "
+        "onto the other row would strand its own plays"
+    )
+
+
+def test_promotion_merge_refusal_leaves_both_rows(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RED: the fail-closed fallback, forced on a pair that would otherwise merge.
+
+    A refusal costs a duplicate row; a wrong merge destroys a game. This uses
+    the CROSS-perspective fixture -- which the ordering-pin test above shows
+    does merge cleanly -- so the two rows here survive because of the fallback
+    and for no other reason.
+    """
+    _own_id, _identity_id, loader_s, loader_i = _seed_cross_perspective_divergence(db)
+
+    def _refuse(conn, source_game_id, canonical_game_id):  # noqa: ANN001
+        return GameMergeResult(
+            source_game_id=source_game_id,
+            canonical_game_id=canonical_game_id,
+            refused=True,
+            refusal_reason="forced refusal (test)",
+            shared_perspectives=[-1],
+        )
+
+    _load_stub_headed(loader_s, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1)
+    monkeypatch.setattr(
+        "src.gamechanger.loaders.game_loader.merge_duplicate_game", _refuse
+    )
+    _load_identity_headed(loader_i, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"a refused promotion merge must leave BOTH rows, got {rows}"
+    )
+    assert {r[0] for r in rows} == {_EVENT_ID_1, _EVENT_ID_2}
+    assert loader_i.redirect_map.get(_EVENT_ID_1) is None, (
+        "the source row still exists after a refusal, so it must NOT be "
+        "remapped onto the survivor"
+    )
+
+
+def test_promotion_refuses_when_the_perspective_row_is_missing(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordering guard needs a POSITIVE check, not an error count.
+
+    ``_upsert_game_and_stats`` catches ``sqlite3.Error`` on the
+    ``game_perspectives`` INSERT, logs it, and builds its ``LoadResult``
+    AFTERWARDS -- so a failed perspective write leaves ``errors == 0``. Running
+    the merge on that strength satisfies the ORDERING while the fact ordering
+    exists to guarantee (a non-empty perspective set) is false, and
+    ``merge_duplicate_game`` then finds no intersection and deletes the
+    canonical row unrefused.
+
+    This reproduces that swallowed-failure END STATE. POSITIVE CONTROL: the
+    identical fixture WITHOUT the missing perspective row merges cleanly to one
+    row -- that is
+    ``test_promotion_keeps_identity_bearing_opponent_when_stub_loaded_first`` --
+    so two rows here can only be the guard firing.
+    """
+    _own_id, _identity_id, loader_s, loader_i = _seed_cross_perspective_divergence(db)
+    _load_stub_headed(loader_s, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1)
+
+    real_upsert = loader_i._upsert_game_and_stats
+
+    def _upsert_then_lose_the_perspective_row(*args, **kwargs):  # noqa: ANN002,ANN003
+        result = real_upsert(*args, **kwargs)
+        db.execute(
+            "DELETE FROM game_perspectives WHERE game_id = ?", (_EVENT_ID_2,)
+        )
+        return result
+
+    monkeypatch.setattr(
+        loader_i, "_upsert_game_and_stats", _upsert_then_lose_the_perspective_row
+    )
+    _load_identity_headed(loader_i, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"an absent perspective row makes the disjointness refusal VACUOUS, so "
+        f"the promotion must refuse and leave both rows, got {rows}"
+    )
+    assert {r[0] for r in rows} == {_EVENT_ID_1, _EVENT_ID_2}
+    assert loader_i.redirect_map.get(_EVENT_ID_1) is None
+
+
+def test_divergence_ambiguous_candidate_set_refuses(
+    db: sqlite3.Connection,
+) -> None:
+    """Two qualifying candidates is a REFUSAL, never an arbitrary pick.
+
+    Nothing in the gate separates "one real game listed three times" from
+    "several real games sharing a team, a scoreline and a recorded instant".
+    Choosing the first would be arbitrary -- and on the promotion path the
+    loser's `games` row is HARD-DELETED, so an arbitrary choice can delete the
+    wrong game.
+
+    Free guard: measured over the live corpus 2026-08-15, the maximum
+    qualifying-candidate count for any game is 1, so this refuses zero real
+    collapses today.
+    """
+    own_id = _insert_own_team(db)
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME, public_id=_IDENTITY_OPP_PUBLIC_ID,
+    )
+    _insert_identity_team(
+        db, name=_IDENTITY_OPP_NAME_2, public_id=_IDENTITY_OPP_SLUG_2,
+    )
+    loader = _make_loader(db)
+    # Two identity-bearing rows first. They do not collapse into each other --
+    # both-identity REFUSES -- so both stand as candidates for the third.
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME_2)
+    db.commit()
+    assert len(_stored_games(db)) == 2, (
+        "fixture guard: the two identity-bearing rows must BOTH stand, or the "
+        "third listing below faces only one candidate and ambiguity is never "
+        "exercised"
+    )
+
+    # The stub-headed third listing is MIXED against BOTH of them.
+    _load_listing(loader, event_id=_EVENT_ID_3, stream_id=_STREAM_ID_3,
+                      start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 3, (
+        f"an ambiguous candidate set must refuse and leave every row, got {rows}"
+    )
+    assert {r[0] for r in rows} == {_EVENT_ID_1, _EVENT_ID_2, _EVENT_ID_3}
+    assert loader.redirect_map == {}, (
+        "a refused ambiguous set must record no redirect at all"
+    )
+
+    # POSITIVE CONTROL on the pass itself: with only ONE identity-bearing
+    # candidate present the same call MATCHES, so the None above is the
+    # ambiguity refusal firing and not an empty candidate set.
+    stub_id = _team_id_by_name(db, _STUB_OPP_NAME)
+    assert loader._find_divergence_duplicate_game(
+        "unseen-event-id", _DL_DATE, own_id, stub_id, 4, 1, _DIV_START_1,
+    ) is None, "two candidates must refuse"
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_2, _DL_DATE, own_id, stub_id, 4, 1, _DIV_START_1,
+    ) == _EVENT_ID_1, (
+        "positive control: with _EVENT_ID_2 excluded by the query's own "
+        "`game_id != ?`, a SINGLE candidate remains and must still match -- so "
+        "the None above is the ambiguity refusal, not an empty candidate set"
+    )
+
+
+def test_divergence_collapse_warning_names_this_branchs_own_bound(
+    db: sqlite3.Connection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The collapse WARNING is this branch's audit trail, so it must not lie.
+
+    The bound is the mitigation for a fitted rule: a wrong merge is meant to be
+    reviewable after the fact. A warning quoting the SAME-PAIR window (1800.0s)
+    on a branch that actually enforces 0.0s misstates why a row was collapsed
+    or deleted -- and this branch can hard-delete. Caught by codex review;
+    uncaught by every other test here, which is why it is pinned separately.
+    """
+    _own_id, loader = _seed_same_perspective_divergence(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                      start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.game_loader"):
+        _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                          start_time=_DIV_START_1, opponent_name=_STUB_OPP_NAME)
+    db.commit()
+
+    assert len(_stored_games(db)) == 1, "fixture guard: the collapse must happen"
+    divergence = [
+        r.getMessage() for r in caplog.records
+        if "Opponent-identity divergence" in r.getMessage()
+    ]
+    assert divergence, "the collapse must emit its audit WARNING"
+    message = divergence[0]
+    assert f"bound {_DIVERGENCE_MAX_DELTA_SECONDS:.1f}s" in message, (
+        f"the warning must name THIS branch's bound "
+        f"({_DIVERGENCE_MAX_DELTA_SECONDS}s), got: {message}"
+    )
+    assert f"bound {_SAME_LISTING_MAX_DELTA_SECONDS:.1f}s" not in message, (
+        "the warning must NOT quote the same-pair window on this branch"
+    )
+
+
+def test_divergence_shared_sentinel_opponent_is_refused(
+    db: sqlite3.Connection,
+) -> None:
+    """The "Unknown Opponent" sentinel is a SHARED catch-all, not one team's stub.
+
+    ``_resolve_team_ids`` routes EVERY unresolvable opponent onto one name-deduped
+    row, and ``_ensure_team_row`` always passes ``gc_uuid=None``, so that row can
+    never be identity-bearing. It therefore reads as "the stub" against any known
+    opponent -- letting a game against a genuinely different unresolvable opponent
+    collapse into, and on the promote branch DELETE, a game against a known one.
+
+    Free narrowing: measured 2026-08-15, zero teams in the live corpus carry the
+    sentinel name at all, so refusing costs nothing.
+    """
+    own_id, loader = _seed_same_perspective_divergence(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time=_DIV_START_1, opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time=_DIV_START_1, opponent_name=_UNKNOWN_OPPONENT_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"a sentinel-headed row must not collapse into a known opponent's game, "
+        f"got {rows}"
+    )
+    assert [r[5] for r in rows] == [_DL_DATE, _DL_DATE]
+
+    # Pin the refusal at the pass itself, with a POSITIVE CONTROL: the identical
+    # call differing ONLY in that the incoming side is an ordinary bare stub
+    # DOES match, so the None below is the sentinel guard and not an empty
+    # candidate set.
+    sentinel_id = _team_id_by_name(db, _UNKNOWN_OPPONENT_NAME)
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_2, _DL_DATE, own_id, sentinel_id, 4, 1, _DIV_START_1,
+    ) is None, "the shared sentinel must be REFUSED as a divergence candidate"
+    ordinary_stub = _insert_bare_stub(db, _STUB_OPP_NAME)
+    assert loader._find_divergence_duplicate_game(
+        _EVENT_ID_2, _DL_DATE, own_id, ordinary_stub, 4, 1, _DIV_START_1,
+    ) == _EVENT_ID_1, "positive control: an ordinary stub must still match"
+
+
+def test_divergence_one_second_apart_stays_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """BOUNDARY for the DESTRUCTIVE branch: the bound is `<= 0.0`, not "small".
+
+    The same-pair branch got an exact 1,800/1,801 boundary pair because the spec
+    demanded one. The divergence branch -- the branch that can hard-DELETE a
+    row -- had no analogue: its only negative timing control sat at 1,500s, so
+    loosening the bound from 0.0 to 1.0 passed the entire suite (verified by
+    mutation before this test was written). One second apart is two DIFFERENT
+    recorded instants, and this branch collapses only IDENTICAL ones.
+    """
+    _own_id, loader = _seed_same_perspective_divergence(db)
+    _load_listing(loader, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1,
+                  start_time="2026-07-25T21:00:00.000Z",
+                  opponent_name=_IDENTITY_OPP_NAME)
+    _load_listing(loader, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2,
+                  start_time="2026-07-25T21:00:01.000Z",   # +1s
+                  opponent_name=_STUB_OPP_NAME)
+    db.commit()
+
+    rows = _stored_games(db)
+    assert len(rows) == 2, (
+        f"one second apart is NOT an identical recorded instant; the divergence "
+        f"branch must refuse, got {rows}"
+    )
+    assert [r[5] for r in rows] == [_DL_DATE, _DL_DATE]
+    # POSITIVE CONTROL: the same fixture at delta 0 collapses -- that is
+    # `test_divergence_same_side_score_agreeing_collapses` -- so two rows here
+    # are the bound firing, not a fixture that never reached the pass.
+
+
+def test_promotion_remaps_entries_that_pointed_at_the_deleted_row(
+    db: sqlite3.Connection,
+) -> None:
+    """A redirect already POINTING AT the row a promotion deletes must follow it.
+
+    The generator's plays and spray stages resolve every source event id through
+    `redirect_map` before filing. An entry left pointing at a deleted `games`
+    row strands those stages on a row that no longer exists -- and the failure
+    mode is a silent SKIP, not an error.
+
+    ⚠️ REACHABILITY, stated honestly rather than implied by the test's existence:
+    this seeds `redirect_map` directly because I could NOT construct the shape
+    through the real load path. `redirect_map` is per-loader, and a loader that
+    can redirect INTO the stub-headed row shares that row's perspective, which
+    makes the promotion merge REFUSE instead of delete. So this pins a contract
+    on defensive code whose live reachability is unproven -- it is not evidence
+    that the shape occurs. See the residual on the pre-existing twin-merge path,
+    which carries the same hazard unguarded.
+    """
+    _own_id, _identity_id, loader_s, loader_i = _seed_cross_perspective_divergence(db)
+    _load_stub_headed(loader_s, event_id=_EVENT_ID_1, stream_id=_STREAM_ID_1)
+    # An earlier stage of THIS loader's run had already mapped some source id
+    # onto the row that the promotion below is about to delete.
+    loader_i.redirect_map["earlier-source-id"] = _EVENT_ID_1
+    _load_identity_headed(loader_i, event_id=_EVENT_ID_2, stream_id=_STREAM_ID_2)
+    db.commit()
+
+    assert len(_stored_games(db)) == 1, "fixture guard: the promotion must delete"
+    assert loader_i.redirect_map["earlier-source-id"] == _EVENT_ID_2, (
+        "an entry pointing at the DELETED row must be rewritten to the survivor, "
+        "or the plays/spray stages silently skip that game"
+    )
+    assert loader_i.redirect_map[_EVENT_ID_1] == _EVENT_ID_2

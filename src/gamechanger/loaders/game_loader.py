@@ -47,6 +47,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from src.db.game_merge import GameMergeError, merge_duplicate_game
 from src.db.players import ensure_player_row
@@ -155,23 +156,115 @@ _UNKNOWN_OPPONENT_NAME = "Unknown Opponent"
 # decision, not a detail.
 _UNKNOWN_GAME_DATE = "1900-01-01"
 
-# E-278-02. Two same-perspective listings whose start instants fall within this
-# window are ONE real game that GameChanger listed twice, never two games.
+# E-278-02, widened 2026-08-15. Two listings whose start instants fall within
+# this window are ONE real game that GameChanger listed twice, never two games.
 #
-# The bound is physical, not fitted: one team cannot begin two games inside a
-# second, so a sub-second gap between two listings of the same pair on the same
-# date is not a schedule, it is a double-write. That is a stronger warrant than
-# the empirical separation, which is only corroboration -- the measured
-# doubleheader floor in dev is 90 minutes (3.75 orders of magnitude away), and
-# PROD's is 150-180, but neither number belongs in a criterion: they are
-# different populations and the observed floor could shift.
+# ⚠️ THE BOUND IS FITTED, NOT PHYSICAL -- and the previous comment here claimed
+# the opposite, so read this before restoring anything from it.
 #
-# ⚠️ SCOPE: this is a NARROWING condition, never a trigger. Score agreement
-# triggers; this only bounds it. A sub-second delta ALONE must not collapse
-# anything -- corpus-wide there are three other near-zero pairs, and they are
-# safe here only because they carry DISJOINT perspectives and are resolved in
-# the cross-perspective branch above, never reaching this one.
-_SAME_LISTING_MAX_DELTA_SECONDS = 1.0
+# ⚠️ TWO POPULATIONS USE THIS ONE CONSTANT AND THEIR MARGINS DIFFER. Say which
+# one you mean; conflating them reads as a safety argument that was never made.
+#   * SAME-PAIR (two rows naming the same unordered team pair): twins at or
+#     below 600s, doubleheader floor 5400s, so the interval (600s, 5400s) is
+#     entirely EMPTY, nothing physical selects a point inside it, and 1800s
+#     carries a 3x margin on BOTH sides.
+#   * DIVERGENCE (shared team on the same side, two different opponent rows):
+#     see the WHY-1800 block below. Its largest admitted twin sits EXACTLY ON
+#     the bound -- margin ZERO above. The 3x figures do NOT transfer.
+# A fitted bound inherits exactly the risk the old comment named: the observed
+# floor can shift.
+#
+# ⚠️ THE MINIMUM-GAME-DURATION ARGUMENT IS A CEILING, NOT A FLOOR GUARANTEE, and
+# it must not be written back in as one. The argument -- "two genuine games
+# sharing a team cannot both START within 30 minutes, because the first must
+# finish first" -- has a surviving counterexample: this rule keys on
+# ``start_time``, which is a RECORDED value, not an observed one (see
+# ``_parse_instant``). A scorekeeper entering both halves of a doubleheader at
+# nominal times, a suspended game resumed and re-stamped, or a forfeit all
+# produce two genuine games whose RECORDED starts sit inside any window. The
+# corpus proves the rest of that shape is real: it already holds a genuine
+# doubleheader with an IDENTICAL per-team scoreline, and that pair WOULD be
+# collapsed if its recorded gap were small. So the duration argument bounds real
+# PLAY while the rule reads recorded TIMESTAMPS.
+#
+# WHY 1800 AND NOT 3600 -- the load-bearing justification is the corpus, and it
+# is entirely repo-checkable. Measured 2026-08-15 against 2,303 stored games,
+# in the DIVERGENCE population: the score-agreeing shared-team deltas are
+# 0, 1800, 3600, 9000, 62400s. 1800s is the LARGEST bound admitting every delta
+# that population classifies as a twin -- the 0s cluster, plus the 1800s pair
+# rated a PROBABLE twin on 9-of-13 batting stat-tuple overlap -- while excluding
+# the UNKNOWN 3600s pair (8-of-13 overlap, the same band, which is why it is
+# unadjudicated rather than ruled out) and both known non-twins. Excluding 3600s
+# is the fail-closed choice, not a confident one.
+# ⚠️ The admitted twin at 1800s sits ON the bound: margin ZERO above it, 2x below
+# to the excluded 3600s pair. Do not quote the same-pair 3x margins here.
+#
+# EXPOSURE, stated rather than argued away: this widens an EXISTING exposure by
+# a factor, it does not create a new class. The byte-equality tiebreaker BELOW
+# this rule collapses same-instant pairs with NO score check at all, so this
+# rule is still narrower than behaviour the repo already ships -- it requires
+# pairwise score agreement, same-side orientation and a bounded delta. The
+# mitigation is implemented, not merely noted: every collapse logs a WARNING
+# naming both start instants and the delta, so a wrong merge is auditable after
+# the fact rather than silent.
+#
+# ⚠️ SCOPE: this is a NARROWING condition, never a trigger, and inverting that
+# would be unsafe. Score agreement triggers; this only bounds it.
+_SAME_LISTING_MAX_DELTA_SECONDS = 1800.0
+
+# The opponent-divergence branch's OWN bound, deliberately NOT the same-pair
+# window above. It requires IDENTICAL recorded start instants.
+#
+# ⚠️ THE 1800s WARRANT DOES NOT REACH THIS BRANCH, which is why the constants are
+# separate (operator ruling, 2026-08-15, on a code-review finding). The
+# mixed-identity trigger does not discriminate the way it reads: measured over
+# EVERY mixed pair the corpus contains at ANY delta, the identity-bearing side is
+# the LOADING TEAM ITSELF in 28 of 28 (26 at 0s, 1 at 1,800s, 1 at 3,600s) -- and
+# the loading team carries a public_id by CONSTRUCTION, not because it is a
+# distinct real opponent. ⚠️ The denominator is stated PER-DELTA deliberately: an
+# "in-window" count moves when the window does, and this window narrowed to 0s
+# after that measurement was first written down. So the trigger
+# degenerates to "the other row's differing team is a bare stub", which is true
+# of any team a boxscore named but nobody ever scouted -- including a genuinely
+# DIFFERENT real team. Two real games then look identical to one double-listed
+# game: tournament pool play against two opponents, or a program's varsity and
+# JV both facing one opponent on one date. Neither has a corpus instance, and
+# neither is excluded by anything in the gate.
+#
+# What survives that objection is the delta-0 case, and only it: the repo
+# ALREADY collapses identical-instant pairs via the byte-equality tiebreaker
+# below, with no score check at all, so requiring identical instants PLUS score
+# agreement PLUS same-side orientation PLUS mixed identity is strictly narrower
+# than shipped behaviour. At minutes apart there is no such precedent.
+# 26 of the 27 twins the OLD 1,800s window would have admitted sit at exactly
+# 0s, so narrowing to 0s costs exactly ONE pair -- the 1,800s probable twin, now
+# an accepted residual beside the 3,600s unadjudicated one. (Naming the old
+# window explicitly: "in-window" is ambiguous now that the window moved.)
+#
+# ⚠️ THIS IS EXPOSURE-MINIMIZATION, NOT EXPOSURE-ELIMINATION, and nobody may
+# later read delta-0 as "safe". TWO REAL GAMES CAN SHARE A RECORDED START
+# INSTANT. This module already proves it one paragraph up, against its own
+# earlier claim: `start_time` is a RECORDED value, not an observed one, so a
+# scorekeeper entering both halves of a doubleheader at nominal times, a
+# resumed suspended game, or a forfeit all produce two genuine games at one
+# stamp. Delta-0 shrinks the window the hazard needs; it does not close it.
+#
+# The asymmetry is what decides the direction, and it is not close: a WRONG
+# MERGE hard-deletes a real game FOREVER, while a MISSED duplicate sits
+# visibly in a report until someone widens the rule again. Fail CLOSED --
+# when in doubt, refuse to collapse.
+#
+# Compared on PARSED instants, not bytes: "…21:00:00Z" and "…21:00:00.000Z" are
+# the same instant, and `_listing_delta_seconds` fails CLOSED on either side
+# being absent or unparseable.
+_DIVERGENCE_MAX_DELTA_SECONDS = 0.0
+
+# Which row wins an opponent-divergence collapse. PROMOTE = the canonical names
+# the bare-name stub, so the incoming row survives and absorbs it (a DELETE).
+# PRESERVE = the canonical already names the identity-bearing team, so the
+# redirect must keep the canonical orientation rather than overwrite it.
+_DIVERGENCE_PROMOTE = "promote"
+_DIVERGENCE_PRESERVE = "preserve"
 
 
 def _parse_instant(value: str | None) -> datetime | None:
@@ -233,11 +326,64 @@ def _is_same_listing_delta(start_a: str | None, start_b: str | None) -> bool:
     agreement. So a byte-equal pair whose scores DISAGREE is collapsed only by
     the tiebreaker, and it still has to run.
     """
+    delta = _listing_delta_seconds(start_a, start_b)
+    return delta is not None and delta <= _SAME_LISTING_MAX_DELTA_SECONDS
+
+
+def _listing_delta_seconds(start_a: str | None, start_b: str | None) -> float | None:
+    """Absolute seconds between two start instants, or ``None`` if unreadable.
+
+    Split out of :func:`_is_same_listing_delta` so a collapse can LOG the delta
+    it acted on. The mitigation for a fitted bound is auditability: a WARNING
+    naming both instants and their gap makes a wrong merge reviewable after the
+    fact, and a boolean cannot carry that.
+    """
     a = _parse_instant(start_a)
     b = _parse_instant(start_b)
     if a is None or b is None:
-        return False
-    return abs((a - b).total_seconds()) <= _SAME_LISTING_MAX_DELTA_SECONDS
+        return None
+    return abs((a - b).total_seconds())
+
+
+class _DivergenceCandidate(NamedTuple):
+    """One stored row that satisfies the whole opponent-divergence gate."""
+
+    existing_id: str
+    incoming_differing: int
+    existing_differing: int
+    existing_start: str | None
+    delta_seconds: float
+    incoming_bearing: bool
+
+
+def _differing_team_ids(
+    incoming_home: int,
+    incoming_away: int,
+    other_home: int,
+    other_away: int,
+) -> tuple[int, int] | None:
+    """Name the two teams that DIFFER when both rows share exactly one side.
+
+    Returns ``(incoming_differing, other_differing)`` when the two team pairs
+    share one team on the SAME side, else ``None`` -- which covers both the
+    exact same-pair match and the orientation-swapped match, neither of which
+    is an opponent-divergence shape.
+
+    Single-sourced deliberately. This comparison is the DETECTOR's candidate
+    test and the ROUTER's classification at the redirect site, and the two
+    outcomes are opposite and destructive: a detector that admits a shape the
+    router maps to ``None`` files the game under the stub-headed row (the very
+    outcome the promotion exists to prevent), while a router that promotes a
+    pair the ordinary team-pair pass matched would hard-delete a ``games`` row.
+    Two hand-written copies of a four-line comparison must not guard that.
+    """
+    if other_home == incoming_home and other_away == incoming_away:
+        return None                       # exact team-pair match
+    if other_home == incoming_home:
+        return incoming_away, other_away
+    if other_away == incoming_away:
+        return incoming_home, other_home
+    return None                           # orientation-swapped team-pair match
 
 
 def _opt_int(value: object) -> int | None:
@@ -552,12 +698,15 @@ class GameLoader:
         self._season_id, self._season_year = derive_season_id_for_team(
             db, owned_team_ref.id
         )
-        # {source_event_id: canonical_game_id} accumulated as a side-effect each
-        # time _find_duplicate_game redirects a cross-perspective duplicate to an
-        # existing canonical row (E-244). GameLoader is constructed fresh per
-        # report run, so this map is naturally scoped to one run (no reset).
-        # Exposed to the report generator via LoadResult.redirect_map so the
-        # plays/spray stages file rows under the canonical id.
+        # {stale_event_id: surviving_game_id} accumulated as a side-effect of
+        # every dedup collapse (E-244; widened 2026-08-15). A key is any event
+        # id that no longer resolves to a ``games`` row -- from a REDIRECT (the
+        # incoming source id, nothing deleted) or from an identity-bearing
+        # PROMOTION (the canonical row's id, that row having been merged away
+        # and DELETED). GameLoader is constructed fresh per report run, so this
+        # map is naturally scoped to one run (no reset). Exposed to the report
+        # generator via LoadResult.redirect_map so the plays/spray stages file
+        # rows under the surviving id.
         self.redirect_map: dict[str, str] = {}
         # Source event ids whose payload PARSED far enough to reach the
         # dedup/redirect + upsert stage this run. Distinct from "the fetch
@@ -766,6 +915,30 @@ class GameLoader:
             # below MUST use this captured id, not the post-replace canonical.
             source_event_id = summary.event_id
 
+            # Identity-bearing promotion (2026-08-15). On an opponent-divergence
+            # collapse the surviving row must name the opponent carrying a
+            # ``public_id``/``gc_uuid``, never a bare-name stub -- otherwise which
+            # identity survives is decided by LOAD ORDER, which the regenerate
+            # does not control. When the canonical is the stub-headed row we
+            # therefore do NOT redirect into it; the incoming row is written
+            # under its own event id and the stub-headed row is merged into it.
+            #
+            # ⚠️ THIS IS THE CHUNK'S DESTRUCTIVE SEAM: that merge re-points five
+            # child tables and HARD-DELETES a ``games`` row.
+            divergence = (
+                self._classify_divergence_collapse(
+                    canonical_id, home_team_id, away_team_id
+                )
+                if source_event_id != canonical_id
+                else None
+            )
+            if divergence == _DIVERGENCE_PROMOTE:
+                return self._promote_over_stub_headed_row(
+                    summary, canonical_id, game_date,
+                    home_team_id, away_team_id, home_score, away_score,
+                    own_data, own_team_id, opp_data, opp_team_id,
+                )
+
             # Score ownership (E-261-03a / TN-1): a CROSS-perspective redirect must
             # NOT overwrite the canonical row's first-loaded scores -- once the
             # tolerant signal makes redirects fire on DISAGREEING scores,
@@ -774,14 +947,20 @@ class GameLoader:
             # yet among the canonical row's recorded perspectives. A SAME-
             # perspective reload keeps preserve_scores False so a legitimate
             # scorekeeper correction on re-scout still updates.
-            existing_perspectives = {
-                r[0] for r in self._db.execute(
-                    "SELECT perspective_team_id FROM game_perspectives "
-                    "WHERE game_id = ?",
-                    (canonical_id,),
-                ).fetchall()
-            }
-            preserve_scores = self._team_ref.id not in existing_perspectives
+            #
+            # The FIRST disjunct is the divergence rule: when the canonical
+            # already names the identity-bearing opponent, this redirect must
+            # not rewrite its orientation tuple -- the SAME-perspective case
+            # would otherwise leave this False and bury that identity under the
+            # incoming stub. Scores are not at stake either way; the divergence
+            # gate already forced them to agree. It short-circuits, so the
+            # perspective read below does not run on that path.
+            preserve_scores = (
+                divergence == _DIVERGENCE_PRESERVE
+                or not self._game_perspective_recorded(
+                    canonical_id, self._team_ref.id
+                )
+            )
             logger.info(
                 "Dedup: redirecting game %s → %s (same date %s, same teams)",
                 source_event_id, canonical_id, game_date,
@@ -1602,9 +1781,10 @@ class GameLoader:
              away_team_id, home_team_id),
         ).fetchall()
 
-        if not rows:
-            return None
-
+        # NOTE: an EMPTY ``rows`` deliberately falls through rather than
+        # returning early. The tolerant guard below cannot fire on an empty set
+        # and the candidate loop cannot execute, so control reaches the single
+        # divergence call at the end of this method -- one call site, not two.
         # Uniform tolerant same-game guard (E-261-03a / TN-4, findings B + E).
         # PRIMARY schedule-count signal, applied PERSPECTIVE-AGNOSTICALLY across
         # the whole candidate set (NOT only the cross-perspective sub-branch
@@ -1732,14 +1912,18 @@ class GameLoader:
             # idempotency check doesn't cover the path (e.g., different
             # event_ids for the same real game from the same perspective).
 
-            # E-278-02: GameChanger double-lists ONE real game inside a single
-            # team's own schedule under two distinct event ids, sub-second
-            # apart. Both listings share a perspective, so the byte-equality
+            # E-278-02, widened 2026-08-15: GameChanger double-lists ONE real
+            # game inside a single team's own schedule under two distinct event
+            # ids. The observed gaps are 0.96s, 300s and 600s -- the rule was
+            # calibrated on the sub-second pair and MISSED the minutes-apart
+            # ones, which is why the window is now
+            # ``_SAME_LISTING_MAX_DELTA_SECONDS`` = 1800s and NOT sub-second.
+            # Both listings share a perspective, so the byte-equality
             # tiebreaker below finds their start_times unequal and files them as
             # a doubleheader -- inserting a second row and double-counting the
             # game in season aggregates.
             #
-            # SCORE AGREEMENT IS THE TRIGGER; the sub-second delta only NARROWS
+            # SCORE AGREEMENT IS THE TRIGGER; the delta bound only NARROWS
             # it. Never invert that. A delta-triggered rule would be unsafe
             # corpus-wide (three other near-zero pairs exist), and a
             # score-only rule is unsafe on its own because two genuine
@@ -1769,19 +1953,26 @@ class GameLoader:
             # AC-9 VERDICT (E-278-02): no corroborator is available at this
             # decision point -- all four candidates above are rejected on the
             # measurements cited, not on taste -- so score agreement narrowed by
-            # a sub-second delta, scoped to this branch, is judged SUFFICIENT.
+            # the delta bound, scoped to this branch, is judged SUFFICIENT.
+            # ⚠️ That verdict was reached when the bound was 1.0s. The bound is
+            # now 1800s, which WIDENS the residual below by the same factor;
+            # read the constant's comment for the fitted-bound warrant rather
+            # than inferring safety from this paragraph.
             #
             # RESIDUAL RISK, recorded because a verdict without one is not a
             # verdict: a genuine doubleheader whose two games carry identical
-            # per-team scores AND start under a second apart would be wrongly
-            # collapsed. Physically that is not a schedule (see
-            # _SAME_LISTING_MAX_DELTA_SECONDS) -- but `start_time` is a RECORDED
+            # per-team scores AND recorded starts within the bound would be
+            # wrongly collapsed. The physical-impossibility defence this
+            # paragraph used to lean on is RETIRED (see
+            # _SAME_LISTING_MAX_DELTA_SECONDS): `start_time` is a RECORDED
             # value, not an observed one, so a scorekeeper entering both games
-            # with one timestamp is the way it could happen. Note that case
-            # already collapses today via the byte-equality tiebreaker below,
-            # which applies no score check at all: this rule widens that window
-            # from 0s to 1s and adds a score gate, so it is NARROWER than the
-            # path it sits above. It does not create the exposure.
+            # at nominal times is the way it happens, and the corpus already
+            # holds a genuine doubleheader with an IDENTICAL scoreline. That
+            # case already collapses today via the byte-equality tiebreaker
+            # below, which applies no score check at all -- so this rule adds a
+            # score gate the tiebreaker lacks, while widening the window from 0s
+            # to 1800s. It is NOT uniformly narrower than the path it sits
+            # above; it is narrower on scores and wider on time.
             have_both_score_pairs = (
                 home_score is not None
                 and away_score is not None
@@ -1794,17 +1985,22 @@ class GameLoader:
                 == (existing_home_score, existing_away_score)
                 and _is_same_listing_delta(start_time, existing_start_time)
             ):
-                if start_time != existing_start_time:
-                    logger.warning(
-                        "Same-perspective double-listing: game %s → %s on %s. "
-                        "GameChanger listed one real game twice under distinct "
-                        "event ids (start times %s vs %s, within %.1fs); "
-                        "per-team scores agree (%s-%s). Collapsing to one row.",
-                        game_id, existing_id, game_date,
-                        start_time, existing_start_time,
-                        _SAME_LISTING_MAX_DELTA_SECONDS,
-                        home_score, away_score,
-                    )
+                # Logged UNCONDITIONALLY, including the byte-equal case. The
+                # bound is fitted (see _SAME_LISTING_MAX_DELTA_SECONDS), so
+                # every collapse this rule performs must be auditable after the
+                # fact; a collapse that logs nothing is exactly the one nobody
+                # can review.
+                logger.warning(
+                    "Same-perspective double-listing: game %s → %s on %s. "
+                    "GameChanger listed one real game twice under distinct "
+                    "event ids (start times %s vs %s, delta %ss, bound %.1fs); "
+                    "per-team scores agree (%s-%s). Collapsing to one row.",
+                    game_id, existing_id, game_date,
+                    start_time, existing_start_time,
+                    _listing_delta_seconds(start_time, existing_start_time),
+                    _SAME_LISTING_MAX_DELTA_SECONDS,
+                    home_score, away_score,
+                )
                 return existing_id
 
             if start_time is not None and existing_start_time is not None:
@@ -1830,11 +2026,455 @@ class GameLoader:
             )
             continue
 
-        return None
+        # The team-pair pass produced no usable candidate -- it either found
+        # none at all, or found some and ruled every one of them out.
+        # The divergence pass asks a DIFFERENT question -- is one of these two
+        # opponent team ROWS a stand-in for the other's real team? -- so it
+        # still runs. It is a separate query for exactly the reason the
+        # tolerant guard above is untouched: that guard's meaning depends on
+        # ``len(rows)`` counting TEAM-PAIR candidates, and widening the first
+        # query would silently change it.
+        return self._find_divergence_duplicate_game(
+            game_id, game_date,
+            home_team_id, away_team_id, home_score, away_score, start_time,
+        )
+
+    # ------------------------------------------------------------------
+    # Opponent-identity divergence pass (2026-08-15)
+    # ------------------------------------------------------------------
+
+    def _team_name(self, team_id: int) -> str | None:
+        """The ``teams.name`` for this id, or ``None`` if the row is gone."""
+        row = self._db.execute(
+            "SELECT name FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def _team_is_identity_bearing(self, team_id: int) -> bool:
+        """True when this ``teams`` row carries a GameChanger identity.
+
+        Identity means a non-NULL ``gc_uuid`` OR ``public_id``. A bare-name stub
+        carries neither: ``_ensure_team_row`` always passes ``gc_uuid=None``, so
+        a team row this loader CREATES is never identity-bearing. An
+        identity-bearing opponent row exists only because some other path -- a
+        scout of that team in its own right -- created it.
+        """
+        return (
+            self._db.execute(
+                "SELECT 1 FROM teams WHERE id = ? "
+                "AND (gc_uuid IS NOT NULL OR public_id IS NOT NULL)",
+                (team_id,),
+            ).fetchone()
+            is not None
+        )
+
+    def _find_divergence_duplicate_game(
+        self,
+        game_id: str,
+        game_date: str,
+        home_team_id: int,
+        away_team_id: int,
+        home_score: int | None,
+        away_score: int | None,
+        start_time: str | None,
+    ) -> str | None:
+        """Second dedup pass: one real game filed under two OPPONENT team rows.
+
+        GameChanger's second double-listing shape is not a repeated event id --
+        it is one real game whose two rows name two DIFFERENT ``teams`` rows for
+        one real opponent (typically the opponent's own identity-bearing row on
+        one side, and a bare-name stub a boxscore created on the other). The
+        natural key ``{home, away}`` structurally cannot match those, which is
+        why the team-pair pass above must run first and come back empty-handed.
+
+        ⚠️ THE SHARED TEAM IS STRUCTURAL, NOT "THE PERSPECTIVE TEAM". It is
+        whichever team both rows carry on the SAME side; the DIFFERING team may
+        be this load's opponent OR its own team, depending on which perspective
+        is being loaded. Keying on the perspective team instead would fire in
+        only one of the two load orders -- measured 2026-08-15, in all 26
+        in-window corpus pairs the shared team is a perspective of exactly one
+        row, uniformly the stub-headed one -- and the regenerate does not
+        control load order, so the collapse must be order-independent.
+
+        Gate, ALL required (each narrowing, none of them a trigger on its own):
+
+        * pairwise score agreement, the TRIGGER (never by total: 11-1 and 10-2
+          both total 12 and are plainly different games);
+        * IDENTICAL recorded start instants -- :data:`_DIVERGENCE_MAX_DELTA_SECONDS`,
+          NOT the same-pair window, and read that constant's comment before
+          widening it. Fails CLOSED on an absent or unparseable instant, and it
+          does NOT make the branch safe: two real games can share a recorded
+          stamp. It minimizes the exposure, it does not remove it;
+        * MIXED opponent identity -- exactly ONE of the two differing teams
+          carries a GC identity. Both identity-bearing REFUSES and both stubs
+          REFUSES.
+
+        The mixed-identity condition is a TRIGGER, not a survivor tie-break.
+        Measured over all 31 score-agreeing shared-team pairs (2026-08-15): both
+        known NON-twins are the ONLY both-identity-bearing pairs, and every
+        in-window twin is mixed. Refusing on both-identity costs 0 in-window
+        pairs; refusing on both-stub costs exactly 1, and that loss is taken.
+        ⚠️ ITS MECHANISM ARGUMENT IS WEAKER THAN IT READS, and the correction
+        matters more than the original claim. The argument was: a stub stands in
+        for a real opponent, so two rows BOTH carrying a GC identity are more
+        likely two genuinely different opponents. But measured 2026-08-15 over
+        EVERY mixed pair the corpus holds at ANY delta, the identity-bearing side
+        is the LOADING TEAM ITSELF in 28 of 28 (26 at 0s, 1 at 1,800s, 1 at
+        3,600s) -- and a loading team carries a public_id by
+        CONSTRUCTION, not because it is a distinct real opponent. So on this
+        population the test degenerates to "the other row's differing team is a
+        bare stub", which is true of any team a boxscore named but nobody
+        scouted. Honest bound: n=2 on the both-identity side, and the mechanism
+        does not do the work it appears to. It is a fail-closed narrowing that
+        removes an unevidenced destructive branch, NOT a validated
+        discriminator -- never re-read it as "both-identity proves a
+        doubleheader", and never treat it as the thing keeping two real games
+        apart. That job belongs to the identical-instant requirement above, and
+        even that only minimizes the exposure.
+
+        AMBIGUITY REFUSES. If two or more rows satisfy the whole gate, none is
+        chosen -- an arbitrary pick can hard-delete the wrong game on the
+        promotion path. Costs zero collapses on the measured corpus (max
+        candidate count 1), so it is a free fail-closed guard.
+
+        Orientation-flipped pairs are deliberately NOT candidates: this branch
+        has the weakest identity anchor, and on a flipped pair a raw
+        home-to-home score comparison pits the shared team's score against its
+        opponent's, so a "match" there can be an artifact.
+
+        Returns:
+            The existing ``game_id`` to collapse onto, or ``None``.
+        """
+        # Score agreement is the TRIGGER, so a missing score on either side is
+        # not a near-miss -- there is nothing to trigger on. Refuse before
+        # querying rather than falling through to a delta-only rule.
+        if home_score is None or away_score is None:
+            return None
+
+        rows = self._db.execute(
+            """
+            SELECT game_id, home_team_id, away_team_id, start_time
+            FROM games
+            WHERE game_date = ?
+              AND status = 'completed'
+              AND game_id != ?
+              AND home_score = ?
+              AND away_score = ?
+              AND (
+                -- Shared team on the SAME side. ⚠️ This is guard ONE of TWO:
+                -- ``_differing_team_ids`` independently rejects an
+                -- orientation-swapped pair, so neither is dead code and
+                -- removing either alone leaves the property standing (proven by
+                -- mutation -- only removing BOTH lets a flipped pair collapse).
+                -- Deliberate defence in depth on a branch that can delete a row.
+                (home_team_id = ? AND away_team_id != ?)
+                OR (away_team_id = ? AND home_team_id != ?)
+              )
+            ORDER BY start_time ASC NULLS LAST
+            """,
+            (game_date, game_id, home_score, away_score,
+             home_team_id, away_team_id,
+             away_team_id, home_team_id),
+        ).fetchall()
+
+        # Collect ALL qualifying candidates before choosing, rather than
+        # returning the first. See the ambiguity refusal below -- picking the
+        # first would be an ARBITRARY choice on a path that can delete a row.
+        qualifying: list[_DivergenceCandidate] = []
+        for existing_id, existing_home, existing_away, existing_start in rows:
+            # Which team is shared, and therefore which pair DIFFERS. The SQL
+            # already guarantees exactly one side matches; routing through the
+            # shared helper keeps the detector and the router from drifting.
+            differing = _differing_team_ids(
+                home_team_id, away_team_id, existing_home, existing_away,
+            )
+            if differing is None:
+                continue
+            incoming_differing, existing_differing = differing
+
+            # NOT ``_is_same_listing_delta`` -- this branch carries its own,
+            # much tighter bound (see _DIVERGENCE_MAX_DELTA_SECONDS). Fails
+            # CLOSED: an absent or unparseable instant on either side yields
+            # None and refuses.
+            delta = _listing_delta_seconds(start_time, existing_start)
+            if delta is None or delta > _DIVERGENCE_MAX_DELTA_SECONDS:
+                continue
+
+            # ⚠️ THE SENTINEL IS NOT A STUB FOR ONE REAL OPPONENT -- it is the
+            # SHARED catch-all every unresolvable opponent name-dedups onto
+            # (``_resolve_team_ids``), and it can never be identity-bearing
+            # because ``_ensure_team_row`` passes ``gc_uuid=None``. So it reads
+            # as "the stub" against ANY known opponent, which would let a game
+            # against a genuinely different unresolvable opponent collapse into
+            # -- and on the promote branch DELETE -- a game against a known one.
+            # Refusing costs ZERO on the live corpus (measured 2026-08-15: zero
+            # teams carry the sentinel name at all), so it is free.
+            if _UNKNOWN_OPPONENT_NAME in (
+                self._team_name(incoming_differing),
+                self._team_name(existing_differing),
+            ):
+                logger.info(
+                    "Opponent-divergence candidate %s / %s on %s REFUSED: one "
+                    "side is the shared %r sentinel, which stands in for every "
+                    "unresolvable opponent and cannot evidence one real team.",
+                    game_id, existing_id, game_date, _UNKNOWN_OPPONENT_NAME,
+                )
+                continue
+
+            incoming_bearing = self._team_is_identity_bearing(incoming_differing)
+            existing_bearing = self._team_is_identity_bearing(existing_differing)
+            if incoming_bearing == existing_bearing:
+                logger.info(
+                    "Opponent-divergence candidate %s / %s on %s REFUSED: teams "
+                    "%d and %d are %s, and this branch requires exactly one "
+                    "identity-bearing side.",
+                    game_id, existing_id, game_date,
+                    incoming_differing, existing_differing,
+                    "both identity-bearing" if incoming_bearing else "both stubs",
+                )
+                continue
+
+            qualifying.append(_DivergenceCandidate(
+                existing_id, incoming_differing, existing_differing,
+                existing_start, delta, incoming_bearing,
+            ))
+
+        if not qualifying:
+            return None
+
+        # ⚠️ AMBIGUITY REFUSAL. Two or more rows satisfying the whole gate is not
+        # a licence to pick one -- the choice would be arbitrary, and on the
+        # promotion path the loser's ``games`` row is HARD-DELETED, so an
+        # arbitrary choice can delete the wrong game. Nothing in the gate
+        # distinguishes "one real game listed three times" from "several real
+        # games that happen to share a shared team, a scoreline and a recorded
+        # instant", and this branch's whole posture is to refuse what it cannot
+        # tell apart. Measured 2026-08-15 over the live corpus: of the games
+        # with any qualifying candidate, the MAXIMUM candidate count is 1, so
+        # this refusal costs ZERO real collapses today -- it is a fail-closed
+        # guard against a shape the corpus does not yet contain, adopted
+        # precisely because it is free.
+        if len(qualifying) > 1:
+            logger.warning(
+                "Opponent-divergence AMBIGUOUS for game %s on %s: %d candidates "
+                "(%s) all satisfy the gate. Refusing to choose -- an arbitrary "
+                "pick can delete the wrong games row. Leaving all rows.",
+                game_id, game_date, len(qualifying),
+                ", ".join(c.existing_id for c in qualifying),
+            )
+            return None
+
+        candidate = qualifying[0]
+        logger.warning(
+            "Opponent-identity divergence: game %s → %s on %s. One real "
+            "game filed under two opponent team rows (%d vs %d, identity "
+            "on the %s side); start times %s vs %s, delta %ss, bound "
+            "%.1fs; per-team scores agree (%s-%s). Collapsing to one row.",
+            game_id, candidate.existing_id, game_date,
+            candidate.incoming_differing, candidate.existing_differing,
+            "incoming" if candidate.incoming_bearing else "canonical",
+            start_time, candidate.existing_start,
+            candidate.delta_seconds,
+            # This branch's OWN bound, not the same-pair window. The warning is
+            # this destructive path's audit trail, so naming the wrong constant
+            # would misstate WHY a row was collapsed or deleted.
+            _DIVERGENCE_MAX_DELTA_SECONDS,
+            home_score, away_score,
+        )
+        return candidate.existing_id
+
+    def _classify_divergence_collapse(
+        self, canonical_id: str, home_team_id: int, away_team_id: int,
+    ) -> str | None:
+        """Classify a collapse as a divergence one, and say which row wins.
+
+        Returns ``_DIVERGENCE_PROMOTE`` when the canonical row names the
+        bare-name STUB (so the incoming row must survive and absorb it),
+        ``_DIVERGENCE_PRESERVE`` when the canonical already names the
+        identity-bearing team (a plain redirect that must NOT overwrite the
+        canonical orientation), or ``None`` when this is an ordinary team-pair
+        collapse.
+
+        Derived from the canonical ROW rather than threaded out of
+        ``_find_duplicate_game``, which keeps this order-independent and leaves
+        that function's signature (and its many direct-calling tests) alone. The
+        derivation is exact: the team-pair pass can only return a row whose
+        ``{home, away}`` equals the incoming pair in one order or the other, so
+        a canonical that shares exactly ONE side is necessarily a divergence
+        match.
+
+        Work item 2's mixed-identity TRIGGER means only one shape ever reaches
+        here: exactly one side identity-bearing. Both-identity and both-stub
+        never collapse, so they never reach the redirect at all.
+
+        ⚠️ THE ``PRESERVE`` HALF IS NOT COSMETIC. Without it a SAME-perspective
+        divergence redirect leaves ``preserve_scores`` False, and the upsert
+        then overwrites the canonical row's orientation tuple with the incoming
+        one -- burying the identity-bearing opponent under the stub and making
+        the surviving identity depend on load order, which is exactly what the
+        promotion exists to prevent. Caught by
+        ``test_divergence_same_side_score_agreeing_collapses``.
+        """
+        row = self._db.execute(
+            "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",
+            (canonical_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        canonical_home, canonical_away = row
+
+        differing = _differing_team_ids(
+            home_team_id, away_team_id, canonical_home, canonical_away,
+        )
+        if differing is None:
+            return None                       # an ordinary team-pair collapse
+        _incoming_differing, canonical_differing = differing
+
+        if self._team_is_identity_bearing(canonical_differing):
+            return _DIVERGENCE_PRESERVE
+        return _DIVERGENCE_PROMOTE
+
+    def _promote_over_stub_headed_row(
+        self,
+        summary: GameSummaryEntry,
+        canonical_id: str,
+        game_date: str,
+        home_team_id: int,
+        away_team_id: int,
+        home_score: int | None,
+        away_score: int | None,
+        own_data: dict | None,
+        own_team_id: int,
+        opp_data: dict | None,
+        opp_team_id: int,
+    ) -> LoadResult:
+        """Load under the INCOMING event id, then merge the stub-headed row in.
+
+        ⚠️ ORDERING IS THE SHARPEST HAZARD IN THIS CHUNK, and it is what makes
+        the fail-closed fallback real rather than vacuous.
+        ``merge_duplicate_game`` refuses only when the two rows' perspective
+        sets INTERSECT; an EMPTY set on either side yields no intersection and
+        the merge PROCEEDS. ``_upsert_game_and_stats`` is what records this
+        row's ``game_perspectives`` entry, so running the merge before it
+        returns would leave the new row's set empty, let a SAME-perspective pair
+        through unrefused, and destroy a real game. The merge therefore runs
+        AFTER the upsert, and a test pins it (the corpus contains such a pair,
+        so the shape is real rather than hypothetical).
+
+        ``preserve_scores`` is False, reasoned rather than inherited. E-268
+        protects the canonical row's orientation tuple on a CROSS-perspective
+        REDIRECT, so the first-loaded perspective's scores do not flap. This is
+        not a redirect: it writes THIS perspective's own row under its OWN event
+        id, which is the same situation as an ordinary same-perspective reload,
+        where a genuine scorekeeper correction must still land. The gate has
+        already forced the two rows' scores to agree, so there is no
+        cross-perspective disagreement to protect -- and the orientation this
+        step exists to change is precisely the one it must be free to write.
+
+        On a merge REFUSAL both rows are left standing and no remap is
+        recorded: a refusal costs a duplicate row, a wrong merge destroys a
+        game.
+        """
+        source_event_id = summary.event_id
+        logger.warning(
+            "Identity-bearing promotion: loading game %s under its OWN event id "
+            "and merging stub-headed row %s into it (date %s). The canonical "
+            "row names a bare-name opponent stub; the surviving row must carry "
+            "the opponent's GameChanger identity.",
+            source_event_id, canonical_id, game_date,
+        )
+
+        result = self._upsert_game_and_stats(
+            summary, game_date,
+            home_team_id, away_team_id, home_score, away_score,
+            own_data, own_team_id, opp_data, opp_team_id,
+            preserve_scores=False,
+        )
+        if result.errors:
+            # The incoming row did not land cleanly; do not delete anything on
+            # the strength of a half-written survivor.
+            return result
+
+        # ⚠️ ASSERT THE GUARD'S PREMISE POSITIVELY -- ``result.errors`` CANNOT
+        # carry it. ``_upsert_game_and_stats`` catches ``sqlite3.Error`` on the
+        # ``game_perspectives`` INSERT, logs it, and builds its ``LoadResult``
+        # AFTERWARDS, so a failed perspective write leaves ``errors == 0``. The
+        # ordering above would then be satisfied while the thing it exists to
+        # guarantee -- a NON-EMPTY perspective set on the incoming row -- was
+        # never true, and ``merge_duplicate_game`` would find no intersection
+        # and delete the canonical row unrefused. "Ran without errors" is not
+        # the same fact as "the row is there", so ask for the row.
+        if not self._game_perspective_recorded(source_event_id, self._team_ref.id):
+            logger.error(
+                "Refusing the identity-bearing promotion of %s over %s: this "
+                "load's game_perspectives row is absent, so the merge's "
+                "disjointness refusal would be VACUOUS. Leaving both rows.",
+                source_event_id, canonical_id,
+            )
+            return result
+
+        merged = self._merge_twin_or_rollback(canonical_id, source_event_id)
+        if merged is not None:
+            # sqlite3.Error mid-merge: already rolled back and counted.
+            return merged
+
+        # ``_merge_twin_or_rollback`` returns None for a clean merge, a
+        # structural REFUSAL, and a vanished source alike, so the row itself is
+        # the arbiter of whether anything was deleted.
+        if not self._game_row_exists(canonical_id):
+            self._record_deleted_row_redirect(canonical_id, source_event_id)
+        return result
+
+    def _record_deleted_row_redirect(
+        self, deleted_game_id: str, surviving_game_id: str,
+    ) -> None:
+        """Point every redirect at the survivor after a row is deleted.
+
+        The generator's plays and spray stages remap every SOURCE event id
+        through ``redirect_map`` before filing, so an id resolving to a deleted
+        ``games`` row silently strands those stages -- a skip, not an error.
+        Two entries need attention and both cost one line:
+
+        * the deleted row's OWN id, added unconditionally. At spec time the
+          deleted row usually belongs to a different perspective's earlier run,
+          so its id is normally absent from this run's crawl set and the entry
+          is harmless insurance -- but "usually" is not a guarantee worth
+          relying on at a seam whose failure mode is a silent skip.
+        * any entry already POINTING AT the deleted row, which must follow it.
+          Those are invisible from the deleted id alone.
+        """
+        for source, destination in list(self.redirect_map.items()):
+            if destination == deleted_game_id:
+                self.redirect_map[source] = surviving_game_id
+        previous = self.redirect_map.get(deleted_game_id)
+        if previous is not None and previous != surviving_game_id:
+            logger.warning(
+                "Redirect for deleted game %s moves from %s to %s.",
+                deleted_game_id, previous, surviving_game_id,
+            )
+        self.redirect_map[deleted_game_id] = surviving_game_id
 
     # ------------------------------------------------------------------
     # Twin merge (E-261-03b)
     # ------------------------------------------------------------------
+
+    def _game_perspective_recorded(
+        self, game_id: str, perspective_team_id: int,
+    ) -> bool:
+        """True when this game/perspective pair is actually recorded.
+
+        Exists so the promotion can PROVE its non-empty perspective set rather
+        than infer it from an error count that structurally cannot report the
+        failure (see ``_promote_over_stub_headed_row``).
+        """
+        return (
+            self._db.execute(
+                "SELECT 1 FROM game_perspectives "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                (game_id, perspective_team_id),
+            ).fetchone()
+            is not None
+        )
 
     def _game_row_exists(self, game_id: str) -> bool:
         """Return True if a ``games`` row already exists under ``game_id``."""

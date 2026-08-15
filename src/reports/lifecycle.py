@@ -1067,10 +1067,23 @@ _TEAM_BASE_PRED = (
 # Belt-and-suspenders GAME-CHILD reference clause (TN-2): a team referenced by a
 # surviving game's child row via ``team_id``/``perspective_team_id`` (or
 # ``batting_team_id``/``perspective_team_id`` on ``plays``, or
-# ``perspective_team_id`` on ``game_perspectives``).  VACUOUSLY TRUE on real data
-# -- a gameless team cannot carry such a row (the row belongs to a game the team
-# participates in -> the team would have a ``games`` row -> contradiction).  It
-# fires only in a synthetic corrupt state and converts a reclamation-halting
+# ``perspective_team_id`` on ``game_perspectives``).
+#
+# ⚠️ NO LONGER VACUOUS (2026-08-15).  This clause was documented as vacuously
+# true on real data -- "a gameless team cannot carry such a row, because the row
+# belongs to a game the team participates in, so the team would have a ``games``
+# row" -- and that contradiction is now BROKEN by the opponent-identity
+# divergence collapse in ``GameLoader`` (see ``.claude/rules/data-model.md``,
+# Same-listing Dedup).  Both of its branches leave a bare-name opponent stub
+# holding stat rows on a game it has no ``games`` row for: the PROMOTE branch
+# because ``merge_duplicate_game`` re-points ``game_id`` only, so re-pointed
+# child rows keep ``team_id`` = stub while the stub's own ``games`` row is
+# DELETED; the PRESERVE branch because the stub is created and its stats filed
+# under the canonical id while no ``games`` row is ever written for it.
+# So this clause now fires on REAL data, once per divergence collapse, and the
+# excluded team accumulates.  That is the intended graceful behaviour -- but do
+# NOT read a hit here as evidence of corruption.  It still converts a
+# reclamation-halting
 # ``IntegrityError`` (a surviving game-child FK at DELETE FROM teams -- which
 # would ROLLBACK the ENTIRE sweep) into a graceful correct exclusion, with a WARN
 # (see :func:`_warn_stat_referenced_gameless_teams`).
@@ -1232,8 +1245,13 @@ def _warn_stat_referenced_gameless_teams(conn: sqlite3.Connection) -> None:
     (graceful skip instead of a reclamation-halting ``IntegrityError``).  That
     exclusion silently swallows exactly the corruption signal the loud abort
     would have surfaced, so we log it -- mirroring the FK-safe-orphan stub+WARN
-    convention (``.claude/rules/data-model.md``).  Vacuously a no-op on real
-    data (TN-2).
+    convention (``.claude/rules/data-model.md``).
+
+    ⚠️ NO LONGER a no-op on real data (2026-08-15).  The opponent-identity
+    divergence collapse leaves a bare-name opponent stub holding stat rows on a
+    game it has no ``games`` row for, so this fires once per such collapse.  The
+    message therefore names BOTH causes: a benign divergence stub is expected
+    and needs no action; an operator backfill is the one worth investigating.
     """
     sql = (
         f"SELECT id FROM teams t "
@@ -1242,8 +1260,11 @@ def _warn_stat_referenced_gameless_teams(conn: sqlite3.Connection) -> None:
     for (team_id,) in conn.execute(sql).fetchall():
         table = _first_stat_reference_table(conn, team_id)
         logger.warning(
-            "Team id=%s excluded from reclamation despite no games -- possible "
-            "orphaned game-child row in %s (operator backfill).",
+            "Team id=%s excluded from reclamation despite no games -- "
+            "game-child row in %s. EXPECTED for a bare-name opponent stub left "
+            "by an opponent-identity divergence collapse (benign, no action). "
+            "Investigate only if no such collapse explains it -- e.g. an "
+            "operator backfill.",
             team_id,
             table,
         )

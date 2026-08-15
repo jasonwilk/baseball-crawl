@@ -23,12 +23,28 @@ class LoadResult:
         loaded: Number of records successfully upserted into the database.
         skipped: Number of records skipped due to missing required fields.
         errors: Number of records that caused unexpected errors.
-        redirect_map: ``{source_event_id: canonical_game_id}`` entries produced
-            by ``GameLoader`` when cross-perspective dedup redirects a game to an
-            existing canonical row (E-244). Empty for non-redirected loads.
-            Carries the redirect to the report generator's plays/spray stages so
-            those rows are filed under the canonical id rather than skipped under
-            the now-orphaned source event id.
+        redirect_map: ``{stale_event_id: surviving_game_id}`` entries produced
+            by ``GameLoader`` when a dedup collapse leaves an event id with no
+            ``games`` row of its own. Empty for non-redirected loads. Carries
+            the mapping to the report generator's plays/spray stages so those
+            rows are filed under the surviving id rather than skipped under an
+            id that no longer resolves.
+
+            ⚠️ IT IS NO LONGER CROSS-PERSPECTIVE-ONLY (2026-08-15). Two distinct
+            entry shapes now exist and they point in OPPOSITE directions:
+
+            * REDIRECT (E-244, unchanged): the incoming game is filed under an
+              existing canonical row, so the key is the INCOMING source event
+              id and no row is deleted.
+            * PROMOTION (opponent-identity divergence): the incoming row wins
+              and the canonical stub-headed row is MERGED AWAY AND DELETED, so
+              the key is the DELETED row's event id -- an id that had a row a
+              moment ago. Entries already pointing AT that deleted row are
+              rewritten to follow it.
+
+            So a key here means "this id does not resolve to a games row",
+            NOT "this id belonged to another perspective". Code reasoning about
+            these entries must not assume the key was never persisted.
     """
 
     loaded: int = field(default=0)

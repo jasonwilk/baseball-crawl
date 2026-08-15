@@ -2,8 +2,9 @@
 
 # Same-listing dedup: DETECTION at load time
 
-**Date**: 2026-08-13 · **Status**: `READY` — written, codex-reviewed (7 rounds, clean), committed;
-waiting only for a fresh execution session.
+**Date**: 2026-08-13 · **Status**: `COMPLETE (this commit)` — executed 2026-08-15. Two spec claims
+were REFUTED at execution and the RULE was narrowed twice (once by audit, once by operator ruling
+on a `/code-review` finding); see the Progress log and the amended step-6 acceptance.
 **Source**: `.project/specs/README.md` NOW — the ruled sequence after the dedup fix landed. Supersedes
 the detection half of `2026-08-10-same-listing-dedup-window.md` (`STUB`); that stub's REPAIR half is
 de-scoped by the Regeneration hazard ruling (2026-08-12) and dies with the full regenerate.
@@ -570,7 +571,12 @@ reports the PIPE.
      single SAME-perspective pair in the bucket, so it is refused twice over — once by the trigger and
      again by `merge_duplicate_game`'s disjointness pre-classification. A `0` here would mean
      something collapsed that the spec says must not; treat it as a FAILURE, not a bonus.
-   - **(c) 1,800s → 0.** The mixed-identity probable twin collapses.
+   - **(c) 1,800s → 1, NOT 0. CHANGED AT EXECUTION** (operator ruling 2026-08-15, on a
+     `/code-review` finding). The divergence branch now requires IDENTICAL recorded instants
+     (`_DIVERGENCE_MAX_DELTA_SECONDS = 0.0`), so the probable twin at 1,800s no longer collapses.
+     A `0` here would mean the branch is still running the same-pair window and is a FAILURE.
+     ⚠ This is the "a narrowing fix invalidates acceptance criteria" shape: the count below was
+     written for the wider rule and had to move with it.
    - **(c) 3,600s → 1, unchanged.** Expected to persist — unadjudicated and out of window.
    - **(b) unchanged at 92, floor still 5,400s.** The doubleheaders must not have moved at all.
 
@@ -594,6 +600,29 @@ Neither review can be launched from inside a session — the execution session m
 
 ## Residuals this chunk creates or names
 
+- ⚠ **THE DIVERGENCE BRANCH'S DELTA-0 BOUND MINIMIZES THE EXPOSURE; IT DOES NOT CLOSE IT.**
+  Operator ruling 2026-08-15, and it must be restated honestly wherever this rule is described.
+  Two genuinely different games CAN share a recorded start instant — `start_time` is a RECORDED
+  value, not an observed one, which this very spec proves in work item 1 against its own earlier
+  claim (a scorekeeper entering both halves at nominal times, a resumed suspended game, a
+  forfeit). So a same-instant + same-scoreline + same-side + mixed-identity pair can still be two
+  real games, and collapsing it HARD-DELETES one of them. What delta-0 buys is only that the repo
+  already collapses identical-instant pairs via the byte-equality tiebreaker with no score check
+  at all, so this branch stays strictly narrower than shipped behaviour. The direction is chosen
+  by an asymmetry that is not close: **a wrong merge hard-deletes a real game forever; a missed
+  duplicate sits visibly in a report until someone widens the rule.** Fail CLOSED — anyone
+  widening this bound owes evidence, not convenience.
+- **The mixed-identity trigger does NOT do the work the spec argued it does.** Measured at
+  execution over EVERY mixed pair the corpus holds at ANY delta: the identity-bearing side is **the
+  loading team itself in 28 of 28** (26 at 0s, 1 at 1,800s, 1 at 3,600s), and a loading team
+  carries a `public_id` by CONSTRUCTION, not because it is a
+  distinct real opponent. The trigger therefore degenerates to "the other row's differing team is a
+  bare stub" — true of any team a boxscore named but nobody scouted, including a genuinely
+  DIFFERENT real team (tournament pool play; a program's varsity and JV facing one opponent on one
+  date). It still earns its place by deleting an unevidenced destructive branch, but it is not what
+  keeps two real games apart. `n=2` on the both-identity side, unchanged.
+- **The 1,800s divergence probable twin now stays uncollapsed too** (9-of-13 overlap), joining the
+  3,600s pair. Cost of the delta-0 ruling: exactly one corpus pair.
 - **The 3,600s divergence pair stays uncollapsed and the regenerate will recreate it.** Accepted,
   fail-closed by design: it is unadjudicated (F3), and reaching it needs a 60-minute window that F3's
   duration argument rules unsafe.
@@ -603,6 +632,28 @@ Neither review can be launched from inside a session — the execution session m
 - **Three doctrine sites claim a cross-perspective-stable `event_id`; the probe contradicts them for
   unmanaged teams** (F2). Unreconciled, and left that way deliberately — this chunk records the
   premise and its method, it does not rewrite API doctrine on one probe.
+- **A divergence collapse makes a documented-IMPOSSIBLE state routine.** `_TEAM_STAT_EXISTS` in
+  `src/reports/lifecycle.py` carried the claim that a gameless team cannot hold a game-child stat
+  row ("VACUOUSLY TRUE on real data ... fires only in a synthetic corrupt state"). BOTH collapse
+  branches break that contradiction, so `_warn_stat_referenced_gameless_teams` now fires on real
+  data and previously blamed "operator backfill" — a cause that did not happen. The comment, the
+  docstring and the message were corrected in this commit; a hit there is expected and benign.
+  Found by `/code-review`; it is the THIRD inbound-sweep miss in this chunk, and the first in a
+  file the spec's Files list never named.
+- **The PRE-EXISTING twin-merge path carries the same stranding hazard, unguarded.** At the
+  redirect site the E-261 twin merge deletes the row under `source_event_id`; `redirect_map[source]
+  = canonical` is already set, but any EARLIER entry pointing AT `source` (a chain `Y -> S`, then
+  `S -> C`, reachable in a 3-way twin group within one run) is left pointing at a deleted row —
+  the same silent-skip failure `_record_deleted_row_redirect` exists to prevent, and that site does
+  not call it. The fix is one line (`self._record_deleted_row_redirect(source_event_id,
+  canonical_id)` after a successful merge). NOT applied here: it changes a pre-existing destructive
+  path after every review had already run, and this chunk's discipline is not to ship unreviewed
+  edits to a delete seam. Offered to the operator; cheap to land in its own chunk.
+- **The divergence branch does not consult `incoming_schedule_count`.** Recorded rather than fixed:
+  it looks like a free fail-closed narrowing, but a double-listing can itself appear twice in the
+  own schedule, so a `>= 2` refusal could silently disable the branch entirely. The cost cannot be
+  measured from the DB — it needs a live crawl. The post-regenerate acceptance detects it if it
+  ever fires, because `(c) 0s` would return 27 instead of 1.
 - **After a promotion merge, child stat rows keep the stub team's `team_id`** — the seam re-points
   `game_id` only (F5). Consequence to state, not to fix here: a stub team referenced by a surviving
   game's child row is NOT an orphan, so `reclaim_orphan_reference_data` will keep it alive.
@@ -671,3 +722,141 @@ Neither review can be launched from inside a session — the execution session m
   the PII gates (docs-only, step 5). But the spec had NOT recorded the step-5 gates the EXECUTION
   chunk owes, so a fresh session could have missed that `/security-review` is required — the
   promotion path hard-deletes a `games` row. Added the "Reviews owed at EXECUTION" section.
+- **2026-08-15 — EXECUTED.** Step 0 gate PASSED: `bb creds check` web `[OK] 200 OK`; 26 eligible
+  pairs (expected 26); both positive controls `True` (35 and 32 summaries); `shared event_ids = 0`.
+  F2 holds. Steps 1 / 1b / 1c reproduced every pinned number exactly. RED baseline re-confirmed
+  (`RC=5`, `37 deselected / 0 selected`). Final: **16 new tests, full suite 4,529 passed RC=0**.
+  `bb report reconcile-scoreboard` recorded (`batting.AB 75→191`, `no_plays_units 484→1737`, gate
+  red on the standing growing-corpus residual); `data/app.db` mtime unchanged all session, so no
+  ingestion ran and before/after are necessarily one measurement.
+- **2026-08-15 — TWO SPEC CLAIMS REFUTED BY AUDIT, before any code.**
+  (1) Work item 2's *"sharing the perspective team"* is wrong and F3's *"shared team"* is right.
+  Measured: in all 26 in-window mixed pairs the shared team is a perspective of exactly ONE row,
+  uniformly the STUB-headed one — so the perspective reading fires only when the stub-headed row
+  loads SECOND, which generation order decides, and it leaves work item 3's promotion UNREACHABLE.
+  Implemented the STRUCTURAL reading, which is what the census and step 1c already measure.
+  (2) Step 2's *"failure count equals the number of new tests"* is unsatisfiable: the negative
+  controls the spec itself mandates (both-identity, both-stub, flipped, doubleheaders, the 1,801s
+  boundary) assert two rows SURVIVE, which is true pre-change. Honest split recorded instead —
+  **5 RED, the rest controls** — and every control proved by MUTATION rather than by RED.
+- **2026-08-15 — a defect and a test gap, both caught in-flight.** The plain-redirect half of a
+  divergence collapse left `preserve_scores` False, so a SAME-perspective redirect overwrote the
+  canonical orientation and BURIED the identity-bearing opponent under the stub — making the
+  surviving identity load-order-dependent, exactly what work item 3 exists to prevent. Fixed by
+  forcing `preserve_scores=True` on that path. Separately, mutation showed
+  `test_divergence_both_stub_refused` passed with the trigger REMOVED: a cross-perspective
+  both-stub pair is structurally impossible on the load path, so the merge refusal masked it. The
+  trigger now carries a direct assertion with a positive control.
+- **2026-08-15 — `/code-review`: 2 HIGH, 1 MEDIUM, 1 LOW.** All four real; two fixed in code, one
+  answered by operator ruling, and one reviewer REMEDY refuted by measurement.
+  * MEDIUM (fixed): the promotion's ordering guard rested on `result.errors`, which structurally
+    CANNOT see a failed `game_perspectives` INSERT — that write is caught, logged, and the
+    `LoadResult` is built afterwards. The guard now POSITIVELY asserts the perspective row exists
+    (`_game_perspective_recorded`). Mutation-proven: without it the canonical row is deleted
+    unrefused. "Ran without errors" is not "the row is there".
+  * LOW (fixed): the window's warrant conflated two populations — the `(600s, 5400s)` empty
+    interval and both 3× margins are the SAME-PAIR population's, while the divergence population
+    has deltas at 1,800 and 3,600 inside it. Both the constant's comment and `data-model.md` now
+    name the population and state the ZERO margin plainly.
+  * HIGH ×2 (operator ruling): both reduce to the degenerate mixed-identity trigger above.
+    Ruling — tighten the DIVERGENCE branch to identical recorded instants
+    (`_DIVERGENCE_MAX_DELTA_SECONDS = 0.0`), leaving the same-pair window at 1,800s. Step 6's
+    `(c) 1,800s` acceptance moved from 0 to 1 accordingly.
+  * REFUTED remedy: the reviewer proposed requiring NAME SIMILARITY between the two differing team
+    rows. Measured — only **1 of 26** in-window mixed pairs has equal names (the stubs are
+    tournament-event labels and `TBD-<date>` placeholders), so it would refuse 25 of 26 real twins.
+    Its `incoming_schedule_count` suggestion also cannot discriminate: that count is keyed
+    `(date, opponent_name)` and is 1 in both the twin and the pool-play case.
+- **2026-08-15 — operator rulings.** (a) CLAUDE.md byte cap raised 11,264 → 11,392 so the THIRD
+  destructive condition could be named in the only always-on file (11,250 + 128 = 11,378); the cap
+  number lives in agent memory, not the repo, and was updated there. (b) Delta-0 on the divergence
+  branch, *"with one demand — the residual must state honestly that even delta-0 doesn't fully
+  close the hole … this is exposure-minimization, not exposure-elimination. Fail closed."* Recorded
+  verbatim in the Residuals above, in the constant's comment, and in `.claude/rules/data-model.md`.
+- **2026-08-15 — codex second-opinion review (`scripts/codex-review.sh uncommitted`): 1 High,
+  1 Medium, 2 Low. ZERO overlap with `/code-review`'s four findings** — the two reviewers caught
+  disjoint sets, which is the whole argument for running both. All four accepted and fixed.
+  * **High — no AMBIGUITY refusal.** `_find_divergence_duplicate_game` returned the FIRST
+    qualifying candidate and never refused a multi-candidate set; on the promotion path an
+    arbitrary pick can hard-delete the wrong `games` row. Now REFUSES on 2+ qualifying candidates.
+    Measured before adopting: over the live corpus the maximum qualifying-candidate count for any
+    game is **1**, so the guard costs ZERO real collapses — a free fail-closed narrowing.
+    ⚠ Adopting it INVALIDATED two of this chunk's own positive controls (they presented two
+    candidates and began refusing); they were re-scoped to isolate a single candidate rather than
+    weakened. Second instance this chunk of "a narrowing fix invalidates acceptance criteria".
+  * **Medium — the divergence WARNING quoted the wrong bound** (`_SAME_LISTING_MAX_DELTA_SECONDS`,
+    1800.0s) while the branch enforces 0.0s. That warning is this destructive path's AUDIT TRAIL,
+    so it misstated why a row was collapsed or deleted. Fixed, and pinned by a dedicated test —
+    the mutation showed **no existing test caught it** (54 passed with the wrong constant).
+  * **Low ×2 — the inbound sweep was incomplete in two ways I had checked too narrowly.** (a) In
+    `.claude/rules/architecture-subsystems.md` I rewrote the paragraph's OPENING sentence but a
+    LATER sentence in the same paragraph still declared the old `{source_event_id:
+    canonical_game_id}` contract — the file contradicted itself. (b) `src/reports/generator.py`
+    states the contract in TWO consumer docstrings and was never in the spec's Files list; the
+    obligation is "what points AT a thing you redefine", and consumers point at it. Both fixed,
+    plus the `GameLoader.redirect_map` construction comment. A repo-wide grep for the old contract
+    string now returns nothing.
+  * Also removed: an orphaned `return None` left dead by the ambiguity restructure, caught by
+    reading the surrounding lines rather than trusting the diff.
+- **2026-08-15 — the line of march contradicted itself** and codex caught that too: `NOW` recorded
+  the chunk as landed while `NEXT` still listed it `READY 2026-08-13`. `CLAUDE.md` tells every
+  session to read that file first, so a stale `READY` could have misrouted the next execution
+  session into re-doing this chunk. Struck.
+- **2026-08-15 — `/simplify` (4 parallel agents: reuse, simplification, efficiency, altitude).**
+  Note the ORDERING cost, since CLAUDE.md puts `/simplify` BEFORE `/code-review` precisely to avoid
+  it: this ran AFTER both reviews, so its edits are unreviewed by `/code-review` and by codex.
+  * **Efficiency: no findings, and measured rather than asserted.** The new divergence query uses
+    the SAME index and plan as the pre-existing team-pair query (`idx_games_game_date`), timed at
+    **10.0 µs/game vs 10.0 µs/game** — against a ≥1 s per-game HTTP floor (`min_delay_ms=1000` +
+    jitter), five orders of magnitude down. Candidate rate measured at ~0.04/game.
+  * **Applied:** removed a DUPLICATE call site into the divergence entry point (an empty `rows`
+    already falls through to the single call at the end); single-sourced the "which team is shared,
+    which differs" derivation into a pure `_differing_team_ids` used by BOTH the detector and the
+    router (two hand-written copies were guarding a hard delete — the drifting-copy shape
+    `canonical-seams.md` names as this repo's recurring defect); replaced the qualifying 5-tuple
+    with a `_DivergenceCandidate` NamedTuple, which also lets the audit WARNING reuse the delta it
+    already computed; folded `preserve_scores` from compute-then-override into ONE short-circuiting
+    rule that reuses `_game_perspective_recorded` (the PRESERVE path no longer issues a discarded
+    query); merged `_load_div_listing` back into `_load_listing` — the split had left the
+    divergence tests unable to drive `date_source_instant`, the anti-vacuity control this test
+    file's own hazard note requires; consolidated the repeated same-perspective seed and the
+    copy-pasted identity fixture guard; re-wrapped two over-long docstring lines in `generator.py`.
+  * **Skipped, with reason:** the altitude agent's headline — thread the finder's decision to the
+    redirect site via the repo's `*_with_provenance` pattern instead of re-deriving from the
+    canonical row. Its concrete failure mode (a widened detector whose router maps the new shape to
+    `None`) is closed by the shared `_differing_team_ids` above, at far smaller blast radius; and
+    deriving from durable row state rather than an in-memory decision is defensible on its own.
+    Recorded rather than argued away.
+  * ⚠️ **Mutations RE-RUN after the refactor, per the testing rule — and one changed meaning.**
+    Widening the SQL same-side clause is no longer caught alone, because `_differing_team_ids` now
+    rejects orientation-swapped pairs independently. That is defence in depth, not lost coverage:
+    the DOUBLE mutation (both guards removed) IS caught by
+    `test_divergence_orientation_flipped_stays_two_rows`, so the test still pins the property. Both
+    guards are now commented as guard-one-of-two so neither gets deleted as redundant. Every other
+    mutant still discriminates: 1799s, 1.0s, mixed-identity trigger, both score filters, the
+    perspective premise check, the divergence bound, and the ambiguity refusal.
+- **2026-08-15 — second `/code-review` pass (post-`/simplify`): 2 MEDIUM, 2 LOW. All four real.**
+  * **MEDIUM (fixed) — the comment block at the collapse DECISION SITE still described the retired
+    1-second rule.** The constant's own comment was rewritten at length to retire that claim, but
+    the copy at the site that USES it was untouched: "sub-second apart", "the sub-second delta only
+    NARROWS it", and — false by three orders of magnitude — "this rule widens that window from 0s
+    to 1s ... so it is NARROWER than the path it sits above". An auditor read a 1s rule while the
+    code ran a 1,800s one. Corrected, including the now-wrong "uniformly narrower" verdict: the
+    rule is narrower on SCORES and wider on TIME.
+  * **MEDIUM (fixed) — see the `_TEAM_STAT_EXISTS` residual above.**
+  * **LOW (fixed) — the `"Unknown Opponent"` SENTINEL is a shared catch-all, not one team's stub.**
+    Every unresolvable opponent name-dedups onto ONE row that can never be identity-bearing, so it
+    read as "the stub" against ANY known opponent — letting a game against a genuinely different
+    unresolvable opponent collapse into, and on PROMOTE delete, a game against a known one. Now
+    refused. Measured free: zero teams in the live corpus carry the sentinel name at all.
+    Mutation-proven.
+  * **LOW (recorded, not fixed) — `incoming_schedule_count` residual above.**
+- **2026-08-15 — peer trainer session independently reproduced the mixed-identity finding** and
+  flagged an arithmetic discrepancy: it measured 26/26, this session reported 27/27. Re-measured —
+  **both are right about different populations**: 26 mixed pairs at delta 0, plus 1 at 1,800s, was
+  27 "in-window" while the window was 1,800s. But the operator's delta-0 ruling MOVED "in-window",
+  stranding that denominator — the third instance in this chunk of a narrowing invalidating counts
+  written for the wider rule. Every site now states the window-INDEPENDENT figure instead:
+  **28 of 28 mixed pairs at every delta (26 at 0s, 1 at 1,800s, 1 at 3,600s)**. Peer's three
+  requested records were already in place (acceptance table, honesty line, trigger's true width).
+

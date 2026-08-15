@@ -843,9 +843,13 @@ def _crawl_and_load_spray(
             INFORMATIONAL ``spray_games_with_data`` coverage count is computed
             via a perspective-filtered ``COUNT(DISTINCT game_id)`` so
             cross-perspective spray rows are not miscounted.
-        redirect_map: ``{source_event_id: canonical_game_id}`` from the dedup
-            stage (E-244). The crawl FETCHES by source event id (the scouted
-            team's perspective), but spray rows are FILED under the canonical id
+        redirect_map: ``{stale_event_id: surviving_game_id}`` from the dedup
+            stage (E-244; widened 2026-08-15). A key is any event id that no
+            longer resolves to a ``games`` row -- which, since the
+            opponent-identity promotion, INCLUDES the id of a row that was
+            merged away and DELETED, not only an incoming source id. The crawl
+            FETCHES by source event id (the scouted team's perspective), but
+            spray rows are FILED under the canonical id
             via a dict-key remap of ``spray_data`` before load, so deduped games
             land under the canonical row instead of being FK-skipped. Defaults to
             identity passthrough (no remap) for non-deduped runs.
@@ -957,8 +961,12 @@ def _crawl_and_load_plays(
             ``discrepancies_found`` / ``discrepancies_corrected`` /
             ``games_reconciled`` for the run record. The return value stays
             ``list[str]`` (the E-211 contract) regardless.
-        redirect_map: ``{source_event_id: canonical_game_id}`` from the dedup
-            stage (E-244). The API FETCH continues to use the SOURCE event id
+        redirect_map: ``{stale_event_id: surviving_game_id}`` from the dedup
+            stage (E-244; widened 2026-08-15). A key is any event id that no
+            longer resolves to a ``games`` row -- which, since the
+            opponent-identity promotion, INCLUDES the id of a row that was
+            merged away and DELETED, not only an incoming source id. The API
+            FETCH continues to use the SOURCE event id
             (it returns the scouted team's perspective), but the idempotency
             precheck, the DB-write key, the reconcile loop, and the returned
             game-id list (the rate-query scope) all use the CANONICAL id so

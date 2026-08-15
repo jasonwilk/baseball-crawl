@@ -2,7 +2,24 @@
 
 # Same-listing dedup window misses minutes-apart double-listings
 
-**Date**: 2026-08-10 · **Status**: `STUB` — root-caused with evidence; needs a spec + repair pass
+**Date**: 2026-08-10 · **Status**: `STUB` — DETECTION half is DONE; residual observations remain.
+
+> **The DETECTION half of this stub landed 2026-08-15** via
+> `.project/specs/done/2026-08-13-same-listing-dedup-detection.md` — the window widened to
+> 1,800s and an opponent-divergence second pass was added. Do not re-plan detection from here.
+>
+> The **REPAIR** half is DE-SCOPED by the Regeneration hazard ruling (2026-08-12): the full
+> regenerate replaces it and `bb data merge-duplicate-games` is untouched.
+>
+> ⚠ **The Addendum below is REFUTED and kept only as history.** Its claim (1) — "the tolerance
+> branch is not reached on at least one path" — is FALSE. `_is_same_listing_delta` returns True
+> on the 0.96s pair's real stored start strings. That twin survived because the step BEHIND the
+> redirect, `merge_duplicate_game`, structurally REFUSES when the two rows share a
+> `perspective_team_id`, and both rows carry the same single perspective. A same-perspective
+> twin therefore can never self-heal in place; only a fresh load avoids creating one.
+>
+> This stub stays `STUB` for its remaining residual observations (the enumerated candidate
+> groups and the spray/degraded-badge fallout chain), not for the detection rule.
 **Source**: read-only probe of a degraded Aug-3 report (operator ask). Evidence in the probe
 report relayed 2026-08-10; re-derive with the queries below, do not inherit counts.
 

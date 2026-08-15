@@ -32,6 +32,8 @@ plays-derived stats toward GameChanger's official box scores, never away. Run
 - `bb report generate` is NOT read-only: it hard-deletes `games` and their whole child surface
   (reconcile-at-load) and unreachable `teams` / `players` / `team_rosters` (orphan reclamation).
   Report deletion and `bb report cleanup` run reclamation too.
+  A THIRD condition landed 2026-08-15: an opponent-identity divergence collapse merges the
+  stub-headed row away, deleting it.
 - `bb db purge-scouting` wipes 20 of 27 tables, keeping only identity/auth/bootstrap: logins
   survive, team-access grants do not. `--force` (override the production refusal) and `--yes`
   (skip the prompt) are SEPARATE flags.

@@ -55,7 +55,7 @@ The scouting pipeline and report generator use in-memory crawl-to-load with no d
 
 ### Plays Pipeline
 
-The plays loader uses whole-game idempotency (`SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1`). Combined with `GameLoader._find_duplicate_game()` collapsing cross-perspective games to a single `game_id`, the second load of the same perspective is skipped. Different perspectives of the same game each get their own plays rows. The same collapse means a deduped game's SOURCE event id has no `games` row — generator stages keyed off source event ids must remap through `LoadResult.redirect_map` (see `.claude/rules/architecture-subsystems.md`, Reports Package, E-244).
+The plays loader uses whole-game idempotency (`SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1`). Combined with `GameLoader._find_duplicate_game()` collapsing cross-perspective games to a single `game_id`, the second load of the same perspective is skipped. Different perspectives of the same game each get their own plays rows. The same collapse means a deduped game's event id has no `games` row — generator stages keyed off source event ids must remap through `LoadResult.redirect_map` (see `.claude/rules/architecture-subsystems.md`, Reports Package, E-244). ⚠️ Since 2026-08-15 that map is NOT cross-perspective-only and its keys are not always the incoming source id: an opponent-identity divergence **promotion** hard-deletes the CANONICAL row and keys the entry on the deleted row's id. Read a key as "does not resolve to a `games` row", never as "belonged to another perspective".
 
 ## Code Review Checklist
 
