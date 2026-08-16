@@ -99,6 +99,16 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   must state its own concurrency discipline, serial or its own bound, in its own spec.** (2) The
   cap is in-process, so **replicating the app container multiplies it and nothing detects that**;
   its only enforcement is a deployment invariant in `docs/admin/operations.md`.
+- **Orphan-cleanup FK rollback — STUB 2026-08-16**, spec
+  `2026-08-16-orphan-cleanup-fk-rollback.md`. Found by the trainer's sweep of the 71-team
+  restore run: `cleanup_orphan_teams` uses a games-only deletability test while reclamation
+  also checks game-child tables, so one undeletable team FK-crashes the delete and — because
+  nothing commits incrementally — rolls back the WHOLE batch's cleanup. 5 team rows leaked in
+  one run, now permanent "excluded from reclamation" residue. **Recommended to land before the
+  counted rebuild** — it degrades every generation until fixed. Two sibling stubs from the same
+  sweep: `2026-08-16-plays-parser-unknown-templates.md` (6 dropped play templates, 46 firings —
+  north-star fidelity, appeal OUTS among them) and `2026-08-16-restore-run-observations.md`
+  (six needs-a-look items, adjudicate at the next audit or the rebuild spec).
 - **API-doc corrections & probes — one bundled chunk, PARKED behind the march** (audit-5
   routing, 2026-08-16). One api-scout pass, one PII-gated docs commit, after the regenerate:
   the three `event_id` doctrine sites (see STANDING RESIDUALS), the name-year probe
