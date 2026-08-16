@@ -80,10 +80,25 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   `codex-review`-vs-`codex review` comparison; all three are struck from the lists below.
 - **Generate-concurrency cap — the NEXT CHUNK in the ruled sequence** (linked at audit 5; the
   sequence in NOW named it but nothing pointed at its spec). Spec
-  `2026-08-10-admin-generate-concurrency.md` (STUB — needs its spec pass first, then a fresh
-  execution session). Cap admin-generate self-concurrency at N=2–3; NOT a longer busy_timeout.
-  Its repair half died with the regeneration ruling. **Must land before the full regenerate** —
-  bulk regeneration is exactly the load that produced the 243-failure lock storm.
+  `2026-08-10-admin-generate-concurrency.md` — **`READY` as of this commit** (spec pass
+  2026-08-16, codex-spec-reviewed **3 rounds, 9 findings: 8 folded, 1 disputed** — the dispute is
+  a lifecycle artifact that fires on every pre-commit spec, reasoned out in that spec's progress
+  log); waiting only for a fresh execution session. **Must land before the full regenerate** — bulk regeneration is exactly the
+  load that produced the 243-failure lock storm.
+
+  Operator rulings that fixed its shape (2026-08-16): scope is the **admin web page only**, and
+  **N = 2** (the stub's open "N=2–3" is closed). Mechanism is an in-process `BoundedSemaphore` on
+  `POST /admin/reports/generate` — NOT a longer `busy_timeout`, and NOT a count of
+  `reports.status='generating'` rows, which the spec's F4 shows is materially weaker here because
+  that row is not written until seconds after the click. Its repair half died with the
+  regeneration ruling.
+
+  ⚠ **Two residuals it carries out, both live before the regenerate.** (1) **The CLI and cron
+  paths stay uncapped BY DESIGN** (operator ruling) — `bb report generate` and `bb report
+  morning-run` share the WAL file and this cap cannot see them, so **the full-regenerate chunk
+  must state its own concurrency discipline, serial or its own bound, in its own spec.** (2) The
+  cap is in-process, so **replicating the app container multiplies it and nothing detects that**;
+  its only enforcement is a deployment invariant in `docs/admin/operations.md`.
 - **API-doc corrections & probes — one bundled chunk, PARKED behind the march** (audit-5
   routing, 2026-08-16). One api-scout pass, one PII-gated docs commit, after the regenerate:
   the three `event_id` doctrine sites (see STANDING RESIDUALS), the name-year probe
@@ -195,6 +210,12 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
      (91 → abandoned-charting residual ≥1, not 0) transfers to that regenerate's acceptance.
      Sequencing that follows: dedup fix → same-listing detection → generate-concurrency cap →
      runs-as-scoreboard instrument (so the regenerate is verifiable) → full regenerate.
+  3. ⚠ **THE REGENERATE OWES ITS OWN CONCURRENCY DISCIPLINE, IN ITS OWN SPEC** (operator ruling
+     2026-08-16, made while specing the cap). The generate-concurrency cap binds the **admin web
+     page only** — the CLI and cron paths are uncapped BY DESIGN, and a bulk regenerate is
+     precisely a CLI workload. So the cap landing does NOT make the regenerate safe: that spec
+     must say serial, or name its own bound, or it re-runs the load that produced the 243-failure
+     storm through the one door nothing guards.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
 - **The reconciliation gate CANNOT work on a growing corpus, and this is a design fault, not drift**
