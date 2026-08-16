@@ -249,12 +249,9 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   `parity_consistent.sql`, and `recon_scoreboard_seed.sql` unscanned. **Why you should care**: seed fixtures
   are the higher-risk half — the plausible landing spot for a real player name or email, the same class that
   once put a real minor's name in a planning file.
-- **The `codex-spec-review` rubric is stale on spec Status.**
-  `.project/codex-spec-review.md:48` still lists FOUR statuses and calls a fifth a finding, but `READY` was
-  added 2026-08-09. **Why you should care**: it flags every `READY` spec — it flagged the one committed
-  today, and codex noted the conflict itself. One-line docs fix; it does not belong inside a security chunk.
-  **Fired a SECOND time on 2026-08-11** (the opponent-roster-dedup spec), costing a finding slot in a
-  5-finding review. Two occurrences in two days; it is now the cheapest open residual on this list.
+- ~~**The `codex-spec-review` rubric is stale on spec Status.**~~ **CLOSED — fixed 2026-08-12**
+  (`a7ef590` folded the fix: line 48 now lists all five statuses and calls a sixth a finding).
+  Struck at audit 5 after the bullet was found still claiming to be open.
 - **`.project/ideas/` is inert in `SKIP_PATHS`** (found 2026-08-10). No such directory exists — ideas live at
   `.project/specs/IDEAS.md`, history at `.project/archive/ideas/`. **Operator ruled 2026-08-10: LEAVE.**
   Unlike `epics/`, which can never return, this tree plausibly could, and the re-measured TN-2 noise
@@ -314,8 +311,9 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   its trigger as operator-run before a commit touching a runtime or build-input surface — but
   nothing in the lifecycle tells the operator to run it. **Why you should care**: it used to fire
   automatically at epic closure, and that trigger is now deleted, so a real gate silently became
-  opt-in. Wiring it into `CLAUDE.md` is a byte-cap trade (~23 bytes of headroom), which principle
-  I sends to the operator, not to a session.
+  opt-in. Wiring it into `CLAUDE.md` is a byte-cap trade (headroom is single-digit bytes as of
+  audit 5 — see the cap bullet below for the current numbers), which principle I sends to the
+  operator, not to a session.
 - ✅ **CLOSED 2026-08-09** — `worktree-guard.sh` `CLAUDE_HOME` slash normalization. It was ~3 lines,
   not the 2 estimated; the empty case needed handling and had to DIVERGE from `REPO` (empty `REPO`
   denies, empty `CLAUDE_HOME` falls back to the literal default).
@@ -362,14 +360,17 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   two teams that played each other carry fully DISJOINT event_id sets, and a double-listed game
   holds two distinct event_ids in ONE team's own list. Correcting the three sites is its own
   small chunk and owes an `api-scout` pass, because it edits an API doc.
-- **CLAUDE.md is at 11,378 of the 11,392-byte cap — 14 bytes of headroom.** The cap was raised
-  from 11,264 on 2026-08-15 to fit `bb report generate`'s third delete condition; the raise was
-  made in-session WITHOUT bringing the operator the trade (a principle-I violation, on the
-  audit-5 docket) and the number was then **blessed by operator ruling 2026-08-16** — the content
-  was load-bearing, the unilateral raise was not OK. Per principle I the cap remains a TRIPWIRE,
-  not a wall: when it next binds against **load-bearing** content, STOP and bring the operator
-  the specific trade — never compress meaning to fit, never raise the cap unilaterally.
-  14 bytes is not room for a real addition.
+- **CLAUDE.md byte cap: 11,520 as of audit 5 (2026-08-16), raised from 11,392 by operator ruling
+  to fit the approval-dies-with-its-commit rule.** ⚠ **CORRECTION OF RECORD (audit 5)**: an
+  earlier version of this bullet accused the 2026-08-15 session of raising the 11,264 → 11,392
+  cap without bringing the operator the trade. **That was FALSE** — the session asked via a
+  three-option question at 13:59 and the operator selected "Raise cap to 11,392" at 14:00:39,
+  2026-08-15; the finding was an artifact of a transcript scan that cannot see question-box
+  answers (the auditor trap now recorded in `tool-discipline.md`). The 2026-08-16 "blessing"
+  re-affirmed a cap already legitimately ruled. Real residual: **no hook or script enforces the
+  cap** — it is checked by sessions reading this bullet. Per principle I the cap remains a
+  TRIPWIRE, not a wall: when it binds against **load-bearing** content, STOP and bring the
+  operator the specific trade — never compress meaning to fit, never raise the cap unilaterally.
   The original 8KB cap was raised by operator decision during the Step 1 review, after it proved
   to be trading against the file's own acceptance criterion: meeting 8192 had squeezed out the
   per-rule pointer enumeration, the `bb` command groups, the session-token sensitivity rule and

@@ -69,7 +69,8 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    staged file a manual pass with a positive control.
 7. **APPROVE** - Flip the spec's Status first (values in step 9) so it rides this commit.
    Stage by explicit PATH, never `add -A`; re-diff after staging; present that diff to the
-   operator and wait for approval.
+   operator and wait for approval. Approval DIES WITH ITS COMMIT: a finding arriving after
+   an approved commit produces a fix brought to the operator, never another commit.
 8. **COMMIT** - Commit, then confirm `[pii-hook] PII scan passed.` printed. Its ABSENCE is the
    alarm: if it is missing, stop and investigate; don't assume it ran. It is a receipt, not a
    first check.
