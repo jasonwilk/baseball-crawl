@@ -360,8 +360,12 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   two teams that played each other carry fully DISJOINT event_id sets, and a double-listed game
   holds two distinct event_ids in ONE team's own list. Correcting the three sites is its own
   small chunk and owes an `api-scout` pass, because it edits an API doc.
-- **CLAUDE.md byte cap: 11,520 as of audit 5 (2026-08-16), raised from 11,392 by operator ruling
-  to fit the approval-dies-with-its-commit rule.** ⚠ **CORRECTION OF RECORD (audit 5)**: an
+- **CLAUDE.md byte cap: 12,032 as of audit-5 batch 2 (2026-08-16; number delegated to the
+  trainer by the operator — "I trust you to raise the cap"), raised from 11,520 to fit the
+  codex-required, review-scope, and handoff-rewording rulings; now ENFORCED MECHANICALLY by
+  `.githooks/pre-commit` (`CLAUDE_CAP`), where the number lives and where a future raise is
+  recorded.** Earlier steps: 11,264 → 11,392 (operator-ruled 2026-08-15), 11,392 → 11,520
+  (operator-ruled 2026-08-16, approval-dies-with-its-commit). ⚠ **CORRECTION OF RECORD (audit 5)**: an
   earlier version of this bullet accused the 2026-08-15 session of raising the 11,264 → 11,392
   cap without bringing the operator the trade. **That was FALSE** — the session asked via a
   three-option question at 13:59 and the operator selected "Raise cap to 11,392" at 14:00:39,

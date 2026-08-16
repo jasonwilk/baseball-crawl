@@ -46,6 +46,7 @@ Check each item and report findings:
 - Does it carry a **progress log**?
 - Does it name a **person**? No spec may. Real team/org identifiers belong to the placeholder taxonomy in `.claude/rules/api-docs.md`; a person's name is never acceptable.
 - Does its **Status** read one of the five values in CLAUDE.md step 9 -- `COMPLETE (this commit)`, `READY`, `PARKED + why`, `STUB`, `OPEN + what decision is owed` -- or explicitly claim a chunk in flight? A sixth status is a finding.
+- A `COMPLETE` Status names its acceptance state: `acceptance: run` or `acceptance: owed at <chunk>` (audit-5 ruling -- a landed chunk whose proof never ran must be distinguishable from a proven one). And no Status hides behind a bare verdict word: "clean" is a finding; the severity breakdown ("0 P1/P2, 3 P3 folded") is the claim.
 
 ## Re-Review Protocol
 

@@ -75,6 +75,23 @@ if [ ${#_frozen_candidates[@]} -gt 0 ]; then
 fi
 # --- end frozen-archive invariant --------------------------------------------
 
+# --- CLAUDE.md byte cap (operator-ruled tripwire; audit 5, 2026-08-16) --------
+# Principle I: a cap raise is an OPERATOR ruling, recorded by editing CLAUDE_CAP
+# here in the same commit that needs it -- never raised by a session on its own.
+# Judged on the INDEX (`git show :CLAUDE.md`), not the working tree.
+# Placed above the missing-scanner skip: this check depends on git alone.
+CLAUDE_CAP=12032
+if git diff --cached --name-only -z --no-renames | grep -qzxF "CLAUDE.md"; then
+  _claude_bytes=$(git show :CLAUDE.md | wc -c)
+  if [ "$_claude_bytes" -gt "$CLAUDE_CAP" ]; then
+    echo "[claude-cap: BLOCKED] staged CLAUDE.md is ${_claude_bytes} bytes; cap is ${CLAUDE_CAP}." >&2
+    echo "[claude-cap] Principle I: STOP and bring the operator the trade. A raise is an" >&2
+    echo "[claude-cap] operator ruling, recorded by editing CLAUDE_CAP in .githooks/pre-commit." >&2
+    exit 1
+  fi
+fi
+# --- end CLAUDE.md byte cap ---------------------------------------------------
+
 if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   echo "[pii-hook] Scanner not installed yet. Skipping PII check."
   exit 0
