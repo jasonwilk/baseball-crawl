@@ -353,13 +353,23 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   filter** — the terminality gate short-circuits them, so a pre-patch cross-year auto-match survives.
   **Operator ruled 2026-08-09: LEAVE.** Correctable via `bb report map-opponent`, and they die at the
   next data reset regardless. No invalidation, no migration.
-- **CLAUDE.md is at 11,241 of the 11KB (11,264-byte) cap — 23 bytes of headroom** (measured
-  2026-08-08, after Step 3). It hit the cap exactly at 11,264, then went 31 bytes OVER when the
-  code review's finding 4 forced a step-2 rewrite; the overrun was resolved by tightening that
-  same newly-written gloss (redundant with the script and the skill), not by cutting anything
-  older. Per principle I the cap is a TRIPWIRE, not a wall: when it next binds against
-  **load-bearing** content, STOP and bring the operator the specific trade — never compress
-  meaning to fit, never raise the cap unilaterally. 23 bytes is not room for a real addition.
+- **Three doc sites overstate what `event_id` can do — carried here because no other live list
+  has it** (probed live 2026-08-13 with positive controls; method and results pinned in
+  `done/2026-08-13-same-listing-dedup-detection.md`, fact F2). `CLAUDE.md`,
+  `.claude/rules/perspective-provenance.md`, and
+  `docs/api/endpoints/get-teams-team_id-game-summaries.md` all describe the authenticated
+  `game-summaries` `event_id` as the stable cross-perspective key. Probed on unmanaged teams:
+  two teams that played each other carry fully DISJOINT event_id sets, and a double-listed game
+  holds two distinct event_ids in ONE team's own list. Correcting the three sites is its own
+  small chunk and owes an `api-scout` pass, because it edits an API doc.
+- **CLAUDE.md is at 11,378 of the 11,392-byte cap — 14 bytes of headroom.** The cap was raised
+  from 11,264 on 2026-08-15 to fit `bb report generate`'s third delete condition; the raise was
+  made in-session WITHOUT bringing the operator the trade (a principle-I violation, on the
+  audit-5 docket) and the number was then **blessed by operator ruling 2026-08-16** — the content
+  was load-bearing, the unilateral raise was not OK. Per principle I the cap remains a TRIPWIRE,
+  not a wall: when it next binds against **load-bearing** content, STOP and bring the operator
+  the specific trade — never compress meaning to fit, never raise the cap unilaterally.
+  14 bytes is not room for a real addition.
   The original 8KB cap was raised by operator decision during the Step 1 review, after it proved
   to be trading against the file's own acceptance criterion: meeting 8192 had squeezed out the
   per-rule pointer enumeration, the `bb` command groups, the session-token sensitivity rule and
