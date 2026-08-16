@@ -78,6 +78,19 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   `done/2026-08-05-rung-c-season-year-filter.md`. It carried both queued residuals
   (worktree-guard `CLAUDE_HOME`, extensionless PII scannability) and settled the owed
   `codex-review`-vs-`codex review` comparison; all three are struck from the lists below.
+- **Generate-concurrency cap — the NEXT CHUNK in the ruled sequence** (linked at audit 5; the
+  sequence in NOW named it but nothing pointed at its spec). Spec
+  `2026-08-10-admin-generate-concurrency.md` (STUB — needs its spec pass first, then a fresh
+  execution session). Cap admin-generate self-concurrency at N=2–3; NOT a longer busy_timeout.
+  Its repair half died with the regeneration ruling. **Must land before the full regenerate** —
+  bulk regeneration is exactly the load that produced the 243-failure lock storm.
+- **API-doc corrections & probes — one bundled chunk, PARKED behind the march** (audit-5
+  routing, 2026-08-16). One api-scout pass, one PII-gated docs commit, after the regenerate:
+  the three `event_id` doctrine sites (see STANDING RESIDUALS), the name-year probe
+  (`2026-08-05-post-search-name-year-doc-defect.md`), the residual one-sided-game probe,
+  `2026-08-04-public-organizations-surface.md`, and the harvest-web-bundle adopt-or-discard
+  decision (`2026-08-04-harvest-web-bundle-before-probing.md`, which that chunk reads before
+  its first probe).
 - **Opponent org-reachability measurement — RULED: measure only** (operator, 2026-08-08). Bulk
   org discovery is DECLINED (vision non-goal). The funded question: what fraction of our real
   unresolved opponents (no `progenitor_team_id`) are reachable via a discoverable organization's

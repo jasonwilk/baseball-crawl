@@ -1,6 +1,8 @@
 # `root_team_id` means two different things — the rule reads as universal and is not
 
-**Date:** 2026-08-04 · **Status:** STUB — context-layer correction, not code
+**Date:** 2026-08-04 · **Status:** COMPLETE (this commit) — closed at audit 5, 2026-08-16;
+acceptance: run (both rule-layer sites now endpoint-scoped, verified by reading:
+`CLAUDE.md` API gotchas, `.claude/rules/gc-uuid-bridge.md` BANNED PATH)
 **Source:** live probes 2026-08-04. Evidence:
 `.claude/agent-memory/api-scout/organization-scope.md`.
 
@@ -52,3 +54,7 @@ which is the actual defect here, and the reason a doc-only fix would not have cl
 - **2026-08-04** — Stubbed. Endpoint docs corrected; rule layer NOT touched (owned by
   claude-architect). No code implicated: no current code path reads
   `/organizations/{id}/teams`.
+- **2026-08-16** — Closed at audit 5 after three audits unrouted. Both rule-layer sites edited
+  exactly as "What to change" specifies: the rule is now stated endpoint-scoped, both halves
+  together, in `CLAUDE.md` (API gotchas) and `gc-uuid-bridge.md` (BANNED PATH, with the 24/24
+  round-trip citation). No code touched, matching the stub's own scope.

@@ -70,7 +70,7 @@ This reverse path is the rung-(a) auto-resolution mechanism in the report-genera
 
 Why it is banned:
 
-- **Wrong identifier namespace**: it follows against `root_team_id`, which is NOT a `gc_uuid`. `root_team_id` is a separate namespace (the local opponent-registry key from manually-typed opponents) -- consistent with the CLAUDE.md "Opponent entry duality" guidance, `root_team_id` must NEVER be treated as, or stored in, `gc_uuid`. Following/bridging against it is operating on the wrong identifier.
+- **Wrong identifier namespace**: it follows against `root_team_id`, which in the opponents registry is NOT a `gc_uuid`. That `root_team_id` is a separate namespace (the local opponent-registry key from manually-typed opponents) -- consistent with the CLAUDE.md guidance, the REGISTRY key must NEVER be treated as, or stored in, `gc_uuid`. Following/bridging against it is operating on the wrong identifier. (Endpoint-scoped, NOT universal: the identically-named field in `/organizations/{org_id}/teams` responses IS a canonical `gc_uuid` -- 24/24 round-trip, documented in `get-organizations-org_id-teams.md` since 2026-03-07. The two fields share a NAME, not a namespace; scoping closed the 2026-08-04 collision stub at audit 5.)
 - **Mutates external GameChanger state**: unlike every other bridge path in this file (which is read-only `GET`/`POST /search`), this path *writes* to GC -- it follows a team, hits the bridge endpoint, then issues two best-effort unfollow `DELETE`s. A failed or interrupted cycle can leave the authenticated account following teams it never intended to.
 - **Unverified**: the original implementation's own docstring noted the flow was experimental and that whether `root_team_id` works with the follow/bridge endpoints was unverified.
 

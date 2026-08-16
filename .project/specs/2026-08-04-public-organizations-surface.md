@@ -1,6 +1,7 @@
 # Undocumented unauthenticated `/public/organizations/` surface
 
-**Date:** 2026-08-04 · **Status:** STUB — api-scout doc work, not code
+**Date:** 2026-08-04 · **Status:** PARKED — audit-5 ruling 2026-08-16: rides the API-doc
+corrections chunk (README NEXT); no standalone chunk.
 **Source:** live probes 2026-08-04, verified on a **no-auth** session (no `gc-token`, no
 `gc-device-id`). Evidence: `.claude/agent-memory/api-scout/organization-scope.md`.
 

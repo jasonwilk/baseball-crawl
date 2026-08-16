@@ -64,6 +64,8 @@ Round 2+ reviews (after the findings are incorporated) follow a scoped process:
 3. Check that fixes did not introduce new inconsistencies in adjacent text -- a corrected count often appears in more than one place.
 4. Do NOT re-review unchanged sections. Prior-round findings on untouched sections are closed. Only re-evaluate what was touched or is adjacent to a change.
 
+**A review claim covers the reviewed TEXT, not the file** (audit-5 ruling: a 19-line section was authored 68 minutes after the Status already said "codex-reviewed"). Edits made after the final round get a re-round OR an explicit unreviewed-edits note in the progress log, naming each edit. A Status asserting review coverage over post-review text is a finding.
+
 ## Reporting
 
 - Cite the spec's section heading (e.g. "§4 Templates", "Verification step 2") for every finding.

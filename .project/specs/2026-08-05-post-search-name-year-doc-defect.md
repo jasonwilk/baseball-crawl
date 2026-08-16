@@ -1,6 +1,7 @@
 # `post-search.md` says `result.name` "typically includes year" — the repo's own capture says 0/15
 
-**Date:** 2026-08-05 · **Status:** **STUB — needs a probe, not an edit.**
+**Date:** 2026-08-05 · **Status:** **STUB — needs a probe, not an edit.** Routed at audit 5 (2026-08-16) into the
+API-doc corrections chunk (README NEXT); its probe runs in that chunk's api-scout pass.
 **Source:** found while writing `2026-08-05-rung-c-search-resolve-recoverable.md`, where this
 doc line was used as a load-bearing rationale and turned out to be contradicted by the repo's
 own captured data. Nothing was changed either way.

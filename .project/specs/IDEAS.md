@@ -19,3 +19,8 @@ ideas safe. Never paste a real name or identifier here; use the placeholder taxo
 `.claude/rules/api-docs.md`.
 
 ## Ideas
+
+- Jersey-corroborated scorekeeper spelling variants in converged rosters (chunk-14 measurement:
+  8 pairs across 13 teams, 6 jersey-corroborated) — coach-visible wart the dedup deliberately
+  leaves; candidate polish after the ingestion campaign closes. First routed here at audit 5,
+  which found this list empty three audits in.

@@ -63,6 +63,7 @@ This fires on the deliberate act of mutating source to check that a test fails; 
 - Re-run mutations after any refactor — a mutation can stop discriminating when the code beneath it changes.
 - **A mutant must be the PLAUSIBLE FUTURE EDIT, not merely an edit that breaks the property** — a mutant nobody would write proves the test catches vandalism, not regression.
 - **Report per-test outcomes, never an aggregate count**: in E-270 a `get_connection` mutant failed both tests, but a plain writable-connection mutant (the edit someone would actually make) PASSED test 1 and failed only test 2 — an aggregate "2 caught" would have hidden which test was load-bearing.
+- **State the EXPECTED catchers before the run** (audit-5 ruling; twice in one chunk a session reported per-test outcomes and still missed what they showed): before executing a mutation, name which tests you expect it to fail and why. A result differing from the expectation — in EITHER direction — is a finding to chase, not a pass to report. "1 caught" means nothing without the expected count beside it.
 
 A verification method needs its own verification.
 

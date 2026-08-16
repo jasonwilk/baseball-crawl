@@ -1,6 +1,8 @@
 # Harvest the web bundle before guess-probing an API surface
 
-**Date:** 2026-08-04 · **Status:** STUB — a method note; adopt or discard, do not half-adopt
+**Date:** 2026-08-04 · **Status:** PARKED — audit-5 ruling 2026-08-16: the adopt-or-discard
+decision belongs to the API-doc corrections chunk (README NEXT), the next work that probes;
+that chunk reads this note before its first probe. "Do not half-adopt" remains binding.
 **Source:** org probe 2026-08-04. Evidence:
 `.claude/agent-memory/api-scout/organization-scope.md`.
 
