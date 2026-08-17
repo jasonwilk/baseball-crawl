@@ -137,16 +137,38 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   already suspects one. That edit spends CLAUDE.md bytes, so it is a cap trade for the operator;
   the spec lays out three options and recommends adding a one-command check. ⚠ Bitten ONCE, so
   principle E's bites-twice bar means no rule was written — if it recurs, audit 6 has bite two.
-- **Orphan-cleanup FK rollback — STUB 2026-08-16**, spec
-  `2026-08-16-orphan-cleanup-fk-rollback.md`. Found by the trainer's sweep of the 71-team
-  restore run: `cleanup_orphan_teams` uses a games-only deletability test while reclamation
-  also checks game-child tables, so one undeletable team FK-crashes the delete and — because
-  nothing commits incrementally — rolls back the WHOLE batch's cleanup. 5 team rows leaked in
-  one run, now permanent "excluded from reclamation" residue. **Recommended to land before the
-  counted rebuild** — it degrades every generation until fixed. Two sibling stubs from the same
-  sweep: `2026-08-16-plays-parser-unknown-templates.md` (6 dropped play templates, 46 firings —
-  north-star fidelity, appeal OUTS among them) and `2026-08-16-restore-run-observations.md`
-  (six needs-a-look items, adjudicate at the next audit or the rebuild spec).
+- **Orphan-cleanup FK rollback — READY 2026-08-17** (`bb95034`), spec
+  `2026-08-16-orphan-cleanup-fk-rollback.md`. `cleanup_orphan_teams` uses a games-only
+  deletability test while reclamation also checks six game-child tables, so one undeletable team
+  FK-crashes the delete and — because nothing commits incrementally — rolls back the WHOLE
+  batch's cleanup. **Recommended to land before the counted rebuild.**
+
+  **The permanence mechanism was found at spec time and is the reason this is not cosmetic**: the
+  rollback also restores the orphan-vs-orphan `games` rows cleanup had just deleted, and
+  `_TEAM_BASE_PRED` requires a team to have NO games row — so every rolled-back team is thereafter
+  invisible to the only pass that could sweep it. Corroborated by `Orphan reclamation: deleted 0
+  team(s)` on **70 of 70** runs. Operator ruled the fix shape (align the predicate AND add a
+  per-team savepoint) and **fix-forward-only** — no repair of existing residue.
+
+  ⚠ **Two numbers the STUB carried are FALSE; the spec marks them and they must not be requoted.**
+  The restore run FINISHED (`[71/71] OK`, `generated: 71  skipped: 0  failed: 0`) — the stub's
+  "70 of 71" was measured mid-run — and the "rebuild would leak ~30 team rows" projection is
+  unsupported: 34 is the sum of discarded batch sizes, not a count of leaked rows. Also, 2 of the
+  15 "excluded from reclamation" ids predate the first crash and are the by-design
+  divergence-collapse stubs, not damage.
+
+  **It now carries a SECOND work item, operator-ruled 2026-08-17.** Three `/code-review` findings
+  on the ALREADY-COMMITTED generate-concurrency chunk, verified against the files: the reaper's
+  reorder (flip row, then unlink) left behind a docstring at `lifecycle.py:184-186` stating the
+  opposite order — which invites re-wedging the generate page — plus `reaped`/`errors` no longer
+  being disjoint, and a false operator-facing ERROR claiming the page is wedged when only an
+  unlink failed. Codex found a FOURTH site in `docs/admin/operations.md`. Bundled so one set of
+  review gates covers both; they share a file, not a cause.
+
+  Two sibling stubs from the same sweep, untouched: `2026-08-16-plays-parser-unknown-templates.md`
+  (6 dropped play templates, 46 firings — north-star fidelity, appeal OUTS among them) and
+  `2026-08-16-restore-run-observations.md` (six needs-a-look items, adjudicate at the next audit
+  or the rebuild spec).
 - **API-doc corrections & probes — one bundled chunk, PARKED behind the march** (audit-5
   routing, 2026-08-16). One api-scout pass, one PII-gated docs commit, after the regenerate:
   the three `event_id` doctrine sites (see STANDING RESIDUALS), the name-year probe
