@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import sys
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from migrations.apply_migrations import run_migrations
 from src.api.main import app
+from src.api.routes import reports_admin
+from src.reports import lifecycle
 from src.util.timezone import UTC_ISO_FORMAT, utcnow_iso
 
 
@@ -1446,3 +1452,461 @@ class TestBatchInvariantReclamation:
             "the opponent_links operator decision must be intact (not NULLed)"
         )
         assert grant_count == 1, "the user_team_access grant must be intact"
+
+
+# ---------------------------------------------------------------------------
+# Generate-concurrency cap (spec 2026-08-10-admin-generate-concurrency): the
+# admin generate route admits at most MAX_CONCURRENT_ADMIN_GENERATIONS in-flight
+# generations started from POST /admin/reports/generate.
+#
+# Group (A) -- the four classes below TestAdminGenerate_WhenTheCapIsReached
+# through TestAdminGenerate_WhenTwoRequestsRaceAtCapOne -- is RED-first: none
+# can pass before the route change, because today's route has no admission
+# check at all.
+#
+# Group (B) -- TestAdminGenerate_WhenTheUrlIsInvalid and
+# TestTheCheckedInTopology -- passes today BY CONSTRUCTION. It pins a property
+# the change must not break, so RED-first does not apply and its only proof of
+# worth is mutation (M2 and M4 respectively).
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _slots(n: int, wrapper=None):
+    """Swap the module-level semaphore for a fresh ``BoundedSemaphore(n)``.
+
+    The real semaphore is constructed from MAX_CONCURRENT_ADMIN_GENERATIONS at
+    import time, so monkeypatching the CONSTANT changes nothing -- a test must
+    replace ``_generation_slots`` itself and restore it. There is no injection
+    seam at a module global; `testing.md` prefers DI and this is the stated
+    exception, not an oversight. Every test that acquires a slot must release
+    it, or it poisons later tests in the same process -- the restore here is the
+    backstop for that.
+    """
+    original = reports_admin._generation_slots
+    fresh = threading.BoundedSemaphore(n)
+    reports_admin._generation_slots = wrapper(fresh) if wrapper else fresh
+    try:
+        yield fresh
+    finally:
+        reports_admin._generation_slots = original
+
+
+def _post_generate(client, gc_url: str = "https://web.gc.com/teams/abc123/test"):
+    return client.post(
+        "/admin/reports/generate",
+        data={"gc_url": gc_url, "csrf_token": _CSRF},
+        follow_redirects=False,
+    )
+
+
+def _is_refusal(response) -> bool:
+    location = response.headers["location"]
+    return "error=" in location and "already" in location
+
+
+class TestAdminGenerate_WhenTheCapIsReached:
+    """Every generation slot is already held by an in-flight generation."""
+
+    def test_redirects_with_an_error_flash(self, setup):
+        _db_path, client = setup
+
+        with _slots(2) as slots:
+            assert slots.acquire(blocking=False)
+            assert slots.acquire(blocking=False)
+            response = _post_generate(client)
+            slots.release()
+            slots.release()
+
+        assert response.status_code == 303
+        assert "/admin/reports?error=" in response.headers["location"]
+        assert _is_refusal(response)
+
+    def test_does_not_enqueue_a_generation(self, setup):
+        _db_path, client = setup
+
+        with _slots(2) as slots:
+            assert slots.acquire(blocking=False)
+            assert slots.acquire(blocking=False)
+            with patch("src.reports.generator.generate_report") as mock_gen:
+                _post_generate(client)
+            slots.release()
+            slots.release()
+
+        mock_gen.assert_not_called()
+
+
+class TestAdminGenerate_WhenAGenerationFinishes:
+    """A generation that returns normally hands its slot back."""
+
+    def test_the_slot_is_returned(self, setup):
+        _db_path, client = setup
+
+        # Probing DURING the generation is what keeps this test honest: a fresh
+        # semaphore is free whether or not the route ever acquired it, so
+        # "free afterwards" alone would pass vacuously against a route with no
+        # admission check at all.
+        with _slots(1) as slots:
+            free_during = None
+
+            def probe(_gc_url):
+                nonlocal free_during
+                free_during = slots.acquire(blocking=False)
+                if free_during:
+                    slots.release()
+
+            with patch("src.reports.generator.generate_report", side_effect=probe):
+                # TestClient runs background tasks synchronously, so the
+                # releasing wrapper's finally: has already run by the time the
+                # response comes back.
+                response = _post_generate(client)
+
+            free_after = slots.acquire(blocking=False)
+            if free_after:
+                slots.release()
+
+        assert not _is_refusal(response)
+        assert free_during is False, "the running generation was not holding a slot"
+        assert free_after is True, "the finished generation did not release its slot"
+
+
+class TestAdminGenerate_WhenTheGenerationRaises:
+    """A generation that blows up STILL hands its slot back."""
+
+    def test_the_slot_is_still_returned(self, setup):
+        _db_path, client = setup
+
+        with _slots(1) as slots:
+            free_during = None
+
+            def probe_then_raise(_gc_url):
+                nonlocal free_during
+                free_during = slots.acquire(blocking=False)
+                if free_during:
+                    slots.release()
+                raise RuntimeError("generation blew up")
+
+            # The exception surfaces in the background task, after the response
+            # has been sent; TestClient(raise_server_exceptions=False) does not
+            # re-raise it here. The point of this test is the finally:, not the
+            # exception's propagation.
+            with patch("src.reports.generator.generate_report", side_effect=probe_then_raise):
+                _post_generate(client)
+
+            free_after = slots.acquire(blocking=False)
+            if free_after:
+                slots.release()
+
+        assert free_during is False, "the running generation was not holding a slot"
+        assert free_after is True, "a raising generation leaked its slot"
+
+
+class TestAdminGenerate_WhenTheGenerationImportFails:
+    """The background task cannot even IMPORT the generator.
+
+    Regression pin for a codex P1: the call-time import used to sit ABOVE the
+    try/finally, so an ImportError (a circular-import regression, a missing
+    transitive dependency) skipped the release and leaked the slot PERMANENTLY.
+    Two such failures wedge the generate page until the process restarts.
+    """
+
+    def test_the_slot_is_still_returned(self, setup):
+        _db_path, client = setup
+
+        with _slots(1) as slots:
+            # None in sys.modules makes `from src.reports.generator import ...`
+            # raise ImportError at call time, which is exactly the shape that
+            # used to bypass the finally.
+            with patch.dict(sys.modules, {"src.reports.generator": None}):
+                _post_generate(client)
+
+            free_after = slots.acquire(blocking=False)
+            if free_after:
+                slots.release()
+
+        assert free_after is True, "a failed generator import leaked its slot"
+
+
+class TestAdminGenerate_WhenTwoRequestsRaceAtCapOne:
+    """Two submissions reach the acquire seam simultaneously with ONE slot free.
+
+    Modeled on tests/test_passkey.py::test_cap_hard_bound_under_concurrent_inserts.
+    A `threading.Barrier(2)` sits ON the acquire seam so both threads enter it
+    together, and the winner's generation blocks inside the background task so it
+    is genuinely still holding the slot when the loser arrives.
+    """
+
+    def test_exactly_one_wins(self, setup):
+        _db_path, client = setup
+
+        barrier = threading.Barrier(2)
+
+        class _BarrieredSemaphore:
+            def __init__(self, sem):
+                self._sem = sem
+
+            def acquire(self, blocking=True):
+                barrier.wait(timeout=10)
+                return self._sem.acquire(blocking=blocking)
+
+            def release(self):
+                self._sem.release()
+
+        winner_is_holding = threading.Event()
+        may_finish = threading.Event()
+        refusal_seen = threading.Event()
+        results: dict[str, bool] = {}
+
+        def blocking_generate(_gc_url):
+            winner_is_holding.set()
+            may_finish.wait(timeout=10)
+
+        def worker(name: str) -> None:
+            response = _post_generate(client)
+            results[name] = _is_refusal(response)
+            if results[name]:
+                refusal_seen.set()
+
+        with _slots(1, wrapper=_BarrieredSemaphore):
+            with patch("src.reports.generator.generate_report", side_effect=blocking_generate):
+                threads = [threading.Thread(target=worker, args=(n,)) for n in ("a", "b")]
+                for t in threads:
+                    t.start()
+                refusal_seen.wait(timeout=10)
+                may_finish.set()
+                for t in threads:
+                    t.join(timeout=10)
+
+        assert winner_is_holding.is_set(), "no request ever acquired the slot"
+        assert len(results) == 2, "a request thread did not finish"
+        assert sum(1 for refused in results.values() if not refused) == 1, (
+            f"exactly one request must be admitted, got {results}"
+        )
+        assert sum(1 for refused in results.values() if refused) == 1, (
+            f"exactly one request must be refused, got {results}"
+        )
+
+
+class TestAdminGenerate_WhenTheUrlIsInvalid:
+    """Group (B) guard: a URL rejected by validation must not burn a slot.
+
+    Green today because there are no slots at all; its worth is proven by mutant
+    M2 (the acquire moved above the URL validations). This catches the single
+    worst way to get this change wrong -- two bad pastes permanently wedging the
+    page.
+    """
+
+    def test_no_slot_is_consumed(self, setup):
+        _db_path, client = setup
+
+        # Deliberately NOT routed through _slots(): this guard must be runnable
+        # at the pre-change commit, where no semaphore exists at all. It runs
+        # against whatever admission mechanism the route actually has.
+        _post_generate(client, "   ")
+        _post_generate(client, "not a url !!!")
+        _post_generate(client, "72bb77d8-54ca-42d2-8547-9da4880d0cb4")
+
+        with patch("src.reports.generator.generate_report") as mock_gen:
+            response = _post_generate(client)
+
+        assert not _is_refusal(response)
+        mock_gen.assert_called_once()
+
+
+class TestAdminGenerate_WhenAGenerationIsInFlightAnywhere:
+    """A generation is running SOMEWHERE -- CLI, cron, or this page.
+
+    The cross-path gate (operator ruling 2026-08-16, after a UI click raced the
+    serial CLI restore run and hard-deleted stat rows on games the CLI was
+    actively writing). The semaphore cannot see another PROCESS; only the shared
+    `reports` table can. There is no source column anywhere, so this gate
+    deliberately does not distinguish a CLI run from this page's own in-flight
+    generation -- the page is one-at-a-time by ruling.
+    """
+
+    def test_redirects_with_an_error_flash(self, setup):
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="in-flight", status="generating")
+
+        # Isolated from the real module semaphore deliberately: these tests drive
+        # the route to a REFUSAL, and under a slot-leaking regression they would
+        # otherwise drain the real semaphore and make LATER tests fail for an
+        # unrelated reason (measured against mutant M6).
+        with _slots(2):
+            response = _post_generate(client)
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert "/admin/reports?error=" in location
+        assert "in+progress" in location
+
+    def test_does_not_enqueue_a_generation(self, setup):
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="in-flight", status="generating")
+
+        with _slots(2), patch("src.reports.generator.generate_report") as mock_gen:
+            _post_generate(client)
+
+        mock_gen.assert_not_called()
+
+    def test_no_slot_is_consumed(self, setup):
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="in-flight", status="generating")
+
+        # Asserting only the slot state would pass vacuously against a route with
+        # no gate at all, so the refusal itself is asserted alongside it. This is
+        # the ordering pin: the cross-path check runs BEFORE the acquire, so a
+        # refusal cannot leak a slot.
+        with _slots(2) as slots:
+            response = _post_generate(client)
+            free = [slots.acquire(blocking=False) for _ in range(2)]
+            for got in free:
+                if got:
+                    slots.release()
+
+        assert "error=" in response.headers["location"]
+        assert free == [True, True], "the cross-path refusal consumed a semaphore slot"
+
+
+class TestAdminGenerate_WhenTheOnlyGeneratingRowIsStale:
+    """The sole `generating` row is older than STALE_GENERATING_SECONDS.
+
+    Green today by construction (today nothing blocks at all); its only proof of
+    worth is mutant M7, which counts before reaping. A crashed generation must
+    not wedge the admin page for the full hour-long staleness threshold.
+    """
+
+    def test_the_submission_proceeds(self, setup, tmp_path):
+        db_path, client = setup
+        tmp_reports = tmp_path / "reports"
+        tmp_reports.mkdir()
+        team_id = _insert_team(db_path)
+        stale = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=lifecycle.STALE_GENERATING_SECONDS + 600)
+        ).strftime(UTC_ISO_FORMAT)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at) "
+            "VALUES ('stale-gen', ?, 'Stale', 'generating', ?, ?)",
+            (team_id, stale, _future_iso()),
+        )
+        conn.commit()
+        conn.close()
+
+        # The reaper UNLINKS _REPORTS_DIR/"{slug}.html" for every row it reaps.
+        # Without redirecting that seam this test would delete a real
+        # data/reports/stale-gen.html from the checkout (codex P2).
+        with patch("src.reports.lifecycle._REPORTS_DIR", tmp_reports), \
+                patch("src.reports.generator.generate_report") as mock_gen:
+            response = _post_generate(client)
+
+        assert not _is_refusal(response) and "error=" not in response.headers["location"]
+        mock_gen.assert_called_once()
+
+
+class TestTheCapValue:
+    """The cap's NUMBER, pinned to the operator ruling of 2026-08-16.
+
+    Not redundant with the cap-behavior tests above, and the redundancy it looks
+    like is exactly why it is here: every one of those tests installs its OWN
+    ``BoundedSemaphore(n)`` (the spec-mandated mechanics -- the real semaphore is
+    built from the constant at import, so patching the constant changes nothing).
+    That decouples them from the constant completely. Measured: mutating
+    MAX_CONCURRENT_ADMIN_GENERATIONS from 2 to 99 left the entire suite green.
+    Any test whose setup DERIVES from the constant is tautological against a
+    change to it, so a literal pin is the only thing that can catch one.
+    """
+
+    def test_is_the_operator_ruled_two(self):
+        assert reports_admin.MAX_CONCURRENT_ADMIN_GENERATIONS == 2
+
+
+class TestTheCheckedInTopology:
+    """Group (B) guard for the cap's load-bearing premise (F3 / F3a).
+
+    Named for what it CHECKS -- tracked launch files -- not for the served
+    process count, which it cannot observe. Runtime replication of the container
+    (a second compose project, a scaled service, a hand-run uvicorn) multiplies
+    the cap to 2 x processes and no test can see it (F3b); that half is enforced
+    only by the deployment invariant written into `docs/admin/operations.md`.
+    """
+
+    _BREAKAGE = (
+        "MAX_CONCURRENT_ADMIN_GENERATIONS in src/api/routes/reports_admin.py is an "
+        "IN-PROCESS cap on concurrent report generation. More than one server "
+        "process multiplies it to 2 x processes against one SQLite file, with no "
+        "warning of any kind. Re-think that cap before landing this."
+    )
+
+    def test_no_tracked_launch_file_starts_extra_workers(self):
+        import yaml
+
+        repo_root = Path(__file__).resolve().parent.parent
+
+        launch_lines = [
+            line
+            for line in (repo_root / "Dockerfile").read_text().splitlines()
+            if "uvicorn" in line or "gunicorn" in line
+        ]
+        assert launch_lines, "no uvicorn/gunicorn launch line found in Dockerfile"
+        for line in launch_lines:
+            for flag in ("--workers", " -w ", "--worker-class", " -k "):
+                assert flag not in line, (
+                    f"the Dockerfile launch line carries {flag!r}: {line.strip()}\n"
+                    f"{self._BREAKAGE}"
+                )
+
+        compose_paths = [repo_root / "docker-compose.yml"]
+        # F3a: docker-compose.override.yml is gitignored and untracked, so it is
+        # absent in CI. Read it only if it happens to be present; its ABSENCE is
+        # never a failure.
+        override = repo_root / "docker-compose.override.yml"
+        if override.exists():
+            compose_paths.append(override)
+
+        for path in compose_paths:
+            # Parse the YAML rather than grepping: `command:` legitimately appears
+            # on the `traefik` and `cloudflared` services, so a whole-file grep
+            # would fail today, vacuously.
+            services = (yaml.safe_load(path.read_text()) or {}).get("services") or {}
+            app_service = services.get("app")
+            if app_service is None:
+                continue
+
+            for key in ("command", "entrypoint"):
+                # `entrypoint` overrides the Dockerfile CMD just as effectively
+                # as `command` does.
+                assert app_service.get(key) is None, (
+                    f"{path.name} sets `{key}` on the `app` service.\n{self._BREAKAGE}"
+                )
+            replicas = (app_service.get("deploy") or {}).get("replicas")
+            assert replicas is None, (
+                f"{path.name} sets deploy.replicas={replicas} on `app`.\n{self._BREAKAGE}"
+            )
+            # uvicorn reads WEB_CONCURRENCY straight from the environment
+            # (uvicorn/config.py: `if workers is None and "WEB_CONCURRENCY" in
+            # os.environ`), so it multiplies workers with no launch-file change
+            # at all. Catch the tracked ways it could be set.
+            env = app_service.get("environment") or {}
+            env_keys = env.keys() if isinstance(env, dict) else [
+                str(e).split("=", 1)[0] for e in env
+            ]
+            assert "WEB_CONCURRENCY" not in env_keys, (
+                f"{path.name} sets WEB_CONCURRENCY on `app`.\n{self._BREAKAGE}"
+            )
+
+    def test_web_concurrency_is_not_set_in_this_environment(self):
+        # Separate from the tracked-file guard above because it observes a
+        # DIFFERENT thing: the live process environment rather than a file. It is
+        # the only handle any test has on the env-var route, and it is a weak one
+        # -- production's value arrives via the `app` service's `env_file`, which
+        # is untracked and unreadable here. See the deployment invariant in
+        # docs/admin/operations.md; this asserts the dev container, not prod.
+        assert os.environ.get("WEB_CONCURRENCY") in (None, "", "1"), (
+            f"WEB_CONCURRENCY={os.environ.get('WEB_CONCURRENCY')!r} in this "
+            f"environment.\n{self._BREAKAGE}"
+        )

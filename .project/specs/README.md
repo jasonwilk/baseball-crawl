@@ -24,6 +24,49 @@ same-listing detection → generate-concurrency cap → runs-as-scoreboard instr
 regenerate. **The generation freeze is LIFTED** — the lossy-merge hazard it protected against is
 fixed and proven on live data. The plays half-pair clobber below must land BEFORE the regenerate.
 
+- ~~**Generate-concurrency cap**~~ — **LANDED 2026-08-17**, `acceptance: run`. Spec moved to
+  `done/2026-08-10-admin-generate-concurrency.md` (`git log --follow` for history). Suite
+  4,536 → 4,551 (+15). `POST /admin/reports/generate` now carries TWO admission gates covering
+  different blind spots: an in-process `BoundedSemaphore(2)`, and a reap-then-count of
+  `reports.status='generating'` that can see OTHER PROCESSES. Thirteen mutants, every one matching
+  an expectation stated before it ran.
+
+  **The spec's N=2 ruling did NOT survive execution, and the board should say so.** A mid-chunk
+  operator ruling added a CROSS-PATH gate after a 2026-08-16 incident: a UI click raced the serial
+  CLI restore run, hard-deleted stat rows on games the CLI was actively writing, forced the CLI to
+  skip orphan reclamation, and produced a report served as `ready` carrying **155 uncorrected
+  reconciliation discrepancies** (run 160). Codex then established that `reports` has **no source
+  column**, so the gate cannot distinguish a CLI run from the page's own in-flight generation.
+  **Operator ruled: the admin page is ONE-AT-A-TIME.** N=2 is now reachable only inside the
+  click-to-`generating`-row window — which is precisely why the semaphore stays rather than being
+  deleted as vestigial. Per-path caps do not compose; that is the durable lesson.
+
+  ⚠ **This does NOT cap the CLI — it makes the admin door DEFER to it.** CLI-vs-CLI remains
+  unguarded, so consequence 3 of the regeneration hazard below is UNDISCHARGED and the regenerate
+  still owes its own discipline.
+
+  **Three residuals it carries out, all live.** (1) **`WEB_CONCURRENCY` set in the untracked
+  environment file silently multiplies the cap and NO TEST CAN SEE IT** — uvicorn reads that
+  variable directly and the `app` service loads that file, so one line there yields 4 workers and
+  an effective cap of 8 with the suite fully green. Found at `/code-review`; the widened guard
+  reaches only the TRACKED routes plus the dev container's own environment. This now ranks
+  alongside the replication invariant below, and unlike it requires no infrastructure change at
+  all. (2) The cap is in-process, so **replicating the app container multiplies it and nothing
+  detects that**; its only enforcement is a deployment invariant in `docs/admin/operations.md`.
+  (3) The stale-generation reaper now runs on **every** admin submission, refused ones included —
+  operator-ruled acceptable (the 1-hour threshold is ~70x a real generation), but a materially
+  slower generation would put it at risk of reaping live runs.
+
+  **It also fixed a product-fatal defect OUTSIDE its own file list, on an operator ruling.** In
+  `src/reports/lifecycle.py` the reaper unlinked a report's orphan HTML BEFORE marking the row
+  failed, inside one swallowing per-row try/except — so a failed unlink left the row `generating`
+  forever. Tolerable before; with the new cross-path gate it wedged the generate page PERMANENTLY,
+  and the delete affordance is itself gated on `status != 'generating'`, leaving no UI escape. The
+  row is now flipped first. An explicit force-clear command for a stuck row younger than the
+  staleness threshold was offered and DECLINED, and an unconditional startup wipe was recommended
+  against and ruled out — CLI generations run in a separate process that SURVIVES an app-container
+  restart, so such a wipe would kill a live run and unlink its file mid-flight.
+
 - ~~**Same-listing detection**~~ — **LANDED 2026-08-15**, acceptance owed at the regenerate. Spec
   moved to `done/2026-08-13-same-listing-dedup-detection.md` (`git log --follow` for history).
   Same-pair window 1.0s → 1,800s; a new opponent-divergence second pass; an identity-bearing
@@ -78,27 +121,6 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   `done/2026-08-05-rung-c-season-year-filter.md`. It carried both queued residuals
   (worktree-guard `CLAUDE_HOME`, extensionless PII scannability) and settled the owed
   `codex-review`-vs-`codex review` comparison; all three are struck from the lists below.
-- **Generate-concurrency cap — the NEXT CHUNK in the ruled sequence** (linked at audit 5; the
-  sequence in NOW named it but nothing pointed at its spec). Spec
-  `2026-08-10-admin-generate-concurrency.md` — **`READY` as of this commit** (spec pass
-  2026-08-16, codex-spec-reviewed **3 rounds, 9 findings: 8 folded, 1 disputed** — the dispute is
-  a lifecycle artifact that fires on every pre-commit spec, reasoned out in that spec's progress
-  log); waiting only for a fresh execution session. **Must land before the full regenerate** — bulk regeneration is exactly the
-  load that produced the 243-failure lock storm.
-
-  Operator rulings that fixed its shape (2026-08-16): scope is the **admin web page only**, and
-  **N = 2** (the stub's open "N=2–3" is closed). Mechanism is an in-process `BoundedSemaphore` on
-  `POST /admin/reports/generate` — NOT a longer `busy_timeout`, and NOT a count of
-  `reports.status='generating'` rows, which the spec's F4 shows is materially weaker here because
-  that row is not written until seconds after the click. Its repair half died with the
-  regeneration ruling.
-
-  ⚠ **Two residuals it carries out, both live before the regenerate.** (1) **The CLI and cron
-  paths stay uncapped BY DESIGN** (operator ruling) — `bb report generate` and `bb report
-  morning-run` share the WAL file and this cap cannot see them, so **the full-regenerate chunk
-  must state its own concurrency discipline, serial or its own bound, in its own spec.** (2) The
-  cap is in-process, so **replicating the app container multiplies it and nothing detects that**;
-  its only enforcement is a deployment invariant in `docs/admin/operations.md`.
 - **Orphan-cleanup FK rollback — STUB 2026-08-16**, spec
   `2026-08-16-orphan-cleanup-fk-rollback.md`. Found by the trainer's sweep of the 71-team
   restore run: `cleanup_orphan_teams` uses a games-only deletability test while reclamation
@@ -226,6 +248,14 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
      precisely a CLI workload. So the cap landing does NOT make the regenerate safe: that spec
      must say serial, or name its own bound, or it re-runs the load that produced the 243-failure
      storm through the one door nothing guards.
+
+     **UPDATED 2026-08-17, when the cap landed — this is still owed, but the shape changed.** The
+     cap's amendment added a cross-path gate, so the admin page now REFUSES while any generation is
+     in flight, CLI runs included. That closes admin-vs-CLI, which is the pair that actually bit
+     (the 2026-08-16 incident). What remains open is **CLI-vs-CLI**: two `bb report` processes, or
+     a regenerate overlapping the `morning-run` cron, are still completely unguarded — nothing in
+     the CLI path consults the gate. A regenerate spec that reasons "the cap landed, so this is
+     handled" would be reading the wrong half. Serial, or its own bound, still required.
 
 - Devcontainer pip will break the way CI did when its image floats to pip 26.2.
 - **The reconciliation gate CANNOT work on a growing corpus, and this is a design fault, not drift**

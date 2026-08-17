@@ -564,6 +564,29 @@ bb report generate <public_id>
 
 Reports expire 14 days after generation. After expiry, the link returns a 404 and the row is eligible for cleanup.
 
+**This page generates ONE report at a time, and it also refuses while a CLI generation is running.** Submit while any generation is in progress -- yours or one started from the command line -- and the page refuses it with a red banner reading:
+
+> A report generation is already in progress -- it may have been started from the command line. Wait for it to finish, then try again.
+
+Nothing is queued and nothing is lost: the submission is simply not started, so re-submit once the running generation finishes. A second, rarer banner exists for the first few seconds after a click, before the new generation has registered itself in the database:
+
+> 2 report generations are already running. Wait for one to finish, then try again.
+
+Both refusals exist because concurrent generations all write the same SQLite file, and generating a report is destructive (see the reconcile-at-load section below). Two measured incidents, neither re-derived since:
+
+- **2026-08-10** -- an operator run reached 14 simultaneous generations, exhausted the 30-second database lock timeout, and left 13 teams with roster bloat. Waiting longer for the lock was rejected as a fix; it moves the cliff rather than removing it.
+- **2026-08-16** -- a single click from this page raced a command-line run. It hard-deleted stat rows on games the CLI was actively writing, forced the CLI to skip its orphan-reclamation step, and produced a report served as finished while carrying 155 uncorrected reconciliation discrepancies. This is why the page now refuses across the command-line boundary and not just against itself.
+
+**⚠ This reduces the risk; it does not eliminate it.** The check reads the database at the moment you submit. A command-line generation that STARTS in the seconds after that check will still race your run, and nothing anywhere detects it. If you are running `bb report generate` or `bb report morning-run`, do not use this page until it finishes.
+
+**⚠ The check is not passive -- a refused submission still changes the database.** Before counting, it runs the stale-generation reaper: any generation stuck in progress for more than an hour (its process died mid-run) is marked failed and its half-written HTML file is deleted, and that result is committed whether or not anything was reaped. This is deliberate -- it is what stops a crashed generation from blocking this page for an hour -- but it means submitting here is never a read-only act, even when you are told no.
+
+**The page cannot tell whose generation it is.** Nothing in the database records whether a run was started here or from the command line, so the page refuses on *any* in-flight generation. That is deliberate, and it is why the page is one-at-a-time rather than two.
+
+**⚠ Deployment invariant -- while this cap stands, the app is deployed as exactly ONE process serving HTTP: one container, one uvicorn worker, not replicated.** The 2-slot cap is counted inside a single process, so it is a real ceiling only under that condition. (The cross-command-line refusal above reads the shared database and so is NOT affected by this invariant -- it is the in-process 2-slot cap that depends on it.) Running a second copy of the app -- a second `docker compose` project, a scaled or replicated `app` service, a hand-run `uvicorn`, an orchestrator that adds an instance -- multiplies the effective cap to 2 x processes, and **nothing detects it or warns you**.
+
+**⚠ The easiest way to break this by accident is a single environment variable.** uvicorn reads `WEB_CONCURRENCY` directly: setting it to 4 gives you four worker processes and an effective cap of 8, with no change to any launch file. Because the `app` service loads its environment from the untracked `.env` file, **no test can see this** -- a `WEB_CONCURRENCY` line in `.env` defeats the cap silently and the suite stays green. Do not set it while this cap stands. (A test pins the tracked routes -- `Dockerfile`, and `command` / `entrypoint` / `deploy.replicas` / `environment` on the `app` service in `docker-compose.yml` -- plus the variable's absence from the dev container's own environment. The `.env` route and true runtime replication have no enforcement anywhere except this paragraph.) Anyone who scales the app owes this cap a re-think.
+
 ### Reconcile-at-Load: Generating a Report Can Now Delete Stale Data
 
 *Last updated: 2026-07-27 | Source: E-267 (reconcile-at-load against the fresh crawl), E-276 (corrected the game and player-line gate to a pre-upsert snapshot; removed the roster grain's floor gate outright; docs-writer disclosed the player-line grain's one-run-window and `bb data dedup-players`-reliance residual, per the 2026-07-26 layer-pass handoff), E-277 (E-277-05: collapsed the game grain's refusal WARN from one per absent game to one per cause)*

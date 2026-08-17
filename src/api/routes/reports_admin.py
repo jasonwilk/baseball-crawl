@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from src.api.auth import user_is_admin
 from src.api.db import get_connection, list_reports_with_runs
 from src.api.helpers import get_app_url
 from src.gamechanger.url_parser import parse_team_url
+from src.reports.lifecycle import reap_stale_generating_reports
 from src.util.timezone import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,142 @@ router = APIRouter(prefix="/admin")
 
 # Valid role values (application-layer validation; SQLite cannot add CHECK via ALTER)
 _VALID_ROLES = {"admin", "user"}
+
+# Admission cap for POST /admin/reports/generate.
+#
+# WARRANT. A generation submitted here runs as a plain sync `generate_report`
+# handed to Starlette's BackgroundTask, which sends it to `run_in_threadpool` ->
+# `anyio.to_thread.run_sync` with no limiter, i.e. the DEFAULT anyio limiter --
+# 40 tokens in this container. So every submission got its own thread and the
+# only ceiling in the system was 40. A measured 2026-08-10 operator run put 14
+# simultaneous generations against the one SQLite file, exhausting the 30s
+# busy_timeout and producing 243 `database is locked` tracebacks. This is the
+# admission check that run had none of; `busy_timeout` is deliberately untouched,
+# because waiting longer only moves the cliff.
+#
+# ⚠ LOAD-BEARING PREMISE: this is an IN-PROCESS cap, so it is a real cap only
+# while the app is deployed as exactly ONE process serving HTTP -- one container,
+# one uvicorn worker, not replicated. The half of that premise living in tracked
+# files is pinned by
+# tests/test_admin_reports.py::TestTheCheckedInTopology. Two halves CANNOT be
+# tested and are enforced only by the deployment invariant in
+# `docs/admin/operations.md`: runtime replication of the container, and a
+# `WEB_CONCURRENCY` entry in the untracked env file, which uvicorn reads directly
+# to set its worker count. Either multiplies this cap and nothing warns you.
+#
+# ⚠ THIS CONSTANT ALONE DOES NOT MAKE THE PAGE SAFE, and reading it that way is
+# how the 2026-08-16 incident happened. `bb report generate` /
+# `bb report morning-run` write the same WAL file in ANOTHER PROCESS, which no
+# in-process counter can see. That door is guarded separately, by
+# `_a_generation_is_in_flight` below -- and because that gate cannot tell a CLI
+# run from this page's own generation, the page is effectively ONE-AT-A-TIME and
+# this constant only binds inside the window before a `generating` row exists.
+# The CLI itself remains uncapped BY DESIGN (operator ruling); the admin door
+# DEFERS to it rather than capping it.
+MAX_CONCURRENT_ADMIN_GENERATIONS = 2
+
+# BoundedSemaphore, not Semaphore, deliberately: a double-release bug raises
+# ValueError loudly instead of silently inflating the cap.
+_generation_slots = threading.BoundedSemaphore(MAX_CONCURRENT_ADMIN_GENERATIONS)
+
+
+def _a_generation_is_in_flight() -> bool:
+    """True when ANY report generation is running, from any process.
+
+    The cross-path gate (operator ruling 2026-08-16). The semaphore above is an
+    IN-PROCESS bound and structurally cannot see `bb report generate` or
+    `bb report morning-run`, which write this same SQLite file. On 2026-08-16 an
+    admin click raced the serial CLI restore run: it hard-deleted stat rows on
+    games the CLI was actively writing, forced the CLI to skip orphan
+    reclamation, and produced a report served as `ready` carrying 155
+    uncorrected reconciliation discrepancies. Per-path caps do not compose.
+
+    Reap-then-count, in that ORDER, reusing the canonical reaper rather than
+    growing a second copy of it (`.claude/rules/canonical-seams.md`; the same
+    sequence `reclaim_orphan_reference_data` already uses).
+
+    The order is load-bearing, but NOT for the reason an earlier version of this
+    comment gave (it claimed reaping first avoids wedging the page "for the full
+    STALE_GENERATING_SECONDS = 3600", which is wrong in both directions and is
+    corrected here). The reaper only selects rows ALREADY older than that
+    threshold, so reaping first does not shorten the hour for anybody: a
+    generation younger than the threshold blocks this page under either order,
+    and that is correct -- it is probably alive. What the order actually buys is
+    that once a crashed row IS past the threshold, this call clears it and
+    admits the submission in the SAME request. Counting first would report the
+    stale row as live and refuse, clearing it only for some LATER submission --
+    or never, if a future edit turns the count into an early return.
+
+    ⚠ The reaper UPDATEs rows, unlinks orphan HTML, and COMMITS unconditionally
+    even when it reaps nothing -- so this is NOT a passive read on a serving
+    route. It is why this chunk owes a `/security-review`.
+
+    ⚠ We pass our OWN connection rather than None. `_conn_scope(None)` resolves
+    `lifecycle.get_connection`, which test fixtures do not patch -- passing None
+    would point this gate at the real data/app.db. The injected-connection seam
+    exists precisely so the caller's sandbox travels with the connection.
+
+    ⚠ There is NO source column on `reports`, so this cannot distinguish a CLI
+    run from this page's own in-flight generation. By operator ruling the admin
+    page is therefore ONE-AT-A-TIME; the semaphore still covers the window
+    between the click and the `generating` row being written, which this gate is
+    blind to.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            result = reap_stale_generating_reports(conn)
+            if result.errors:
+                # A row the reaper could not clear is still 'generating' and will
+                # keep refusing this page. Surface it: the operator otherwise sees
+                # only the generic banner and has no way to learn the reap failed.
+                logger.error(
+                    "Stale-'generating' reaper reported %d error(s) while gating "
+                    "the admin generate route; a row it failed to clear will keep "
+                    "refusing submissions until it is resolved.",
+                    result.errors,
+                )
+            return bool(
+                conn.execute(
+                    "SELECT COUNT(*) FROM reports WHERE status = 'generating'"
+                ).fetchone()[0]
+            )
+    except Exception:
+        # FAIL CLOSED. The reaper's SELECT and its final commit sit OUTSIDE its
+        # per-row error isolation, so `database is locked` propagates out of here
+        # -- and that is precisely the contention this gate exists to handle (a
+        # CLI generation holding the same WAL file). Letting it escape would
+        # return a 500 instead of the designed 303 flash. Refusing on an
+        # unreadable signal is the house rule: a missing safety signal defaults
+        # to REFUSE, never to proceed (`.claude/rules/python-style.md`).
+        logger.exception(
+            "Could not determine whether a generation is in flight; refusing the "
+            "submission rather than racing an unknown writer."
+        )
+        return True
+
+
+def _generate_report_releasing_slot(gc_url: str) -> None:
+    """Run a generation and hand its slot back, however it ends.
+
+    The import stays INSIDE the function, as it was at the original call site.
+    That is load-bearing for the existing tests, which patch
+    ``src.reports.generator.generate_report`` and assert on the call -- only a
+    call-time import resolves through the patch.
+
+    ⚠ The import is INSIDE the ``try``, not above it. The slot is acquired in the
+    route BEFORE this task runs, so an exception raised by the import itself
+    (``ImportError`` from a circular-import regression, a missing transitive
+    dependency) would otherwise skip the ``finally`` and leak the slot
+    PERMANENTLY -- two such failures wedge the generate page until the process
+    restarts. Pinned by
+    ``TestAdminGenerate_WhenTheGenerationImportFails::test_the_slot_is_still_returned``.
+    """
+    try:
+        from src.reports.generator import generate_report
+
+        generate_report(gc_url)
+    finally:
+        _generation_slots.release()
 
 
 # ---------------------------------------------------------------------------
@@ -720,8 +858,41 @@ async def generate_report_admin(
             status_code=303,
         )
 
-    from src.reports.generator import generate_report
-    background_tasks.add_task(generate_report, gc_url)
+    # Cross-path gate, BEFORE the semaphore acquire. Ordering is deliberate: a
+    # refusal here cannot leak a slot because no slot is held yet. (Acquiring
+    # first and releasing on refusal is also correct but relies on a release a
+    # reviewer must verify; this removes the failure mode instead of guarding
+    # it.) Pinned by
+    # TestAdminGenerate_WhenAGenerationIsInFlightAnywhere::test_no_slot_is_consumed.
+    if await run_in_threadpool(_a_generation_is_in_flight):
+        return RedirectResponse(
+            url="/admin/reports?error=" + quote_plus(
+                "A report generation is already in progress -- it may have been "
+                "started from the command line. Wait for it to finish, then try again."
+            ),
+            status_code=303,
+        )
+
+    # Admission check, LAST -- after _require_admin and after all three URL
+    # validations. ⚠ This ordering is the whole correctness of the cap. Acquiring
+    # any earlier means every rejected empty/invalid/UUID URL returns without
+    # releasing and permanently burns a slot, so two bad pastes would wedge the
+    # page. Pinned by
+    # TestAdminGenerate_WhenTheUrlIsInvalid::test_no_slot_is_consumed.
+    #
+    # Reject, not queue: a queued job the operator was told "started" that
+    # actually sits idle is a worse lie than an immediate refusal, and queuing
+    # would pin an anyio thread for the duration.
+    if not _generation_slots.acquire(blocking=False):
+        return RedirectResponse(
+            url="/admin/reports?error=" + quote_plus(
+                f"{MAX_CONCURRENT_ADMIN_GENERATIONS} report generations are already "
+                "running. Wait for one to finish, then try again."
+            ),
+            status_code=303,
+        )
+
+    background_tasks.add_task(_generate_report_releasing_slot, gc_url)
 
     msg = f"Report generation started for {gc_url}. This may take a few minutes."
     return RedirectResponse(

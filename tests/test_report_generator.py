@@ -5287,6 +5287,44 @@ class TestReapStaleGenerating:
         assert row[0] == "failed"
         assert "Reaped" in (row[1] or "")
 
+    def test_the_row_is_freed_even_when_the_orphan_unlink_fails(self, db, tmp_path):
+        """A failing unlink must NOT leave the row stuck at 'generating'.
+
+        The UPDATE and the unlink share one per-row try/except that swallows and
+        continues. With the unlink FIRST, an unlink failure skipped the UPDATE
+        and the row stayed 'generating' forever -- which since 2026-08-16 wedges
+        POST /admin/reports/generate permanently (it refuses on any 'generating'
+        row) with no UI escape, because the delete affordance is itself gated on
+        status != 'generating'. Flipping the row first makes a failed unlink cost
+        a stray file instead of the product.
+        """
+        team_id = _seed_team(db)
+        self._insert_generating(db, "unlinkfail", team_id, _iso_offset_days(-1))
+        reports_dir = tmp_path / "data" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "unlinkfail.html").write_text("<html>partial</html>")
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", reports_dir),
+            patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")),
+        ):
+            result = reap_stale_generating_reports()
+
+        verify = self._fresh_conn(tmp_path)
+        status = verify.execute(
+            "SELECT status FROM reports WHERE slug = 'unlinkfail'"
+        ).fetchone()[0]
+        verify.close()
+
+        assert status == "failed", (
+            "a failed orphan unlink left the row stuck at 'generating', which "
+            "permanently wedges the admin generate page"
+        )
+        assert result.errors == 1
+
     def test_fresh_generating_left_untouched(self, db, tmp_path):
         """AC-2: a 'generating' row WITHIN the threshold (a live generation) is NOT
         reaped -- the reaper must not kill an in-progress generation."""

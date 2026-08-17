@@ -203,7 +203,7 @@ def reap_stale_generating_reports(
 
     What the raise means in production, in both directions: it stops the
     destructive path, but no operator is paged.  THIS function's call sites are
-    exactly three, enumerated from the code rather than from any shared list:
+    exactly four, enumerated from the code rather than from any shared list:
 
     * :func:`cleanup_expired_reports` -- wrapped; logs at WARNING and continues.
     * :func:`reclaim_orphan_reference_data`, its Step 1 -- **NOT wrapped**, so
@@ -214,10 +214,18 @@ def reap_stale_generating_reports(
       demoting site.**  It calls this function with no argument, so ``conn`` is
       ``None``, the guard SKIPS, and the raise cannot occur there at all.  Same
       exemption as ``bb report cleanup`` on :func:`cleanup_expired_reports`.
+    * ``src/api/routes/reports_admin.py::_a_generation_is_in_flight`` -- the
+      admin generate route's cross-path gate (2026-08-16).  It passes a BORROWED
+      connection, so this guard is LIVE there, and it is the first call site on a
+      SERVING request path: it runs on every valid ``POST /admin/reports/generate``
+      submission, including refused ones.  The raise is absorbed at that site by a
+      broad ``except`` that fails CLOSED (refuses the submission) rather than
+      returning a 500.
 
     Note this list does NOT include ``generate_report`` or the admin
-    report-delete path: neither calls this function.  "Refuses loudly" describes
-    a direct caller, not the deployed behaviour.
+    report-DELETE path: neither calls this function.  (The admin GENERATE path
+    does, as of the fourth bullet -- do not read the two admin paths as one.)
+    "Refuses loudly" describes a direct caller, not the deployed behaviour.
 
     Args:
         conn: An open connection to use, with no transaction in progress.  When
@@ -252,6 +260,29 @@ def reap_stale_generating_reports(
             report_id = row["id"]
             slug = row["slug"]
             try:
+                # ORDER IS LOAD-BEARING: flip the row FIRST, unlink AFTER.
+                #
+                # These two used to run the other way round, and a failing
+                # unlink (read-only mount, permissions, EBUSY) hit the `except`
+                # below and `continue`d BEFORE the UPDATE -- leaving the row
+                # 'generating' forever. That was a leaked orphan file's worth of
+                # damage until the admin generate route began refusing on ANY
+                # 'generating' row (2026-08-16): a stuck row now refuses every
+                # submission from that page permanently, and the delete
+                # affordance is itself gated on `status != 'generating'`
+                # (admin/reports.html), so there is no way out through the UI.
+                #
+                # Flipping first inverts the failure into the strictly milder
+                # one this function was already designed to tolerate: the row
+                # always clears, and a failed unlink leaves a stray file (the
+                # pre-existing orphan condition) instead of wedging the product.
+                conn.execute(
+                    "UPDATE reports SET status = 'failed', error_message = ? "
+                    "WHERE id = ? AND status = 'generating'",
+                    (reaped_message, report_id),
+                )
+                result.reaped += 1
+
                 # Unlink any orphan partial HTML (written before the 'ready' update
                 # that would have set report_path -- so report_path is still NULL and
                 # cleanup_expired_reports can never reap it). Canonical resolution
@@ -262,12 +293,6 @@ def reap_stale_generating_reports(
                     file_path.unlink()
                     logger.info("Removed orphan HTML for reaped report: %s", file_path)
                     result.files_removed += 1
-                conn.execute(
-                    "UPDATE reports SET status = 'failed', error_message = ? "
-                    "WHERE id = ? AND status = 'generating'",
-                    (reaped_message, report_id),
-                )
-                result.reaped += 1
             except Exception as exc:  # noqa: BLE001 -- per-row error isolation
                 logger.warning(
                     "Failed to reap stale 'generating' report id=%s: %s", report_id, exc
