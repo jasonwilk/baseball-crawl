@@ -30,6 +30,16 @@ none is established enough to spec today.
    `http://baseball.localhost:8000` vs expected `:8001` — the traefik-vs-direct port split.
    Real login papercut; smallest possible fix chunk or a config note.
 
+7. **CLEAR DEFECT, promote at next adjudication — a transient DNS failure publishes a report
+   titled "Unknown" and calls it success.** One firing on the full run: `Could not fetch public
+   team info ... ConnectError: Temporary failure in name resolution` → report generated with
+   `team=Unknown`, status `ready`, served, and the driving script sees `OK`. Fail or retry;
+   never publish "Unknown". (Also the run's only network fault: an in-container DNS blip.)
+8. **`Cross-perspective dedup` collapses on score-match alone when start times DISAGREE by
+   minutes** (2 firings, e.g. 19:20 vs 19:30 "treating as duplicate because per-team scores
+   match (8-8)"). Same family as the same-listing window rules — check this branch's warrant
+   against that spec's fitted-bound reasoning before the rebuild trusts it.
+
 Also for the record: the half-pair defect fired 8 times in this run with exact 1:1 symptom
 pairing (dedup score-disagree ↔ plays-derived disagree on identical game ids) — priority
 confirmation for the already-stubbed fix, no new work here. And the app suggested

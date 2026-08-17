@@ -47,3 +47,9 @@ warning after their next touching generation, or are explicitly adjudicated.
 
 - **2026-08-16** — Stubbed from the trainer's log sweep during the 71-team restore run.
   No code touched.
+- **2026-08-17** — Full-run counts (30,082-line log, 70 of 71 complete): the FK failure fired
+  **5 times**, rolling back cleanup for **34 teams total**; permanent unreclaimable residue grew
+  5 → **15 distinct teams**; the exclusion warning fired **389 times**. This is the
+  highest-volume defect of the run. Recommendation upgraded: land this BEFORE the counted
+  rebuild — at this rate the rebuild would leak ~30 team rows and silently lose cleanup on a
+  third of a full pass's batches.

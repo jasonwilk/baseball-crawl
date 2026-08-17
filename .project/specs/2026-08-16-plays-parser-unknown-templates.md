@@ -28,6 +28,13 @@ which feeds the final-score derivation the half-pair chunk just made load-bearin
 runner substitution affects who is on base for every subsequent play. Both are exactly the
 "closer to byte-identical" class, and both have a known template shape sitting in the log.
 
+## Full-run update (2026-08-17) and a SECOND, worse parser gap
+
+Template firings grew 46 → **108** over the full 71-team run (same six templates). And the
+tail surfaced a heavier sibling this chunk should own too: **19 firings of
+`Could not extract batter_id for game=... play_order=...; skipping.`** — that one drops the
+WHOLE play, not one detail field. Same file, same fix pass.
+
 ## Out of scope
 
 Whatever the FULL log adds to the template list rides this same chunk; new template classes

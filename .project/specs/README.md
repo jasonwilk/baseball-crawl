@@ -14,8 +14,10 @@ sense moved to READY. (`RULED` was retired 2026-08-08.) Audits verify READY spec
 **`specs/done/`.** At handoff, a spec whose Status you just flipped to `COMPLETE` moves to
 `.project/specs/done/` in the SAME commit. Everything still open stays in the live directory —
 that is exactly what principle F's audit has to see. Note the rename cost: plain `git log` on the
-new path shows only the move commit, so **use `git log --follow -- <path>`** to get a moved spec's
-real history. Someday-work does not live here at all; it is one line in `IDEAS.md`.
+new path shows only the move commit, so **use `git log --follow -M20% -- <path>`** to get a moved
+spec's real history — bare `--follow` ALSO fails silently when the move commit carried heavy
+growth (chunk 16's spec grew 429 → 790 lines in its move and dropped below git's 50% similarity
+default; measured 2026-08-17). Someday-work does not live here at all; it is one line in `IDEAS.md`.
 
 ## NOW
 
