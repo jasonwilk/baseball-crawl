@@ -22,9 +22,12 @@ default; measured 2026-08-17). Someday-work does not live here at all; it is one
 ## NOW
 
 Continue the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"):
-same-listing detection → generate-concurrency cap → runs-as-scoreboard instrument → full
-regenerate. **The generation freeze is LIFTED** — the lossy-merge hazard it protected against is
-fixed and proven on live data. The plays half-pair clobber below must land BEFORE the regenerate.
+same-listing detection → generate-concurrency cap → **reaper unlink race (STUB, operator-ruled
+2026-08-17 to run FIRST — it is the serving path)** → **runs-as-scoreboard instrument (SPEC
+COMMITTED, READY)** → full regenerate. **The generation freeze is LIFTED** — the lossy-merge
+hazard it protected against is fixed and proven on live data. The half-pair clobber no longer
+needs its own slot before the regenerate: it is folded into the instrument chunk, along with
+the cap 2 → 1 ruling.
 
 - ~~**Generate-concurrency cap**~~ — **LANDED 2026-08-17**, `acceptance: run`. Spec moved to
   `done/2026-08-10-admin-generate-concurrency.md` — **history needs `git log --follow -M20%`**;
@@ -227,19 +230,32 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   intact, and it never self-heals. That is the Cleanup-Detection Mirror Invariant on a COPY path,
   and it was reachable by exactly the ordering the backfill stub plans. Now guarded by a
   `PRAGMA table_info`-derived drift test that fails on the NEXT forgotten column.
-- **Plays final-score BACKFILL** — **STUB 2026-08-11**, spec
-  `2026-08-11-plays-final-score-backfill.md`. The fix landed but **no stored data moved**: the
-  detection query still reads **91** and all 2,464 `game_perspectives` rows are NULL, because
-  whole-game plays idempotency skips any game that already has plays. Backup → reset → re-scout, in
-  its own session, naming `bb report generate` as destructive first. **Success is 91 → the
-  abandoned-charting residual (≥1), NOT → 0** — 87 of 88 recover, and one game's run is genuinely
-  absent from the payload.
-- **Runs as a reconciliation-scoreboard stat** — **STUB 2026-08-11**, spec
-  `2026-08-11-runs-as-scoreboard-stat.md`. The scoreboard measures no runs stat, so **the north-star
-  instrument was blind to the 102-run defect the recovery chunk just fixed**. Add it UNGATED first
-  (gating raises `BaselineError`/exit 4 against a baseline lacking the key), and treat the 9
-  two-scorebook units and the non-monotone units as legitimate disagreement. ⚠ Read the gate residual
-  below before gating anything.
+- ~~**Plays final-score BACKFILL**~~ — **DISCHARGED BY THE RESTORE RUN, measured 2026-08-17.**
+  Spec `2026-08-11-plays-final-score-backfill.md`; its Status flip rides the runs-instrument
+  chunk. **Its premise is now FALSE and must not be requoted**: it says all 2,464
+  `game_perspectives` rows are NULL and the detection reads 91. Measured read-only: **2,620 of
+  2,623 rows carry a score** (0 half-set, 3 with neither), and the plays-vs-`games` short count
+  is **6**. The 71-report restore run re-ingested plays and did the backfill's job; nobody needs
+  to run its backup → reset → re-scout plan. The legacy last-play query still reads **101**,
+  which is the broken read the new column replaced — not a failure.
+- **Runs as a reconciliation-scoreboard stat** — **READY 2026-08-17**, spec
+  `2026-08-11-runs-as-scoreboard-stat.md` (rewritten from its STUB; codex-reviewed, five
+  findings folded). **The STUB's shape was REFUTED — do not execute it.** It asked for a
+  per-player R beside AB/H/BB/SO; plays carry no per-player run attribution (`plays` holds a
+  running game score, `play_events` no player id), and the 102 missing runs never touched a
+  player stat, so that stat could not be built and would not have seen the defect. What
+  ships instead is a **game-score section**: plays-derived final vs the `games` row, per
+  game-perspective, UNGATED.
+  **It now carries TWO folded items on operator rulings of 2026-08-17**: the half-pair
+  clobber below, and the admin cap 2 → 1 (residual 2 above, RULED).
+
+  **Measured live before-state, pinned in the spec** (read-only, cross-checked in the
+  guarded form): units **2,620** · exact **2,609** · plays-short **6** · plays-exceed **5** ·
+  abs-Δ **26** · unmeasurable **3**. ⚠ **The gate already exits RC=1** with seven violations
+  against the committed baseline (corpus growth — `no_plays_units` 484 → 7,358), so this
+  chunk's proof is that the violation LIST does not move, NOT a green run.
+  ⚠ Neither direction is a pure class: abandoned charting is legitimately SHORT, so short
+  reads "worth investigating", never "defects".
 - ~~**Opponent-roster dedup gap**~~ — **LANDED 2026-08-12**; see NOW for the acceptance numbers.
   Spec moved to `done/2026-08-10-opponent-roster-dedup-gap.md`. The "zero refused forks is what
   the hazard looks like" lesson this entry carried is preserved in the spec and the jot list.
@@ -248,10 +264,12 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   `OR` while both columns are assigned from `excluded`, so a half-derived pair `(5, NULL)` landing
   on a stored `(NULL, 7)` **NULLs a real score** — contradicting the docstring three lines above,
   which promises an all-or-nothing write. Found by codex review of a different chunk's diff.
-  **Why you should care**: it is LATENT today (all 2,464 rows are NULL) and **the full regenerate
-  is what fires it**, so it must land BEFORE that regenerate, not after. Not the one-character fix
-  it looks like — `OR`→`AND` also discards a half we legitimately derived, so measure whether real
-  payloads produce half-pairs before choosing.
+  **FOLDED into the runs-instrument chunk, operator-ruled 2026-08-17 — its open question is
+  ANSWERED.** It asked for a measurement before choosing `OR`→`AND`, because `AND` also discards
+  a half we legitimately derived. Measured read-only after a full re-ingest: **0 home-only and
+  0 away-only across all 2,623 rows**, so `AND` discards nothing observed and makes the code
+  match its own docstring. The "all 2,464 rows are NULL" latency claim is stale — 2,620 now
+  carry scores — but the defect is unfired, not gone.
 - ~~**Same-listing dedup detection**~~ — **LANDED 2026-08-15; see NOW, not here.** Spec moved to
   `done/2026-08-13-same-listing-dedup-detection.md`. The source stub
   `2026-08-10-same-listing-dedup-window.md` stays `STUB` for the residual observations it also
@@ -286,16 +304,45 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
      DELETE matching ZERO rows still takes SQLite's write lock, so Phases 1-2 already hold it by
      the time the loop runs; that is why the loop is not where contention bites. Closing it means
      moving containment above Phase 1 or into the caller.
-  2. **`MAX_CONCURRENT_ADMIN_GENERATIONS = 2` vs the one-at-a-time ruling.** `/code-review` argues
-     the operator's own 2026-08-16 ruling implies `1`: two generations can still pass through the
-     click-to-`generating`-row window the DB gate cannot see, which is the exact shape of the
-     2026-08-16 incident. The value is pinned by `TestTheCapValue` to that ruling, so this is an
-     **operator value ruling to re-make**, not a defect a session may fix.
+  2. ✅ **RULED 2026-08-17: the cap becomes `1`.** `/code-review` argued the operator's own
+     2026-08-16 ruling implied it — two generations can still pass through the
+     click-to-`generating`-row window the DB gate cannot see, the exact shape of the 2026-08-16
+     incident. Operator took the trade (a refused click occasionally needs re-clicking) over
+     keeping a small version of what bit them. **Folded into the runs-instrument chunk**, which
+     also owes the banner's plural: it interpolates the constant, so at N=1 it renders "1 report
+     generations are already running". The semaphore STAYS — it is what binds inside the window.
   3. **A semaphore slot leaks permanently if the response send fails.** Starlette awaits the
      background task only after both `send()` calls, so a client disconnect (closed tab) skips
      `_generate_report_releasing_slot` and its `finally`. Two occurrences wedge the page on the
      "2 report generations are already running" banner until the process restarts. Same failure
      class as the codex P1 that chunk already fixed, one layer up.
+
+- ⚠ **The reaper's unlink race is only HALF closed — STUB 2026-08-17**, spec
+  `2026-08-17-reaper-unlink-race.md`, **ruled to run next**. A `/code-review` of the
+  already-committed `2217092`, verified against the files before routing: the generator writes
+  the HTML and only THEN commits `ready` (`generator.py:2702` → `:2705`), and
+  `_update_report_ready` has NO status guard (`:272-275`). So the reap can claim the row
+  BETWEEN those two steps and still unlink a finished report's served HTML — `status='ready'`,
+  `report_path` set, file gone, `reaped=1, files_removed=1, errors=0`. **The same end state
+  that chunk reproduced and believed it had fixed**; the rowcount arbiter closes only the
+  other ordering. Much narrower (needs a >1h generation that then finishes, reaped inside a
+  millisecond window) and NOT reproduced live — but the regenerate is exactly the bulk CLI
+  workload that produces long generations. The stub also carries two Low findings in the same
+  file, one of which sharpens residual 1 above: **the SAVEPOINT statement sits OUTSIDE its
+  `try`** (`lifecycle.py:971-972`), so a failure THERE still rolls the whole batch back —
+  residual 1 currently blames only Phase 1's first DELETE, and that is not the only door.
+
+- **Two live-data findings from the runs-instrument spec session (2026-08-17), both parked in
+  that spec's Out of scope and repeated here so they survive its move to `done/`.**
+  1. **A completed game is stored `0-0` in `games` while its plays derive `10-5`** — one unit,
+     but 15 of the whole corpus's 26-run plays-vs-`games` abs-Δ. Only **2** completed games
+     repo-wide sit at `0-0`. This is a `games`-row score defect, nothing else in the repo
+     reports it, and the new game-score section is what surfaced it. Measuring it is that
+     chunk; FIXING it is not — it exits as a stub or an `IDEAS.md` line at that handoff.
+  2. **`bb report reconcile-scoreboard` opens the live DB with a bare `sqlite3.connect`**
+     (`src/cli/report.py:297`), not the `mode=ro` URI `.claude/rules/canonical-seams.md`
+     prescribes for a must-not-modify reader. Pre-existing, and the command is a pure reader,
+     so this is a seam divergence rather than a live hazard.
 
 - **Regeneration hazard — RULED 2026-08-12.** Operator ruling (verbatim intent): existing
   scouting data is NOT precious — "I don't care if we lose everything that is there and I have
@@ -340,7 +387,11 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   2026-08-10 — the CLI calls `evaluate_gate`, prints `Reconciliation gate FAILED`, and exits **RC=1**.
   It is live, not vestigial. Read that idea before acting anyway: it carries a real footgun about two
   ratchets sharing this vocabulary, and says to scope any deletion by FILE, never by grepping
-  "baseline"/"ratchet"/`--update-baseline`.
+  "baseline"/"ratchet"/`--update-baseline`. **Re-measured 2026-08-17 and it is worse, exactly as
+  predicted**: the command exits **RC=1** with SEVEN violations (`batting.AB 75→133`,
+  `batting.H 20→48`, `batting.SO 14→15`, `pitching.H 40→170`, `pitching.SO 24→71`,
+  `pitching.BB 42→137`, `axis.no_plays_units 484→7358`). Nothing regressed; the corpus grew.
+  Every session running this command now sees a red FAILED it must be told to ignore.
 - **Row counts cannot detect an UPDATE — do not use them as a "DB is settled" check** (found
   2026-08-10, cost two rounds of wrong numbers in one spec). `games` and `plays` counts held
   identical at 2,303 / 143,613 across an entire session while `games.home_score` changed underneath,
