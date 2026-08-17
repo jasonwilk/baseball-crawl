@@ -27,7 +27,9 @@ regenerate. **The generation freeze is LIFTED** — the lossy-merge hazard it pr
 fixed and proven on live data. The plays half-pair clobber below must land BEFORE the regenerate.
 
 - ~~**Generate-concurrency cap**~~ — **LANDED 2026-08-17**, `acceptance: run`. Spec moved to
-  `done/2026-08-10-admin-generate-concurrency.md` (`git log --follow` for history). Suite
+  `done/2026-08-10-admin-generate-concurrency.md` — **history needs `git log --follow -M20%`**;
+  bare `--follow` returns only the move commit for this one, because the spec grew 429 → 790 lines
+  in it (the case the `specs/done/` note above describes). Suite
   4,536 → 4,551 (+15). `POST /admin/reports/generate` now carries TWO admission gates covering
   different blind spots: an in-process `BoundedSemaphore(2)`, and a reap-then-count of
   `reports.status='generating'` that can see OTHER PROCESSES. Thirteen mutants, every one matching
@@ -123,6 +125,18 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   `done/2026-08-05-rung-c-season-year-filter.md`. It carried both queued residuals
   (worktree-guard `CLAUDE_HOME`, extensionless PII scannability) and settled the owed
   `codex-review`-vs-`codex review` comparison; all three are struck from the lists below.
+- **Step 9's `--follow` promise — STUB 2026-08-17**, spec `2026-08-17-spec-move-follow-gap.md`.
+  **Mostly already fixed; what is left is one operator decision, and the chunk may be foldable into
+  another docs chunk rather than run alone.** A `git mv` plus a heavy same-commit rewrite drops a
+  spec below git's default 50% rename-similarity threshold, so `git log --follow` returns only the
+  move commit — silently, with a plausible one-line answer. Measured: chunk 16's spec grew
+  429 → 790 lines and is **1 of 15** in `done/` affected; history is intact at `-M20%`, nothing was
+  lost. The `specs/done/` preamble (`657dc22`) and the one genuinely-false per-entry pointer are
+  both fixed. **Open: does CLAUDE.md step 9 change?** It still promises `--follow` unconditionally,
+  which is what a session reads while CREATING the problem — the board note only helps a reader who
+  already suspects one. That edit spends CLAUDE.md bytes, so it is a cap trade for the operator;
+  the spec lays out three options and recommends adding a one-command check. ⚠ Bitten ONCE, so
+  principle E's bites-twice bar means no rule was written — if it recurs, audit 6 has bite two.
 - **Orphan-cleanup FK rollback — STUB 2026-08-16**, spec
   `2026-08-16-orphan-cleanup-fk-rollback.md`. Found by the trainer's sweep of the 71-team
   restore run: `cleanup_orphan_teams` uses a games-only deletability test while reclamation
