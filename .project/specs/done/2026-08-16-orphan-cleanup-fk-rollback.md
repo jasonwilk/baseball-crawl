@@ -2,7 +2,9 @@
 
 # Orphan cleanup FK failure rolls back the whole phase; and the reaper's prose outlived its reorder
 
-**Date**: 2026-08-16 (rewritten 2026-08-17) · **Status**: `READY`
+**Date**: 2026-08-16 (rewritten 2026-08-17) · **Status**: `COMPLETE (this commit)` ·
+`acceptance: owed at the counted rebuild` — the observable proof is that the FK traceback and the
+`Orphan cleanup failed` warning are ABSENT from that run's log (Verification step 9).
 **Source**: `.project/specs/README.md` NEXT. Item 1 from the trainer's sweep of the 71-team restore
 run; item 2 folded in by operator ruling 2026-08-17 from a `/code-review` of `origin/main...HEAD`.
 
@@ -265,5 +267,134 @@ cleanup paths; no step here runs it against live data.
   other two made Verification executable: concrete test names in step 2, and the `+1 deferred`
   re-derivation in step 1. Per the rubric's re-review protocol, no round 3 is owed — nothing found
   here was a P1/P2 artifact of an earlier fold-in.
+- **2026-08-17 (execute session)** — Audited the spec against the repo before writing code; every
+  load-bearing claim held. Verification step 1 re-derived exactly: FK `5`; `Orphan cleanup failed`
+  at lines 10167/18831/20296/22287/28406 reading `5, 12, 8, 4, 5`; `70` × `Orphan reclamation:
+  deleted 0 team`; `1` deferred; positive control `0` in `CLAUDE.md`. Also confirmed by reading:
+  neither `_delete_game_scoped_data_for_perspectives` (`:467`) nor `_delete_team_scoped_data`
+  (`:693`) commits; `reports.team_id` is `NOT NULL REFERENCES teams(id)` with no `ON DELETE`
+  (`migrations/001_initial_schema.sql:611`); the reaper's four production callers
+  (`main.py:80`, `reports_admin.py:148`, `lifecycle.py:401`, `:1485`); and per Verification step 6,
+  a READ of every `.errors` hit in `src/api/` + `lifecycle.py` — `reports_admin.py:149/167` is the
+  only READER of a reaper result's `.errors` in `src/` (the two `lifecycle.py` hits are WRITERS,
+  one of them `CleanupResult`'s, a different dataclass). `tests/test_orphan_reclamation.py:1121`
+  asserts `.errors == 0` on a clean DB and survives the new counting unchanged.
+- **RED, then GREEN.** RED (RC captured unpiped): `RC=1`, 9 failed / 2 passed, with all four
+  spec-named tests failing by name. GREEN: `RC=0`, 11 passed. The 2 that passed at RED
+  (`test_a_failed_unlink_still_reaps_the_row`, `test_a_failed_row_flip_counts_as_an_error`) are
+  regression pins on behavior the 2026-08-16 reorder already produced, not defect tests.
+- **Full suite**: baseline `4551 passed` (measured on a stashed tree, `RC=0`), after
+  `4561 passed`, `RC=0`. +10 tests, 0 deleted — ratchet satisfied.
+- **One deviation from the spec, deliberate**: `TestAdminGateWedgeLog` landed in
+  `tests/test_admin_reports.py`, not `tests/test_report_generator.py`. It tests
+  `reports_admin._a_generation_is_in_flight`, whose other gate tests already live there, and
+  `test_<module>.py` is the naming convention. Verification step 2's command was run across BOTH
+  files. Everything else landed as specified.
+- **Fix shape as landed.** Item 1: deletability now `game_ref_ids | stat_ref_ids`, the second
+  composed from `_TEAM_STAT_EXISTS` (no hand-list), computed AFTER Phase 1; a per-team `SAVEPOINT`
+  around each `DELETE FROM teams` catching `sqlite3.IntegrityError`; a WARNING naming the team id
+  and — only where the probe can answer — the referencing table; the savepoint WARNING names the
+  team and the sqlite text and promises NO table. All three prose sites corrected (docstring,
+  inline comment, summary log line, which now reads `retained (still FK-referenced)` +
+  `skipped (delete raised)`). Item 2: `ReaperResult.files_failed` added, the unlink given its own
+  `try`, the docstring's order claim corrected, the admin ERROR reworded and left gated on
+  `errors` (which now means row-clearing only), and `docs/admin/operations.md`'s "check is not
+  passive" paragraph corrected to match `reports_admin.py:119-125`.
+- **Documentation assessment**: trigger 5 fired; `docs/admin/operations.md` updated (the paragraph
+  above) and its file-level `Last updated` line bumped to 2026-08-17 with this spec as Source.
+- **2026-08-17 (`/simplify`)** — Four cleanup agents (reuse / simplification / efficiency /
+  altitude). Applied: `_FailingUpdateConnection` became a `sqlite3.Connection` SUBCLASS via
+  `connect(factory=...)` instead of a hand-surfaced proxy (a proxy is a whitelist —
+  `_require_clean_connection` already reads `in_transaction` on the borrowed path); the new reaper
+  test class now reuses module-level `_insert_report_row` and `_write_report_file` instead of a
+  third report-INSERT literal and a hand-rolled mkdir; `skipped_ids` (a list only ever `len()`-ed)
+  became two counters incremented WHERE THE OUTCOME HAPPENS, so the success count is observed
+  rather than derived by subtraction from a pre-loop set. Suite unchanged at `4561 passed`, `RC=0`.
+- **Skipped, with reasons.** (1) *Drop two new tests as subsumed by the amended stale test* — they
+  are named in this committed spec, and `.claude/rules/testing.md` requires a spec to name any test
+  deletion; the duplicated arrange block was reduced instead. (2) *Compose the FULL
+  `_team_orphan_pred` rather than just `_TEAM_STAT_EXISTS`* — the altitude agent correctly noted
+  `_TEAM_BASE_PRED` (`:1101-1107`, read directly) carries a `reports` root, i.e. exactly the FK
+  test (e) drives its raise from. **Verified the consequence and it argues FOR the spec's shape**:
+  enumerating every FK on `teams(id)` from the migrations, the tables Phase 2 does not clear are
+  `games`, the six stat children, and `reports` — so adopting the full predicate would cover ALL of
+  them and leave the savepoint with no reachable failure to test, which is precisely the
+  unfalsifiability the spec's "(e) is the one that matters for review" note exists to prevent. It
+  would also newly retain any `member` team in the batch (`_TEAM_BASE_PRED` opens with
+  `membership_type = 'tracked'`) — a behavior change beyond this chunk. Kept as specced; recorded
+  here so `/code-review` can rule independently.
+- **Residual (perf, NOT acted on).** The new stat-reference SELECT is per-candidate correlated
+  EXISTS, and four of its six subqueries have no usable index (`spray_charts.team_id`,
+  `plays.batting_team_id`, `reconciliation_discrepancies.team_id`, and the `perspective_team_id`
+  columns on those three). Agent-measured against the live dev DB: ~50 ms warm per stat-free team,
+  so ~2.5 s on a 50-team batch, against a generation that already spends tens of seconds on
+  network. Both closers (a hand-written six-table set query, or an index migration paying write
+  amplification on ~770k load-path rows) are worse trades today. Route to `IDEAS.md` at handoff.
+- **2026-08-17 (codex review + `/code-review`)** — Codex run on `uncommitted`
+  (its `RESULT_FILE` under `/tmp`, 5 lines, read to completion — the epoch-stamped filename is
+  deliberately not reproduced here; a 10-digit run trips the scanner's `us_phone` pattern, the
+  documented noise class in `pii_patterns.py`): **1 P1, 1 P2**.
+  `/code-review` returned 4 findings independently. The two reviewers OVERLAPPED on one defect
+  (codex P1 = `/code-review` #4), which codex rated far higher because it reproduced the data loss.
+
+  **FIXED — the reaper discarded its own arbiter's rowcount (codex P1 / CR #4).** The UPDATE is
+  guarded by `AND status = 'generating'`, but `reaped += 1` and the HTML unlink both fired
+  regardless of whether it matched. **Reproduced independently before fixing** (not taken from the
+  reviewer): a generation that ran past the threshold and then committed `ready` ended as
+  `status='ready'`, `report_path='reports/race.html'`, **its served HTML DELETED**, with the reaper
+  returning `ReaperResult(reaped=1, files_removed=1, errors=0, files_failed=0)` — a clean success.
+  The share link then 404s on a report the admin list calls ready. Now gated on
+  `cursor.rowcount == 1`; a lost race logs at INFO and is counted nowhere (nothing failed, and the
+  gate's `status='generating'` COUNT will not see the row either). This is the
+  DELETE-is-the-arbiter rule in `.claude/rules/data-model.md`, which the reaper had the guarded
+  write for but never applied. ⚠ **PRE-EXISTING on already-committed code** — approval died with
+  that commit; folded in under "no pre-existing excuse" because it sits inside the lines this
+  chunk edits, and flagged to the operator as a scope expansion.
+  **FIXED — CR #2, the savepoint caught only `IntegrityError`.** Any other DB error escaped with
+  the SAVEPOINT open → caller swallows → connection closed mid-transaction → the whole-batch
+  rollback this chunk exists to prevent. Broadened to `sqlite3.Error`. ⚠ **I did NOT accept the
+  finding's stated scenario.** It argued `database is locked` on the Phase-3 DELETE; **measured
+  otherwise** — a DELETE matching ZERO rows still takes SQLite's write lock, so Phases 1-2 already
+  hold it by then. Cross-process contention surfaces at Phase 1's first DELETE, before any
+  savepoint exists, where nothing in this function can contain it. **That exposure is real and
+  stays OPEN** (residual below). The catch is justified as never-strand-a-savepoint, not by the
+  lock story.
+  **FIXED — codex P2, the concurrency test gap.** New `TestReaperWhenALateGenerationFinishesFirst`
+  (3 tests). **Mutation-proven, expected catchers named BEFORE the run**: predicted 2 of 3 fail
+  (`..._html_survives`, `..._not_counted_as_reaped`) with `..._left_ready` passing either way since
+  the guarded UPDATE matches nothing regardless. Ran with `__pycache__` cleared and the mutation
+  asserted applied: **exactly 2 failed, 1 passed**, then restored and residue-checked.
+  **ROUTED TO OPERATOR, not fixed — CR #1 (MEDIUM)** `MAX_CONCURRENT_ADMIN_GENERATIONS = 2` lets
+  two generations through the click-to-row window the semaphore exists to cover; the reviewer
+  argues the operator's own one-at-a-time ruling implies `1`. Untouched by this chunk, pinned by
+  `TestTheCapValue` to a 2026-08-16 operator ruling — a value ruling to re-make, not a bug to fix
+  here. **ROUTED — CR #3 (LOW)** Starlette skips a background task if the response send fails
+  (client disconnect), leaking a semaphore slot permanently; two occurrences wedge the page. Also
+  already-committed code, outside this chunk.
+- **Full suite after review fixes**: `4564 passed`, `RC=0` (baseline `4551`, +13, 0 deleted).
+- **Residual (OPEN, route at handoff)**: cross-process lock contention at Phase 1's first DELETE
+  still rolls the whole batch back and re-arms the permanence mechanism. No savepoint can contain
+  it — containment would have to move above Phase 1 or into the caller.
+- **2026-08-17 (`/security-review`)** — **No findings at any severity.** Four candidate surfaces
+  traced to primary sources and ruled out: (1) the new f-string SQL in `cleanup_orphan_teams` — all
+  three interpolated positions are module constants or an `int()`-coerced rowid, with every team id
+  parameterized; (2) path traversal via the reaper's `_REPORTS_DIR / f"{slug}.html"` unlink — `slug`
+  has exactly ONE writer, `secrets.token_urlsafe(12)` (`generator.py:1906`), which emits only
+  `[A-Za-z0-9_-]`, and the new rowcount gate strictly NARROWS what gets unlinked; (3) the
+  authorization and CSRF boundary on `POST /admin/reports/generate` — `_require_admin` remains the
+  first statement, both admission gates run after it, and `CSRFMiddleware` fires before the
+  endpoint; (4) the new log lines and refusal banners — banners are constants rendered under Jinja
+  autoescape, and the logs carry only integer ids and sqlite error text (no person names).
+  ⚠ **Scope note worth keeping**: the diff the harness handed the reviewer was STALE — it predated
+  the savepoint/predicate rework, the `files_failed` split, the rowcount gate, and the reworded
+  admin ERROR. The reviewer detected this, re-derived the live diff, and reviewed BOTH. Verifying
+  the reviewer's range (CLAUDE.md step 5) caught a real gap here; do not assume the supplied diff
+  is current.
+- **Non-security observation from that pass, NOT acted on**: `conn.execute(f"SAVEPOINT {savepoint}")`
+  sits OUTSIDE the per-team `try`, so a raise there would escape as the whole-batch rollback. It is
+  unreachable — ids are positive AUTOINCREMENT rowids through `int()` — and moving it inside would
+  make the `except` issue `ROLLBACK TO` against a savepoint that may not exist, trading an
+  unreachable failure for a reachable one. Left as is, deliberately.
+- **Owed next**: operator approval (step 7). All four reviews are complete.
 - **Status note**: `READY` is written pre-commit by design — CLAUDE.md step 7 flips Status before
   staging so it rides this commit. Codex flags this every time; it is unfoldable by construction.

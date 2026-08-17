@@ -137,18 +137,29 @@ fixed and proven on live data. The plays half-pair clobber below must land BEFOR
   already suspects one. That edit spends CLAUDE.md bytes, so it is a cap trade for the operator;
   the spec lays out three options and recommends adding a one-command check. ⚠ Bitten ONCE, so
   principle E's bites-twice bar means no rule was written — if it recurs, audit 6 has bite two.
-- **Orphan-cleanup FK rollback — READY 2026-08-17** (`bb95034`), spec
-  `2026-08-16-orphan-cleanup-fk-rollback.md`. `cleanup_orphan_teams` uses a games-only
-  deletability test while reclamation also checks six game-child tables, so one undeletable team
-  FK-crashes the delete and — because nothing commits incrementally — rolls back the WHOLE
-  batch's cleanup. **Recommended to land before the counted rebuild.**
+- ~~**Orphan-cleanup FK rollback**~~ — **LANDED 2026-08-17**, `acceptance: owed at the counted
+  rebuild`. Spec moved to `done/2026-08-16-orphan-cleanup-fk-rollback.md` (use
+  `git log --follow -M20%`). Suite 4,551 → 4,564 (+13). `cleanup_orphan_teams` now decides
+  deletability with the same test reclamation uses — composed from `_TEAM_STAT_EXISTS`, not a
+  second hand-written table list — and deletes each team under its own SAVEPOINT, so one
+  undeletable team costs one team instead of the batch. **The permanence mechanism is why this
+  was not cosmetic**: the rollback restored the orphan-vs-orphan `games` rows, and
+  `_TEAM_BASE_PRED` requires a team to have NO games row, so every rolled-back team was thereafter
+  invisible to the only pass that could sweep it (`deleted 0 team(s)` on 70 of 70 runs).
+  Fix-forward-only, per the standing ruling — no repair of existing residue.
 
-  **The permanence mechanism was found at spec time and is the reason this is not cosmetic**: the
-  rollback also restores the orphan-vs-orphan `games` rows cleanup had just deleted, and
-  `_TEAM_BASE_PRED` requires a team to have NO games row — so every rolled-back team is thereafter
-  invisible to the only pass that could sweep it. Corroborated by `Orphan reclamation: deleted 0
-  team(s)` on **70 of 70** runs. Operator ruled the fix shape (align the predicate AND add a
-  per-team savepoint) and **fix-forward-only** — no repair of existing residue.
+  **ACCEPTANCE IS OWED AND UNRUN.** Nothing here was run against live data. The proof is that the
+  FK traceback and the `Orphan cleanup failed` warning are ABSENT from the counted rebuild's log —
+  whoever specs that rebuild must carry this check.
+
+  **The reviews found a live data-loss defect in ALREADY-COMMITTED code and it was fixed here.**
+  The stuck-`generating` reaper guarded its UPDATE with `AND status = 'generating'` but discarded
+  the rowcount, then counted the row reaped and unlinked `reports/{slug}.html` regardless.
+  Reproduced: a generation that ran past the hour and then finished ended `status='ready'`,
+  `report_path` set, **its served HTML deleted**, with the reaper returning
+  `reaped=1, files_removed=1, errors=0`. The share link 404s on a report the admin list calls
+  ready, silently. Now gated on `cursor.rowcount == 1`. Codex found it, `/code-review` found it
+  independently and rated it lower; the reproduction is what settled it.
 
   ⚠ **Two numbers the STUB carried are FALSE; the spec marks them and they must not be requoted.**
   The restore run FINISHED (`[71/71] OK`, `generated: 71  skipped: 0  failed: 0`) — the stub's
@@ -265,6 +276,26 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 ## STANDING RESIDUALS
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
+
+- **Three open items on the admin generate path, from the orphan-cleanup chunk's reviews
+  (2026-08-17). None is fixed; all three are in already-committed code.**
+  1. ⚠ **Whole-batch rollback is only PARTLY closed.** The per-team SAVEPOINT contains a failure
+     inside `cleanup_orphan_teams`' delete loop, but cross-process lock contention surfaces at
+     **Phase 1's first DELETE** — before any savepoint exists — and still rolls the whole batch
+     back, re-arming the permanence mechanism. **Measured, so do not re-derive it wrong**: a
+     DELETE matching ZERO rows still takes SQLite's write lock, so Phases 1-2 already hold it by
+     the time the loop runs; that is why the loop is not where contention bites. Closing it means
+     moving containment above Phase 1 or into the caller.
+  2. **`MAX_CONCURRENT_ADMIN_GENERATIONS = 2` vs the one-at-a-time ruling.** `/code-review` argues
+     the operator's own 2026-08-16 ruling implies `1`: two generations can still pass through the
+     click-to-`generating`-row window the DB gate cannot see, which is the exact shape of the
+     2026-08-16 incident. The value is pinned by `TestTheCapValue` to that ruling, so this is an
+     **operator value ruling to re-make**, not a defect a session may fix.
+  3. **A semaphore slot leaks permanently if the response send fails.** Starlette awaits the
+     background task only after both `send()` calls, so a client disconnect (closed tab) skips
+     `_generate_report_releasing_slot` and its `finally`. Two occurrences wedge the page on the
+     "2 report generations are already running" banner until the process restarts. Same failure
+     class as the codex P1 that chunk already fixed, one layer up.
 
 - **Regeneration hazard — RULED 2026-08-12.** Operator ruling (verbatim intent): existing
   scouting data is NOT precious — "I don't care if we lose everything that is there and I have

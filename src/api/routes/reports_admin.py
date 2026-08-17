@@ -147,13 +147,23 @@ def _a_generation_is_in_flight() -> bool:
         with closing(get_connection()) as conn:
             result = reap_stale_generating_reports(conn)
             if result.errors:
-                # A row the reaper could not clear is still 'generating' and will
-                # keep refusing this page. Surface it: the operator otherwise sees
-                # only the generic banner and has no way to learn the reap failed.
+                # Gated on `errors` ALONE, which since 2026-08-17 means exactly
+                # "the ROW could not be cleared" -- a row still 'generating',
+                # which the count two lines below WILL see and refuse on. That
+                # is a real wedge, and the operator otherwise sees only the
+                # generic banner with no way to learn the reap failed.
+                #
+                # A failed orphan-HTML unlink is deliberately NOT here: after
+                # the 2026-08-16 reorder those rows are already 'failed', so
+                # this count no longer sees them and they refuse nothing.
+                # `ReaperResult.files_failed` carries them instead, and the
+                # reaper logs each one at WARNING. Before the counters were
+                # split, every stray file produced this ERROR and told the
+                # operator the page was wedged when it was not.
                 logger.error(
-                    "Stale-'generating' reaper reported %d error(s) while gating "
-                    "the admin generate route; a row it failed to clear will keep "
-                    "refusing submissions until it is resolved.",
+                    "Stale-'generating' reaper could not clear %d row(s) while "
+                    "gating the admin generate route; each will keep refusing "
+                    "submissions from this page until it is resolved.",
                     result.errors,
                 )
             return bool(

@@ -156,13 +156,24 @@ class ReaperResult:
     """Outcome of one stuck-'generating' reaper sweep (E-252-08).
 
     ``reaped`` counts rows transitioned generating -> failed; ``files_removed``
-    counts orphan partial-HTML files unlinked; ``errors`` counts rows whose reap
-    raised (per-row error isolation -- one bad row does not abort the sweep).
+    counts orphan partial-HTML files unlinked; ``errors`` counts rows whose ROW
+    CLEARING raised (per-row error isolation -- one bad row does not abort the
+    sweep); ``files_failed`` counts rows whose row-clearing SUCCEEDED but whose
+    orphan-file unlink raised.
+
+    ``reaped`` and ``errors`` are DISJOINT, and the split above is what makes
+    that true.  Before 2026-08-17 a failed unlink counted the same row in both:
+    the 2026-08-16 reorder put ``reaped += 1`` above the unlink while one
+    ``except`` still wrapped the whole per-row body.  The distinction is
+    load-bearing outside this module -- ``reports_admin`` gates an operator-facing
+    "this row will keep refusing submissions" ERROR on ``errors``, and a failed
+    unlink on a row already flipped to ``failed`` refuses nothing.
     """
 
     reaped: int = 0
     files_removed: int = 0
     errors: int = 0
+    files_failed: int = 0
 
 
 def reap_stale_generating_reports(
@@ -183,7 +194,17 @@ def reap_stale_generating_reports(
     :func:`cleanup_expired_reports` (keyed on ``report_path IS NOT NULL``) can
     NEVER reap. The reaper therefore unlinks ``reports/{slug}.html`` by slug
     (canonical ``_REPO_ROOT`` resolution + an ``.is_file()`` guard, mirroring
-    :func:`cleanup_expired_reports` / ``_delete_report``) before flipping the row.
+    :func:`cleanup_expired_reports` / ``_delete_report``) AFTER flipping the row.
+
+    That ORDER is load-bearing and is explained in full at the loop below: with
+    the unlink first, a failing unlink skipped the UPDATE and left the row
+    ``generating`` forever, which since 2026-08-16 wedges
+    ``POST /admin/reports/generate`` permanently with no escape through the UI.
+    Flipping first inverts that into a stray file.  (This paragraph said
+    "before flipping the row" until 2026-08-17 -- it had not moved with the
+    code, and stale prose here authorizes the next reader to restore a
+    product-fatal order.)  The unlink has its OWN ``try`` and its own
+    ``files_failed`` counter, so it cannot inflate ``errors``.
 
     Idempotent: only ``generating`` rows older than the threshold are selected, so
     a re-run finds none (they are now ``failed``); ``ready``/``failed``/``no_games``
@@ -233,7 +254,9 @@ def reap_stale_generating_reports(
             here.  See :func:`_conn_scope`.
 
     Returns:
-        A :class:`ReaperResult` with ``reaped`` / ``files_removed`` / ``errors``.
+        A :class:`ReaperResult` with ``reaped`` / ``files_removed`` / ``errors``
+        / ``files_failed``.  ``errors`` means "the ROW could not be cleared" and
+        nothing else; a failed unlink lands in ``files_failed``.
 
     Raises:
         RuntimeError: If ``conn`` is not ``None`` and has an open transaction.
@@ -276,35 +299,77 @@ def reap_stale_generating_reports(
                 # one this function was already designed to tolerate: the row
                 # always clears, and a failed unlink leaves a stray file (the
                 # pre-existing orphan condition) instead of wedging the product.
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE reports SET status = 'failed', error_message = ? "
                     "WHERE id = ? AND status = 'generating'",
                     (reaped_message, report_id),
                 )
-                result.reaped += 1
-
-                # Unlink any orphan partial HTML (written before the 'ready' update
-                # that would have set report_path -- so report_path is still NULL and
-                # cleanup_expired_reports can never reap it). Canonical resolution
-                # via the named _REPORTS_DIR constant + is_file guard, mirroring
-                # cleanup_expired_reports / _delete_report.
-                file_path = _REPORTS_DIR / f"{slug}.html"
-                if file_path.is_file():
-                    file_path.unlink()
-                    logger.info("Removed orphan HTML for reaped report: %s", file_path)
-                    result.files_removed += 1
+                claimed = cursor.rowcount == 1
             except Exception as exc:  # noqa: BLE001 -- per-row error isolation
                 logger.warning(
                     "Failed to reap stale 'generating' report id=%s: %s", report_id, exc
                 )
                 result.errors += 1
                 continue
+
+            # THE UPDATE'S ROWCOUNT IS THE ARBITER, and skipping this check
+            # DELETES LIVE REPORTS.  The `AND status = 'generating'` clause makes
+            # the write safe, but its rowcount was discarded until 2026-08-17, so
+            # a row that left 'generating' between our SELECT and our UPDATE was
+            # still counted as reaped AND still had `reports/{slug}.html`
+            # unlinked -- and by then that file is the FINISHED report's served
+            # HTML, not an orphan partial.  Reproduced: a generation that ran
+            # past the threshold and then committed 'ready' ended as
+            # `status='ready'`, `report_path='reports/{slug}.html'`, file GONE,
+            # with the reaper returning `reaped=1, files_removed=1, errors=0`.
+            # The share link then 404s on a report the admin list calls ready.
+            #
+            # Losing this race is BENIGN and expected (the report finished, which
+            # is the good outcome), so it is logged at INFO and counted nowhere:
+            # nothing failed, and the `status='generating'` COUNT that gates the
+            # admin route will not see this row either.  Same shape as the
+            # DELETE-is-the-arbiter rule in `.claude/rules/data-model.md`: gate
+            # the privileged action on the guarded write's rowcount, never on the
+            # earlier read.
+            if not claimed:
+                logger.info(
+                    "Skipped stale-'generating' report id=%s: it left 'generating' "
+                    "before this reap claimed it (a late-finishing generation). "
+                    "Its HTML is not ours to remove.", report_id,
+                )
+                continue
+            result.reaped += 1
+
+            # Unlink any orphan partial HTML (written before the 'ready' update
+            # that would have set report_path -- so report_path is still NULL and
+            # cleanup_expired_reports can never reap it). Canonical resolution
+            # via the named _REPORTS_DIR constant + is_file guard, mirroring
+            # cleanup_expired_reports / _delete_report.
+            #
+            # ITS OWN try, and its own counter. The row above is already
+            # 'failed', so this failure is a stray file -- not a row that will
+            # keep refusing submissions. Folding it into `errors` made the two
+            # indistinguishable and put a false "this will keep refusing
+            # submissions" ERROR in front of the operator via reports_admin.
+            try:
+                file_path = _REPORTS_DIR / f"{slug}.html"
+                if file_path.is_file():
+                    file_path.unlink()
+                    logger.info("Removed orphan HTML for reaped report: %s", file_path)
+                    result.files_removed += 1
+            except Exception as exc:  # noqa: BLE001 -- per-file error isolation
+                logger.warning(
+                    "Reaped report id=%s but could not remove its orphan HTML: %s "
+                    "(the row is cleared; a stray file remains)", report_id, exc
+                )
+                result.files_failed += 1
         conn.commit()
 
     if result.reaped:
         logger.info(
-            "Reaped %d stale 'generating' report(s) to failed (%d orphan file(s) removed)",
-            result.reaped, result.files_removed,
+            "Reaped %d stale 'generating' report(s) to failed (%d orphan file(s) "
+            "removed, %d file(s) left behind)",
+            result.reaped, result.files_removed, result.files_failed,
         )
     return result
 
@@ -795,8 +860,41 @@ def cleanup_orphan_teams(
     Used during report generation to clean up auto-created opponent stubs.
     Only deletes games where BOTH participants are orphans — shared games
     between an orphan and a non-orphan (e.g., the report team) are
-    preserved.  Orphan teams that still have game FK references after
-    Phase 1 are retained (team-scoped data is still cleaned).
+    preserved.  An orphan team is RETAINED (team-scoped data is still cleaned)
+    when anything still FK-references it after Phase 1 — a surviving ``games``
+    row, OR a row in one of the six game-child tables.
+
+    That second half was missing until 2026-08-17 and is why this docstring no
+    longer says "game FK references".  Deletability is decided by the SAME test
+    :func:`reclaim_orphan_reference_data` uses, composed from
+    :data:`_TEAM_STAT_EXISTS` rather than a second hand-written table list: a
+    gameless team holding a ``player_game_batting`` row (the shape a divergence
+    collapse leaves behind — ``merge_duplicate_game`` re-points ``game_id``
+    only) passed the games-only filter and raised ``IntegrityError`` on the
+    ``DELETE FROM teams``.
+
+    ⚠ **The raise was never contained to its own team, and THAT is what made the
+    leak permanent.** Neither :func:`_delete_game_scoped_data_for_perspectives`
+    nor :func:`_delete_team_scoped_data` commits internally, and the raise fired
+    before the ``conn.commit()`` below, so phases 1 and 2 rolled back for the
+    WHOLE batch.  The rollback RESTORED the orphan-vs-orphan ``games`` rows
+    Phase 1 had just deleted — and :data:`_TEAM_BASE_PRED` requires a team to
+    have NO ``games`` row, so every rolled-back team became invisible to the
+    only pass that could ever sweep it.  Nothing self-healed: across a 71-team
+    restore run, reclamation ran 70 times and deleted 0 teams every time.  Each
+    team's ``DELETE`` therefore runs under its OWN ``SAVEPOINT`` now (the
+    ``scouting_loader`` per-team precedent), so an uncovered FK costs one team,
+    not the batch.
+
+    **Which half buys what.** The SAVEPOINT is what buys the CONTAINMENT, and it
+    alone would produce the same set of surviving teams -- the six stat FKs would
+    simply fail the way ``reports.team_id`` already does.  The widened predicate
+    buys RETENTION SEMANTICS and OPERATOR DIAGNOSTICS: a team held by a stat row
+    is a known, expected, benign state (the divergence stub), so it is reported
+    as *retained* with the referencing table NAMED, not as a caught
+    ``IntegrityError`` on a destructive path.  Do not read the predicate as
+    load-bearing for correctness, and do not read the savepoint as redundant
+    because of it.
     """
     if not orphan_ids:
         return 0
@@ -816,35 +914,109 @@ def cleanup_orphan_teams(
         conn, [r[0] for r in game_rows], id_list,
     )
 
-    # Determine which orphans still have remaining game FK references
-    remaining_rows = conn.execute(
+    # Determine which orphans still have remaining game FK references.  Run
+    # AFTER Phase 1 so the orphan-vs-orphan rows it just deleted are gone.
+    game_ref_rows = conn.execute(
         f"SELECT DISTINCT home_team_id FROM games WHERE home_team_id IN ({placeholders}) "
         f"UNION "
         f"SELECT DISTINCT away_team_id FROM games WHERE away_team_id IN ({placeholders})",
         id_list + id_list,
     ).fetchall()
-    undeletable_ids = {r[0] for r in remaining_rows}
+    game_ref_ids = {r[0] for r in game_ref_rows}
+
+    # ...and which still have a game-CHILD reference.  Composed from the shared
+    # _TEAM_STAT_EXISTS constant, never a second hand-written table list: that
+    # drift is exactly what this fix closes, and a hand-list is how
+    # merge_duplicate_game silently dropped two columns.  Also runs after Phase
+    # 1, so a team whose only footprint was an orphan-vs-orphan
+    # `game_perspectives` row is correctly seen as clean.
+    stat_ref_rows = conn.execute(
+        f"SELECT t.id FROM teams t WHERE t.id IN ({placeholders}) "
+        f"AND {_TEAM_STAT_EXISTS.format(t='t')}",
+        id_list,
+    ).fetchall()
+    stat_ref_ids = {r[0] for r in stat_ref_rows}
+
+    undeletable_ids = game_ref_ids | stat_ref_ids
     deletable_ids = orphan_ids - undeletable_ids
+
+    for team_id in sorted(stat_ref_ids - game_ref_ids):
+        # The probe CAN name the table here -- these are precisely the six
+        # tables it covers.  Contrast the savepoint WARNING below, which
+        # deliberately promises no table name.
+        logger.warning(
+            "Orphan cleanup retained team_id=%d: still referenced by %s.",
+            team_id, _first_stat_reference_table(conn, team_id),
+        )
 
     # Phase 2: clean team-scoped data for all orphans
     _delete_team_scoped_data(
         conn, id_list, delete_team_rows=False,
     )
-    # Only delete team rows that have no remaining game references
-    if deletable_ids:
-        dp = ",".join("?" for _ in deletable_ids)
-        conn.execute(f"DELETE FROM teams WHERE id IN ({dp})", list(deletable_ids))
+
+    # Phase 3: delete each deletable team row under its OWN savepoint, so an FK
+    # this predicate does not cover (`reports.team_id` is NOT NULL REFERENCES
+    # teams(id) with no ON DELETE, and is not a stat table) skips ONE team
+    # instead of rolling the batch back -- see the docstring for why a rollback
+    # here is unrecoverable rather than merely wasteful.  The savepoint name
+    # interpolates an int, never a string, so it cannot escape the identifier
+    # context.
+    # Counted where the outcome actually HAPPENS, not derived by subtracting a
+    # skip list from a set decided before the loop ran: a future extra skip path
+    # that forgot to decrement would silently over-report deletions.
+    deleted_count = 0
+    skipped_count = 0
+    for team_id in sorted(deletable_ids):
+        savepoint = f"orphan_team_delete_{int(team_id)}"
+        conn.execute(f"SAVEPOINT {savepoint}")
+        try:
+            conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+            conn.execute(f"RELEASE {savepoint}")
+            deleted_count += 1
+        # sqlite3.Error, NOT sqlite3.IntegrityError.  A narrower catch reinstates
+        # the exact defect this loop exists to fix: any other DB error escapes
+        # with the SAVEPOINT still open, the caller
+        # (``generator.py::_cleanup_orphans``) swallows it, and the connection is
+        # closed with the transaction live -- rolling Phases 1 and 2 back for the
+        # whole batch and restoring the `games` rows that hide these teams from
+        # reclamation forever.
+        #
+        # ⚠ Do NOT justify this by the `database is locked` scenario, which is
+        # mostly unreachable HERE, and that was MEASURED: a DELETE matching ZERO
+        # rows still takes SQLite's write lock, so Phases 1 and 2 have already
+        # acquired it by the time this loop runs.  Cross-process contention
+        # surfaces at Phase 1's first DELETE instead -- before any savepoint
+        # exists, where nothing in this function can contain it.  That exposure
+        # is real and remains OPEN; it is not what this catch closes.  This catch
+        # is defense in depth on a destructive path: the outcome it must never
+        # allow is a STRANDED SAVEPOINT, whatever raised.
+        except sqlite3.Error as exc:
+            conn.execute(f"ROLLBACK TO {savepoint}")
+            conn.execute(f"RELEASE {savepoint}")
+            skipped_count += 1
+            # Names the team and the sqlite error text, and NOT a referencing
+            # table: after the widening above, the six tables
+            # _first_stat_reference_table probes can no longer be the cause, so
+            # it would return "unknown" for exactly these cases.  Promise less
+            # rather than promise a name the code cannot produce.
+            logger.warning(
+                "Orphan cleanup could not delete team_id=%d (%s); skipped it and "
+                "kept the rest of the batch.",
+                team_id, exc,
+            )
     conn.commit()
 
-    count = len(deletable_ids)
-    if undeletable_ids:
+    if undeletable_ids or skipped_count:
         logger.info(
-            "Cleaned up %d orphan team(s); %d retained (shared games).",
-            count, len(undeletable_ids),
+            "Cleaned up %d orphan team(s); %d retained (still FK-referenced), "
+            "%d skipped (delete raised).",
+            deleted_count, len(undeletable_ids), skipped_count,
         )
     else:
-        logger.info("Cleaned up %d orphan team(s) from report generation.", count)
-    return count
+        logger.info(
+            "Cleaned up %d orphan team(s) from report generation.", deleted_count
+        )
+    return deleted_count
 
 
 def is_team_eligible_for_cleanup(

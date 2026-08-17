@@ -24,3 +24,14 @@ ideas safe. Never paste a real name or identifier here; use the placeholder taxo
   8 pairs across 13 teams, 6 jersey-corroborated) — coach-visible wart the dedup deliberately
   leaves; candidate polish after the ingestion campaign closes. First routed here at audit 5,
   which found this list empty three audits in.
+- Index the six `_TEAM_STAT_EXISTS` columns, or stop asking the question per-team. The orphan
+  deletability check is a correlated EXISTS evaluated per candidate, and four of its six
+  subqueries have no usable index (`spray_charts.team_id`, `plays.batting_team_id`,
+  `reconciliation_discrepancies.team_id`, and `perspective_team_id` on those three) — so a team
+  with NO stat rows, which is exactly the deletable case, costs four full table scans. Measured
+  on the live dev DB during the orphan-cleanup chunk (2026-08-17): ~50 ms warm per stat-free
+  team, ~2.5 s on a 50-team batch, against a generation already spending tens of seconds on
+  network. Both closers are worse trades today — a hand-written six-table set query reintroduces
+  the drift that chunk existed to close, and an index migration pays write amplification on
+  ~770k rows of load-path inserts. Revisit if orphan batches reach the hundreds or
+  `reconciliation_discrepancies` keeps growing.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -3445,6 +3446,133 @@ class TestCleanupOrphanTeams:
         ).fetchone() is not None
 
 
+class TestCleanupOrphanTeamsFkSafety:
+    """`cleanup_orphan_teams` must not let one undeletable team discard a batch.
+
+    Two independent defects, two independent halves:
+
+    1. The deletability predicate read ONLY `games.home_team_id`/`away_team_id`,
+       while `reclaim_orphan_reference_data` answers the same question over
+       `games` PLUS six game-child tables (`_TEAM_STAT_EXISTS`). A gameless team
+       holding a `player_game_batting` row passed the narrow filter and its
+       `DELETE FROM teams` raised `FOREIGN KEY constraint failed`.
+    2. Neither `_delete_game_scoped_data_for_perspectives` nor
+       `_delete_team_scoped_data` commits internally, and the raise fires before
+       the single `conn.commit()` -- so the whole batch's Phase 1 and Phase 2
+       rolled back. That is what makes the leak PERMANENT: the restored Phase-1
+       `games` rows put every rolled-back team back outside `_TEAM_BASE_PRED`'s
+       no-games clause, where reclamation can never see it again.
+
+    The two halves need separate proof: predicate alignment alone makes every
+    COVERED case pass, which would leave the savepoint unfalsifiable. That is
+    what `test_an_uncovered_foreign_key_skips_only_that_team` is for -- it drives
+    the failure from `reports.team_id`, a NOT NULL reference with no `ON DELETE`
+    that the widened predicate deliberately does not cover.
+    """
+
+    def _seed_stat_referenced_and_deletable(self, db):
+        """Seed a gameless stat-holding orphan beside a genuinely deletable one.
+
+        The stat-holding shape is the real one from a divergence collapse: the
+        stub keeps `player_game_batting` rows on a game it has no `games` row
+        for, because `merge_duplicate_game` re-points `game_id` only.
+        """
+        subject_id = _seed_team(db, "Subject", "subj-fk")
+        other_id = _seed_team(db, "Other", "other-fk")
+        _seed_season(db)
+        _seed_player(db, "p-fk", "Sample", "Batter")
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g-fk", "2026", subject_id, other_id, 4, 1, "2026-04-01"),
+        )
+        stat_held_id = _seed_team(db, "Stat Held Stub", "stat-held-fk")
+        deletable_id = _seed_team(db, "Deletable", "deletable-fk")
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('g-fk', 'p-fk', ?, ?, 3, 1)",
+            (stat_held_id, subject_id),
+        )
+        _seed_roster(db, deletable_id, "p-fk", "2026", "7")
+        db.commit()
+
+        return stat_held_id, deletable_id
+
+    def test_the_deletable_sibling_is_still_deleted(self, db):
+        stat_held_id, deletable_id = self._seed_stat_referenced_and_deletable(db)
+
+        cleanup_orphan_teams(db, {stat_held_id, deletable_id})
+
+        assert db.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (deletable_id,)
+        ).fetchone() is None
+
+    def test_the_stat_referenced_team_is_retained(self, db):
+        stat_held_id, deletable_id = self._seed_stat_referenced_and_deletable(db)
+
+        cleanup_orphan_teams(db, {stat_held_id, deletable_id})
+
+        assert db.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (stat_held_id,)
+        ).fetchone() is not None
+
+    def test_the_retention_is_named_in_a_warning(self, db, caplog):
+        stat_held_id, deletable_id = self._seed_stat_referenced_and_deletable(db)
+
+        with caplog.at_level(logging.WARNING, logger="src.reports.lifecycle"):
+            cleanup_orphan_teams(db, {stat_held_id, deletable_id})
+
+        assert f"team_id={stat_held_id}" in caplog.text
+
+    def test_the_batch_work_is_committed_not_rolled_back(self, db, tmp_path):
+        """The rollback is what makes the leak permanent -- pin the commit.
+
+        Read on a FRESH connection: the in-flight connection cannot distinguish
+        committed work from work still pending on its own transaction.
+        """
+        stat_held_id, deletable_id = self._seed_stat_referenced_and_deletable(db)
+
+        cleanup_orphan_teams(db, {stat_held_id, deletable_id})
+
+        verify = sqlite3.connect(str(tmp_path / "test.db"))
+        team_row = verify.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (deletable_id,)
+        ).fetchone()
+        roster_row = verify.execute(
+            "SELECT 1 FROM team_rosters WHERE team_id = ?", (deletable_id,)
+        ).fetchone()
+        verify.close()
+
+        assert (team_row, roster_row) == (None, None)
+
+    def test_an_uncovered_foreign_key_skips_only_that_team(self, db):
+        """Savepoint containment, proven INDEPENDENTLY of the predicate.
+
+        `reports.team_id` is `NOT NULL REFERENCES teams(id)` with no `ON DELETE`
+        (`migrations/001_initial_schema.sql`) and is NOT one of the six tables
+        `_TEAM_STAT_EXISTS` covers, so this team passes the widened predicate and
+        still raises on the DELETE. Without a per-team savepoint the raise
+        escapes and the sibling's deletion rolls back with it.
+        """
+        report_held_id = _seed_team(db, "Report Held", "report-held-fk")
+        deletable_id = _seed_team(db, "Deletable Two", "deletable-two-fk")
+        _insert_report_row(
+            db, "held-report", report_held_id, _iso_offset_days(+14), None
+        )
+        db.commit()
+
+        cleanup_orphan_teams(db, {report_held_id, deletable_id})
+
+        survivors = {
+            r[0]
+            for r in db.execute(
+                "SELECT id FROM teams WHERE id IN (?, ?)",
+                (report_held_id, deletable_id),
+            ).fetchall()
+        }
+        assert survivors == {report_held_id}
 
 
 class TestCrossPerspectiveScopedDelete:
@@ -5323,7 +5451,12 @@ class TestReapStaleGenerating:
             "a failed orphan unlink left the row stuck at 'generating', which "
             "permanently wedges the admin generate page"
         )
-        assert result.errors == 1
+        # The row WAS reaped and the FILE was not removed -- two disjoint facts.
+        # This assertion used to read `result.errors == 1`, which counted the same
+        # row as both reaped and errored and contradicted ReaperResult's own
+        # docstring. `reaped` is pinned here because the overlap was previously
+        # unasserted in either direction.
+        assert (result.reaped, result.files_failed, result.errors) == (1, 1, 0)
 
     def test_fresh_generating_left_untouched(self, db, tmp_path):
         """AC-2: a 'generating' row WITHIN the threshold (a live generation) is NOT
@@ -5428,6 +5561,191 @@ class TestReapStaleGenerating:
 
         assert STALE_GENERATING_SECONDS == 3600
         assert STALE_GENERATING_SECONDS < _EXPIRY_DAYS * 24 * 3600
+
+
+class _RacingReadyConnection(sqlite3.Connection):
+    """Flips the row to 'ready' once, just before the reaper's first UPDATE.
+
+    Reproduces a late-finishing generation committing between the reaper's
+    SELECT and its UPDATE -- the only way to make the guarded
+    `WHERE ... AND status = 'generating'` match zero rows.
+    """
+
+    db_path: str = ""
+    _fired = False
+
+    def execute(self, sql, *args, **kwargs):
+        if (
+            sql.lstrip().upper().startswith("UPDATE REPORTS")
+            and not type(self)._fired
+        ):
+            type(self)._fired = True
+            other = sqlite3.connect(self.db_path)
+            other.execute(
+                "UPDATE reports SET status = 'ready', report_path = ? "
+                "WHERE slug = 'raced'",
+                ("reports/raced.html",),
+            )
+            other.commit()
+            other.close()
+        return super().execute(sql, *args, **kwargs)
+
+
+class TestReaperWhenALateGenerationFinishesFirst:
+    """The reaper must not touch a row that left 'generating' under it.
+
+    The UPDATE is guarded by `AND status = 'generating'`, but its ROWCOUNT was
+    discarded, so a row claimed by nobody was still counted as reaped and still
+    had `reports/{slug}.html` unlinked -- and once the generation finishes, that
+    file is the SERVED report, not an orphan partial. Found by codex review
+    2026-08-17 and reproduced before the fix: the row ended `status='ready'` with
+    `report_path` set, its HTML deleted, and the reaper returned
+    `reaped=1, files_removed=1, errors=0`. The share link then 404s on a report
+    the admin list calls ready.
+    """
+
+    def _reap_losing_the_race(self, db, tmp_path):
+        team_id = _seed_team(db)
+        _insert_report_row(
+            db, "raced", team_id, _iso_offset_days(+14), None, status="generating"
+        )
+        db.commit()
+        live_html = _write_report_file(tmp_path, "raced")
+
+        racing = type(
+            "_Racing", (_RacingReadyConnection,),
+            {"db_path": str(tmp_path / "test.db"), "_fired": False},
+        )
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: sqlite3.connect(
+                      str(tmp_path / "test.db"), factory=racing
+                  )),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", live_html.parent),
+        ):
+            return reap_stale_generating_reports(), live_html
+
+    def test_the_finished_reports_html_survives(self, db, tmp_path):
+        _, live_html = self._reap_losing_the_race(db, tmp_path)
+
+        assert live_html.exists(), (
+            "the reaper deleted a finished report's served HTML after losing the "
+            "race for its row"
+        )
+
+    def test_the_unclaimed_row_is_not_counted_as_reaped(self, db, tmp_path):
+        result, _ = self._reap_losing_the_race(db, tmp_path)
+
+        assert (result.reaped, result.files_removed) == (0, 0)
+
+    def test_the_finished_row_is_left_ready(self, db, tmp_path):
+        self._reap_losing_the_race(db, tmp_path)
+
+        verify = sqlite3.connect(str(tmp_path / "test.db"))
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = 'raced'"
+        ).fetchone()
+        verify.close()
+
+        assert row == ("ready", "reports/raced.html")
+
+
+class _FailingUpdateConnection(sqlite3.Connection):
+    """A connection whose `UPDATE reports` raises; everything else is inherited.
+
+    Injected via `sqlite3.connect(..., factory=...)` at the
+    `lifecycle.get_connection` seam, rather than monkeypatching
+    `sqlite3.Connection.execute` (a built-in type, and a global patch besides).
+    Subclassing rather than wrapping deliberately: a hand-surfaced proxy is a
+    whitelist that breaks the moment the reaper touches a member it did not
+    forward -- `_require_clean_connection` already reads `in_transaction` on the
+    BORROWED path, one refactor away from this one.
+    """
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.lstrip().upper().startswith("UPDATE REPORTS"):
+            raise sqlite3.OperationalError("database is locked")
+        return super().execute(sql, *args, **kwargs)
+
+
+class TestReaperUnlinkFailureAccounting:
+    """`reaped` and `errors` must be disjoint, as `ReaperResult` promises.
+
+    The generate-concurrency chunk (2026-08-16) reordered the reaper to flip the
+    `reports` row BEFORE unlinking the orphan HTML -- correct, and what stopped a
+    failed unlink wedging the generate page. But `result.reaped += 1` sits above
+    the unlink while the `except` wraps the whole per-row body, so a failed
+    unlink counts the SAME row in both counters. Splitting the unlink into its
+    own `try` and its own `files_failed` counter is what lets the admin gate
+    distinguish "could not clear the row" (a real wedge) from "could not delete
+    the file" (a stray file).
+    """
+
+    def _fresh_conn(self, tmp_path):
+        conn = sqlite3.connect(str(tmp_path / "test.db"))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        return conn
+
+    def _insert_generating(self, conn, slug, team_id):
+        # `_insert_report_row` already stamps generated_at at -30 days, which is
+        # well past STALE_GENERATING_SECONDS, so it needs no stale-time argument
+        # here. TestReapStaleGenerating keeps its own copy because it must VARY
+        # generated_at to test the fresh-vs-stale boundary; this class does not.
+        _insert_report_row(
+            conn, slug, team_id, _iso_offset_days(+14), None, status="generating"
+        )
+
+    def _reap_with_failing_unlink(self, db, tmp_path):
+        team_id = _seed_team(db)
+        self._insert_generating(db, "unlinkfail2", team_id)
+        reports_dir = _write_report_file(tmp_path, "unlinkfail2").parent
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", reports_dir),
+            patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")),
+        ):
+            return reap_stale_generating_reports()
+
+    def test_a_failed_unlink_still_reaps_the_row(self, db, tmp_path):
+        result = self._reap_with_failing_unlink(db, tmp_path)
+
+        verify = self._fresh_conn(tmp_path)
+        status = verify.execute(
+            "SELECT status FROM reports WHERE slug = 'unlinkfail2'"
+        ).fetchone()[0]
+        verify.close()
+
+        assert (result.reaped, status) == (1, "failed")
+
+    def test_a_failed_unlink_counts_as_files_failed_not_errors(self, db, tmp_path):
+        result = self._reap_with_failing_unlink(db, tmp_path)
+
+        assert (result.files_failed, result.errors) == (1, 0)
+
+    def test_a_failed_row_flip_counts_as_an_error(self, db, tmp_path):
+        """The row-clearing failure is the one that still means `errors`."""
+        team_id = _seed_team(db)
+        self._insert_generating(db, "flipfail", team_id)
+
+        def _failing_conn():
+            conn = sqlite3.connect(
+                str(tmp_path / "test.db"), factory=_FailingUpdateConnection
+            )
+            sqlite3.Connection.execute(conn, "PRAGMA foreign_keys=ON;")
+            return conn
+
+        with (
+            patch("src.reports.lifecycle.get_connection", side_effect=_failing_conn),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert (result.errors, result.reaped) == (1, 0)
 
 
 # ---------------------------------------------------------------------------

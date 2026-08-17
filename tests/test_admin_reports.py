@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import sys
@@ -1910,3 +1911,59 @@ class TestTheCheckedInTopology:
             f"WEB_CONCURRENCY={os.environ.get('WEB_CONCURRENCY')!r} in this "
             f"environment.\n{self._BREAKAGE}"
         )
+
+
+class TestAdminGateWedgeLog:
+    """The gate's operator-facing ERROR must name a real wedge, not a stray file.
+
+    `_a_generation_is_in_flight` asserts that "a row it failed to clear will keep
+    refusing submissions until it is resolved." After the 2026-08-16 reorder
+    flipped the row BEFORE the unlink, most reaper errors came from unlink
+    failures on rows ALREADY flipped to `failed` -- which the `status='generating'`
+    count two lines below no longer sees, so they refuse nothing. Gating the
+    ERROR on the row-clearing failure alone is what makes the message true, and
+    it is only possible once `files_failed` exists to carry the other case.
+    """
+
+    def _gate_with(self, tmp_path, caplog, **result_kwargs):
+        db_path = _make_db(tmp_path)
+
+        def _conn():
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        with patch("src.api.routes.reports_admin.get_connection", side_effect=_conn), \
+                patch(
+                    "src.api.routes.reports_admin.reap_stale_generating_reports",
+                    return_value=lifecycle.ReaperResult(**result_kwargs),
+                ), \
+                caplog.at_level(
+                    logging.ERROR, logger="src.api.routes.reports_admin"
+                ):
+            reports_admin._a_generation_is_in_flight()
+
+        return [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    def test_no_wedge_error_is_logged_when_only_the_unlink_failed(
+        self, tmp_path, caplog
+    ):
+        errors = self._gate_with(
+            tmp_path, caplog, reaped=1, files_removed=0, files_failed=1, errors=0
+        )
+
+        assert errors == []
+
+    def test_the_wedge_error_is_logged_when_the_row_could_not_be_cleared(
+        self, tmp_path, caplog
+    ):
+        """Positive control for the test above.
+
+        Without it, a gate that logged NOTHING under any condition would satisfy
+        the no-error assertion and read as a pass.
+        """
+        errors = self._gate_with(
+            tmp_path, caplog, reaped=0, files_removed=0, files_failed=0, errors=1
+        )
+
+        assert len(errors) == 1
