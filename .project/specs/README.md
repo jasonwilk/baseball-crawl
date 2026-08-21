@@ -22,8 +22,8 @@ default; measured 2026-08-17). Someday-work does not live here at all; it is one
 ## NOW
 
 Continue the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"):
-same-listing detection → generate-concurrency cap → **reaper unlink race (STUB, operator-ruled
-2026-08-17 to run FIRST — it is the serving path)** → **runs-as-scoreboard instrument (SPEC
+same-listing detection → generate-concurrency cap → **reaper unlink race (SPEC COMMITTED,
+READY, to run FIRST — it is the serving path)** → **runs-as-scoreboard instrument (SPEC
 COMMITTED, READY)** → full regenerate. **The generation freeze is LIFTED** — the lossy-merge
 hazard it protected against is fixed and proven on live data. The half-pair clobber no longer
 needs its own slot before the regenerate: it is folded into the instrument chunk, along with
@@ -317,20 +317,29 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
      "2 report generations are already running" banner until the process restarts. Same failure
      class as the codex P1 that chunk already fixed, one layer up.
 
-- ⚠ **The reaper's unlink race is only HALF closed — STUB 2026-08-17**, spec
-  `2026-08-17-reaper-unlink-race.md`, **ruled to run next**. A `/code-review` of the
-  already-committed `2217092`, verified against the files before routing: the generator writes
-  the HTML and only THEN commits `ready` (`generator.py:2702` → `:2705`), and
-  `_update_report_ready` has NO status guard (`:272-275`). So the reap can claim the row
-  BETWEEN those two steps and still unlink a finished report's served HTML — `status='ready'`,
-  `report_path` set, file gone, `reaped=1, files_removed=1, errors=0`. **The same end state
-  that chunk reproduced and believed it had fixed**; the rowcount arbiter closes only the
-  other ordering. Much narrower (needs a >1h generation that then finishes, reaped inside a
-  millisecond window) and NOT reproduced live — but the regenerate is exactly the bulk CLI
-  workload that produces long generations. The stub also carries two Low findings in the same
-  file, one of which sharpens residual 1 above: **the SAVEPOINT statement sits OUTSIDE its
-  `try`** (`lifecycle.py:971-972`), so a failure THERE still rolls the whole batch back —
-  residual 1 currently blames only Phase 1's first DELETE, and that is not the only door.
+- ⚠ **The reaper's unlink race — SPEC COMMITTED 2026-08-21, Status `READY`**, spec
+  `2026-08-17-reaper-unlink-race.md` (this commit — hash intentionally not self-cited, since
+  citing it here would drift on the next amend), **ruled to run next, before the runs
+  instrument**. Stubbed 2026-08-17 naming one unguarded write
+  (`_update_report_ready`, `generator.py:272-275`: the generator writes the HTML then commits
+  `ready` unconditionally, so a reap claiming the row between those two steps unlinks a
+  finished report's served HTML — `status='ready'`, `report_path` set, file gone,
+  `reaped=1, files_removed=1, errors=0`, the same end state `2217092` reproduced and believed
+  it had fully fixed; the rowcount arbiter it landed closes only the OTHER ordering). Specced
+  2026-08-21: a full sweep of every `reports`-row writer (`grep -rn "UPDATE reports SET"
+  src/`) found a **second, identical-shape site** the stub had not named
+  (`generator.py:2162`, the no-games terminal path), and codex + an operator-run
+  `/code-review` on the spec both surfaced that `_update_report_failed`'s own missing guard
+  is a real risk too (it can flip an already-`ready` row back to `failed` if a later
+  bookkeeping step raises). All three now route through one shared guarded helper. Also
+  fixed in the same spec: the SAVEPOINT-outside-its-`try` finding (`lifecycle.py:971-972`,
+  sharpens residual 1 above — it is not only Phase 1's first DELETE that can roll the whole
+  batch back), an unchecked DELETE rowcount (`lifecycle.py:973-975`), and a
+  `lifecycle.py:343-347` comment whose "orphan partial HTML" premise the fix falsifies.
+  Bound stated honestly: needs a >1h generation that then finishes, reaped inside a
+  millisecond window; not reproduced live, but the regenerate is exactly the bulk CLI
+  workload that produces long generations. **No code yet — next session executes from this
+  spec.**
 
 - **Two live-data findings from the runs-instrument spec session (2026-08-17), both parked in
   that spec's Out of scope and repeated here so they survive its move to `done/`.**
