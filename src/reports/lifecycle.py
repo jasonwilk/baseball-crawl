@@ -340,11 +340,21 @@ def reap_stale_generating_reports(
                 continue
             result.reaped += 1
 
-            # Unlink any orphan partial HTML (written before the 'ready' update
-            # that would have set report_path -- so report_path is still NULL and
-            # cleanup_expired_reports can never reap it). Canonical resolution
-            # via the named _REPORTS_DIR constant + is_file guard, mirroring
-            # cleanup_expired_reports / _delete_report.
+            # Unlink the file this row's slug names, if present. It is USUALLY
+            # an orphan partial (written before the 'ready' update that would
+            # have set report_path -- so report_path is still NULL and
+            # cleanup_expired_reports can never reap it), but under the race
+            # this reap can also WIN against a live generation that is still
+            # running: in that case the file here can be the COMPLETE,
+            # finished report, written by a generation that simply has not
+            # (and, after generator.py's _claim_report_completion guard,
+            # never will) committed 'ready'. That generation self-deletes its
+            # own file on the no-op it gets back -- see
+            # .project/specs/2026-08-17-reaper-unlink-race.md -- so this
+            # unlink and that self-delete both racing for the same file is
+            # expected and harmless (`is_file()` makes the loser a no-op).
+            # Canonical resolution via the named _REPORTS_DIR constant +
+            # is_file guard, mirroring cleanup_expired_reports / _delete_report.
             #
             # ITS OWN try, and its own counter. The row above is already
             # 'failed', so this failure is a stray file -- not a row that will
@@ -968,11 +978,16 @@ def cleanup_orphan_teams(
     skipped_count = 0
     for team_id in sorted(deletable_ids):
         savepoint = f"orphan_team_delete_{int(team_id)}"
-        conn.execute(f"SAVEPOINT {savepoint}")
+        savepoint_created = False
         try:
-            conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+            conn.execute(f"SAVEPOINT {savepoint}")
+            savepoint_created = True
+            cursor = conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
             conn.execute(f"RELEASE {savepoint}")
-            deleted_count += 1
+            if cursor.rowcount == 1:
+                deleted_count += 1
+            else:
+                skipped_count += 1
         # sqlite3.Error, NOT sqlite3.IntegrityError.  A narrower catch reinstates
         # the exact defect this loop exists to fix: any other DB error escapes
         # with the SAVEPOINT still open, the caller
@@ -991,8 +1006,14 @@ def cleanup_orphan_teams(
         # is defense in depth on a destructive path: the outcome it must never
         # allow is a STRANDED SAVEPOINT, whatever raised.
         except sqlite3.Error as exc:
-            conn.execute(f"ROLLBACK TO {savepoint}")
-            conn.execute(f"RELEASE {savepoint}")
+            # The SAVEPOINT statement itself is inside this try -- if IT is
+            # what raised, no savepoint was ever created, and issuing
+            # ROLLBACK TO / RELEASE against a name that was never opened
+            # would raise a second time. Only run them when the savepoint is
+            # confirmed to exist.
+            if savepoint_created:
+                conn.execute(f"ROLLBACK TO {savepoint}")
+                conn.execute(f"RELEASE {savepoint}")
             skipped_count += 1
             # Names the team and the sqlite error text, and NOT a referencing
             # table: after the widening above, the six tables

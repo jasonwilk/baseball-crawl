@@ -243,6 +243,106 @@ class TestReportRowManagement:
         assert row[1] == "Something went wrong"
 
 
+class TestClaimReportCompletion:
+    """`_claim_report_completion` (E-284) is the shared atomic status-transition
+    guard behind `_update_report_ready` / `_update_report_failed` / the
+    no-games branch -- see .project/specs/2026-08-17-reaper-unlink-race.md.
+    """
+
+    def test_claims_a_generating_row(self, db):
+        team_id = _seed_team(db)
+        row_id = _create_report_row(
+            db, "claim-ready", team_id, "Test",
+            "2026-03-28T12:00:00Z", "2026-04-11T12:00:00Z",
+        )
+
+        claimed = _gen._claim_report_completion(
+            db, row_id, status="ready", report_path="reports/claim-ready.html",
+        )
+
+        assert claimed is True
+        row = db.execute(
+            "SELECT status, report_path FROM reports WHERE id = ?", (row_id,)
+        ).fetchone()
+        assert row == ("ready", "reports/claim-ready.html")
+
+    def test_no_op_when_the_row_already_left_generating(self, db):
+        """The reaper-won-the-race shape: something else already flipped the
+        row to a terminal status before this claim's UPDATE runs."""
+        team_id = _seed_team(db)
+        row_id = _create_report_row(
+            db, "claim-raced", team_id, "Test",
+            "2026-03-28T12:00:00Z", "2026-04-11T12:00:00Z",
+        )
+        db.execute(
+            "UPDATE reports SET status = 'failed', error_message = ? WHERE id = ?",
+            ("Reaped: generation did not complete", row_id),
+        )
+        db.commit()
+
+        claimed = _gen._claim_report_completion(
+            db, row_id, status="ready", report_path="reports/claim-raced.html",
+        )
+
+        assert claimed is False
+        row = db.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row == ("failed", None, "Reaped: generation did not complete")
+
+    def test_an_omitted_column_is_preserved_via_coalesce(self, db):
+        """report_path=None / error_message=None must leave that column
+        UNCHANGED, never null it out -- the contract `_fail_report`'s
+        crawl/load-stage calls (no report_path in scope) depend on."""
+        team_id = _seed_team(db)
+        row_id = _create_report_row(
+            db, "claim-coalesce", team_id, "Test",
+            "2026-03-28T12:00:00Z", "2026-04-11T12:00:00Z",
+        )
+        db.execute(
+            "UPDATE reports SET error_message = ? WHERE id = ?",
+            ("pre-existing message", row_id),
+        )
+        db.commit()
+
+        claimed = _gen._claim_report_completion(
+            db, row_id, status="ready", report_path="reports/claim-coalesce.html",
+        )
+
+        assert claimed is True
+        row = db.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row == (
+            "ready", "reports/claim-coalesce.html", "pre-existing message",
+        )
+
+    def test_a_failed_claim_does_not_revert_an_already_ready_row(self, db):
+        """`_fail_report`'s guard direction: a later failed-claim on a row
+        that already left 'generating' (e.g. render committed 'ready' before
+        a later non-essential step raised) must leave it alone."""
+        team_id = _seed_team(db)
+        row_id = _create_report_row(
+            db, "claim-no-revert", team_id, "Test",
+            "2026-03-28T12:00:00Z", "2026-04-11T12:00:00Z",
+        )
+        assert _gen._claim_report_completion(
+            db, row_id, status="ready", report_path="reports/claim-no-revert.html",
+        ) is True
+
+        claimed = _gen._claim_report_completion(
+            db, row_id, status="failed", error_message="a later step raised",
+        )
+
+        assert claimed is False
+        row = db.execute(
+            "SELECT status, report_path FROM reports WHERE id = ?", (row_id,)
+        ).fetchone()
+        assert row == ("ready", "reports/claim-no-revert.html")
+
+
 # ---------------------------------------------------------------------------
 # AC-9(a) E2E: Successful generation creates file + DB row
 # ---------------------------------------------------------------------------
@@ -321,6 +421,222 @@ class TestGenerateReportE2E:
         verify_conn.close()
         assert row[0] == "ready"
         assert row[1] == f"reports/{result.slug}.html"
+
+
+class _RacingReaperConnection(sqlite3.Connection):
+    """Flips the sole 'generating' row to 'failed' -- as the reaper would --
+    the instant the generator's own status-claim UPDATE fires, racing from
+    the OTHER side of `_RacingReadyConnection` above (there the GENERATION
+    wins; here the REAPER wins).
+
+    Fires on the first ``UPDATE reports SET status`` statement only, which
+    within `generate_report()`'s pipeline is exactly the ready/no-games
+    completion claim (the earlier title UPDATE does not match this prefix).
+    Matching on ``status = 'generating'`` rather than a specific slug is safe
+    because each test drives exactly one report row.
+    """
+
+    db_path: str = ""
+    _fired = False
+
+    def execute(self, sql, *args, **kwargs):
+        if (
+            sql.lstrip().upper().startswith("UPDATE REPORTS SET STATUS")
+            and not type(self)._fired
+        ):
+            type(self)._fired = True
+            other = sqlite3.connect(self.db_path)
+            other.execute(
+                "UPDATE reports SET status = 'failed', error_message = ? "
+                "WHERE status = 'generating'",
+                ("Reaped: generation did not complete",),
+            )
+            other.commit()
+            other.close()
+        return super().execute(sql, *args, **kwargs)
+
+
+def _drive_generate_report_racing_reaper(
+    mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+    db, tmp_path, *, seed_completed_game: bool,
+):
+    """Shared driver for the two reaper-wins-the-race E2E tests below.
+
+    ``seed_completed_game=True`` exercises the ready-branch claim
+    (`generator.py`'s post-render `_claim_report_completion`);
+    ``seed_completed_game=False`` (N=0, no completed game WITH DATA) routes
+    through the no-games gate's claim instead. Both share this driver because
+    everything except that one seed call is identical -- except the N=0 case
+    still seeds a bare, statless completed `games` row (`_seed_game`, no
+    `player_game_batting`/`pitching` rows) so the freshly-seeded team has a
+    real FK reference: `generate_report()`'s own opportunistic
+    `cleanup_expired_reports` -> orphan-reclamation sweep runs BEFORE this
+    generation's 'generating' report row exists to defer it, and a team with
+    NO footprint at all is a genuine orphan by that sweep's predicate. A bare
+    games row pins the team (satisfying reclaim's FK check) without adding
+    stat rows, so `_query_freshness`'s N-of-M count (which requires
+    EXISTS(player_game_batting/pitching), not bare games rows) still reads 0.
+    """
+    from src.gamechanger.loaders import LoadResult
+
+    _seed_team(db)
+    _seed_season(db)
+    db.execute(
+        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+        "VALUES (1, '2026', 'full', '2026-03-28T00:00:00Z', 'completed')"
+    )
+    db.commit()
+    if seed_completed_game:
+        _seed_completed_game(db)
+    else:
+        _seed_game(db, team_id=1, game_id="nogames-pin")
+
+    db_path = str(tmp_path / "test.db")
+    racing = type(
+        "_Racing", (_RacingReaperConnection,), {"db_path": db_path, "_fired": False},
+    )
+    mock_get_conn.side_effect = lambda: sqlite3.connect(db_path, factory=racing)
+
+    mock_client_cls.return_value = MagicMock()
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025", games_crawled=5, games=[], boxscores={},
+    )
+    mock_loader = MagicMock()
+    mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+    with (
+        patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+        patch("src.reports.generator._REPO_ROOT", tmp_path),
+        patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+    ):
+        result = generate_report("abc123")
+
+    return result, db_path
+
+
+def _generate_report_racing_reaper(db, tmp_path, *, seed_completed_game: bool):
+    """Run `generate_report()` end-to-end with `_RacingReaperConnection` so the
+    reaper claims the row first (see the connection's docstring above). Owns
+    all its patching internally (rather than via test-method decorators) so
+    each one-assertion-per-test method below can call it independently.
+    """
+    with (
+        patch("src.reports.generator.get_connection") as mock_get_conn,
+        patch("src.reports.generator.GameChangerClient") as mock_client_cls,
+        patch("src.reports.generator.ensure_team_row_with_provenance",
+              return_value=EnsureTeamResult(1, "anchor", False)),
+        patch("src.reports.generator.render_report", return_value="<html>test</html>"),
+        patch("src.reports.generator._crawl_and_load_spray"),
+    ):
+        return _drive_generate_report_racing_reaper(
+            None, None, None, mock_client_cls, mock_get_conn,
+            db, tmp_path, seed_completed_game=seed_completed_game,
+        )
+
+
+class TestReadyClaimWhenTheReaperWinsTheRace:
+    """generator.py's post-render `_claim_report_completion(status="ready")`
+    call, when the reaper claims the row first (Ordering 1/2 in
+    .project/specs/2026-08-17-reaper-unlink-race.md -- from the generator's
+    side both orderings converge on the same rowcount-0 outcome; the
+    file-timing distinction is exercised from the reaper's side by
+    `TestReaperWhenALateGenerationFinishesFirst` above)."""
+
+    def _generate(self, db, tmp_path):
+        return _generate_report_racing_reaper(db, tmp_path, seed_completed_game=True)
+
+    def test_the_result_reports_failure_not_a_shareable_url(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        assert (result.success, result.outcome, result.url) == (False, "failed", None), (
+            "a lost race must report failure to the caller, not a "
+            "success-shaped result naming a URL that 404s"
+        )
+
+    def test_it_self_deletes_its_own_file(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "the generator must self-delete its own file when the reaper "
+            "claimed the row first, rather than trust the reaper's unlink"
+        )
+
+    def test_the_row_is_left_failed_with_the_reapers_message(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        verify_conn = sqlite3.connect(db_path)
+        row = verify_conn.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+
+        assert row == ("failed", None, "Reaped: generation did not complete")
+
+    def test_the_run_record_is_finalized_failed(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert run_record["overall_status"] == "failed"
+
+    def test_it_logs_a_warning_naming_the_self_delete(self, db, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert any("deleted its own file" in r.message for r in caplog.records)
+
+
+class TestNoGamesClaimWhenTheReaperWinsTheRace:
+    """The no-games branch's `_claim_report_completion(status="no_games")`
+    call, same race as the ready branch above but through the N=0 gate."""
+
+    def _generate(self, db, tmp_path):
+        return _generate_report_racing_reaper(db, tmp_path, seed_completed_game=False)
+
+    def test_the_result_reports_failure_not_the_no_games_outcome(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        assert (result.success, result.outcome, result.url) == (False, "failed", None), (
+            "a lost race must report failure to the caller, not the "
+            "no_games outcome (which implies a served, shareable page)"
+        )
+
+    def test_it_self_deletes_its_own_file(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "the no-games branch must self-delete its own file when the "
+            "reaper claimed the row first"
+        )
+
+    def test_the_row_is_left_failed_with_the_reapers_message(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        verify_conn = sqlite3.connect(db_path)
+        row = verify_conn.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+
+        assert row == ("failed", None, "Reaped: generation did not complete")
+
+    def test_the_run_record_is_finalized_failed(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert run_record["overall_status"] == "failed"
+
+    def test_it_logs_a_warning_naming_the_self_delete(self, db, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert any("deleted its own file" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -3444,6 +3760,62 @@ class TestCleanupOrphanTeams:
         assert db.execute(
             "SELECT 1 FROM plays WHERE game_id = 'g-shared'"
         ).fetchone() is not None
+
+
+class TestCleanupOrphanTeamsSavepointAndRowcount:
+    """The reaper-race spec's two smaller lifecycle.py findings (E-284):
+
+    the Phase 3 SAVEPOINT statement must sit INSIDE its own try (a raise from
+    the statement itself must not escape with a stranded savepoint), and
+    ``deleted_count`` must be gated on the DELETE's own rowcount rather than
+    incremented unconditionally.
+    """
+
+    def test_a_savepoint_that_fails_to_open_does_not_escape(self, tmp_path):
+        """If SAVEPOINT itself raises, ROLLBACK TO/RELEASE must not be issued
+        against a savepoint that was never created (they would raise again on
+        a name sqlite has no record of) -- the loop must skip this team and
+        keep going, not escape to the caller."""
+
+        class _FailingSavepointConnection(sqlite3.Connection):
+            def execute(self, sql, *args, **kwargs):
+                if sql.startswith("SAVEPOINT "):
+                    raise sqlite3.OperationalError("cannot open savepoint")
+                return super().execute(sql, *args, **kwargs)
+
+        conn = sqlite3.connect(
+            str(tmp_path / "test.db"), factory=_FailingSavepointConnection
+        )
+        load_real_schema(conn)
+        conn.commit()
+        orphan_id = _seed_team(conn, "Orphan", "orphan-sp1")
+
+        count = cleanup_orphan_teams(conn, {orphan_id})
+
+        # The team was skipped, not deleted -- and no exception escaped.
+        assert count == 0
+        assert conn.execute(
+            "SELECT id FROM teams WHERE id = ?", (orphan_id,)
+        ).fetchone() is not None
+        conn.close()
+
+    def test_deleted_count_is_gated_on_the_deletes_own_rowcount(self, db):
+        """A DELETE matching zero rows must not increment deleted_count.
+
+        Deletability (Phase 1/2) is decided purely by the ABSENCE of FK
+        references -- it never checks that the `teams` row itself still
+        exists. So a team already removed by a concurrent path between this
+        function's SELECT-based eligibility check and its own DELETE lands in
+        `deletable_ids` with zero FK references, and its `DELETE FROM teams`
+        matches zero rows -- exactly the shape this fix guards.
+        """
+        orphan_id = _seed_team(db, "Orphan", "orphan-rc1")
+        db.execute("DELETE FROM teams WHERE id = ?", (orphan_id,))
+        db.commit()
+
+        count = cleanup_orphan_teams(db, {orphan_id})
+
+        assert count == 0, "a 0-row DELETE must not increment deleted_count"
 
 
 class TestCleanupOrphanTeamsFkSafety:
@@ -6980,4 +7352,5 @@ class TestGenerateReportDestructiveReconcile:
         assert spy_reclaim.results, "the E-273 reclamation never ran on run 2"
         for reclaim_result in spy_reclaim.results:
             assert reclaim_result.deferred is False
+
 

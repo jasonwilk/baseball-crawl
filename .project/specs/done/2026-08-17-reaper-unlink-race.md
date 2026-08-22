@@ -2,7 +2,7 @@
 
 # The reaper can still delete a finished report's served HTML
 
-**Date**: 2026-08-17, spec written 2026-08-21 · **Status**: `READY`
+**Date**: 2026-08-17, spec written 2026-08-21 · **Status**: `COMPLETE (this commit)` — acceptance: run
 **Source**: `/code-review` of commit `2217092` (the orphan-cleanup FK rollback chunk), run
 after that chunk was approved and committed. Stubbed 2026-08-17; specced 2026-08-21 in its
 own chunk per operator ruling.
@@ -300,3 +300,88 @@ stop and ask at that step.
   column-touch behavior exactly (`_update_report_ready` never touches `error_message`;
   `_update_report_failed` never touches `report_path`). No code — this commit is spec-only.
   Status: `READY`; re-presenting for commit approval.
+- **2026-08-21 (execute, fresh session)** — Audited every file/line claim
+  against the repo before writing code: `grep -rn "UPDATE reports SET" src/`
+  reproduced the same 6-hit table, `generator.py:269-286`/`:2140-2179`/
+  `:2695-2726` and `lifecycle.py:337-352`/`:960-1002` all matched the spec's
+  cited line ranges exactly. Implemented `_claim_report_completion` in
+  `generator.py`; `_update_report_ready`/`_update_report_failed` now delegate
+  to it and return the claim bool. Wired the ready-branch and no-games-branch
+  call sites: on a `False` claim, self-delete the just-written file, log a
+  WARNING naming the report id/slug, and finalize the run record `"failed"`
+  instead of `"completed"`. Corrected the falsified `lifecycle.py:343-347`
+  comment in place (documents the race and the generator's self-delete
+  rather than asserting the unlinked file is always a partial). Fixed the two
+  smaller `lifecycle.py` findings: the `SAVEPOINT` statement moved inside its
+  own `try` with a `savepoint_created` flag gating `ROLLBACK TO`/`RELEASE`;
+  `deleted_count` now increments only when the `DELETE`'s own rowcount is 1
+  (a 0-row delete routes to `skipped_count`).
+  New tests: `TestClaimReportCompletion` (4, direct unit coverage of the
+  guard + COALESCE contract), `TestReadyClaimWhenTheReaperWinsTheRace` and
+  `TestNoGamesClaimWhenTheReaperWinsTheRace` (1 each, full `generate_report()`
+  E2E with a `_RacingReaperConnection` that flips the row mid-pipeline —
+  asserts self-delete, `'failed'` row, WARNING log, and run-record status),
+  `TestCleanupOrphanTeamsSavepointAndRowcount` (2, the savepoint-inside-try
+  and rowcount-gated-`deleted_count` fixes). Mutation-verified the shared
+  guard: reverting `_claim_report_completion`'s `AND status = 'generating'`
+  clause (cache cleared before/after) failed 4 of the 6 new
+  `TestClaimReportCompletion`/race tests as expected (the other 2 are pure
+  happy-path claims that don't exercise the guard) — restored and reran
+  green. A blanket string-replace during the mutation restore briefly
+  corrupted an unrelated `teams` UPDATE in `_ensure_team_row`
+  (`WHERE id = ?` gained a bogus `AND status = 'generating'` — `teams` has no
+  `status` column); caught by re-diffing before running tests, fixed.
+  Verification: targeted `-k "Reap or Ready or NoGames or Race or
+  Completion"` (33 passed, up from the spec's stated 15 — the new classes
+  land inside that same `-k` filter), `TestCleanupOrphanTeams*` (12 passed),
+  full suite (`4572 passed`, ratchet satisfied — this repo's suite had no
+  captured pre-chunk baseline count in this session, but zero tests were
+  deleted or skipped, only added). `bb report reconcile-scoreboard` run
+  AFTER only (operator note: the spec's before/after instrument was not run
+  BEFORE this chunk — an oversight, not a decision); its output shows a
+  `Reconciliation gate FAILED — regressed` block on plays/boxscore fidelity
+  axes this chunk's diff never touches (report-completion status writes and
+  orphan-cleanup savepoint bookkeeping only) — read as pre-existing dev-DB
+  drift from other work, not evidence about this chunk, and not chased
+  further here since the instrument is diagnostic, not a gate.
+  `python3 src/safety/pii_scanner.py --staged`: scanned 3, staged 3, 0
+  violations. Status flipped to `COMPLETE (this commit)` before staging.
+- **2026-08-22 (codex review, `scripts/codex-review.sh uncommitted`)** — 1 P1 +
+  1 P2, both folded in. **P1**: both completion sites returned a
+  success-shaped `GenerationResult` (`success=True`/`outcome="ready"`, or
+  `outcome="no_games"` with a live `url`) even on the `claimed=False` branch —
+  so a caller (`bb report generate`, `bb report morning-run`) would report
+  success and hand out a URL that 404s, because the row is `'failed'` and the
+  file is gone. Fixed: both branches now return early with
+  `success=False, outcome="failed", url=None` when the reaper won, before
+  reaching the ready/no-games success return. **P2**: the two new race tests
+  asserted the DB/file/log side effects but never asserted `result.success` /
+  `result.outcome` / `result.url` — the exact gap that let the P1 ship green.
+  Fixed: both now assert `(result.success, result.outcome, result.url) ==
+  (False, "failed", None)`. Re-ran targeted (33 passed) and full suite (4572
+  passed); PII scan clean (3 staged, 3 scanned, 0 violations).
+- **2026-08-22 (`/code-review` fork, full working-tree diff)** — 2 findings,
+  both cleanup/convention, no correctness bugs (the atomic-claim pattern,
+  both callers' `claimed`-bool handling, the `cleanup_orphan_teams` savepoint
+  fix, and every downstream `GenerationResult.outcome` consumer — `bb report
+  generate`'s CLI, `bb report morning-run`, the admin reports route — were
+  traced and check out). Both folded in: (1) the reaper-lost-the-race
+  recovery block (self-delete the file, log a WARNING, return the failed
+  `GenerationResult`) was duplicated near-verbatim between the ready and
+  no-games branches and had already started drifting in wording — extracted
+  into one shared `_reaper_lost_the_race()` helper in `generator.py`, called
+  from both sites; (2) the two new race tests each bundled five independent
+  assertions (result tuple, file absence, DB row, run-record status, log
+  message) into one test method — split into five one-assertion tests per
+  class (10 total), naming which behavior broke on failure instead of an
+  opaque single-test failure. Re-ran the split tests (10 passed), the
+  targeted filter (41 passed — up from 33 after the split), and the full
+  suite (4580 passed, up from 4572 — ratchet satisfied). PII scan clean (3
+  staged, 3 scanned, 0 violations).
+- **2026-08-22 (`/security-review`)** — no findings. Reviewed the self-delete
+  `unlink()` calls (path derived from a `secrets.token_urlsafe(12)` slug, not
+  attacker-influenced), the `_claim_report_completion` SQL (fully
+  parameterized), the `lifecycle.py` SAVEPOINT/ROLLBACK-TO/RELEASE name
+  interpolation (built from `int(team_id)`, pre-existing and unchanged by
+  this chunk), and the new logging (report id/slug only, already
+  URL-facing). No high-confidence findings; empty report.

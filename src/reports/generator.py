@@ -23,6 +23,7 @@ import sqlite3
 from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from src.api.db import (
@@ -266,24 +267,91 @@ def _create_report_row(
     return cursor.lastrowid
 
 
-def _update_report_ready(
-    conn: sqlite3.Connection, report_id: int, report_path: str
-) -> None:
-    conn.execute(
-        "UPDATE reports SET status = 'ready', report_path = ? WHERE id = ?",
-        (report_path, report_id),
+def _claim_report_completion(
+    conn: sqlite3.Connection,
+    report_id: int,
+    *,
+    status: str,
+    report_path: str | None = None,
+    error_message: str | None = None,
+) -> bool:
+    """Atomically transition a 'generating' report to a terminal status.
+
+    ``report_path`` and ``error_message`` are OPTIONAL and independently
+    preserve the existing per-column write behavior of the two functions this
+    helper replaces: passing ``None`` for either leaves that column UNCHANGED
+    (via ``COALESCE(?, column)``), it does NOT null it out.  This matters
+    concretely: ``_fail_report`` fires from crawl/load-stage failures where no
+    HTML has been rendered and no ``report_path`` value exists in scope -- the
+    caller passes ``report_path=None`` there, exactly mirroring today's
+    ``_update_report_failed``, which never touches that column either.
+
+    Returns False (no-op) if the row already left 'generating' -- e.g. the
+    reaper claimed it first.  Callers MUST treat False as "the reaper won":
+    a ready/no_games caller deletes the file it just wrote and logs a
+    WARNING, never assuming the reaper's own unlink already covered it (it
+    may run before the file exists).  A failed-path caller (`_fail_report`)
+    treats False as "leave the row alone" -- it is either already `failed`
+    (harmless no-op) or already `ready` (must not be reverted).
+    """
+    cursor = conn.execute(
+        "UPDATE reports SET status = ?, "
+        "report_path = COALESCE(?, report_path), "
+        "error_message = COALESCE(?, error_message) "
+        "WHERE id = ? AND status = 'generating'",
+        (status, report_path, error_message, report_id),
     )
     conn.commit()
+    return cursor.rowcount == 1
+
+
+def _update_report_ready(
+    conn: sqlite3.Connection, report_id: int, report_path: str
+) -> bool:
+    return _claim_report_completion(
+        conn, report_id, status="ready", report_path=report_path
+    )
 
 
 def _update_report_failed(
     conn: sqlite3.Connection, report_id: int, error_message: str
-) -> None:
-    conn.execute(
-        "UPDATE reports SET status = 'failed', error_message = ? WHERE id = ?",
-        (error_message, report_id),
+) -> bool:
+    return _claim_report_completion(
+        conn, report_id, status="failed", error_message=error_message
     )
-    conn.commit()
+
+
+def _reaper_lost_the_race(
+    file_path: Path,
+    *,
+    report_id: int,
+    slug: str,
+    title: str | None,
+    no_games: bool = False,
+) -> GenerationResult:
+    """Shared reaper-won-the-race recovery: self-delete this run's own file,
+    log a WARNING, and return the failed result callers must see.
+
+    Used by both completion sites (ready and no-games) -- a success-shaped
+    result naming a URL here would tell callers a served page exists when it
+    does not, since the row is 'failed' and the file is gone (codex review,
+    2026-08-22). See .project/specs/2026-08-17-reaper-unlink-race.md.
+    """
+    file_path.unlink(missing_ok=True)
+    logger.warning(
+        "Report id=%s slug=%s finished%s after the reaper claimed it as "
+        "stale; deleted its own file and left the row 'failed'.",
+        report_id, slug, " (no-games)" if no_games else "",
+    )
+    return GenerationResult(
+        success=False, slug=slug, title=title,
+        error_message=(
+            "Report generation finished after a stale-generation cleanup "
+            "pass had already claimed and failed this report; no shareable "
+            "report was produced."
+        ),
+        outcome="failed",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2158,11 +2226,9 @@ class _ReportGeneration:
             encoding="utf-8",
         )
         with closing(get_connection()) as conn:
-            conn.execute(
-                "UPDATE reports SET status = 'no_games', report_path = ? WHERE id = ?",
-                (report_path, self.report_id),
+            claimed = _claim_report_completion(
+                conn, self.report_id, status="no_games", report_path=report_path
             )
-            conn.commit()
 
         # Orphan cleanup on the abort path too, so it stays symmetric with the
         # normal render path (a true no-op here -- the N==0 firing condition
@@ -2171,7 +2237,14 @@ class _ReportGeneration:
         self._compute_orphans()
         self._cleanup_orphans()
 
-        _finalize_run_record(self.report_id, "completed")
+        _finalize_run_record(self.report_id, "completed" if claimed else "failed")
+
+        if not claimed:
+            return _reaper_lost_the_race(
+                file_path, report_id=self.report_id, slug=self.slug,
+                title=self.title, no_games=True,
+            )
+
         logger.info(
             "No completed games with data for public_id=%s (M=%d, N=0); "
             "wrote no-games page slug=%s",
@@ -2704,7 +2777,7 @@ class _ReportGeneration:
 
             # Update reports row to 'ready'
             with closing(get_connection()) as conn:
-                _update_report_ready(conn, report_id, report_path)
+                claimed = _update_report_ready(conn, report_id, report_path)
 
             # Run record: write the render-stage counts and finalize completed.
             _update_run_record(
@@ -2713,7 +2786,7 @@ class _ReportGeneration:
                 plays_games_covered=_coerce_int(plays_games_covered),
                 enrichment_status=_coerce_status(enrichment_status),
             )
-            _finalize_run_record(report_id, "completed")
+            _finalize_run_record(report_id, "completed" if claimed else "failed")
 
         except Exception as exc:  # noqa: BLE001
             msg = f"Post-pipeline error: {exc}"
@@ -2723,6 +2796,11 @@ class _ReportGeneration:
             )
             _fail_report(report_id, msg)
             return GenerationResult(success=False, slug=slug, error_message=msg)
+
+        if not claimed:
+            return _reaper_lost_the_race(
+                file_path, report_id=report_id, slug=slug, title=self.title,
+            )
 
         url = f"{_get_base_url()}/reports/{slug}"
         logger.info(
