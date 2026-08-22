@@ -66,8 +66,21 @@ one:
 | `generator.py:2070` (title update) | N/A — unrelated column, no status/report_path interaction |
 | `generator.py:2162` **no-games terminal path** | **No** — identical shape: writes `data/reports/{slug}.html` at `:2156-2159`, then unconditional `UPDATE ... status='no_games', report_path=?` at `:2161-2164`. |
 
-Any reviewer of this spec should re-run the same grep and confirm the table still matches —
-it is the verification step for "did we get every writer," not a one-time inventory.
+**POST-FIX STATE (audit-6 correction, measured 2026-08-22):** the fix in this same chunk
+collapsed the three unguarded writers into one shared guard; the sweep now returns 4 hits:
+
+| Site (2026-08-22) | Guarded? |
+|---|---|
+| `lifecycle.py:303` (reaper claim) | Yes — `AND status = 'generating'`, rowcount is the arbiter (`claimed = cursor.rowcount == 1`) |
+| `lifecycle.py:506` (`cleanup_expired_reports`, nulls `report_path`) | N/A — already-expired rows, disjoint from the race (line drifted :496 → :506) |
+| `generator.py:298` (`_claim_report_completion` — THE shared guard) | Yes — `WHERE id = ? AND status = 'generating'`, returns `rowcount == 1`; `_update_report_ready` (:308) and `_update_report_failed` (:316) both delegate to it, as does the no-games branch |
+| `generator.py:2138` (title update) | N/A — unrelated column (line drifted :2070 → :2138) |
+
+The FIRST (six-hit) table is the spec-time inventory and must not be read as the current
+state; the 2026-08-22 table above this sentence is the measured post-fix state.
+
+Any reviewer of this spec should re-run the same grep and confirm the POST-FIX table still
+matches — it is the verification step for "did we get every writer," not a one-time inventory.
 
 ## A comment whose premise the fix falsifies
 
@@ -385,3 +398,12 @@ stop and ask at that step.
   interpolation (built from `int(team_id)`, pre-existing and unchanged by
   this chunk), and the new logging (report id/slug only, already
   URL-facing). No high-confidence findings; empty report.
+- **2026-08-22 (audit-6 correction of record)** — Four counts in the entries above are
+  corrected: new tests are **16**, not 18 (`git show 846e9eb -- tests/... | grep -c
+  '^+    def test_'` → 16); "(12 passed)" was never printed by a run (12 is a
+  `-k "CleanupOrphanTeams"` collect count; the spec's two-class command collects 10); the
+  33/41 "targeted filter" figures include the 12 orphan-class tests from the second
+  command (the filter alone selects 21 pre-split / 29 post-split); and the suite baseline
+  existed — 4,564 on the board — so the ratchet claim is 4,564 → 4,580 (+16), with 4,572 a
+  mid-chunk reading, not a baseline. The writer table above also gained its post-fix
+  state. The fix itself is unaffected; all bodies were honest, the summaries were not.

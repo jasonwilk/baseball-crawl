@@ -22,9 +22,9 @@ default; measured 2026-08-17). Someday-work does not live here at all; it is one
 ## NOW
 
 Continue the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"):
-same-listing detection → generate-concurrency cap → **reaper unlink race (SPEC COMMITTED,
-READY, to run FIRST — it is the serving path)** → **runs-as-scoreboard instrument (SPEC
-COMMITTED, READY)** → full regenerate. **The generation freeze is LIFTED** — the lossy-merge
+same-listing detection → generate-concurrency cap → ~~reaper unlink race~~ (LANDED
+2026-08-22) → **runs-as-scoreboard instrument (SPEC COMMITTED, READY, next)** → full
+regenerate. **The generation freeze is LIFTED** — the lossy-merge
 hazard it protected against is fixed and proven on live data. The half-pair clobber no longer
 needs its own slot before the regenerate: it is folded into the instrument chunk, along with
 the cap 2 → 1 ruling.
@@ -317,10 +317,14 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
      "2 report generations are already running" banner until the process restarts. Same failure
      class as the codex P1 that chunk already fixed, one layer up.
 
-- ⚠ **The reaper's unlink race — SPEC COMMITTED 2026-08-21, Status `READY`**, spec
-  `2026-08-17-reaper-unlink-race.md` (this commit — hash intentionally not self-cited, since
-  citing it here would drift on the next amend), **ruled to run next, before the runs
-  instrument**. Stubbed 2026-08-17 naming one unguarded write
+- ✅ **The reaper's unlink race — LANDED 2026-08-22** (`846e9eb`), spec moved to
+  `done/2026-08-17-reaper-unlink-race.md` (use `git log --follow -M20%`). Suite
+  4,564 → 4,580 (+16). All three `reports`-row completion writers now route through one
+  guarded helper (`_claim_report_completion`, rowcount-arbitrated); on a lost race the
+  generator self-deletes its file, logs a WARNING, and returns a failed
+  `GenerationResult` (codex P1: it previously returned success-shaped results on that
+  branch). Savepoint-inside-try and rowcount-gated `deleted_count` landed in
+  `lifecycle.py` alongside. Stubbed 2026-08-17 naming one unguarded write
   (`_update_report_ready`, `generator.py:272-275`: the generator writes the HTML then commits
   `ready` unconditionally, so a reap claiming the row between those two steps unlinks a
   finished report's served HTML — `status='ready'`, `report_path` set, file gone,
@@ -338,8 +342,12 @@ Carried deliberately. Not prose, not tickets — things that will bite if forgot
   `lifecycle.py:343-347` comment whose "orphan partial HTML" premise the fix falsifies.
   Bound stated honestly: needs a >1h generation that then finishes, reaped inside a
   millisecond window; not reproduced live, but the regenerate is exactly the bulk CLI
-  workload that produces long generations. **No code yet — next session executes from this
-  spec.**
+  workload that produces long generations. (1) **Ordering 2 exists only as a docstring
+  argument** — the write-then-unlink interleaving was never built as a test; the racing
+  connection exercises only the claim, and the docstring cites a class that cannot
+  exercise the unlink timing. A test-only micro-chunk is drafted (audit 6). (2) The
+  archived spec's writer table is spec-time state; see its audit-6 correction note.
+  (3) Live reproduction remains out of scope by ruling.
 
 - **Two live-data findings from the runs-instrument spec session (2026-08-17), both parked in
   that spec's Out of scope and repeated here so they survive its move to `done/`.**
