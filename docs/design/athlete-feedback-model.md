@@ -1,6 +1,9 @@
 # The Athlete Feedback Model
 
-**Status: DRAFT v1 — 2026-08-22.** Governs every player-facing feedback artifact this project
+**Last updated**: 2026-08-22 · **Source**: concept sessions of 2026-08-15..22 (v1.1 amendment
+same day: in-season arc, DB-sourced window carve-out, pool identity dedup)
+
+**Status: DRAFT v1.1 — 2026-08-22.** Governs every player-facing feedback artifact this project
 produces, starting with the exit-meeting player sheet. The design intent: this document carries
 the intellectual work — what may be said, to whom, on what evidence, in what words — so that
 producing the sheets is deterministic work any competent model or plain script can execute.
@@ -81,6 +84,9 @@ them, and changed only deliberately with rationale.
 | Fielding | descriptive only | no cross-position comparison; counts + FPCT with chances shown |
 | Trajectory arrow floor | 60 PA each half | below: both numbers shown side by side, unmarked |
 | Trajectory magnitude | ≥.080 OBP/SLG; ≥8 pts K%/BB%/QAB% | approximates 1 SD of the between-half difference at the floor — provisional |
+| In-season window floor | 40 PA per half-season window | measured 2026-08-22 on full crawls: 6 of 10 spring / 9 of 11 summer regulars clear it — provisional |
+| In-season window boundary | midpoint game date of the team-season | deterministic; pinned here so two builders split identically |
+| Arc stats | OBP, K% | the two most stable headline rates; one arc, not one per stat family |
 | Band deadband | .015 OBP/SLG; 1.5 pts rates | values this close to a cutoff render "around the team middle" |
 | Four-band minimum pool | 8 qualified players | below: two bands only (above/below the team middle) |
 | Standing-claim caps | ≤3 stood-out, ≤2 below-middle | one claim per correlated family (§7) |
@@ -92,11 +98,23 @@ fixed in the build spec, exercised by fixtures, identical for every builder.
 
 ## 5. Comparison lenses
 
-**Self over time (trajectory).** Spring HS and summer Legion are treated as two halves of one
-long season (operator ruling: mostly-similar teams, not a JV→varsity jump). Arrows (▲ better /
-▼ worse / – about the same) appear only above the trajectory gates in §4. Exception: a player
-who moved competition levels between halves gets numbers side by side, no marks — identified
-via the coach context manifest (§6), not inferred.
+**Self over time (the season arc).** Spring HS and summer Legion are treated as two halves of
+one long season (operator ruling: mostly-similar teams, not a JV→varsity jump). The lens
+renders as ONE display, not competing widgets: the arc — up to four half-season windows
+(spring 1st half → spring 2nd half → summer 1st half → summer 2nd half) for the §4 arc stats,
+every point badged with its PA, a step marked ▲/▼/– only where that step clears the §4 gates.
+The spring→summer step is one step of the arc, not a separate feature. Exceptions and floors:
+
+- A player who moved competition levels between halves gets numbers side by side, no marks on
+  the cross-season step — identified via the coach context manifest (§6), not inferred.
+- **Within-season windows are DB-sourced** (the authoritative CSV has no per-game grain) and
+  are permitted only for a team-season that passes the verified-coverage gate: the full season
+  crawled (every scheduled game's per-game rows present), fresh. A trend over the fraction of
+  a season we happened to crawl is the same lie as an unverified pool. Measured 2026-08-22:
+  both LSB 2026 team-seasons pass (30 of 30 spring, 43 of 43 summer games).
+- Windows below the §4 floor render no rate and no mark for that segment.
+- **Count-based finish facts** ("reached base in 9 of your last 10 games") are recorded-fact
+  claims, available at any sample, and are the only in-season trend form for part-time players.
 
 **Team.** Anonymous bands against the player's own team-season, computed against the team
 median but never worded "average". Vocabulary, in the coach's register but arithmetically
@@ -113,6 +131,11 @@ ruling 2026-08-22: "we shouldn't wander in claiming a 'league' we haven't verifi
 - Same season and competition class; one canonical formula per metric computed from
   compatible counting components on both sides (subject CSV vs pool DB) — fail closed on
   definition mismatch.
+- **Pool teams are deduplicated by identity before weighting.** Duplicate team rows for the
+  same real club are a live database condition (measured 2026-08-22: one opponent present as
+  three team ids), and a naive pool builder would ingest that roster three times — the same
+  distortion the coverage rules prevent, entering through the identity door. A failed
+  duplicate collapse blocks the lens exactly as a coverage failure does.
 - ≥8 qualifying teams; no single team contributes >15% of the pool; equal-team weighting.
 - Sensitivity check: recompute against the highest-coverage half of the pool; if the player's
   band moves, suppress the lens for that stat.
@@ -197,9 +220,13 @@ Acceptance = all of:
 
 ## 10. Scope and non-goals
 
-- **v1 ships the self and team lenses.** The barometer ships only behind the §5 gate, which
-  requires the full opponent crawl (~50–55 `bb report generate` runs — a destructive-seam
-  batch the operator sanctions explicitly, never a side effect of sheet generation).
+- **v1 ships the self and team lenses**, including the in-season arc where the §5 coverage
+  gate passes — as of the 2026-08-22 crawls it passes for both LSB 2026 team-seasons, and
+  measurement shows ~6–9 regulars per season clear the window floor; everyone else gets
+  finish facts. The barometer ships only behind the §5 gate, which requires the full opponent
+  crawl (~50–55 `bb report generate` runs — a destructive-seam batch the operator sanctions
+  explicitly, never a side effect of sheet generation; ~9 of ~38 18U opponents were already
+  fully crawled as of 2026-08-22).
 - Single year only. No cross-year tracking (project non-goal); the sheet's growth loop is the
   scaffold in §8, revisited at next season's exit meeting from fresh data.
 - No effort, attitude, mechanics, potential, or coachability inference — ever (claim matrix,
