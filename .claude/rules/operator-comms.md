@@ -25,6 +25,16 @@ nothing") was buried inside an instrument reading, next to its six-line plain re
   (two parts of the program touching the same thing, outcome decided by milliseconds)". The
   operator ruled this in after decoding "reaper race" cold (2026-08-22); defining your own
   labels is not enough when the subject itself is jargon.
+- A claim that CLOSES a question needs a pasted tool output, exactly like a claim that opens
+  one. Raised findings get reproduced; cleared findings ("pre-existing", "the other path covers
+  it", "that input is safe") must get the same — three near-misses in chunks 16–18 were all
+  accepted all-clears, one of them the unproven core deliverable.
+- A quantifier spanning more than one tool output is stated as a fraction with the exceptions
+  named ("11 of 13 first-run; M1 and M6 re-run after fixes") or not stated. Fifth-chunk bite:
+  "18 new tests" (16), "all 13 mutants" (2 diverged first-run), in approval prompts.
+- Between two tool calls, send NO text unless it carries a number the operator has not seen or
+  a decision being made. Measured relapse: 74% narration-only messages in one chunk AFTER
+  explicit notice.
 - A question box must survive ALONE on the operator's screen: restate the premise inside the
   question in product language (two sentences max), state the decision as the trade it is, and
   keep implementation detail below the options or in the spec. A question that depends on a

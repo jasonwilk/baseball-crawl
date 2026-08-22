@@ -47,6 +47,7 @@ Check each item and report findings:
 - Does it name a **person**? No spec may. Real team/org identifiers belong to the placeholder taxonomy in `.claude/rules/api-docs.md`; a person's name is never acceptable.
 - Does its **Status** read one of the five values in CLAUDE.md step 9 -- `COMPLETE (this commit)`, `READY`, `PARKED + why`, `STUB`, `OPEN + what decision is owed` -- or explicitly claim a chunk in flight? A sixth status is a finding.
 - A `COMPLETE` Status names its acceptance state: `acceptance: run` or `acceptance: owed at <chunk>` (audit-5 ruling -- a landed chunk whose proof never ran must be distinguishable from a proven one). And no Status hides behind a bare verdict word: "clean" is a finding; the severity breakdown ("0 P1/P2, 3 P3 folded") is the claim.
+- A pre-commit spec's Status legitimately reads READY/committed before the commit exists (step 7 flips before staging BY DESIGN) -- do not flag it; flag only a Status false AFTER commit.
 
 ## Re-Review Protocol
 
@@ -65,6 +66,10 @@ Round 2+ reviews (after the findings are incorporated) follow a scoped process:
 4. Do NOT re-review unchanged sections. Prior-round findings on untouched sections are closed. Only re-evaluate what was touched or is adjacent to a change.
 
 **A review claim covers the reviewed TEXT, not the file** (audit-5 ruling: a 19-line section was authored 68 minutes after the Status already said "codex-reviewed"). Edits made after the final round get a re-round OR an explicit unreviewed-edits note in the progress log, naming each edit. A Status asserting review coverage over post-review text is a finding.
+
+Post-final-round folds that only narrow verification steps into concrete commands may ship under an UNREVIEWED-EDITS log note naming them; folds that add claims or mechanisms get a scoped re-round. Logging a round always creates new text -- this is the terminating rule.
+
+Review scope for docs-only staged work: the review covers the staged files ONLY; state that scope, or the reviewer defaults to wandering into committed history (measured: it reviewed the prior commit and the accident was caught only by a scope-check).
 
 ## Reporting
 

@@ -81,7 +81,7 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    the board; "nothing discovered" is a claim to defend. The Status from step 7 reads
    `COMPLETE (this commit)`, `READY`, `PARKED + why`, `STUB`, or `OPEN + what decision is owed`;
    a COMPLETE also names `acceptance: run` or `owed at <chunk>`, and moves to
-   `.project/specs/done/` in this commit - no hash needed, `git log --follow` supplies it.
+   `.project/specs/done/` in this commit - no hash needed, `git log --follow -M20%` supplies it.
    Only post-commit steps (a backfill, a migration run) earn a second small results commit, and
    THAT one cites hashes. Then report what landed, what's carried and where, the exact
    next-session prompt, and the literal last line
