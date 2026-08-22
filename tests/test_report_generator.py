@@ -246,7 +246,7 @@ class TestReportRowManagement:
 class TestClaimReportCompletion:
     """`_claim_report_completion` (E-284) is the shared atomic status-transition
     guard behind `_update_report_ready` / `_update_report_failed` / the
-    no-games branch -- see .project/specs/2026-08-17-reaper-unlink-race.md.
+    no-games branch -- see .project/specs/done/2026-08-17-reaper-unlink-race.md.
     """
 
     def test_claims_a_generating_row(self, db):
@@ -439,6 +439,16 @@ class _RacingReaperConnection(sqlite3.Connection):
     db_path: str = ""
     _fired = False
 
+    def _reaper_side_effects(self, slug: str | None) -> None:
+        """What the reaper does BEYOND claiming the row. Base class: nothing.
+
+        The real reaper unlinks the claimed row's HTML after committing the
+        claim; whether that unlink finds a file is what separates the two
+        interleavings. This base leaves the file alone (the file-present
+        interleaving); `_RacingReaperUnlinkingConnection` overrides it to
+        remove the file (the file-already-gone interleaving).
+        """
+
     def execute(self, sql, *args, **kwargs):
         if (
             sql.lstrip().upper().startswith("UPDATE REPORTS SET STATUS")
@@ -446,19 +456,56 @@ class _RacingReaperConnection(sqlite3.Connection):
         ):
             type(self)._fired = True
             other = sqlite3.connect(self.db_path)
+            # Read the slug BEFORE the claim flips the row out of 'generating',
+            # so the side-effect hook can name the file the real reaper would
+            # unlink. Ordering matters: after the UPDATE, 'generating' matches
+            # nothing and a 'failed' lookup could not tell this row from any
+            # other failed one.
+            claimed_row = other.execute(
+                "SELECT slug FROM reports WHERE status = 'generating'"
+            ).fetchone()
             other.execute(
                 "UPDATE reports SET status = 'failed', error_message = ? "
                 "WHERE status = 'generating'",
                 ("Reaped: generation did not complete",),
             )
             other.commit()
+            self._reaper_side_effects(claimed_row[0] if claimed_row else None)
             other.close()
         return super().execute(sql, *args, **kwargs)
+
+
+class _RacingReaperUnlinkingConnection(_RacingReaperConnection):
+    """The reaper claims the row AND unlinks the report file, as it really does.
+
+    `_RacingReaperConnection` above leaves the file on disk, so the generator's
+    recovery (`_reaper_lost_the_race`) always self-deletes a file that is still
+    present. That is only one of the two interleavings the reaper race has. In
+    the other, the reaper's unlink lands first and the generator's self-delete
+    finds NOTHING -- the `missing_ok=True` path, which until now was argued for
+    in a docstring and never executed by a test.
+
+    `reports_dir` must be set on the subclass the test builds (the same
+    directory `generator._REPORTS_DIR` is patched to), mirroring how `db_path`
+    is supplied.
+    """
+
+    reports_dir: Path | None = None
+
+    def _reaper_side_effects(self, slug: str | None) -> None:
+        if slug is None or self.reports_dir is None:
+            raise AssertionError(
+                "the unlinking reaper double needs both a claimed slug and a "
+                "reports_dir -- without them it silently degrades into the "
+                "non-unlinking base double and the test measures nothing"
+            )
+        (self.reports_dir / f"{slug}.html").unlink()
 
 
 def _drive_generate_report_racing_reaper(
     mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
     db, tmp_path, *, seed_completed_game: bool,
+    racing_base: type[sqlite3.Connection] = _RacingReaperConnection,
 ):
     """Shared driver for the two reaper-wins-the-race E2E tests below.
 
@@ -493,7 +540,12 @@ def _drive_generate_report_racing_reaper(
 
     db_path = str(tmp_path / "test.db")
     racing = type(
-        "_Racing", (_RacingReaperConnection,), {"db_path": db_path, "_fired": False},
+        "_Racing", (racing_base,),
+        {
+            "db_path": db_path,
+            "_fired": False,
+            "reports_dir": tmp_path / "data" / "reports",
+        },
     )
     mock_get_conn.side_effect = lambda: sqlite3.connect(db_path, factory=racing)
 
@@ -517,7 +569,10 @@ def _drive_generate_report_racing_reaper(
     return result, db_path
 
 
-def _generate_report_racing_reaper(db, tmp_path, *, seed_completed_game: bool):
+def _generate_report_racing_reaper(
+    db, tmp_path, *, seed_completed_game: bool,
+    racing_base: type[sqlite3.Connection] = _RacingReaperConnection,
+):
     """Run `generate_report()` end-to-end with `_RacingReaperConnection` so the
     reaper claims the row first (see the connection's docstring above). Owns
     all its patching internally (rather than via test-method decorators) so
@@ -534,16 +589,28 @@ def _generate_report_racing_reaper(db, tmp_path, *, seed_completed_game: bool):
         return _drive_generate_report_racing_reaper(
             None, None, None, mock_client_cls, mock_get_conn,
             db, tmp_path, seed_completed_game=seed_completed_game,
+            racing_base=racing_base,
         )
 
 
 class TestReadyClaimWhenTheReaperWinsTheRace:
     """generator.py's post-render `_claim_report_completion(status="ready")`
-    call, when the reaper claims the row first (Ordering 1/2 in
-    .project/specs/2026-08-17-reaper-unlink-race.md -- from the generator's
-    side both orderings converge on the same rowcount-0 outcome; the
-    file-timing distinction is exercised from the reaper's side by
-    `TestReaperWhenALateGenerationFinishesFirst` above)."""
+    call, when the reaper claims the row first.
+
+    This is Ordering 1 of .project/specs/done/2026-08-17-reaper-unlink-race.md: the
+    reaper's unlink ran before the file existed, so it removed nothing and the
+    generator's own self-delete is what clears the file. The double used here
+    (`_RacingReaperConnection`) claims the row WITHOUT unlinking, which is what
+    makes this the file-still-present interleaving.
+
+    Ordering 2 -- the reaper's unlink lands first and the generator's
+    self-delete finds nothing -- is a DIFFERENT execution, not a restatement of
+    this one, and is covered by
+    `TestReadyClaimWhenTheReaperAlsoUnlinkedTheFileFirst` below. (This docstring
+    previously asserted the two orderings "converge on the same rowcount-0
+    outcome" from the generator's side and treated that as covering both. The
+    rowcount does converge; the file state at self-delete time does not, and no
+    test executed the absent-file branch until that class was added.)"""
 
     def _generate(self, db, tmp_path):
         return _generate_report_racing_reaper(db, tmp_path, seed_completed_game=True)
@@ -633,6 +700,156 @@ class TestNoGamesClaimWhenTheReaperWinsTheRace:
         assert run_record["overall_status"] == "failed"
 
     def test_it_logs_a_warning_naming_the_self_delete(self, db, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert any("deleted its own file" in r.message for r in caplog.records)
+
+
+class TestReadyClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
+    """Ordering 2: the reaper claimed the row AND removed the file first.
+
+    Same losing claim as `TestReadyClaimWhenTheReaperWinsTheRace` above, but
+    driven by `_RacingReaperUnlinkingConnection`, so by the time
+    `_reaper_lost_the_race` runs its `file_path.unlink(missing_ok=True)` there
+    is no file to remove. `missing_ok=True` is what makes that a clean no-op;
+    a bare `unlink()` would raise `FileNotFoundError` from the ready branch's
+    `_reaper_lost_the_race` call -- which sits OUTSIDE the render try/except, so
+    it would escape `generate_report()` rather than degrade to a failed result.
+
+    Why this is not a restatement of Ordering 1: the assertions match, but the
+    executed branch does not. Ordering 1 exercises unlink-a-present-file; only
+    this class and its no-games sibling exercise unlink-a-missing-file.
+    Verified discriminating by mutation (`missing_ok=True` -> bare `unlink()`):
+    all 10 Ordering-2 tests fail, all 10 Ordering-1 tests above still pass.
+    """
+
+    def _generate(self, db, tmp_path):
+        return _generate_report_racing_reaper(
+            db, tmp_path, seed_completed_game=True,
+            racing_base=_RacingReaperUnlinkingConnection,
+        )
+
+    def test_the_self_delete_of_an_already_missing_file_does_not_raise(
+        self, db, tmp_path
+    ):
+        result, _ = self._generate(db, tmp_path)
+
+        assert (result.success, result.outcome) == (False, "failed"), (
+            "the generator must degrade to the lost-race failure; a raising "
+            "self-delete would escape generate_report() before this assert"
+        )
+
+    def test_no_file_is_left_behind(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "the end state must match Ordering 1: no orphaned HTML on disk"
+        )
+
+    def test_the_row_is_left_failed_with_the_reapers_message(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        verify_conn = sqlite3.connect(db_path)
+        row = verify_conn.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+
+        assert row == ("failed", None, "Reaped: generation did not complete")
+
+    def test_the_run_record_is_finalized_failed(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert run_record["overall_status"] == "failed"
+
+    def test_it_still_logs_the_warning(self, db, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert any("deleted its own file" in r.message for r in caplog.records), (
+            "the WARNING is the only audit trail of a lost race, and it must "
+            "not be conditional on the self-delete having found a file"
+        )
+
+
+class TestNoGamesClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
+    """Ordering 2 through the no-games gate.
+
+    One asymmetry with the ready branch above is load-bearing for what these
+    tests can prove: this branch's `_reaper_lost_the_race` call sits INSIDE the
+    pipeline try/except, so a raising self-delete is SWALLOWED into a
+    `Pipeline error: ...` result rather than escaping.
+
+    That swallow makes three of this class's assertions vacuous on their own,
+    and the mutation run proved it rather than the docstring arguing it: under
+    a bare `unlink()`, `test_no_file_is_left_behind`,
+    `test_the_row_is_left_failed_with_the_reapers_message` and
+    `test_the_run_record_is_finalized_failed` all still PASSED -- the reaper had
+    already removed the file, and `_fail_report` leaves an already-'failed' row
+    untouched, so every absence they assert was satisfied by a mechanism that
+    blew up. This is the `.claude/rules/testing.md` shape: an absence claim
+    needs proof the mechanism COMPLETED CLEANLY, not merely that it was entered.
+
+    `_generate` therefore carries that proof as a shared precondition, so all
+    five tests fail when the self-delete raises rather than only the two that
+    read the message and the log.
+    """
+
+    def _generate(self, db, tmp_path):
+        result, db_path = _generate_report_racing_reaper(
+            db, tmp_path, seed_completed_game=False,
+            racing_base=_RacingReaperUnlinkingConnection,
+        )
+
+        assert not (result.error_message or "").startswith("Pipeline error:"), (
+            "the pipeline swallowed an exception, so the lost-race recovery did "
+            "NOT complete cleanly; every absence asserted below would be "
+            f"satisfied by that failure. error_message={result.error_message!r}"
+        )
+
+        return result, db_path
+
+    def test_it_reports_the_lost_race_not_a_swallowed_pipeline_error(
+        self, db, tmp_path
+    ):
+        result, _ = self._generate(db, tmp_path)
+
+        assert "finished after a stale-generation cleanup pass" in (
+            result.error_message or ""
+        ), (
+            "a raising self-delete would surface here as 'Pipeline error: ...' "
+            f"instead; got: {result.error_message!r}"
+        )
+
+    def test_no_file_is_left_behind(self, db, tmp_path):
+        result, _ = self._generate(db, tmp_path)
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists()
+
+    def test_the_row_is_left_failed_with_the_reapers_message(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        verify_conn = sqlite3.connect(db_path)
+        row = verify_conn.execute(
+            "SELECT status, report_path, error_message FROM reports WHERE slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+
+        assert row == ("failed", None, "Reaped: generation did not complete")
+
+    def test_the_run_record_is_finalized_failed(self, db, tmp_path):
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert run_record["overall_status"] == "failed"
+
+    def test_it_still_logs_the_warning(self, db, tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
             self._generate(db, tmp_path)
 
