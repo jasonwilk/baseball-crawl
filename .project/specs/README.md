@@ -23,11 +23,34 @@ default; measured 2026-08-17). Someday-work does not live here at all; it is one
 
 Continue the ruled sequence in STANDING RESIDUALS ("Regeneration hazard — RULED 2026-08-12"):
 same-listing detection → generate-concurrency cap → ~~reaper unlink race~~ (LANDED
-2026-08-22) → **runs-as-scoreboard instrument (SPEC COMMITTED, READY, next)** → full
+2026-08-22) → ~~reaper-race review findings~~ (LANDED 2026-08-22) →
+**runs-as-scoreboard instrument (SPEC COMMITTED, READY — next)** → full
 regenerate. **The generation freeze is LIFTED** — the lossy-merge
 hazard it protected against is fixed and proven on live data. The half-pair clobber no longer
 needs its own slot before the regenerate: it is folded into the instrument chunk, along with
 the cap 2 → 1 ruling.
+
+- ~~**Reaper-race review findings**~~ — **LANDED 2026-08-22**, `acceptance: run`. Spec moved to
+  `done/2026-08-22-reaper-race-review-findings.md` — **history needs `git log --follow -M20%`**.
+  All six carried defects confirmed against the repo, **including all three that were relayed
+  UNVERIFIED** — the audit changed no verdicts, only one claim (see below). Suite 4590 → 4608.
+  **The permanent-orphan leak had THREE sites, not the one the stub named.** A rendered page is
+  stranded forever whenever its row ends terminal with `report_path` NULL — beyond
+  `cleanup_expired_reports` (non-NULL only) and beyond the reaper (`generating` only). The stub
+  named the lost-race window; the audit found a second (the claim itself failing, no race
+  involved, operator-ruled in); `/code-review` found a third on the fix (the no-games branch,
+  whose failures land in a different handler the render fix could not reach). All three closed by
+  `_discard_unreachable_render`, which re-reads the row and deletes ONLY when nothing points at
+  the file.
+  **One stub claim was wrong and is corrected:** the lost race is not the case with "no
+  explanation stored" — the reaper writes one to `reports.error_message` and the admin page shows
+  it. The gap was a second, missing explanation on the RUN record, now filled.
+  ⚠ **Process finding worth more than any single defect here: two fixes silently made adjacent
+  tests vacuous, and only re-running mutations against original source caught either.** One was a
+  test-double change of mine; the other hit a PRE-EXISTING test class my diff barely touched,
+  whose docstring claimed a mutation failed all 5 of its tests when it now failed 1. The suite
+  was green through both. Carried to the audit jot list as a rule candidate — NOT promoted
+  mid-flight (principle E), though it bit twice inside this one chunk.
 
 - ~~**Generate-concurrency cap**~~ — **LANDED 2026-08-17**, `acceptance: run`. Spec moved to
   `done/2026-08-10-admin-generate-concurrency.md` — **history needs `git log --follow -M20%`**;
@@ -294,6 +317,18 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 ## STANDING RESIDUALS
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
+
+- **A live report can be reported to its caller as FAILED** (found by `/code-review`
+  2026-08-22, in the reaper-race review-findings chunk; pre-existing, NARROWED by that chunk).
+  `_fail_report` is guarded on `WHERE status = 'generating'`, so a failure landing AFTER a
+  successful `ready`/`no_games` claim leaves the row terminal with `report_path` set and the page
+  genuinely served at `/reports/{slug}` — while the caller still gets `success=False`, and
+  `morning_run` records `delivery_status='failed'` for a report the operator can open and share.
+  **The guard is correct and must not be "fixed"** — reverting a `ready` row is the worse failure,
+  and `test_a_failed_claim_does_not_revert_an_already_ready_row` pins it. The open question is
+  what the RESULT should report, not what the row should do. Cheapest honest read: the failure
+  path could re-read the row and return the produced report when it reached a terminal
+  non-`failed` status.
 
 - **Three open items on the admin generate path, from the orphan-cleanup chunk's reviews
   (2026-08-17). None is fixed; all three are in already-committed code.**

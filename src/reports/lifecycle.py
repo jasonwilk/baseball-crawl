@@ -159,7 +159,14 @@ class ReaperResult:
     counts orphan partial-HTML files unlinked; ``errors`` counts rows whose ROW
     CLEARING raised (per-row error isolation -- one bad row does not abort the
     sweep); ``files_failed`` counts rows whose row-clearing SUCCEEDED but whose
-    orphan-file unlink raised.
+    orphan-file unlink raised something OTHER than ``FileNotFoundError``.
+
+    That exclusion is not a detail: an absent file is the EXPECTED case on this
+    path (the reap usually beats the render) and is also how a live generation's
+    own self-delete presents when it wins the race against this unlink.  Neither
+    is a stray file and neither is a failure, so both leave ``files_removed`` and
+    ``files_failed`` alone -- ``files_removed`` counts only files this sweep
+    actually removed.
 
     ``reaped`` and ``errors`` are DISJOINT, and the split above is what makes
     that true.  Before 2026-08-17 a failed unlink counted the same row in both:
@@ -193,8 +200,12 @@ def reap_stale_generating_reports(
     leaves an orphan file while ``report_path`` is still NULL -- which
     :func:`cleanup_expired_reports` (keyed on ``report_path IS NOT NULL``) can
     NEVER reap. The reaper therefore unlinks ``reports/{slug}.html`` by slug
-    (canonical ``_REPO_ROOT`` resolution + an ``.is_file()`` guard, mirroring
-    :func:`cleanup_expired_reports` / ``_delete_report``) AFTER flipping the row.
+    (canonical ``_REPO_ROOT`` resolution) AFTER flipping the row.  There is no
+    ``.is_file()`` pre-check -- this paragraph claimed one until 2026-08-22, when
+    the check was removed as unsound: it is not atomic with the unlink, and a
+    live generation's own self-delete landing between the two turned the benign
+    case into a reported failure.  An absent file is now decided by the unlink
+    itself (``FileNotFoundError`` -> no counter moves); see the loop below.
 
     That ORDER is load-bearing and is explained in full at the loop below: with
     the unlink first, a failing unlink skipped the UPDATE and left the row
@@ -350,11 +361,25 @@ def reap_stale_generating_reports(
             # (and, after generator.py's _claim_report_completion guard,
             # never will) committed 'ready'. That generation self-deletes its
             # own file on the no-op it gets back -- see
-            # .project/specs/2026-08-17-reaper-unlink-race.md -- so this
-            # unlink and that self-delete both racing for the same file is
-            # expected and harmless (`is_file()` makes the loser a no-op).
-            # Canonical resolution via the named _REPORTS_DIR constant +
-            # is_file guard, mirroring cleanup_expired_reports / _delete_report.
+            # .project/specs/done/2026-08-17-reaper-unlink-race.md -- so this
+            # unlink and that self-delete race for the same file.
+            #
+            # THE LOSER OF THAT RACE IS A `FileNotFoundError`, NOT A NO-OP, and
+            # this comment used to claim otherwise ("`is_file()` makes the loser
+            # a no-op"). `is_file()` and `unlink()` are two statements: on the
+            # interleaving where the generation's self-delete lands BETWEEN
+            # them, the check passes and the unlink raises -- which fell to the
+            # broad `except` below and reported the benign case to the operator
+            # as a failed unlink. The pre-check is gone rather than repaired,
+            # because no ordering of two statements makes them atomic; the
+            # absent-file case is now decided by the unlink itself.
+            #
+            # `missing_ok=True` is deliberately NOT used: it would swallow the
+            # FileNotFoundError into the success branch and count a file that
+            # was never removed in `files_removed`, which is the same
+            # counter-names-a-thing-that-did-not-happen defect one branch down.
+            # Canonical resolution via the named _REPORTS_DIR constant,
+            # mirroring cleanup_expired_reports / _delete_report.
             #
             # ITS OWN try, and its own counter. The row above is already
             # 'failed', so this failure is a stray file -- not a row that will
@@ -363,8 +388,15 @@ def reap_stale_generating_reports(
             # submissions" ERROR in front of the operator via reports_admin.
             try:
                 file_path = _REPORTS_DIR / f"{slug}.html"
-                if file_path.is_file():
+                try:
                     file_path.unlink()
+                except FileNotFoundError:
+                    # Either there was never a file (the usual case -- the reap
+                    # beat the render), or the live generation's self-delete won
+                    # the race above. Nothing was removed and nothing failed, so
+                    # NEITHER counter moves and the operator is not warned.
+                    pass
+                else:
                     logger.info("Removed orphan HTML for reaped report: %s", file_path)
                     result.files_removed += 1
             except Exception as exc:  # noqa: BLE001 -- per-file error isolation
@@ -974,20 +1006,37 @@ def cleanup_orphan_teams(
     # Counted where the outcome actually HAPPENS, not derived by subtracting a
     # skip list from a set decided before the loop ran: a future extra skip path
     # that forgot to decrement would silently over-report deletions.
+    # THREE outcomes, not two.  `skipped_count` counts only teams whose DELETE
+    # RAISED, because that is what its operator-facing message says; a DELETE
+    # that matched zero rows raised nothing and gets its own counter.  Folding
+    # the two together sent an operator hunting for an exception that never
+    # happened -- the team had simply vanished concurrently between the
+    # deletability predicate above and this DELETE (a real cross-process race on
+    # one SQLite file).
     deleted_count = 0
     skipped_count = 0
+    vanished_count = 0
     for team_id in sorted(deletable_ids):
         savepoint = f"orphan_team_delete_{int(team_id)}"
         savepoint_created = False
+        # Captured BEFORE the RELEASE so the handler below can still tell
+        # "our DELETE removed a row" from "our DELETE matched nothing".  The
+        # re-read alone CANNOT: a team that vanished concurrently AND whose
+        # RELEASE then failed is absent from `teams` for a reason that is not
+        # our delete, and counting that as deleted inflates the number returned
+        # to the caller (`/code-review`, 2026-08-22).  None means the DELETE
+        # never got as far as reporting a rowcount.
+        delete_rowcount: int | None = None
         try:
             conn.execute(f"SAVEPOINT {savepoint}")
             savepoint_created = True
             cursor = conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+            delete_rowcount = cursor.rowcount
             conn.execute(f"RELEASE {savepoint}")
-            if cursor.rowcount == 1:
+            if delete_rowcount == 1:
                 deleted_count += 1
             else:
-                skipped_count += 1
+                vanished_count += 1
         # sqlite3.Error, NOT sqlite3.IntegrityError.  A narrower catch reinstates
         # the exact defect this loop exists to fix: any other DB error escapes
         # with the SAVEPOINT still open, the caller
@@ -1011,27 +1060,99 @@ def cleanup_orphan_teams(
             # ROLLBACK TO / RELEASE against a name that was never opened
             # would raise a second time. Only run them when the savepoint is
             # confirmed to exist.
+            #
+            # ⚠ The RELEASE above is INSIDE this try, so it can be what raised
+            # -- and then `savepoint_created` is still True while the savepoint's
+            # state is unknown.  The recovery pair therefore gets its OWN try:
+            # without it, a raising ROLLBACK TO / RELEASE escapes this function
+            # with the transaction live, which is exactly the uncontained batch
+            # rollback the savepoint loop exists to prevent.  Containing beats
+            # escaping in both directions -- a stranded savepoint costs this
+            # batch's remaining teams, an escape costs Phases 1 and 2 for ALL of
+            # them and restores the `games` rows that hide these teams from
+            # reclamation forever.
             if savepoint_created:
-                conn.execute(f"ROLLBACK TO {savepoint}")
-                conn.execute(f"RELEASE {savepoint}")
-            skipped_count += 1
-            # Names the team and the sqlite error text, and NOT a referencing
-            # table: after the widening above, the six tables
-            # _first_stat_reference_table probes can no longer be the cause, so
-            # it would return "unknown" for exactly these cases.  Promise less
-            # rather than promise a name the code cannot produce.
-            logger.warning(
-                "Orphan cleanup could not delete team_id=%d (%s); skipped it and "
-                "kept the rest of the batch.",
-                team_id, exc,
-            )
+                try:
+                    conn.execute(f"ROLLBACK TO {savepoint}")
+                    conn.execute(f"RELEASE {savepoint}")
+                except sqlite3.Error as recovery_exc:
+                    logger.warning(
+                        "Orphan cleanup could not unwind its savepoint for "
+                        "team_id=%d (%s); the batch continues, but this "
+                        "connection's transaction state is no longer known.",
+                        team_id, recovery_exc,
+                    )
+            # ⚠ WHICH OUTCOME HAPPENED IS NOT DERIVABLE FROM WHICH EXCEPTION
+            # FIRED, so it is READ rather than inferred.  A RELEASE that raised
+            # BEFORE reaching SQLite leaves the savepoint open and the ROLLBACK
+            # TO above really does undo the DELETE (team kept); a RELEASE that
+            # raised AFTER executing leaves the savepoint GONE and the DELETE
+            # STANDING, and the ROLLBACK TO then fails against a name that no
+            # longer exists.  Counting every RELEASE failure as "kept" reported a
+            # skip for a team that was actually deleted and undercounted
+            # `deleted_count` -- the same counter-names-what-did-not-happen
+            # defect this chunk fixed one branch up, arriving from the opposite
+            # direction (codex, 2026-08-22, with a reproducer).
+            try:
+                team_survived = conn.execute(
+                    "SELECT 1 FROM teams WHERE id = ?", (team_id,)
+                ).fetchone() is not None
+            except sqlite3.Error:
+                # The outcome is genuinely unknown now.  Count the conservative
+                # side (a skip understates what was destroyed, never overstates
+                # it) and say so rather than guessing.
+                logger.warning(
+                    "Orphan cleanup could not determine whether team_id=%d was "
+                    "deleted; counting it as skipped.", team_id,
+                )
+                team_survived = True
+
+            if team_survived:
+                skipped_count += 1
+                # Names the team and the sqlite error text, and NOT a referencing
+                # table: after the widening above, the six tables
+                # _first_stat_reference_table probes can no longer be the cause,
+                # so it would return "unknown" for exactly these cases.  Promise
+                # less rather than promise a name the code cannot produce.
+                logger.warning(
+                    "Orphan cleanup could not delete team_id=%d (%s); skipped it "
+                    "and kept the rest of the batch.",
+                    team_id, exc,
+                )
+            elif delete_rowcount == 1:
+                # The ONLY evidence that OUR delete is what removed the row.
+                # Gated on == 1 rather than on "not 0", because `None` (the
+                # DELETE never got as far as reporting a rowcount, e.g. it was
+                # the statement that raised) is a THIRD state and reading it as
+                # deleted counts a removal we never performed -- the same
+                # counter-names-what-did-not-happen defect, entering through the
+                # None case (`/code-review`, 2026-08-22).
+                deleted_count += 1
+                logger.warning(
+                    "Orphan cleanup raised for team_id=%d (%s) but the row is "
+                    "GONE -- the delete had already taken effect and could not "
+                    "be rolled back. Counted as deleted.",
+                    team_id, exc,
+                )
+            else:
+                # ABSENT, but not demonstrably BY US: either our DELETE matched
+                # nothing (already gone before this loop touched it) or it never
+                # reported a rowcount at all.  Either way the row's absence says
+                # nothing about our delete, so it is not counted as one.
+                vanished_count += 1
+                logger.warning(
+                    "Orphan cleanup raised for team_id=%d (%s); the row is gone, "
+                    "but our DELETE did not report removing it (rowcount=%s), so "
+                    "it is not counted as our deletion.",
+                    team_id, exc, delete_rowcount,
+                )
     conn.commit()
 
-    if undeletable_ids or skipped_count:
+    if undeletable_ids or skipped_count or vanished_count:
         logger.info(
             "Cleaned up %d orphan team(s); %d retained (still FK-referenced), "
-            "%d skipped (delete raised).",
-            deleted_count, len(undeletable_ids), skipped_count,
+            "%d already gone (delete matched no row), %d skipped (delete raised).",
+            deleted_count, len(undeletable_ids), vanished_count, skipped_count,
         )
     else:
         logger.info(

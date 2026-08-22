@@ -650,11 +650,109 @@ class TestReadyClaimWhenTheReaperWinsTheRace:
         run_record = _read_run_record(db_path, result.slug)
         assert run_record["overall_status"] == "failed"
 
+    def test_the_run_record_records_why_it_failed(self, db, tmp_path):
+        """`overall_status='failed'` beside completed stage statuses, with no
+        reason, is the one failure an operator cannot explain from the run record.
+
+        `/admin/reports` renders `run_error_message` and `error_stage`
+        (`admin/reports.html`), so a NULL pair means that block does not render
+        at all. The reports row does carry the reaper's own message in its
+        separate `error_message` column -- this is a second, missing explanation
+        on the run record, not the absence of any.
+        """
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        # Pinned to the STAGE, not merely to non-NULL: `/admin/reports` renders
+        # the stage label, so a regression to the wrong stage would send an
+        # operator to the wrong half of the pipeline while a not-NULL assertion
+        # stayed green (codex, 2026-08-22).
+        assert run_record["error_stage"] == "render"
+        assert run_record["error_message"]
+
     def test_it_logs_a_warning_naming_the_self_delete(self, db, tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
             self._generate(db, tmp_path)
 
         assert any("deleted its own file" in r.message for r in caplog.records)
+
+    def test_a_failing_self_delete_does_not_bury_the_lost_race_explanation(
+        self, db, tmp_path
+    ):
+        """An unlink error must not overwrite WHY this run failed.
+
+        Moving the recovery inside the render try made its own
+        `unlink(missing_ok=True)` catchable: an `OSError` (read-only mount,
+        EBUSY, EPERM) fell to the post-pipeline handler, which rewrote the run
+        record with `Post-pipeline error: ...` ON TOP of the lost-race reason
+        written moments earlier -- so the operator saw a filesystem error in
+        place of "the reaper claimed this row first", which is the exact
+        explanation this chunk added.
+
+        A stray file is the lesser harm and is already the reaper's own
+        tolerated failure mode; losing the reason is the greater one.
+        """
+        with patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True,
+            )
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert not (run_record["error_message"] or "").startswith(
+            "Post-pipeline error:"
+        ), (
+            "the lost-race reason was overwritten by the unlink's own error; "
+            f"got {run_record['error_message']!r}"
+        )
+
+    def test_a_failing_self_delete_leaves_the_file_and_says_so(self, db, tmp_path):
+        """The accepted trade, pinned so it is a decision and not an accident.
+
+        Codex's third pass read the contained OSError as reintroducing the
+        permanent-orphan leak and asked for the exception to propagate so
+        `_discard_unreachable_render` gets a turn. DECLINED, because that helper's
+        only destructive act is the SAME `unlink` that just failed -- it re-reads
+        the row and unlinks, so on a read-only mount or an EPERM it fails
+        identically and the file remains either way. The file state is therefore
+        unchanged by the choice; what propagating WOULD change is the run record,
+        which the handler rewrites with `Post-pipeline error: ...`, destroying the
+        lost-race reason (the defect the previous round fixed).
+
+        So the trade is: a file the OS refuses to delete stays on disk under
+        BOTH designs, and this one additionally keeps the honest reason and emits
+        a stray-file warning naming it. This test pins all three facts so a future
+        reader changing it knows what they are giving up.
+        """
+        with patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        verify = sqlite3.connect(db_path)
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify.close()
+
+        assert (report_file.exists(), row) == (True, ("failed", None)), (
+            "an undeletable file necessarily remains; the point of the design is "
+            "that the operator still learns WHY the run failed"
+        )
+
+    def test_a_failing_self_delete_warns_that_a_stray_file_remains(
+        self, db, tmp_path, caplog
+    ):
+        """The stray file must be announced, not silently tolerated."""
+        with (
+            patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")),
+            caplog.at_level(logging.WARNING, logger="src.reports.generator"),
+        ):
+            self._generate(db, tmp_path)
+
+        assert any(
+            "could NOT delete its own file" in r.message for r in caplog.records
+        )
 
 
 class TestNoGamesClaimWhenTheReaperWinsTheRace:
@@ -699,6 +797,17 @@ class TestNoGamesClaimWhenTheReaperWinsTheRace:
         run_record = _read_run_record(db_path, result.slug)
         assert run_record["overall_status"] == "failed"
 
+    def test_the_run_record_names_the_no_games_stage(self, db, tmp_path):
+        """The no-games claim site owes the same reason as the render one.
+
+        Its stage differs -- nothing was rendered here -- so recording "render"
+        would send an operator to the wrong half of the pipeline.
+        """
+        result, db_path = self._generate(db, tmp_path)
+
+        run_record = _read_run_record(db_path, result.slug)
+        assert run_record["error_stage"] == "no_games"
+
     def test_it_logs_a_warning_naming_the_self_delete(self, db, tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
             self._generate(db, tmp_path)
@@ -714,21 +823,47 @@ class TestReadyClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
     `_reaper_lost_the_race` runs its `file_path.unlink(missing_ok=True)` there
     is no file to remove. `missing_ok=True` is what makes that a clean no-op;
     a bare `unlink()` would raise `FileNotFoundError` from the ready branch's
-    `_reaper_lost_the_race` call -- which sits OUTSIDE the render try/except, so
-    it would escape `generate_report()` rather than degrade to a failed result.
+    `_reaper_lost_the_race` call.
+
+    ⚠ TWO CLAIMS HERE WERE FALSIFIED ON 2026-08-22, both by the same change, and
+    the correction is the interesting part. This docstring said the ready
+    branch's recovery "sits OUTSIDE the render try/except, so it would escape
+    `generate_report()`", and that under the bare-`unlink()` mutation "all 10
+    Ordering-2 tests fail". The permanent-orphan fix MOVED that recovery INSIDE
+    the try (`generator.py`, "THE RECOVERY LIVES INSIDE THE TRY"), which made
+    the first claim false and the second one stale in the same stroke: the
+    `FileNotFoundError` is now CAUGHT, degraded to a `Post-pipeline error: ...`
+    result, and re-measured under that mutation only ONE of this class's five
+    tests failed -- this class had become what its no-games sibling below had
+    already documented about itself.
+
+    So the asymmetry that sibling calls "load-bearing" is GONE: both branches
+    now swallow, and both need the same precondition. Nothing failed while this
+    was true; the tests simply stopped proving anything, which is why the
+    obligation is to re-measure a mutation after the code beneath it changes
+    rather than to trust a recorded result.
 
     Why this is not a restatement of Ordering 1: the assertions match, but the
     executed branch does not. Ordering 1 exercises unlink-a-present-file; only
     this class and its no-games sibling exercise unlink-a-missing-file.
-    Verified discriminating by mutation (`missing_ok=True` -> bare `unlink()`):
-    all 10 Ordering-2 tests fail, all 10 Ordering-1 tests above still pass.
     """
 
     def _generate(self, db, tmp_path):
-        return _generate_report_racing_reaper(
+        result, db_path = _generate_report_racing_reaper(
             db, tmp_path, seed_completed_game=True,
             racing_base=_RacingReaperUnlinkingConnection,
         )
+
+        # The render branch's swallow prefix is "Post-pipeline error:" -- NOT the
+        # "Pipeline error:" the no-games sibling guards on. Same guard, different
+        # handler, and copying the sibling's literal would silently never fire.
+        assert not (result.error_message or "").startswith("Post-pipeline error:"), (
+            "the render handler swallowed an exception, so the lost-race "
+            "recovery did NOT complete cleanly; every absence asserted below "
+            f"would be satisfied by that failure. error_message={result.error_message!r}"
+        )
+
+        return result, db_path
 
     def test_the_self_delete_of_an_already_missing_file_does_not_raise(
         self, db, tmp_path
@@ -770,10 +905,32 @@ class TestReadyClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
         with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
             self._generate(db, tmp_path)
 
-        assert any("deleted its own file" in r.message for r in caplog.records), (
-            "the WARNING is the only audit trail of a lost race, and it must "
-            "not be conditional on the self-delete having found a file"
+        # ⚠ This asserted "deleted its own file" until 2026-08-22, which was the
+        # WRONG message for this class: the reaper's unlink landed first, so this
+        # run deleted nothing. The assertion was locking in a false
+        # operator-facing claim about a destructive act (codex, third pass).
+        # The audit trail must still exist -- that part of the original intent
+        # stands -- it just has to say what actually happened.
+        assert any("its file was already gone" in r.message for r in caplog.records), (
+            "the WARNING is the only audit trail of a lost race and must still "
+            "fire when the self-delete found nothing -- but it must not claim a "
+            "deletion this run did not perform"
         )
+
+    def test_it_does_not_claim_a_deletion_it_did_not_perform(
+        self, db, tmp_path, caplog
+    ):
+        """The other half of the assertion above, stated separately.
+
+        Asserting the correct message does not by itself prove the wrong one is
+        gone -- both could fire. This pins the absence.
+        """
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert not any(
+            "deleted its own file" in r.message for r in caplog.records
+        ), "the reaper removed this file; this run must not take credit for it"
 
 
 class TestNoGamesClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
@@ -853,7 +1010,282 @@ class TestNoGamesClaimWhenTheReaperAlsoUnlinkedTheFileFirst:
         with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
             self._generate(db, tmp_path)
 
-        assert any("deleted its own file" in r.message for r in caplog.records)
+        # Same correction as the ready sibling: the reaper's unlink won here, so
+        # this run deleted nothing and must not say it did.
+        assert any("its file was already gone" in r.message for r in caplog.records)
+
+    def test_it_does_not_claim_a_deletion_it_did_not_perform(
+        self, db, tmp_path, caplog
+    ):
+        with caplog.at_level(logging.WARNING, logger="src.reports.generator"):
+            self._generate(db, tmp_path)
+
+        assert not any(
+            "deleted its own file" in r.message for r in caplog.records
+        ), "the reaper removed this file; this run must not take credit for it"
+
+
+class TestARenderedReportIsNeverStrandedOnDisk:
+    """The permanent-orphan leak, on the two windows that still reached it.
+
+    A rendered file whose `reports` row never records a `report_path` is
+    reachable by NOTHING afterwards: `cleanup_expired_reports` selects
+    `WHERE report_path IS NOT NULL`, and the reaper selects
+    `WHERE status = 'generating'` -- which `_fail_report` has just left. The file
+    sits on disk until someone notices it by hand.
+
+    Both windows below write the file, fail to record a path for it, and end
+    with the row in a terminal state. They differ in WHERE the failure lands:
+
+    * after a LOST claim (the reaper won) -- the recovery that would have
+      self-deleted sat below the `except`, so an exception raised between the
+      claim and it returned without ever reaching it.
+    * on the claim ITSELF (a locked or unavailable database) -- there is no lost
+      race here at all and the reaper is not involved; the row simply never
+      leaves for 'ready', and `_fail_report` then moves it out of the reaper's
+      reach.
+
+    The absence assertions here are paired with a positive check that the row is
+    in the state that makes the file unreachable -- an absent file proves nothing
+    on its own, since a run that never rendered would satisfy it too.
+    """
+
+    def test_a_failure_after_a_lost_claim_leaves_no_file_behind(self, db, tmp_path):
+        with patch(
+            "src.reports.generator._finalize_run_record",
+            side_effect=[RuntimeError("telemetry write blew up"), None],
+        ):
+            result, _ = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "an exception between the lost claim and the self-delete returned "
+            "via the `except` without ever reaching the recovery, stranding the "
+            "rendered file permanently"
+        )
+
+    def test_the_lost_claim_row_is_the_one_that_makes_a_file_unreachable(
+        self, db, tmp_path
+    ):
+        """Positive control for the absence asserted above."""
+        with patch(
+            "src.reports.generator._finalize_run_record",
+            side_effect=[RuntimeError("telemetry write blew up"), None],
+        ):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True
+            )
+
+        verify = sqlite3.connect(db_path)
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify.close()
+
+        assert row == ("failed", None), (
+            "if the row had kept a report_path, cleanup_expired_reports could "
+            "still reach the file and this would not be a permanent leak"
+        )
+
+    def test_a_failing_claim_leaves_no_file_behind(self, db, tmp_path):
+        """The second window: the claim itself raises, so no race occurred.
+
+        `get_connection()` and the claim UPDATE are ordinary SQLite calls on a
+        file several processes share; `database is locked` outliving the
+        busy_timeout is the realistic form.
+        """
+        with patch(
+            "src.reports.generator._update_report_ready",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            result, _ = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True,
+                racing_base=sqlite3.Connection,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "a render that reached disk before a failing claim is unreachable "
+            "by every cleanup path and must be discarded by the run itself"
+        )
+
+    def test_the_failing_claim_row_is_the_one_that_makes_a_file_unreachable(
+        self, db, tmp_path
+    ):
+        """Positive control for the absence asserted above."""
+        with patch(
+            "src.reports.generator._update_report_ready",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True,
+                racing_base=sqlite3.Connection,
+            )
+
+        verify = sqlite3.connect(db_path)
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify.close()
+
+        assert row == ("failed", None)
+
+    def test_a_failing_no_games_claim_leaves_no_file_behind(self, db, tmp_path):
+        """The no-games branch writes a page too, and stranded it the same way.
+
+        Found by `/code-review` ON THE FIX for the render branch: the discard was
+        attached to one of the two sites that write a file. This branch's failure
+        lands in a DIFFERENT handler (`_run_pipeline`'s, which cannot see
+        `file_path`), so the render fix structurally could not cover it.
+        """
+        with patch(
+            "src.reports.generator._claim_report_completion",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            result, _ = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=False,
+                racing_base=sqlite3.Connection,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert not report_file.exists(), (
+            "the no-games page reached disk before a failing claim, so no row "
+            "points at it and no cleanup path can ever reach it"
+        )
+
+    def test_a_claimed_no_games_page_survives_a_later_failure(self, db, tmp_path):
+        """Positive control for the no-games discard.
+
+        Once the claim SUCCEEDS the row carries a `report_path` and the page is
+        genuinely shareable -- `/reports/{slug}` serves 'no_games' like 'ready'.
+        A later failure in the orphan sweep must NOT take that page down, which
+        is the whole reason the discard re-reads the row instead of assuming.
+        """
+        with patch(
+            "src.reports.generator._ReportGeneration._cleanup_orphans",
+            side_effect=RuntimeError("orphan sweep blew up"),
+        ):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=False,
+                racing_base=sqlite3.Connection,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        verify = sqlite3.connect(db_path)
+        stored_path = verify.execute(
+            "SELECT report_path FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()[0]
+        verify.close()
+
+        assert (stored_path is not None, report_file.exists()) == (True, True), (
+            "a claimed no-games page is reachable and must survive an unrelated "
+            "later failure"
+        )
+
+    def test_a_report_row_deleted_mid_failure_still_has_its_file_discarded(
+        self, db, tmp_path
+    ):
+        """The vanished-row branch: no row at all is the strongest unreachability.
+
+        An admin delete landing while a generation is failing removes the row,
+        and `_delete_report` unlinks by `report_path` -- which is NULL in exactly
+        this window, so that delete removes no file and nothing else ever will.
+        The first shape of this helper returned early here and leaked the file
+        (codex, 2026-08-22: the branch came from review feedback and was itself
+        untested).
+        """
+        def _delete_the_row_then_fail(report_id, error_message):
+            side = sqlite3.connect(str(tmp_path / "test.db"))
+            try:
+                side.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+                side.commit()
+            finally:
+                side.close()
+
+        with (
+            patch(
+                "src.reports.generator._update_report_ready",
+                side_effect=sqlite3.OperationalError("database is locked"),
+            ),
+            patch(
+                "src.reports.generator._fail_report",
+                side_effect=_delete_the_row_then_fail,
+            ),
+        ):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=True,
+                racing_base=sqlite3.Connection,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        verify = sqlite3.connect(db_path)
+        row = verify.execute(
+            "SELECT 1 FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify.close()
+
+        assert (row, report_file.exists()) == (None, False), (
+            "the row really is gone (so nothing can point at the file) and the "
+            "file must not survive it"
+        )
+
+    def test_a_no_games_failure_in_the_recovery_block_leaves_no_file_behind(
+        self, db, tmp_path
+    ):
+        """The FOURTH site: the no-games lost-race recovery block itself.
+
+        The first no-games fix wrapped the claim and the orphan sweep, but left
+        `if not claimed:` -- `_finalize_run_record` + `_reaper_lost_the_race` --
+        BELOW the guarded try. Anything raising in there escaped to
+        `_run_pipeline`'s handler, which never runs the discard, and the page
+        written moments earlier stayed on disk with the row at
+        `('failed', NULL)`.
+
+        Same leak, same chunk, fourth manifestation -- found by `/code-review` on
+        the fix to the third.
+        """
+        with patch(
+            "src.reports.generator._finalize_run_record",
+            side_effect=[RuntimeError("telemetry write blew up"), None],
+        ):
+            result, db_path = _generate_report_racing_reaper(
+                db, tmp_path, seed_completed_game=False,
+            )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        verify = sqlite3.connect(db_path)
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify.close()
+
+        assert (row, report_file.exists()) == (("failed", None), False), (
+            "the no-games page is unreachable once the row is failed with a NULL "
+            "report_path, so this run must discard its own file"
+        )
+
+    def test_a_ready_report_is_never_discarded(self, db, tmp_path):
+        """The guard rail on both fixes.
+
+        Discarding is only safe BECAUSE the row does not point at the file. A
+        successful generation keeps its file -- without this, a discard that
+        forgot to check the row would delete live reports and every absence
+        assertion above would still pass.
+        """
+        result, db_path = _generate_report_racing_reaper(
+            db, tmp_path, seed_completed_game=True, racing_base=sqlite3.Connection,
+        )
+
+        report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        verify = sqlite3.connect(db_path)
+        status = verify.execute(
+            "SELECT status FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()[0]
+        verify.close()
+
+        assert (status, report_file.exists()) == ("ready", True)
 
 
 # ---------------------------------------------------------------------------
@@ -4164,6 +4596,413 @@ class TestCleanupOrphanTeamsFkSafety:
         assert survivors == {report_held_id}
 
 
+class _VanishedTeamConnection(sqlite3.Connection):
+    """Makes the per-team `DELETE FROM teams` match zero rows without raising.
+
+    The real shape is a team that vanished concurrently between this function's
+    deletability predicate and its DELETE -- a cross-process race on one SQLite
+    file (admin UI + CLI + cron). Rewriting the WHERE clause reproduces the only
+    thing that matters (rowcount 0, nothing raised) without needing a second
+    process, and leaves every other statement in the cleanup untouched.
+    """
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().upper().startswith("DELETE FROM TEAMS WHERE ID"):
+            sql = sql.replace("WHERE id = ?", "WHERE id = ? AND 1 = 0")
+        return super().execute(sql, *args, **kwargs)
+
+
+class _ReleaseFailsConnection(sqlite3.Connection):
+    """Raises on every `RELEASE`, leaving the savepoint genuinely still open.
+
+    The raise happens BEFORE the statement reaches SQLite, which is what makes
+    this double faithful to the hazard: the savepoint the handler is about to
+    recover against really does still exist, so `ROLLBACK TO` succeeds and the
+    handler's own trailing `RELEASE` is the statement that raises a SECOND time
+    -- and that second raise is what escapes the function.
+
+    ⚠ ALWAYS-ON is load-bearing for the escape tests, and a one-shot variant
+    silently disarms them: with only the loop's RELEASE failing, the handler's
+    own RELEASE succeeds, nothing escapes, and the test passes against the
+    UNFIXED code. Measured, not reasoned -- a one-shot version of this double
+    was written and passed against stashed original source.
+    """
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().upper().startswith("RELEASE "):
+            raise sqlite3.OperationalError("cannot release savepoint")
+        return super().execute(sql, *args, **kwargs)
+
+
+class _ReleaseFailsForOneTeamConnection(sqlite3.Connection):
+    """Fails every `RELEASE` for ONE team's savepoint, and no other's.
+
+    Scoped by savepoint NAME rather than by call count, which is what lets a
+    single test hold both halves at once: the targeted team fails its loop
+    RELEASE *and* its recovery RELEASE (so the escape is still live against
+    unfixed code), while the sibling's savepoint is untouched and must complete
+    normally. `target_team_id` is set after seeding, since the ids are not known
+    when the connection is opened.
+    """
+
+    target_team_id: int | None = None
+
+    def execute(self, sql, *args, **kwargs):
+        statement = sql.strip().upper()
+        if (
+            statement.startswith("RELEASE ")
+            and self.target_team_id is not None
+            and statement.endswith(f"ORPHAN_TEAM_DELETE_{self.target_team_id}")
+        ):
+            raise sqlite3.OperationalError("cannot release savepoint")
+        return super().execute(sql, *args, **kwargs)
+
+
+class _ReleaseFailsAfterExecutingConnection(sqlite3.Connection):
+    """`RELEASE` REACHES SQLite and succeeds; the error surfaces afterwards.
+
+    The other two doubles raise BEFORE the statement executes, which leaves the
+    savepoint open and the DELETE recoverable. This one is the opposite half of
+    the same failure and it inverts the outcome: the savepoint is really gone,
+    the DELETE really stands, and the subsequent `ROLLBACK TO` cannot undo it.
+    A connection dropped or a disk error surfacing after the write is the
+    realistic form.
+
+    Counting a RELEASE failure as "kept" without checking is therefore wrong in
+    exactly this direction (codex, 2026-08-22).
+    """
+
+    target_team_id: int | None = None
+
+    def execute(self, sql, *args, **kwargs):
+        statement = sql.strip().upper()
+        if (
+            statement.startswith("RELEASE ")
+            and self.target_team_id is not None
+            and statement.endswith(f"ORPHAN_TEAM_DELETE_{self.target_team_id}")
+        ):
+            super().execute(sql, *args, **kwargs)
+            raise sqlite3.OperationalError("connection dropped after RELEASE")
+        return super().execute(sql, *args, **kwargs)
+
+
+class _VanishedAndReleaseFailsConnection(sqlite3.Connection):
+    """Both conditions at once: the DELETE matches nothing AND the RELEASE fails
+    after executing.
+
+    Reproduces the STATE the handler observes in the concurrent-vanish race --
+    the row is absent AND our recorded rowcount is 0 -- by running the real
+    DELETE and then returning the cursor of a second DELETE that matches
+    nothing.
+
+    ⚠ The obvious double (a second connection deleting the row first) does NOT
+    work here and fails OPEN: phases 1 and 2 already hold SQLite's write lock, so
+    the side connection blocks for the full busy timeout and then raises
+    `database is locked` from inside our DELETE. That lands in the same
+    `except sqlite3.Error`, leaves `delete_rowcount` at None, and the re-read
+    finds the team ALIVE -- a "skipped" outcome that satisfies this test's
+    assertion for entirely the wrong reason. It was written that way first and
+    passed against deliberately broken code; the ~5s runtime was the only tell.
+    """
+
+    target_team_id: int | None = None
+
+    def execute(self, sql, *args, **kwargs):
+        statement = sql.strip().upper()
+        if (
+            statement.startswith("DELETE FROM TEAMS WHERE ID")
+            and self.target_team_id is not None
+        ):
+            super().execute(sql, *args, **kwargs)
+            return super().execute(
+                "DELETE FROM teams WHERE id = ?", (-1,)
+            )
+        if (
+            statement.startswith("RELEASE ")
+            and self.target_team_id is not None
+            and statement.endswith(f"ORPHAN_TEAM_DELETE_{self.target_team_id}")
+        ):
+            super().execute(sql, *args, **kwargs)
+            raise sqlite3.OperationalError("connection dropped after RELEASE")
+        return super().execute(sql, *args, **kwargs)
+
+
+class _DeleteRaisesAfterRemovingConnection(sqlite3.Connection):
+    """The DELETE removes the row and THEN raises, so no rowcount is ever read.
+
+    Models the state where the row is absent but `delete_rowcount` is still
+    None: the statement reached SQLite and took effect, but control left before
+    `cursor.rowcount` was captured. The handler must not read that absence as
+    its own deletion.
+
+    ⚠ The `ROLLBACK TO` must ALSO fail, and leaving it out makes this double
+    prove nothing. Without it the recovery successfully undoes the delete, the
+    row comes BACK, `team_survived` is True, and the run ends in the `skipped`
+    branch — never reaching the rowcount gate under test. Written that way
+    first, it passed against the deliberately broken gate. That is the shape to
+    watch for in this file: a double that models the failure but not the
+    recovery leaves the code under test unreached.
+    """
+
+    target_team_id: int | None = None
+
+    def execute(self, sql, *args, **kwargs):
+        statement = sql.strip().upper()
+        if (
+            statement.startswith("DELETE FROM TEAMS WHERE ID")
+            and self.target_team_id is not None
+        ):
+            super().execute(sql, *args, **kwargs)
+            raise sqlite3.OperationalError("disk I/O error after DELETE")
+        if (
+            statement.startswith("ROLLBACK TO ")
+            and self.target_team_id is not None
+            and statement.endswith(f"ORPHAN_TEAM_DELETE_{self.target_team_id}")
+        ):
+            raise sqlite3.OperationalError("cannot roll back to savepoint")
+        return super().execute(sql, *args, **kwargs)
+
+
+def _orphan_cleanup_conn(tmp_path, factory):
+    db_file = str(tmp_path / "doubled.db")
+    conn = sqlite3.connect(db_file, factory=factory)
+    # Doubles that need a SECOND connection (to model a concurrent writer) read
+    # the path from here rather than reconstructing it. Guarded because a plain
+    # sqlite3.Connection -- used by the control tests -- has no __dict__ and
+    # rejects the assignment; only the subclassed doubles accept it.
+    try:
+        conn.db_file = db_file
+    except AttributeError:
+        pass
+    load_real_schema(conn)
+    conn.commit()
+    return conn
+
+
+class TestOrphanCleanupCounterHonesty:
+    """`cleanup_orphan_teams`'s summary counter, when the DELETE matched nothing.
+
+    A DELETE matching zero rows and a DELETE that RAISED are different events
+    with different operator consequences, and both incremented one counter
+    rendered as "%d skipped (delete raised)". A team that vanished concurrently
+    -- nothing raised -- sent the operator hunting for an exception that never
+    happened.
+    """
+
+    def test_a_vanished_team_is_not_reported_as_having_raised(self, tmp_path, caplog):
+        conn = _orphan_cleanup_conn(tmp_path, _VanishedTeamConnection)
+        deletable_id = _seed_team(conn, "Vanisher", "vanisher-fk")
+
+        with caplog.at_level(logging.INFO, logger="src.reports.lifecycle"):
+            cleanup_orphan_teams(conn, {deletable_id})
+        conn.close()
+
+        # Asserted as the rendered COUNT, not the presence of the phrase: the
+        # summary names every bucket on every run, so "delete raised" is in the
+        # line whether or not anything raised. Only the number attributes.
+        assert "0 skipped (delete raised)" in caplog.text, (
+            "nothing raised -- counting this team under an exception the "
+            "operator cannot find is the defect"
+        )
+
+    def test_a_vanished_team_is_still_reported(self, tmp_path, caplog):
+        """Not-reported-as-raised must not become not-reported-at-all.
+
+        Silently dropping the outcome would satisfy the test above while losing
+        the fact that a team this run meant to delete was gone when it looked.
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _VanishedTeamConnection)
+        deletable_id = _seed_team(conn, "Vanisher Two", "vanisher-two-fk")
+
+        with caplog.at_level(logging.INFO, logger="src.reports.lifecycle"):
+            cleanup_orphan_teams(conn, {deletable_id})
+        conn.close()
+
+        assert "already gone" in caplog.text
+
+    def test_a_team_whose_delete_raised_is_still_reported_as_having_raised(
+        self, tmp_path, caplog
+    ):
+        """Positive control: the real raised case must keep its own wording.
+
+        Without this, deleting the "(delete raised)" phrase outright would turn
+        both tests above green while destroying the distinction they exist to
+        draw.
+        """
+        conn = _orphan_cleanup_conn(tmp_path, sqlite3.Connection)
+        report_held_id = _seed_team(conn, "Report Held Raise", "report-held-raise")
+        _insert_report_row(
+            conn, "held-raise", report_held_id, _iso_offset_days(+14), None
+        )
+        conn.commit()
+
+        with caplog.at_level(logging.INFO, logger="src.reports.lifecycle"):
+            cleanup_orphan_teams(conn, {report_held_id})
+        conn.close()
+
+        assert "delete raised" in caplog.text
+
+
+class TestOrphanCleanupWhenTheSavepointReleaseRaises:
+    """The `savepoint_created` guard covers a raising SAVEPOINT, not a raising
+    RELEASE.
+
+    `RELEASE` sits inside the same `try` as the DELETE, so if IT raises the
+    handler still sees `savepoint_created is True` and issues its own
+    `ROLLBACK TO` / `RELEASE` pair -- and that second failure escapes
+    `cleanup_orphan_teams` with the transaction live. That is precisely the
+    uncontained-batch-rollback outcome the savepoint loop exists to prevent, and
+    which the loop's own comment calls the thing it must never allow ("the
+    outcome it must never allow is a STRANDED SAVEPOINT, whatever raised").
+    """
+
+    def test_a_raising_release_does_not_escape_the_function(self, tmp_path):
+        conn = _orphan_cleanup_conn(tmp_path, _ReleaseFailsConnection)
+        deletable_id = _seed_team(conn, "Release Fails", "release-fails-fk")
+
+        try:
+            cleanup_orphan_teams(conn, {deletable_id})
+        except sqlite3.Error as exc:
+            raise AssertionError(
+                "a failing RELEASE escaped cleanup_orphan_teams with the "
+                f"transaction live, rolling the whole batch back: {exc}"
+            ) from exc
+        finally:
+            conn.close()
+
+    def test_the_contained_release_failure_is_warned_about(self, tmp_path, caplog):
+        """Containment must not be silent.
+
+        A swallowed savepoint failure on a destructive path is the shape that
+        hid the original permanent leak; the operator gets a line naming the
+        team.
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _ReleaseFailsConnection)
+        deletable_id = _seed_team(conn, "Release Fails Two", "release-fails-two")
+
+        with caplog.at_level(logging.WARNING, logger="src.reports.lifecycle"):
+            cleanup_orphan_teams(conn, {deletable_id})
+        conn.close()
+
+        assert f"team_id={deletable_id}" in caplog.text
+
+    def test_a_team_deleted_before_the_release_failed_is_counted_as_deleted(
+        self, tmp_path
+    ):
+        """A RELEASE that failed AFTER executing leaves the team really deleted.
+
+        The recovery treats every RELEASE failure as "team kept" and counts a
+        skip -- but when the RELEASE actually reached SQLite, the savepoint is
+        gone, the DELETE stands, and the `ROLLBACK TO` that follows cannot undo
+        it. The summary then reports a skip for a team that IS deleted and
+        undercounts `deleted_count`.
+
+        This is the SAME defect class as the counter this chunk fixed one branch
+        up (a counter naming an outcome that did not happen), arriving from the
+        opposite direction -- which is why the fix re-reads the row rather than
+        inferring the outcome from which exception fired.
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _ReleaseFailsAfterExecutingConnection)
+        team_id = _seed_team(conn, "Released Then Failed", "released-then-failed")
+        conn.target_team_id = team_id
+
+        deleted_count = cleanup_orphan_teams(conn, {team_id})
+        still_present = conn.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        conn.close()
+
+        assert (deleted_count, still_present) == (1, None), (
+            "the team is gone, so the count must say deleted -- reporting a "
+            "skip here is a false operator-facing claim about a destructive act"
+        )
+
+    def test_a_team_that_vanished_is_not_counted_as_deleted_when_release_fails(
+        self, tmp_path
+    ):
+        """Absent is not the same fact as deleted-by-us.
+
+        Both conditions together: our DELETE matches nothing (the team vanished
+        concurrently) AND the RELEASE then fails after executing. The re-read
+        finds no row and, on its own, cannot tell "we deleted it" from "it was
+        already gone" -- so it counted a deletion that never happened and
+        inflated the number returned to the caller. Only the DELETE's own
+        rowcount, captured before the RELEASE, can separate them
+        (`/code-review`, 2026-08-22).
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _VanishedAndReleaseFailsConnection)
+        team_id = _seed_team(conn, "Vanished And Failed", "vanished-and-failed")
+        conn.target_team_id = team_id
+
+        deleted_count = cleanup_orphan_teams(conn, {team_id})
+        conn.close()
+
+        assert deleted_count == 0, (
+            "our DELETE matched no row, so nothing was deleted by us -- the "
+            "row's absence is somebody else's doing"
+        )
+
+    def test_a_delete_that_never_reported_a_rowcount_is_not_counted_as_deleted(
+        self, tmp_path
+    ):
+        """The THIRD rowcount state: None, because the DELETE itself raised.
+
+        Absence plus `rowcount != 0` is not proof we deleted anything — the
+        DELETE may never have reported a rowcount at all. Gating the deleted
+        count on `== 1` rather than on `!= 0` is what separates them
+        (`/code-review`, 2026-08-22).
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _DeleteRaisesAfterRemovingConnection)
+        team_id = _seed_team(conn, "Delete Raised", "delete-raised")
+        conn.target_team_id = team_id
+
+        deleted_count = cleanup_orphan_teams(conn, {team_id})
+        conn.close()
+
+        assert deleted_count == 0, (
+            "our DELETE never reported a rowcount, so its removal is not ours "
+            "to claim however absent the row now is"
+        )
+
+    def test_the_rest_of_the_batch_is_still_deleted_and_committed(self, tmp_path):
+        """The claim the containment actually makes: "kept the rest of the batch".
+
+        Not escaping is the weaker half. What the loop promises is that ONE
+        team's savepoint failure costs ONE team -- so a later team must still be
+        deleted AND still be committed. A transaction left poisoned by the failed
+        recovery would satisfy "did not raise" while silently swallowing every
+        deletion below it, which is the original permanent-leak shape wearing a
+        contained-exception disguise.
+
+        Read on a FRESH connection: the in-flight one cannot tell committed work
+        from work still pending on its own transaction.
+        """
+        conn = _orphan_cleanup_conn(tmp_path, _ReleaseFailsForOneTeamConnection)
+        first_id = _seed_team(conn, "Release Fails First", "release-fails-first")
+        second_id = _seed_team(conn, "Batch Sibling", "batch-sibling")
+        # Targeted AFTER seeding (the ids do not exist before it), and at the
+        # team the loop reaches FIRST -- `sorted(deletable_ids)` and ascending
+        # ids agree -- so the sibling is genuinely downstream of the failure.
+        conn.target_team_id = first_id
+
+        cleanup_orphan_teams(conn, {first_id, second_id})
+        conn.close()
+
+        verify = sqlite3.connect(str(tmp_path / "doubled.db"))
+        survivors = {
+            r[0]
+            for r in verify.execute(
+                "SELECT id FROM teams WHERE id IN (?, ?)", (first_id, second_id)
+            ).fetchall()
+        }
+        verify.close()
+
+        assert survivors == {first_id}, (
+            "one team's RELEASE failure must cost exactly that team: it is "
+            "rolled back and kept, and the sibling is deleted and committed"
+        )
+
+
 class TestCrossPerspectiveScopedDelete:
     """Round 6 Cluster 2: scoped game-scoped delete helper.
 
@@ -6046,6 +6885,101 @@ class TestReapStaleGenerating:
         # docstring. `reaped` is pinned here because the overlap was previously
         # unasserted in either direction.
         assert (result.reaped, result.files_failed, result.errors) == (1, 1, 0)
+
+    def test_a_file_vanishing_between_the_check_and_the_unlink_is_not_a_failure(
+        self, db, tmp_path, caplog
+    ):
+        """The generator's own self-delete landing mid-unlink is BENIGN.
+
+        `is_file()` and `unlink()` are two statements, not one atomic act. In the
+        interleaving where a live generation's `_reaper_lost_the_race` self-delete
+        lands between them, the unlink raises `FileNotFoundError` -- and until
+        2026-08-22 that hit the broad `except`, incremented `files_failed`, and
+        put an operator-facing WARNING in front of someone for the one case the
+        code's own comment declared harmless ("`is_file()` makes the loser a
+        no-op"). The comment was describing an atomicity the code did not have.
+
+        `FileNotFoundError` is raised from `Path.unlink` here rather than deleting
+        the fixture file, so the test pins the RACE (check passed, file gone by
+        unlink time) and not merely the never-had-a-file case -- which both the
+        old and new code already handled identically via `is_file()`, and which
+        therefore discriminates nothing.
+        """
+        team_id = _seed_team(db)
+        self._insert_generating(db, "vanished", team_id, _iso_offset_days(-1))
+        reports_dir = tmp_path / "data" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "vanished.html").write_text("<html>finished</html>")
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", reports_dir),
+            patch("pathlib.Path.unlink", side_effect=FileNotFoundError("gone")),
+            caplog.at_level(logging.WARNING, logger="src.reports.lifecycle"),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert (result.reaped, result.files_removed, result.files_failed) == (1, 0, 0), (
+            "a file the live generation deleted first is not a failed unlink and "
+            "was never ours to remove -- neither counter may move"
+        )
+
+    def test_a_vanished_file_produces_no_operator_warning(self, db, tmp_path, caplog):
+        """The counter and the WARNING are disjoint operator surfaces.
+
+        `files_failed` feeds a summary count; the per-file WARNING is what an
+        operator actually reads. Asserting only the counter would leave a stray
+        "could not remove its orphan HTML" line shippable.
+        """
+        team_id = _seed_team(db)
+        self._insert_generating(db, "vanished2", team_id, _iso_offset_days(-1))
+        reports_dir = tmp_path / "data" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "vanished2.html").write_text("<html>finished</html>")
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", reports_dir),
+            patch("pathlib.Path.unlink", side_effect=FileNotFoundError("gone")),
+            caplog.at_level(logging.WARNING, logger="src.reports.lifecycle"),
+        ):
+            reap_stale_generating_reports()
+
+        assert not [
+            r for r in caplog.records if "could not remove its orphan HTML" in r.message
+        ], "the benign race must not warn the operator about a failed unlink"
+
+    def test_a_genuinely_failing_unlink_still_warns(self, db, tmp_path, caplog):
+        """Positive control for the two tests above.
+
+        Narrowing the benign case to `FileNotFoundError` must not silence the
+        real one. A `PermissionError` (read-only mount, EBUSY) is a stray file
+        the operator has to deal with, and it must still count and still warn --
+        without this, a blanket swallow would satisfy both tests above.
+        """
+        team_id = _seed_team(db)
+        self._insert_generating(db, "denied", team_id, _iso_offset_days(-1))
+        reports_dir = tmp_path / "data" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "denied.html").write_text("<html>partial</html>")
+
+        with (
+            patch("src.reports.lifecycle.get_connection",
+                  side_effect=lambda: self._fresh_conn(tmp_path)),
+            patch("src.reports.lifecycle._REPO_ROOT", tmp_path),
+            patch("src.reports.lifecycle._REPORTS_DIR", reports_dir),
+            patch("pathlib.Path.unlink", side_effect=PermissionError("read-only fs")),
+            caplog.at_level(logging.WARNING, logger="src.reports.lifecycle"),
+        ):
+            result = reap_stale_generating_reports()
+
+        assert result.files_failed == 1 and any(
+            "could not remove its orphan HTML" in r.message for r in caplog.records
+        ), "a real unlink failure must remain a counted, warned-about stray file"
 
     def test_fresh_generating_left_untouched(self, db, tmp_path):
         """AC-2: a 'generating' row WITHIN the threshold (a live generation) is NOT

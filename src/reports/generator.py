@@ -321,6 +321,27 @@ def _update_report_failed(
     )
 
 
+# The run record's reason for a lost race.  Without it the row reads
+# `overall_status='failed'` beside COMPLETED per-stage statuses and populated
+# render counts, with every reason column NULL -- and `/admin/reports` renders
+# its stage-error block only when `run_error_message` is present, so the operator
+# saw a failure with no explanation on the run record at all.  (The `reports` row
+# separately carries the reaper's own message; this is the second explanation,
+# on the record that shows the stage detail.)
+# ⚠ Says NOT SERVED, not "discarded". This string is written to the run record
+# BEFORE the self-delete is attempted, and that delete has three outcomes --
+# including one that leaves the file in place. Claiming a destructive act that
+# may not have happened is the defect this chunk kept re-committing; what IS
+# true in all three cases is that nothing serves this output, because the row is
+# 'failed'. The log line from `_reaper_lost_the_race` carries the file's actual
+# fate.
+_LOST_RACE_RUN_ERROR = (
+    "The stale-generation reaper claimed this report as stale before this run "
+    "committed its result, so this run's output is not served. The generation "
+    "itself did not fail -- it finished too late to claim its row."
+)
+
+
 def _reaper_lost_the_race(
     file_path: Path,
     *,
@@ -329,20 +350,68 @@ def _reaper_lost_the_race(
     title: str | None,
     no_games: bool = False,
 ) -> GenerationResult:
-    """Shared reaper-won-the-race recovery: self-delete this run's own file,
-    log a WARNING, and return the failed result callers must see.
+    """Shared reaper-won-the-race recovery: ATTEMPT to delete this run's own
+    file, log a WARNING naming what actually happened to it, and return the
+    failed result callers must see.
 
     Used by both completion sites (ready and no-games) -- a success-shaped
     result naming a URL here would tell callers a served page exists when it
-    does not, since the row is 'failed' and the file is gone (codex review,
-    2026-08-22). See .project/specs/2026-08-17-reaper-unlink-race.md.
+    does not, since the row is 'failed' (codex review, 2026-08-22).
+    See .project/specs/done/2026-08-17-reaper-unlink-race.md.
+
+    ⚠ **The file is not guaranteed gone on return, and this docstring used to
+    say it was.** Three outcomes, each logged distinctly: deleted by us; already
+    gone (the reaper's own unlink won the race); or STILL PRESENT, when the
+    unlink raised ``OSError`` -- which is contained here deliberately rather than
+    propagated, because both callers sit inside a ``try`` whose handler would
+    overwrite the lost-race reason with a generic filesystem error. Callers and
+    tests MUST NOT rely on the file being absent afterwards. The returned
+    ``GenerationResult`` is failure-shaped in all three cases, which is the
+    guarantee this function DOES make.
     """
-    file_path.unlink(missing_ok=True)
-    logger.warning(
-        "Report id=%s slug=%s finished%s after the reaper claimed it as "
-        "stale; deleted its own file and left the row 'failed'.",
-        report_id, slug, " (no-games)" if no_games else "",
-    )
+    # ⚠ THE UNLINK MUST NOT RAISE OUT OF HERE.  Both callers now sit inside a
+    # try whose handler rewrites the run record with its own generic message --
+    # so an OSError escaping this line (read-only mount, EBUSY, EPERM) would
+    # overwrite the lost-race reason written moments earlier and show the
+    # operator a filesystem error in place of "the reaper claimed this row
+    # first", which is precisely the explanation this function exists to give.
+    # A stray file is the lesser harm and is already the reaper's own tolerated
+    # failure mode; losing the reason is the greater one.
+    # THREE outcomes, each with its own sentence, because "we deleted it" is
+    # true of only one of them -- and an operator-facing claim that a
+    # destructive act happened when it did not is this chunk's recurring defect.
+    # The file-ALREADY-GONE case is not exotic: it is the ordering where the
+    # reaper's own unlink landed first, i.e. half of the race this function
+    # exists to handle.
+    #
+    # Decided by the unlink ITSELF -- no `exists()` pre-check and no
+    # `missing_ok=True`. Both would reintroduce the non-atomic check-then-act
+    # that this same chunk removed from the reaper one module over: the reaper
+    # is unlinking this very path by slug at this very moment, so a pre-check
+    # can pass and its unlink can still land first, making ours a no-op we would
+    # then report as a deletion.
+    try:
+        file_path.unlink()
+    except FileNotFoundError:
+        logger.warning(
+            "Report id=%s slug=%s finished%s after the reaper claimed it as "
+            "stale; its file was already gone (the reaper's own unlink won the "
+            "race) and the row is left 'failed'.",
+            report_id, slug, " (no-games)" if no_games else "",
+        )
+    except OSError as exc:
+        logger.warning(
+            "Report id=%s slug=%s finished%s after the reaper claimed it as "
+            "stale, but could NOT delete its own file: %s (a stray file "
+            "remains; the row is 'failed').",
+            report_id, slug, " (no-games)" if no_games else "", exc,
+        )
+    else:
+        logger.warning(
+            "Report id=%s slug=%s finished%s after the reaper claimed it as "
+            "stale; deleted its own file and left the row 'failed'.",
+            report_id, slug, " (no-games)" if no_games else "",
+        )
     return GenerationResult(
         success=False, slug=slug, title=title,
         error_message=(
@@ -2225,25 +2294,57 @@ class _ReportGeneration:
             render_no_games_page(team_name, self.completed_games, 0),
             encoding="utf-8",
         )
-        with closing(get_connection()) as conn:
-            claimed = _claim_report_completion(
-                conn, self.report_id, status="no_games", report_path=report_path
-            )
 
-        # Orphan cleanup on the abort path too, so it stays symmetric with the
-        # normal render path (a true no-op here -- the N==0 firing condition
-        # created no opponent stubs). Story 04 reworks orphan handling and
-        # inherits this symmetric structure.
-        self._compute_orphans()
-        self._cleanup_orphans()
+        # THIS BRANCH WRITES A FILE TOO, AND STRANDS IT THE SAME WAY.  Everything
+        # below runs inside `_run_pipeline`'s try, whose handler calls
+        # `_fail_report` -- which leaves `report_path` NULL and moves the row out
+        # of the reaper's reach, putting this page beyond every cleanup path.
+        # The render branch's fix does not reach here (different handler, and
+        # `file_path` is not in its scope), so the discard is attached where the
+        # file is created and the exception is re-raised for the pipeline handler
+        # to do the row work.  Codex and /code-review both missed this sibling on
+        # the first pass; it was found by the second reviewer on the fix itself.
+        try:
+            with closing(get_connection()) as conn:
+                claimed = _claim_report_completion(
+                    conn, self.report_id, status="no_games", report_path=report_path
+                )
 
-        _finalize_run_record(self.report_id, "completed" if claimed else "failed")
+            # Orphan cleanup on the abort path too, so it stays symmetric with
+            # the normal render path (a true no-op here -- the N==0 firing
+            # condition created no opponent stubs). Story 04 reworks orphan
+            # handling and inherits this symmetric structure.
+            self._compute_orphans()
+            self._cleanup_orphans()
 
-        if not claimed:
-            return _reaper_lost_the_race(
+            # ⚠ THE RECOVERY BLOCK IS INSIDE THE GUARD TOO, and leaving it out
+            # was a FOURTH instance of this chunk's leak: the first no-games fix
+            # wrapped only the claim and the sweep, so a raise in the two
+            # statements below still escaped to `_run_pipeline`'s handler, which
+            # never discards, leaving the page on disk at ('failed', NULL).
+            if not claimed:
+                # Same missing-reason gap as the render site, with its own stage:
+                # nothing was rendered here, so recording "render" would send an
+                # operator to the wrong half of the pipeline.
+                _finalize_run_record(
+                    self.report_id, "failed",
+                    error_stage="no_games",
+                    error_message=_LOST_RACE_RUN_ERROR,
+                )
+                return _reaper_lost_the_race(
+                    file_path, report_id=self.report_id, slug=self.slug,
+                    title=self.title, no_games=True,
+                )
+
+            _finalize_run_record(self.report_id, "completed")
+        except Exception:
+            # Guarded by a re-read of the row, exactly as on the render path: a
+            # claim that SUCCEEDED leaves `report_path` set, and that file is
+            # reachable and must survive.
+            _discard_unreachable_render(
                 file_path, report_id=self.report_id, slug=self.slug,
-                title=self.title, no_games=True,
             )
+            raise
 
         logger.info(
             "No completed games with data for public_id=%s (M=%d, N=0); "
@@ -2569,6 +2670,13 @@ class _ReportGeneration:
         plays_games_covered: int | None = None
         enrichment_status: str | None = None
 
+        # This run's own render target, derived BEFORE the try so the failure
+        # handler below can name the file even when the exception fired before
+        # it was written.  `_discard_unreachable_render` is a no-op on a file
+        # that never existed, so the early-failure case costs nothing.
+        report_path = f"reports/{slug}.html"
+        file_path = _REPO_ROOT / "data" / report_path
+
         try:
             # Query BEFORE cleanup -- game-dependent queries need game rows
             with closing(get_connection()) as conn:
@@ -2771,22 +2879,43 @@ class _ReportGeneration:
 
             # Save HTML to disk
             _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            report_path = f"reports/{slug}.html"
-            file_path = _REPO_ROOT / "data" / report_path
             file_path.write_text(html, encoding="utf-8")
 
-            # Update reports row to 'ready'
-            with closing(get_connection()) as conn:
-                claimed = _update_report_ready(conn, report_id, report_path)
-
-            # Run record: write the render-stage counts and finalize completed.
+            # Run record: write the render-stage counts BEFORE the claim.  These
+            # counts describe what this run rendered, which is true whoever wins
+            # the claim -- and writing them first keeps the claim and its
+            # recovery adjacent, with no statement between them that can raise.
             _update_run_record(
                 report_id,
                 completed_games_with_data=_coerce_int(completed_games_with_data),
                 plays_games_covered=_coerce_int(plays_games_covered),
                 enrichment_status=_coerce_status(enrichment_status),
             )
-            _finalize_run_record(report_id, "completed" if claimed else "failed")
+
+            # Update reports row to 'ready'
+            with closing(get_connection()) as conn:
+                claimed = _update_report_ready(conn, report_id, report_path)
+
+            # THE RECOVERY LIVES INSIDE THE TRY, DIRECTLY UNDER THE CLAIM, AND
+            # THAT PLACEMENT IS THE FIX.  It used to sit BELOW the `except`, so
+            # anything raising between the claim and it returned through the
+            # handler without ever reaching it -- and the handler cannot repair
+            # this case: `_fail_report` no-ops on a row the reaper already
+            # failed, leaving `report_path` NULL, which puts the file beyond
+            # `cleanup_expired_reports` (it selects `report_path IS NOT NULL`)
+            # and beyond the reaper (it selects `status = 'generating'`).  The
+            # rendered file was then stranded on disk permanently.
+            if not claimed:
+                _finalize_run_record(
+                    report_id, "failed",
+                    error_stage="render",
+                    error_message=_LOST_RACE_RUN_ERROR,
+                )
+                return _reaper_lost_the_race(
+                    file_path, report_id=report_id, slug=slug, title=self.title,
+                )
+
+            _finalize_run_record(report_id, "completed")
 
         except Exception as exc:  # noqa: BLE001
             msg = f"Post-pipeline error: {exc}"
@@ -2795,12 +2924,14 @@ class _ReportGeneration:
                 report_id, "failed", error_stage="render", error_message=msg,
             )
             _fail_report(report_id, msg)
+            # The SECOND way a rendered file gets stranded, and it needs no lost
+            # race: any failure after the write that leaves the row without a
+            # `report_path` is unreachable by every cleanup path, and
+            # `_fail_report` has just moved the row out of the reaper's reach.
+            # Guarded by a re-read of the row, so a file the row still points at
+            # is never removed.
+            _discard_unreachable_render(file_path, report_id=report_id, slug=slug)
             return GenerationResult(success=False, slug=slug, error_message=msg)
-
-        if not claimed:
-            return _reaper_lost_the_race(
-                file_path, report_id=report_id, slug=slug, title=self.title,
-            )
 
         url = f"{_get_base_url()}/reports/{slug}"
         logger.info(
@@ -2816,6 +2947,99 @@ class _ReportGeneration:
             reference_date=reference_date,
             outcome="ready",
         )
+
+
+def _discard_unreachable_render(
+    file_path: Path, *, report_id: int, slug: str
+) -> None:
+    """Delete this run's own HTML when the failure left it UNREACHABLE.
+
+    A rendered file whose ``reports`` row never recorded a ``report_path`` can be
+    reached by nothing afterwards: :func:`cleanup_expired_reports` selects
+    ``WHERE report_path IS NOT NULL``, and the reaper selects
+    ``WHERE status = 'generating'`` -- which :func:`_fail_report` has just left.
+    The file would sit on disk permanently.
+
+    **Deleting is safe precisely BECAUSE the row does not point at the file**, so
+    the row is re-read here rather than assumed: a row carrying a ``report_path``
+    (or sitting at ``ready``) names a file something can still serve, and this
+    function must leave it alone.  A DB error while checking is itself a reason
+    NOT to delete -- an unknown row state is not a licence to remove a file.
+
+    Best-effort by construction: this runs on a path that has already failed, so
+    it logs and returns rather than raising a second error over the first.
+    """
+    # `except Exception`, NOT `except sqlite3.Error`: `get_connection()` resolves
+    # the DB path and can fail with non-sqlite errors, and `closing()`'s exit is
+    # outside a narrower guard. Both callers invoke this from inside an exception
+    # handler, so anything escaping here REPLACES the original failure -- on the
+    # render path it would escape `generate_report` entirely, and on the no-games
+    # path it would destroy the real exception before its `raise`. A narrow catch
+    # contradicted this function's own best-effort contract
+    # (`/code-review`, 2026-08-22).
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT status, report_path FROM reports WHERE id = ?", (report_id,)
+            ).fetchone()
+    except Exception:  # noqa: BLE001 -- must never mask the failure that got us here
+        logger.exception(
+            "Could not check whether report id=%s still points at its file; "
+            "leaving %s on disk", report_id, file_path,
+        )
+        return
+
+    if row is None:
+        # A VANISHED ROW IS THE STRONGEST EVIDENCE THE FILE IS UNREACHABLE, not a
+        # reason to keep it: the admin delete path unlinks by `report_path`,
+        # which is NULL in exactly this window, so nothing else will ever remove
+        # this file.  Returning here (the first shape of this helper) leaked it.
+        # Logged AFTER the unlink, and only on the branch where it happened --
+        # announcing the discard first states an intent as an outcome, which is
+        # the softer form of the same false-claim defect.
+        try:
+            file_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning(
+                "Could not remove the file of vanished report id=%s: %s "
+                "(a stray file remains)", report_id, exc,
+            )
+        else:
+            logger.warning(
+                "Report id=%s slug=%s vanished while it was failing; its file "
+                "could not be reached by any cleanup path and has been discarded.",
+                report_id, slug,
+            )
+        return
+    status, stored_path = row[0], row[1]
+    if stored_path is not None or status == "ready":
+        return
+
+    # Decided by the unlink ITSELF. An `exists()` pre-check here is the same
+    # non-atomic check-then-act this chunk removed from the reaper: the reaper
+    # unlinks this exact path by slug, so the check can pass and its unlink land
+    # first, leaving us logging "has been discarded" about a file we did not
+    # discard. A no-op is silent -- there is nothing to tell the operator when
+    # the file was already gone.
+    try:
+        file_path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning(
+            "Report id=%s slug=%s failed with its rendered file unreachable, and "
+            "that file could not be removed: %s (a stray file remains)",
+            report_id, slug, exc,
+        )
+        return
+
+    logger.warning(
+        "Report id=%s slug=%s failed after rendering; its row records no "
+        "report_path, so the file was unreachable and has been discarded.",
+        report_id, slug,
+    )
 
 
 def _fail_report(report_id: int, error_message: str) -> None:
