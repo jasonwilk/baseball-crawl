@@ -35,6 +35,12 @@ record, not its uniformity.
   parametrize; vary one axis at a time unless the interaction itself is under test.
 - **Red/green/refactor through features.** Write the failing test first and SHOW it failing —
   RC captured unpiped, per the execution gotchas below — before the code that turns it green.
+  A test never shown failing is UNPROVEN, whatever the suite says: classify every new test at
+  step 7 (behavior-failure / symbol-absence / never-shown-failing), and "never-shown-failing"
+  is a per-test justification you owe, not a default you fall back to. This is not ceremony —
+  the 2026-08-22 Ordering-2 chunk's RED pass caught 3 of 10 new tests passing against
+  deliberately broken code (a swallowed exception satisfied every assertion); without RED
+  those tests would have shipped as coverage while proving nothing.
 
 - Use pytest as the test runner
 - IMPORTANT: Never make real HTTP requests in tests -- use mocks or fixtures
