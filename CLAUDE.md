@@ -60,12 +60,13 @@ One-sentence diff? Ask, then skip to step 4 with "small change: no spec".
    failed corrections - by updating the progress log and going to step 9.
 4. **VERIFY** - Run the spec's named commands. A chunk touching `src/`, `tests/`, or `migrations/`
    needs the FULL suite green. No green, no done.
-5. **REVIEW** - Run `/code-review`; add `/security-review` on auth, serving, PII, or deletes.
-   Both are OPERATOR-TYPED - a session cannot invoke them, so stop and ask. Codex review is
-   REQUIRED when the chunk touches `src/`, on request otherwise. `/simplify` is optional and
-   runs BEFORE `/code-review` (its fixes need reviewing too). Docs-only chunk: PII gates alone.
-   A review covers EVERY change since the chunk's base, committed or not - name that range and
-   verify the reviewer received it.
+5. **REVIEW** - The session runs the reviews ITSELF and brings the operator ONE decision-shaped
+   summary (ruled 2026-08-22). Order: `/simplify` (optional) first, then `/code-review` +
+   codex (codex REQUIRED when the chunk touches `src/`, offered otherwise), fold
+   fixes, then `/security-review` LAST on the settled tree when the chunk touches auth,
+   serving, PII, or deletes - security certifies what SHIPS; a post-security fix there gets a
+   scoped re-look. Docs-only chunk: PII gates alone. A review covers EVERY change since the
+   chunk's base, committed or not - name that range, verify the reviewer received it.
 6. **SCAN** - Run `python3 src/safety/pii_scanner.py --staged` and compare scanned-count to
    staged-count: `SKIP_PATHS` blinds it to whole trees (`.claude/` among them). Give each skipped
    staged file a manual pass with a positive control.
