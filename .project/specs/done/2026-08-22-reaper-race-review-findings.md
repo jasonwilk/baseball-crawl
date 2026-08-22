@@ -3,8 +3,15 @@
 **Status:** COMPLETE (this commit) — `acceptance: run`. All six carried defects closed, plus
 THREE further sites of the same permanent-orphan leak found during execution: one by the audit
 (the claim itself failing, no race involved), and two by `/code-review` on the fixes (the
-no-games claim, then the no-games recovery block). The stub named one site; there were four. One
-residual routed out and onto the board: a live report can be reported to its caller as failed.
+no-games claim, then the no-games recovery block). The stub named one site; there were four. TWO
+residuals routed out and onto the board: a live report can be reported to its caller as failed,
+and the leak is narrowed rather than closed — a filesystem error still strands a file.
+
+⚠ This line said "One residual" through the approved commit `af813ef`, while the body below
+already carried two. The second was added late and its summary was not re-read against it — the
+exact header-contradicts-body defect `.claude/rules/tool-discipline.md` names, caught at the
+step-9 sweep rather than before the commit. The board entry it promised was also missing and
+landed after.
 
 ## Provenance, and the audit obligation this creates
 

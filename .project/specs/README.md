@@ -318,6 +318,20 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
+- **The permanent-orphan leak is NARROWED, not closed: a filesystem error still strands a report
+  file** (found by `/code-review` 2026-08-22, in the reaper-race review-findings chunk;
+  deliberate, pinned by two tests). When `unlink` raises `OSError` — read-only mount, EPERM,
+  EBUSY — in either `_reaper_lost_the_race` or `_discard_unreachable_render`, the HTML stays at
+  `data/reports/{slug}.html` while its row is `('failed', report_path NULL)`: unreachable by
+  `cleanup_expired_reports` (needs non-NULL) and by the reaper (needs `'generating'`), with no
+  counter and no retry. **Accepted because no code can delete what the OS refuses**, and because
+  propagating instead destroys the operator-facing failure reason (measured: it gets overwritten
+  with `Post-pipeline error: ...`). Not a security or serving problem — the row is failed and the
+  serve route 404s on a NULL `report_path` — it is disk litter that nothing sweeps. **The closer
+  is a stray-file reconciliation between `data/reports/` and the `reports` table, NOT another
+  try/except**; anyone reaching for a handler here is re-solving the wrong half. Sized as a small
+  chunk; no urgency until someone sees the litter.
+
 - **A live report can be reported to its caller as FAILED** (found by `/code-review`
   2026-08-22, in the reaper-race review-findings chunk; pre-existing, NARROWED by that chunk).
   `_fail_report` is guarded on `WHERE status = 'generating'`, so a failure landing AFTER a
