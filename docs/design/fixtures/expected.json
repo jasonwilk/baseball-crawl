@@ -1,0 +1,1470 @@
+{
+  "arc": {
+    "adjacency_skips_hidden_window": {
+      "b_shown": false,
+      "c_mark": null,
+      "matches_expectation": true
+    },
+    "coverage_fallback_recovery_pass": {
+      "covered_any_perspective": 5,
+      "covered_own_perspective": 4,
+      "covered_via_fallback": 1,
+      "genuine_gap_uncovered": 0,
+      "listed": 5,
+      "listed_but_uncovered": 0,
+      "matches_expectation": true,
+      "message": "4 covered of 5 listed (0 listed-but-uncovered [true forfeit/unscored]; 1 recovered via the opponent's crawl; 0 genuine gap [stat-bearing but this team's own players have no rows anywhere])",
+      "passes": true,
+      "scheduled": 5
+    },
+    "coverage_genuine_gap_fail": {
+      "covered_any_perspective": 4,
+      "covered_own_perspective": 4,
+      "covered_via_fallback": 0,
+      "genuine_gap_uncovered": 1,
+      "listed": 5,
+      "listed_but_uncovered": 0,
+      "matches_expectation": true,
+      "message": "4 covered of 5 listed (0 listed-but-uncovered [true forfeit/unscored]; 0 recovered via the opponent's crawl; 1 genuine gap [stat-bearing but this team's own players have no rows anywhere])",
+      "passes": false,
+      "scheduled": 5
+    },
+    "coverage_true_forfeit_excluded": {
+      "covered_any_perspective": 4,
+      "covered_own_perspective": 4,
+      "covered_via_fallback": 0,
+      "genuine_gap_uncovered": 0,
+      "listed": 4,
+      "listed_but_uncovered": 1,
+      "matches_expectation": true,
+      "message": "4 covered of 4 listed (1 listed-but-uncovered [true forfeit/unscored]; 0 recovered via the opponent's crawl; 0 genuine gap [stat-bearing but this team's own players have no rows anywhere])",
+      "passes": true,
+      "scheduled": 5
+    },
+    "coverage_true_pass": {
+      "covered_any_perspective": 5,
+      "covered_own_perspective": 5,
+      "covered_via_fallback": 0,
+      "genuine_gap_uncovered": 0,
+      "listed": 5,
+      "listed_but_uncovered": 0,
+      "matches_expectation": true,
+      "message": "5 covered of 5 listed (0 listed-but-uncovered [true forfeit/unscored]; 0 recovered via the opponent's crawl; 0 genuine gap [stat-bearing but this team's own players have no rows anywhere])",
+      "passes": true,
+      "scheduled": 5
+    },
+    "magnitude_below_threshold": {
+      "mark_fired": null,
+      "matches_expectation": true
+    },
+    "rounding_threshold_crossing": {
+      "mark_fired": "up",
+      "matches_expectation": true,
+      "raw_diff": 0.0796,
+      "rounded_diff": 0.08
+    },
+    "single_window_abstention_precondition": {
+      "matches_expectation": true,
+      "shown_count": 1
+    },
+    "window_floor_edge": [
+      {
+        "label": "floor-1",
+        "pa": 39,
+        "shown": false
+      },
+      {
+        "label": "floor",
+        "pa": 40,
+        "shown": true
+      },
+      {
+        "label": "floor+1",
+        "pa": 41,
+        "shown": true
+      }
+    ]
+  },
+  "barometer": {
+    "consolidation_replaces_strips": {
+      "claim_types": [
+        "consolidation"
+      ],
+      "matches_expectation": true,
+      "n_claims": 1,
+      "n_families": 4,
+      "text": "Against the hitters across the teams you played this season, your bat sat in the bottom third across the board."
+    },
+    "equal_team_weighting": {
+      "matches_expectation": true,
+      "naive_flat_fraction": 0.909,
+      "weighted_band": "middle third",
+      "weighted_fraction": 0.5
+    },
+    "family_scoping_collapses_on_base_pair": {
+      "claim_families": [
+        "on_base"
+      ],
+      "claim_metrics": [
+        "obp"
+      ],
+      "matches_expectation": true
+    },
+    "sensitivity_check_suppresses_borderline_stat": {
+      "full_band": "middle third",
+      "high_coverage_half_band": "top third",
+      "matches_expectation": true,
+      "sensitivity_ok": false
+    }
+  },
+  "cap_test_team": {
+    "pool_sizes": {
+      "bat_obp_pool_n": 4,
+      "pit_whip_pool_n": 0
+    },
+    "standing": {
+      "Ridley-Sawyer": {
+        "all_standing": [
+          {
+            "band": "above the team middle",
+            "denominator": 140,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 140,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 140,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 140,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 140,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [
+          "Basestealing: 6 of 7 (85.7%)",
+          "Clean glove: 20 chances, 0 errors (1.000 FPCT)"
+        ],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 140,
+        "positions": [
+          "SS"
+        ],
+        "strengths": [
+          "Batting average (AVG): .373 in 140 PA this season -- above the team middle",
+          "Strikeout rate (K%): 9.3% in 140 PA this season -- above the team middle",
+          "Getting on base (OBP): .471 in 140 PA this season -- above the team middle"
+        ],
+        "went_well_after_cap": 4,
+        "went_well_candidates_before_cap": 5
+      }
+    }
+  },
+  "cohort": {
+    "cohort_dominated_fail": {
+      "fresh_and_deduped": 8,
+      "matches_expectation": true,
+      "passes": false,
+      "reasons": [
+        "team 9101 (Fixture Dominant Dragons) is 88% of the pool (> 15% cap)"
+      ]
+    },
+    "cohort_duplicate_identity_fail": {
+      "fresh_and_deduped": 7,
+      "matches_expectation": true,
+      "passes": false,
+      "reasons": [
+        "duplicate team identity in pool: {'fixture osprey club': [9201, 9202]} -- dedup required before weighting",
+        "only 7 qualifying team(s) (fully covered + fresh + deduped); need >= 8"
+      ]
+    },
+    "cohort_pass": {
+      "fresh_and_deduped": 8,
+      "matches_expectation": true,
+      "passes": true,
+      "reasons": []
+    }
+  },
+  "strong_team": {
+    "pool_sizes": {
+      "bat_obp_pool_n": 8,
+      "pit_whip_pool_n": 0
+    },
+    "standing": {
+      "Abernathy-Zane": {
+        "all_standing": [
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 130,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 130,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 130,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 130,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 130,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 130,
+        "positions": [
+          "RF"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Beaumont-Ivy": {
+        "all_standing": [
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 150,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 150,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 150,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 150,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 150,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 150,
+        "positions": [
+          "SS"
+        ],
+        "strengths": [
+          "Batting average (AVG): .384 in 150 PA this season -- top group of the 8 eligible hitters",
+          "Strikeout rate (K%): 9.3% in 150 PA this season -- top group of the 8 eligible hitters",
+          "Getting on base (OBP): .480 in 150 PA this season -- top group of the 8 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Dunmore-Wren": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 140,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Driving the ball (SLG): .449 in 140 PA this season -- below the team middle"
+        ],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 140,
+        "positions": [
+          "2B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Espinoza-Kai": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 140,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Driving the ball (SLG): .449 in 140 PA this season -- below the team middle"
+        ],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 140,
+        "positions": [
+          "3B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Grantham-Odin": {
+        "all_standing": [
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 132,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 132,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 132,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 132,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 8 eligible hitters",
+            "denominator": 132,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 132,
+        "positions": [
+          "1B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Harlow-Zeph": {
+        "all_standing": [
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 148,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 148,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 148,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 148,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 8 eligible hitters",
+            "denominator": 148,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 148,
+        "positions": [
+          "CF"
+        ],
+        "strengths": [
+          "Batting average (AVG): .403 in 148 PA this season -- top group of the 8 eligible hitters",
+          "Strikeout rate (K%): 8.1% in 148 PA this season -- top group of the 8 eligible hitters",
+          "Getting on base (OBP): .493 in 148 PA this season -- top group of the 8 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      }
+    }
+  },
+  "vale_team": {
+    "pool_sizes": {
+      "bat_obp_pool_n": 6,
+      "pit_whip_pool_n": 0
+    },
+    "standing": {
+      "Iverson-Skye": {
+        "all_standing": [
+          {
+            "band": "above the team middle",
+            "denominator": 110,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 110,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 110,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 110,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 110,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 110,
+        "positions": [
+          "SS"
+        ],
+        "strengths": [
+          "Batting average (AVG): .316 in 110 PA this season -- above the team middle",
+          "Strikeout rate (K%): 13.6% in 110 PA this season -- above the team middle",
+          "Getting on base (OBP): .393 in 110 PA this season -- above the team middle"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Juniper-Tobin": {
+        "all_standing": [
+          {
+            "band": "below the team middle",
+            "denominator": 105,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 105,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 105,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 105,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 105,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 105,
+        "positions": [
+          "2B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Larimore-Ash": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 108,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 108,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 108,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 108,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 108,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 108,
+        "positions": [
+          "1B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      }
+    }
+  },
+  "weak_team": {
+    "display_floor_edges": {
+      "Lowe-Cody": {
+        "avg": 0.235,
+        "bat_rate_shown": false,
+        "h": 4,
+        "ip_outs": null,
+        "pa": 19,
+        "pit_rate_shown": false
+      },
+      "Mott-Dana": {
+        "avg": 0.278,
+        "bat_rate_shown": true,
+        "h": 5,
+        "ip_outs": null,
+        "pa": 20,
+        "pit_rate_shown": false
+      },
+      "Nash-Eli": {
+        "avg": 0.316,
+        "bat_rate_shown": true,
+        "h": 6,
+        "ip_outs": null,
+        "pa": 21,
+        "pit_rate_shown": false
+      },
+      "Reyes-Iris": {
+        "avg": 0.0,
+        "bat_rate_shown": false,
+        "h": 0,
+        "ip_outs": 18,
+        "pa": 1,
+        "pit_rate_shown": true
+      },
+      "Reyes-Jax": {
+        "avg": 0.0,
+        "bat_rate_shown": false,
+        "h": 0,
+        "ip_outs": 17,
+        "pa": 1,
+        "pit_rate_shown": false
+      },
+      "Reyes-Kip": {
+        "avg": 0.0,
+        "bat_rate_shown": false,
+        "h": 0,
+        "ip_outs": 19,
+        "pa": 1,
+        "pit_rate_shown": true
+      }
+    },
+    "pool_sizes": {
+      "bat_obp_pool_n": 11,
+      "pit_whip_pool_n": 3
+    },
+    "standing": {
+      "Cutter-Ames": {
+        "all_standing": [
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 140,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 140,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 140,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 140,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 140,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 140,
+        "positions": [
+          "CF"
+        ],
+        "strengths": [
+          "Batting average (AVG): .356 in 140 PA this season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 11.4% in 140 PA this season -- top group of the 11 eligible hitters",
+          "Getting on base (OBP): .457 in 140 PA this season -- top group of the 11 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Doyle-Blake": {
+        "all_standing": [
+          {
+            "band": "below the team middle",
+            "denominator": 100,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 100,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Batting average (AVG): .235 in 100 PA this season -- below the team middle",
+          "Driving the ball (SLG): .294 in 100 PA this season -- below the team middle"
+        ],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 100,
+        "positions": [
+          "RF"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Ellery-Cole": {
+        "all_standing": [
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 90,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 90,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 90,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 90,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 90,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 90,
+        "positions": [
+          "2B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Finch-Drew": {
+        "all_standing": [
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 110,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 110,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 110,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 110,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 110,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 110,
+        "positions": [
+          "1B"
+        ],
+        "strengths": [
+          "Batting average (AVG): .319 in 110 PA this season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 13.6% in 110 PA this season -- top group of the 11 eligible hitters",
+          "Getting on base (OBP): .418 in 110 PA this season -- top group of the 11 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Gable-Reese": {
+        "all_standing": [
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 95,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": true
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 95,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 95,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 95,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": true
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 95,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 95,
+        "positions": [
+          "3B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Hollis-Sage": {
+        "all_standing": [
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 105,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 105,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": true
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 105,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 105,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "bottom group of the 11 eligible hitters",
+            "denominator": 105,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": true
+          }
+        ],
+        "consolidation": "Several related areas were below the team's middle this season (at-bat quality, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 105,
+        "positions": [
+          "SS"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Ibarra-Wren": {
+        "all_standing": [
+          {
+            "band": "below the team middle",
+            "denominator": 100,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 100,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 100,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Batting average (AVG): .235 in 100 PA this season -- below the team middle",
+          "Driving the ball (SLG): .294 in 100 PA this season -- below the team middle"
+        ],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 100,
+        "positions": [
+          "LF"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Jarvis-Tate": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 112,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 112,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 112,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": true
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 112,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 112,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 3,
+        "pa": 112,
+        "positions": [
+          "2B",
+          "SS",
+          "CF"
+        ],
+        "strengths": [
+          "Strikeout rate (K%): 16.1% in 112 PA this season -- top group of the 11 eligible hitters",
+          "Quality at-bat rate (QAB%): 46.0% in 112 PA this season -- above the team middle",
+          "Driving the ball (SLG): .365 in 112 PA this season -- above the team middle"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Kessler-Vandermolen-Bartholomew": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 120,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 120,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 120,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 120,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": true
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 120,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": true
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 140,
+            "family": "pitch_command",
+            "metric": "bb_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 140,
+            "family": "pitch_missing_bats",
+            "metric": "k_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": "32.0",
+            "family": "pitch_baserunners",
+            "metric": "whip",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Strikeout rate (K% of batters faced): 32.1% in 140 BF this season -- below the team middle"
+        ],
+        "ip_outs": 96,
+        "n_positions": 1,
+        "pa": 120,
+        "positions": [
+          "1B"
+        ],
+        "strengths": [
+          "Strikeout rate (K%): 16.7% in 120 PA this season -- above the team middle",
+          "Getting on base (OBP): .373 in 120 PA this season -- above the team middle",
+          "Quality at-bat rate (QAB%): 48.0% in 120 PA this season -- top group of the 11 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Ortiz-Finn": {
+        "all_standing": [],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 39,
+        "positions": [
+          "3B"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      },
+      "Ortiz-Gia": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 40,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 40,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 40,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 40,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": 40,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Quality at-bat rate (QAB%): 40.0% in 40 PA this season -- below the team middle"
+        ],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 40,
+        "positions": [
+          "3B"
+        ],
+        "strengths": [
+          "Getting on base (OBP): .375 in 40 PA this season -- above the team middle"
+        ],
+        "went_well_after_cap": 1,
+        "went_well_candidates_before_cap": 1
+      },
+      "Ortiz-Hal": {
+        "all_standing": [
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 41,
+            "family": "hitting",
+            "metric": "avg",
+            "widened_tie": true
+          },
+          {
+            "band": "top group of the 11 eligible hitters",
+            "denominator": 41,
+            "family": "on_base",
+            "metric": "obp",
+            "widened_tie": true
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 41,
+            "family": "contact",
+            "metric": "k_pct",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 41,
+            "family": "power",
+            "metric": "slg",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 41,
+            "family": "at_bat_quality",
+            "metric": "qab_pct",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 0,
+        "n_positions": 1,
+        "pa": 41,
+        "positions": [
+          "3B"
+        ],
+        "strengths": [
+          "Batting average (AVG): .306 in 41 PA this season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 19.5% in 41 PA this season -- above the team middle",
+          "Getting on base (OBP): .390 in 41 PA this season -- top group of the 11 eligible hitters"
+        ],
+        "went_well_after_cap": 3,
+        "went_well_candidates_before_cap": 3
+      },
+      "Prince-Milo": {
+        "all_standing": [
+          {
+            "band": "below the team middle",
+            "denominator": 55,
+            "family": "pitch_command",
+            "metric": "bb_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "above the team middle",
+            "denominator": 55,
+            "family": "pitch_missing_bats",
+            "metric": "k_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "below the team middle",
+            "denominator": "10.0",
+            "family": "pitch_baserunners",
+            "metric": "whip",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [
+          "Walk rate (BB% of batters faced): 18.2% in 55 BF this season -- below the team middle",
+          "Baserunners allowed (WHIP): 3.00 in 10.0 IP this season -- below the team middle"
+        ],
+        "ip_outs": 30,
+        "n_positions": 1,
+        "pa": 3,
+        "positions": [
+          "P"
+        ],
+        "strengths": [
+          "Strikeout rate (K% of batters faced): 63.6% in 55 BF this season -- above the team middle"
+        ],
+        "went_well_after_cap": 1,
+        "went_well_candidates_before_cap": 1
+      },
+      "Quill-Nova": {
+        "all_standing": [
+          {
+            "band": "around the team middle",
+            "denominator": 270,
+            "family": "pitch_command",
+            "metric": "bb_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": 270,
+            "family": "pitch_missing_bats",
+            "metric": "k_bf",
+            "widened_tie": false
+          },
+          {
+            "band": "around the team middle",
+            "denominator": "60.0",
+            "family": "pitch_baserunners",
+            "metric": "whip",
+            "widened_tie": false
+          }
+        ],
+        "consolidation": null,
+        "count_facts": [],
+        "focus": [],
+        "ip_outs": 180,
+        "n_positions": 1,
+        "pa": 2,
+        "positions": [
+          "P"
+        ],
+        "strengths": [],
+        "went_well_after_cap": 0,
+        "went_well_candidates_before_cap": 0
+      }
+    }
+  }
+}

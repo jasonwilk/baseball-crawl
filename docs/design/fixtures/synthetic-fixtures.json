@@ -1,0 +1,118 @@
+{
+  "_comment": "Synthetic test vectors (not a roster) for the season-arc window logic and the barometer cohort-validity gate. Pure numeric scenarios, no player identity -- fictional team ids only. Interpreted by ephemeral/2026-08-22-exit-sheet-generator-v1/fixtures_build.py's golden gate (checks.py --gate golden).",
+
+  "coverage_true_pass": {
+    "_comment": "All 5 scheduled games stat-bearing and covered via the team's own crawl -- a clean pass, no fallback needed.",
+    "scheduled": ["g1", "g2", "g3", "g4", "g5"],
+    "any_stat": ["g1", "g2", "g3", "g4", "g5"],
+    "own_perspective": ["g1", "g2", "g3", "g4", "g5"],
+    "any_perspective": ["g1", "g2", "g3", "g4", "g5"],
+    "expect_passes": true
+  },
+
+  "coverage_fallback_recovery_pass": {
+    "_comment": "v1.2 denominator/fallback rule, live-verified 2026-08-22 against team 1078 (summer 18U): all 44 scheduled games are stat-bearing; g5 (the real 2026-07-26 game) has no own-perspective rows but DOES have this team's player rows under the opponent's perspective_team_id -- recovered via fallback, not excluded. Matches the model's stated '43 covered of 44 listed' PASS.",
+    "scheduled": ["g1", "g2", "g3", "g4", "g5"],
+    "any_stat": ["g1", "g2", "g3", "g4", "g5"],
+    "own_perspective": ["g1", "g2", "g3", "g4"],
+    "any_perspective": ["g1", "g2", "g3", "g4", "g5"],
+    "expect_passes": true,
+    "expect_covered_via_fallback": 1
+  },
+
+  "coverage_true_forfeit_excluded": {
+    "_comment": "g5 has NO stat rows anywhere (any team, any perspective) -- this IS the doc's own 'listed-but-uncovered' case (Sec.5 v1.3): a true forfeit/unscored listing, EXCLUDED from the gate's denominator, not counted as a failure.",
+    "scheduled": ["g1", "g2", "g3", "g4", "g5"],
+    "any_stat": ["g1", "g2", "g3", "g4"],
+    "own_perspective": ["g1", "g2", "g3", "g4"],
+    "any_perspective": ["g1", "g2", "g3", "g4"],
+    "expect_passes": true,
+    "expect_excluded": 1
+  },
+
+  "coverage_genuine_gap_fail": {
+    "_comment": "g5 IS stat-bearing (someone crawled it) but this team's players have NO rows for it under ANY perspective -- a real, non-recoverable gap the doc does not separately name (it is NOT the doc's 'listed-but-uncovered', which is the true-forfeit case above). The gate must fail closed here regardless.",
+    "scheduled": ["g1", "g2", "g3", "g4", "g5"],
+    "any_stat": ["g1", "g2", "g3", "g4", "g5"],
+    "own_perspective": ["g1", "g2", "g3", "g4"],
+    "any_perspective": ["g1", "g2", "g3", "g4"],
+    "expect_passes": false,
+    "expect_genuine_gap": 1
+  },
+
+  "arc_window_floor_edge": {
+    "_comment": "Sec.4 in-season window floor = 40 PA. Three windows at floor-1/floor/floor+1.",
+    "windows": [
+      {"label": "floor-1", "pa": 39, "onbase": 14, "so": 8},
+      {"label": "floor", "pa": 40, "onbase": 14, "so": 8},
+      {"label": "floor+1", "pa": 41, "onbase": 15, "so": 8}
+    ]
+  },
+
+  "arc_rounding_threshold_crossing": {
+    "_comment": "Sec.4 trajectory magnitude for OBP is >=0.080. Endpoint A rounds to 0.333, endpoint B rounds to 0.413 -- a rounded diff of exactly 0.080. The RAW diff (31/75 - 20/60 wouldn't isolate rounding order; these two are picked so raw diff = 0.0796, strictly BELOW 0.080, while the diff-of-ALREADY-ROUNDED-endpoints (the pinned, round-then-diff order this build uses) reads exactly 0.080 and fires. This is the model's 'rounding that would cross a threshold' fixture case, and it pins the build's rounding order as round-each-endpoint-then-diff.",
+    "a_pa": 60, "a_onbase_raw": 20.004,
+    "b_pa": 75, "b_onbase_raw": 30.975,
+    "a_rounded_obp": 0.333,
+    "b_rounded_obp": 0.413,
+    "raw_diff": 0.0796,
+    "rounded_diff": 0.080,
+    "expect_mark": "up"
+  },
+
+  "arc_magnitude_below_threshold": {
+    "a_pa": 60, "a_obp": 0.350,
+    "b_pa": 65, "b_obp": 0.420,
+    "expect_mark_note": "diff=0.070 < 0.080 magnitude floor -> no mark"
+  },
+
+  "cohort_pass": {
+    "_comment": "8 opponents, evenly weighted (12.5% each, under the 15% cap), all fully covered and fresh -- the gate SHOULD pass.",
+    "today": "2026-08-22",
+    "opponents": [
+      {"team_id": 9001, "team_name": "Fixture Eagles", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-15"},
+      {"team_id": 9002, "team_name": "Fixture Falcons", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-16"},
+      {"team_id": 9003, "team_name": "Fixture Herons", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-14"},
+      {"team_id": 9004, "team_name": "Fixture Ibises", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-17"},
+      {"team_id": 9005, "team_name": "Fixture Jays", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-13"},
+      {"team_id": 9006, "team_name": "Fixture Kites", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-18"},
+      {"team_id": 9007, "team_name": "Fixture Larks", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-12"},
+      {"team_id": 9008, "team_name": "Fixture Martins", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-19"}
+    ],
+    "expect_passes": true
+  },
+
+  "cohort_dominated_fail": {
+    "_comment": "One team is 87% of the pool (>15% cap) -- the gate MUST fail even though the team count clears 8.",
+    "today": "2026-08-22",
+    "opponents": [
+      {"team_id": 9101, "team_name": "Fixture Dominant Dragons", "games_involving": 200, "own_perspective_games": 200, "last_crawled": "2026-08-15"},
+      {"team_id": 9102, "team_name": "Fixture Wrens", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9103, "team_name": "Fixture Sparrows", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9104, "team_name": "Fixture Finches", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9105, "team_name": "Fixture Robins", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9106, "team_name": "Fixture Crows", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9107, "team_name": "Fixture Ravens", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"},
+      {"team_id": 9108, "team_name": "Fixture Doves", "games_involving": 4, "own_perspective_games": 4, "last_crawled": "2026-08-15"}
+    ],
+    "expect_passes": false,
+    "expect_reason_contains": "cap)"
+  },
+
+  "cohort_duplicate_identity_fail": {
+    "_comment": "The same real club appears under two team ids (measured live condition, 2026-08-22: one opponent present as three team ids) -- dedup must collapse them and the resulting pool (7 after collapse) falls below the 8-team minimum.",
+    "today": "2026-08-22",
+    "opponents": [
+      {"team_id": 9201, "team_name": "Fixture Osprey Club", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-15"},
+      {"team_id": 9202, "team_name": "Fixture Osprey Club", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-16"},
+      {"team_id": 9203, "team_name": "Fixture Herons", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-14"},
+      {"team_id": 9204, "team_name": "Fixture Ibises", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-17"},
+      {"team_id": 9205, "team_name": "Fixture Jays", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-13"},
+      {"team_id": 9206, "team_name": "Fixture Kites", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-18"},
+      {"team_id": 9207, "team_name": "Fixture Larks", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-12"},
+      {"team_id": 9208, "team_name": "Fixture Martins", "games_involving": 20, "own_perspective_games": 20, "last_crawled": "2026-08-19"}
+    ],
+    "expect_passes": false,
+    "expect_dedup_collapses_to": 7
+  }
+}

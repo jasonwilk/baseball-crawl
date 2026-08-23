@@ -318,6 +318,13 @@ None open. The sitting of 2026-08-08 ruled all three (details in the named specs
 
 Carried deliberately. Not prose, not tickets — things that will bite if forgotten.
 
+- **Host-side git commits ran ZERO hooks for months — fixed 2026-08-22, audit owed.**
+  `core.hooksPath` held a stale container-absolute path predating `34f2024` (E-038), so git on
+  the macOS host silently ran no pre-commit PII gate; the fix (relative `.githooks`) is applied
+  and verified in BOTH environments. Spec `2026-08-22-host-hooks-bypass.md` carries what
+  remains: the host-side receipt control and the exposure audit of the ungated window (three
+  2026-08-22 docs commits already hand-cleared with positive controls).
+
 - **The permanent-orphan leak is NARROWED, not closed: a filesystem error still strands a report
   file** (found by `/code-review` 2026-08-22, in the reaper-race review-findings chunk;
   deliberate, pinned by two tests). When `unlink` raises `OSError` — read-only mount, EPERM,

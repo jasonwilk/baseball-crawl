@@ -1,9 +1,10 @@
 # The Athlete Feedback Model
 
-**Last updated**: 2026-08-22 · **Source**: concept sessions of 2026-08-15..22 (v1.1 amendment
-same day: in-season arc, DB-sourced window carve-out, pool identity dedup)
+**Last updated**: 2026-08-22 · **Source**: concept sessions of 2026-08-15..22 (v1.3 same
+day: perspective-fallback coverage mechanism, workload ordering rule, band-table scope +
+AVG family, arc adjacency rule, Went-Well total cap; v1.2 added the content inventory)
 
-**Status: DRAFT v1.1 — 2026-08-22.** Governs every player-facing feedback artifact this project
+**Status: DRAFT v1.3 — 2026-08-22.** Governs every player-facing feedback artifact this project
 produces, starting with the exit-meeting player sheet. The design intent: this document carries
 the intellectual work — what may be said, to whom, on what evidence, in what words — so that
 producing the sheets is deterministic work any competent model or plain script can execute.
@@ -90,6 +91,11 @@ them, and changed only deliberately with rationale.
 | Band deadband | .015 OBP/SLG; 1.5 pts rates | values this close to a cutoff render "around the team middle" |
 | Four-band minimum pool | 8 qualified players | below: two bands only (above/below the team middle) |
 | Standing-claim caps | ≤3 stood-out, ≤2 below-middle | one claim per correlated family (§7) |
+| Went-Well total cap | 4 items (standing + count-facts + trends combined) | v1.3; count-facts were unbounded before |
+| Pool membership | subject INCLUDED in his own team pool | pinned v1.2 (v1 build had to guess) |
+| Family tie-break | first-listed stat in the family wins | pinned v1.2 |
+| Workload-lead heuristic | mound leads when season BF > season PA | pinned v1.2 |
+| Numeric comparisons | round to the stat's display precision BEFORE any gate comparison | IEEE754: a raw 0.079999… must count as .080 (caught by v1 fixture) |
 | Consolidation trigger | below-middle in ≥4 families | render one pattern sentence, not an enumeration |
 
 Ties are never split; a tie at a band boundary widens the band and the rendered count says so.
@@ -102,16 +108,29 @@ fixed in the build spec, exercised by fixtures, identical for every builder.
 one long season (operator ruling: mostly-similar teams, not a JV→varsity jump). The lens
 renders as ONE display, not competing widgets: the arc — up to four half-season windows
 (spring 1st half → spring 2nd half → summer 1st half → summer 2nd half) for the §4 arc stats,
-every point badged with its PA, a step marked ▲/▼/– only where that step clears the §4 gates.
-The spring→summer step is one step of the arc, not a separate feature. Exceptions and floors:
+every point badged with its PA, a step marked ▲/▼/– only where that step clears the §4 gates
+AND the two windows are adjacent among ALL windows (a mark never spans a hidden, floor-failing
+window — v1.3; comparing across an invisible gap is a claim the reader can't inspect). An arc
+with a single qualifying window renders that window plus the abstention line ("not enough
+trips in the other stretches to compare"). The spring→summer step is one step of the arc, not
+a separate feature. Exceptions and floors:
 
 - A player who moved competition levels between halves gets numbers side by side, no marks on
   the cross-season step — identified via the coach context manifest (§6), not inferred.
 - **Within-season windows are DB-sourced** (the authoritative CSV has no per-game grain) and
-  are permitted only for a team-season that passes the verified-coverage gate: the full season
-  crawled (every scheduled game's per-game rows present), fresh. A trend over the fraction of
-  a season we happened to crawl is the same lie as an unverified pool. Measured 2026-08-22:
-  both LSB 2026 team-seasons pass (30 of 30 spring, 43 of 43 summer games).
+  are permitted only for a team-season that passes the verified-coverage gate: every
+  STAT-BEARING scheduled game's per-game rows present, fresh. Coverage is counted with
+  PERSPECTIVE FALLBACK (v1.3, mechanism found by the v1.2 build): a game's rows may live
+  only under the OPPONENT'S perspective id — ownership of a stat row is `team_id`, never
+  `perspective_team_id` — so the gate prefers own-perspective rows and recovers rows for this
+  team's players from any other perspective, never double-counting. A listing with no stat
+  rows under ANY perspective (a true forfeit/unscored listing) is EXCLUDED from the
+  denominator and reported on the staff provenance page as listed-but-uncovered. Measured
+  2026-08-22: spring passes 30 of 30 own-perspective; summer passes 44 of 44 (43 own + 1
+  recovered via fallback). (v1.3 corrects v1.2, which misdescribed the recovered game as a
+  forfeit.)
+  A trend over the fraction of a season we happened to crawl is the same lie as an
+  unverified pool.
 - Windows below the §4 floor render no rate and no mark for that segment.
 - **Count-based finish facts** ("reached base in 9 of your last 10 games") are recorded-fact
   claims, available at any sample, and are the only in-season trend form for part-time players.
@@ -131,17 +150,27 @@ ruling 2026-08-22: "we shouldn't wander in claiming a 'league' we haven't verifi
 - Same season and competition class; one canonical formula per metric computed from
   compatible counting components on both sides (subject CSV vs pool DB) — fail closed on
   definition mismatch.
-- **Pool teams are deduplicated by identity before weighting.** Duplicate team rows for the
-  same real club are a live database condition (measured 2026-08-22: one opponent present as
-  three team ids), and a naive pool builder would ingest that roster three times — the same
-  distortion the coverage rules prevent, entering through the identity door. A failed
-  duplicate collapse blocks the lens exactly as a coverage failure does.
+- **Pool teams are deduplicated by identity before weighting.** Duplicate team identities
+  are a documented hazard of this repo's data (the 2026-08 dedup campaign existed because of
+  them), and GameChanger itself lists the same club under multiple team pages (measured in
+  Stage A resolution 2026-08-22: several opponents returned two search candidates with
+  near-identical roster overlap under different public_ids). A naive pool builder would
+  ingest such a roster twice — the coverage distortion entering through the identity door. A
+  failed duplicate collapse blocks the lens exactly as a coverage failure does. (v1.2
+  correction: v1.1 cited a same-DB three-team-ids measurement here that was refuted — a query
+  bug had grouped by game, not team.)
 - ≥8 qualifying teams; no single team contributes >15% of the pool; equal-team weighting.
 - Sensitivity check: recompute against the highest-coverage half of the pool; if the player's
   band moves, suppress the lens for that stat.
 - Rendering is **broad bands, never precise percentiles**: "top third of the hitters across
   the 37 teams you played (20+ trips each)". The pool is named as exactly what it is — the
   word "league" is banned unless the pool is a verified league population.
+- **The barometer obeys the same aggregate bounds as the other lenses (v1.3 flip-run
+  finding):** strips are family-scoped like the band table (one strip per §7 family), and
+  when the §4 consolidation trigger fires (≥4 families in the bottom band on this lens), the
+  section renders ONE plain summary sentence in place of the enumerated strips — say it once,
+  completely, not four times. Per-stat detail stays available in the band table and the staff
+  provenance page. Direct per claim, bounded in aggregate applies to every lens.
 
 ## 6. Context, abstention, and the coach manifest
 
@@ -159,9 +188,11 @@ only) and add context lines; they can never add evaluative claims.
 
 - Plain-name stat map: "Getting on base — OBP", "Trips to the plate (PA)", "Strikeout rate".
   A stat without a plain name doesn't go on the sheet.
-- Correlated families (one standing claim each): on-base {OBP, BB%}; contact {K%, C%};
+- Correlated families (one standing claim each): hitting {AVG} (singleton — assigned v1.3;
+  v1.2 left AVG family-less and it silently vanished from sheets); on-base {OBP, BB%}; contact {K%, C%};
   power {SLG, XBH}; at-bat quality {QAB%, P/PA}; pitching command {BB% of BF, FPS%};
-  pitching bat-missing {K% of BF}.
+  pitching bat-missing {K% of BF}; pitching baserunners {WHIP} (singleton — added v1.2, the
+  v1 build found it gated in §4 but family-less).
 - Banned lexicon (asserted): quartile, percentile, median, average-when-median, BABIP, ISO,
   league (unless verified), and judgment adjectives (worst, weak, poor, lazy).
 - Every negative claim is season-, metric-, and sample-bounded in plain words: "In 42 trips
@@ -176,6 +207,50 @@ Sections qualify independently on their own evidence and order by share of the p
 workload (no named archetypes; no discontinuity where one PA reorders a page). A reliever's
 sheet leads with the mound because his innings dominate his workload, not because a
 classifier fired.
+
+**Ordering rule (v1.3, replacing the inert v1.2 sentence):** the content inventory below is
+fixed in CONTENT, not in page order. When the mound leads the player's workload (§4 heuristic:
+season BF > season PA), the mound facts block and the arms band rows move AHEAD of the batting
+season-lines table on page 1, and the batting table moves to page 2 with the field block; the
+reliever's page 1 tells his mound season. All gates unchanged — this moves blocks, never
+creates claims.
+
+**Content inventory (NORMATIVE — v1.2).** The v1 build proved the claims logic without this
+list and produced skeletal sheets: a spec that names claim types but not page content leaves
+the design in the author's head. The sheet renders these blocks, each still subject to every
+gate above (a block whose claims all fail their gates renders its abstention line, not
+nothing):
+
+- **Header**: name, class year, positions (by innings), team-season labels.
+- **Season lines table** — Spring HS and primary-summer columns side by side. SHOW-rung rows:
+  games; trips to the plate; AVG/OBP/SLG slash; OPS; strikeout rate; walk rate;
+  doubles–triples–HR; RBI · runs; steals rendered "N of M (P%)" (v1.3 — a bare "3-4" is
+  ambiguous between attempts and caught-stealing); quality at-bats; pitches seen per trip. Below the display floor a column renders its counts, never its rates. Cameo and
+  no-varsity-spring notes attach here.
+- **Season arc block** (§5) when its gates pass; otherwise the two seasons' numbers stand
+  unmarked.
+- **Where You Stood** — the COMPLETE band table for every stat with a passing standing gate,
+  batting then arms rows. ⚠ Pinned against the v1 misreading: the consolidation rule governs
+  the GROW section's derivation only — the band table is never consolidated away. Scope
+  (v1.3): the table renders ONE row per correlated family (the family's first-listed gated
+  stat), so it stays scannable; a table repeating one honest phrase is data, a bullet list
+  repeating it is a drumbeat.
+- **What Went Well / Where To Grow** — derivations: standing claims within the §4 caps; plus
+  these count-facts (recorded-fact rung, exempt from standing floors): basestealing (≥4
+  attempts, ≥75%), clean glove (≥15 chances, ≥.980), scoreless relief (6–10 IP, zero earned
+  runs, rendered as innings and outings, never a rank), qualifying trend facts. Grow items are
+  gap statements (value vs team middle), cap 2, consolidation sentence per §4; "no automated
+  item qualified" renders the abstention line.
+- **Page 2**: In the Field (per-season positions with innings, chances, errors, catcher
+  throw-out line when applicable); On the Mound (facts block at ≥6 IP, one-line note below
+  that; standing rows only above §4's pitching floors); contact profile (≥20 PA); barometer
+  strips (§5, broad bands) when the cohort gate passes; the meeting scaffold; the privacy
+  footer.
+- **Formatting standards**: AVG/OBP/SLG/OPS three decimals with leading dot; ERA and WHIP two
+  decimals; ERA computed and labeled on the team's regulation innings
+  (`teams.innings_per_game` — these leagues play 7; print the basis when it isn't 9);
+  percentages one decimal; every rate's denominator visible on the sheet (PA, IP, BF,
+  chances).
 
 Fixed scaffold at the end of every sheet — the meeting agenda embodied on paper:
 
@@ -221,12 +296,14 @@ Acceptance = all of:
 ## 10. Scope and non-goals
 
 - **v1 ships the self and team lenses**, including the in-season arc where the §5 coverage
-  gate passes — as of the 2026-08-22 crawls it passes for both LSB 2026 team-seasons, and
-  measurement shows ~6–9 regulars per season clear the window floor; everyone else gets
-  finish facts. The barometer ships only behind the §5 gate, which requires the full opponent
-  crawl (~50–55 `bb report generate` runs — a destructive-seam batch the operator sanctions
-  explicitly, never a side effect of sheet generation; ~9 of ~38 18U opponents were already
-  fully crawled as of 2026-08-22).
+  gate passes — as of the 2026-08-22 crawls it passes for both LSB 2026 team-seasons under
+  the v1.2 denominator rule, and measurement shows ~6–9 regulars per season clear the window
+  floor; everyone else gets finish facts. The barometer ships only behind the §5 gate, which
+  requires the full opponent crawl — a destructive-seam batch the operator sanctioned
+  2026-08-22, never a side effect of sheet generation. Measured 2026-08-22 (v1.2 corrects
+  v1.1's counts): 62 distinct opponents across the two team-seasons (26 spring / 36 summer),
+  11 already crawled (3 / 8), 51 to crawl; Stage A roster-overlap resolution verified 42 of
+  the 51, with 9 held for operator adjudication.
 - Single year only. No cross-year tracking (project non-goal); the sheet's growth loop is the
   scaffold in §8, revisited at next season's exit meeting from fresh data.
 - No effort, attitude, mechanics, potential, or coachability inference — ever (claim matrix,
