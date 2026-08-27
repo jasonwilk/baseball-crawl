@@ -1,10 +1,21 @@
 # The Athlete Feedback Model
 
-**Last updated**: 2026-08-22 · **Source**: concept sessions of 2026-08-15..22 (v1.3 same
-day: perspective-fallback coverage mechanism, workload ordering rule, band-table scope +
-AVG family, arc adjacency rule, Went-Well total cap; v1.2 added the content inventory)
+**Last updated**: 2026-08-27 · **Source**: concept sessions of 2026-08-15..27; v1.3.5
+(2026-08-27, independent-verifier round): contact-profile denominators must name what they
+count (batted balls, never "trips"); display rounding always from raw components; even-pool
+median, deadband inclusivity, band cutpoints, barometer thirds, and the WHIP deadband
+(0.10, replacing a vacuous 1.5 fallthrough) all pinned — a parameter only the builder knows
+is unverifiable by definition; v1.3.4
+(2026-08-26, operator rulings from the Mason Hiatt half-view finding): every lens is
+per-team-season — no "primary season" scope anywhere — and the barometer's subject obeys the
+§4 relative-standing floors (the 20-PA pool-membership floor never applies to the subject);
+v1.3.3 (2026-08-26): empty sections omit entirely, machinery vocabulary banned on sheets,
+Meeting Notes reduced to the single coach-fillable "Where to grow" block; v1.3.2
+(2026-08-26): no-self-narration rule (no disclaimers or page furniture, operator ruling);
+v1.3.1 (2026-08-25): Where-To-Grow blank and coach-owned per assistant-coach ruling, its
+derivations relocated to the staff provenance page; barometer aggregate bounds (2026-08-22)
 
-**Status: DRAFT v1.3 — 2026-08-22.** Governs every player-facing feedback artifact this project
+**Status: DRAFT v1.3.5 — 2026-08-27.** Governs every player-facing feedback artifact this project
 produces, starting with the exit-meeting player sheet. The design intent: this document carries
 the intellectual work — what may be said, to whom, on what evidence, in what words — so that
 producing the sheets is deterministic work any competent model or plain script can execute.
@@ -88,7 +99,12 @@ them, and changed only deliberately with rationale.
 | In-season window floor | 40 PA per half-season window | measured 2026-08-22 on full crawls: 6 of 10 spring / 9 of 11 summer regulars clear it — provisional |
 | In-season window boundary | midpoint game date of the team-season | deterministic; pinned here so two builders split identically |
 | Arc stats | OBP, K% | the two most stable headline rates; one arc, not one per stat family |
-| Band deadband | .015 OBP/SLG; 1.5 pts rates | values this close to a cutoff render "around the team middle" |
+| Band deadband | .015 OBP/SLG; 1.5 pts rates | values this close to a cutoff render "around the team middle"; INCLUSIVE — a gap of exactly the deadband is "around" (pinned v1.3.5, from a live boundary case) |
+| Team median, even pool | mean of the two middle values | pinned v1.3.5 — was builder-defined, so unverifiable from this doc |
+| Band deadband, WHIP | 0.10 | pinned v1.3.5: the builder's fallthrough default was 1.5 — vacuous at WHIP scale, every arm rendered "around the middle"; 0.10 ≈ one extra baserunner per ten innings — provisional |
+| Band cutpoints (pool ≥8) | deadband first, then: top group v ≥ Q3 (Tukey upper hinge, ties widen the band); above the middle Q3 > v > median; below the middle median > v > Q1; bottom group v ≤ Q1 | pinned v1.3.5 from the builder's constants report (direction flipped for lower-is-better stats) |
+| Barometer thirds | equal-team weighting (each pool player weighs 1/(qualifying players on their club)); weighted fraction-better ≥ 2/3 → top, ≤ 1/3 → bottom, else middle; no deadband — the §5 sensitivity check plays that role | pinned v1.3.5 from the builder's constants report |
+| Display rounding | one rounding, from raw counting components; ties round half-even | never re-round a source's already-rounded rate column (v1.3.5: three sheets shipped double-rounded 1-dp rates); half-even matches GameChanger's own columns (.8125 → .812) |
 | Four-band minimum pool | 8 qualified players | below: two bands only (above/below the team middle) |
 | Standing-claim caps | ≤3 stood-out, ≤2 below-middle | one claim per correlated family (§7) |
 | Went-Well total cap | 4 items (standing + count-facts + trends combined) | v1.3; count-facts were unbounded before |
@@ -160,8 +176,22 @@ ruling 2026-08-22: "we shouldn't wander in claiming a 'league' we haven't verifi
   correction: v1.1 cited a same-DB three-team-ids measurement here that was refuted — a query
   bug had grouped by game, not team.)
 - ≥8 qualifying teams; no single team contributes >15% of the pool; equal-team weighting.
+- A club failing its own-schedule coverage may be DROPPED from the pool rather than failing
+  the lens, provided the pool label counts only what remains and the staff provenance page
+  names the dropped club and its gap (v1.3.2, from the first live 37-club evaluation: one
+  club 1 game short — shrinking the pool honestly beats shutting the lens over 3% of it).
+  The ≥8-club floor and share cap apply to the pool AFTER drops.
 - Sensitivity check: recompute against the highest-coverage half of the pool; if the player's
   band moves, suppress the lens for that stat.
+- **The subject obeys the §4 relative-standing floors** (40 PA batting; 50 BF / 10 IP
+  pitching). The 20-PA membership floor qualifies POOL hitters only — pool noise averages out
+  across hundreds of pooled players, the subject's does not (v1.3.4; the v1 builder reused
+  the pool floor for the subject and ranked a 30-PA line). Below the floor: no strip for that
+  family, no explanation — §8's omission rule.
+- **Per team-season, like every lens** (v1.3.4): a pool exists per team-season, and strips
+  render for each season whose gate passes and whose subject clears the floors. Each strip
+  names its season ("this summer with the 18s", "this spring") — the phrase "this season" is
+  banned on a two-season sheet as ambiguous.
 - Rendering is **broad bands, never precise percentiles**: "top third of the hitters across
   the 37 teams you played (20+ trips each)". The pool is named as exactly what it is — the
   word "league" is banned unless the pool is a verified league population.
@@ -235,30 +265,54 @@ nothing):
   (v1.3): the table renders ONE row per correlated family (the family's first-listed gated
   stat), so it stays scannable; a table repeating one honest phrase is data, a bullet list
   repeating it is a drumbeat.
-- **What Went Well / Where To Grow** — derivations: standing claims within the §4 caps; plus
-  these count-facts (recorded-fact rung, exempt from standing floors): basestealing (≥4
-  attempts, ≥75%), clean glove (≥15 chances, ≥.980), scoreless relief (6–10 IP, zero earned
-  runs, rendered as innings and outings, never a rank), qualifying trend facts. Grow items are
-  gap statements (value vs team middle), cap 2, consolidation sentence per §4; "no automated
-  item qualified" renders the abstention line.
+- **What Went Well** — derivations: standing claims within the §4 caps; plus these
+  count-facts (recorded-fact rung, exempt from standing floors): basestealing (≥4 attempts,
+  ≥75%), clean glove (≥15 chances, ≥.980), scoreless relief (6–10 IP, zero earned runs,
+  rendered as innings and outings, never a rank), qualifying trend facts; "no automated item
+  qualified" renders the abstention line.
+- **Where To Grow — BLANK, coach-owned** (assistant-coach ruling 2026-08-25: "leave the
+  'where to grow' part totally blank so that I can write or type into it"). The section
+  renders as a header plus ruled blank lines, exactly like the meeting scaffold. The
+  machinery that used to fill it (gap statements, cap 2, the §4 consolidation sentence) moves
+  to the STAFF PROVENANCE PAGE as per-player meeting prep, so the coach writes informed by
+  the data without the sheet pre-empting him. This is the claim matrix completing itself: the
+  prescriptive rung was always coach-only; the coach claimed the space. (Digital "type into
+  it": v1 is blank lines annotatable in any PDF viewer; true fillable form fields are a
+  future refinement, not owed now.)
 - **Page 2**: In the Field (per-season positions with innings, chances, errors, catcher
   throw-out line when applicable); On the Mound (facts block at ≥6 IP, one-line note below
   that; standing rows only above §4's pitching floors); contact profile (≥20 PA); barometer
-  strips (§5, broad bands) when the cohort gate passes; the meeting scaffold; the privacy
-  footer.
+  strips (§5, broad bands) when the cohort gate passes; the meeting scaffold.
+- **Every section is per-team-season; there is no "primary season" scope (v1.3.4)**: each
+  page-2 section (mound, standings, contact, barometer) evaluates EACH of the player's
+  team-seasons against that section's own floors and renders every season that qualifies,
+  labeled by season name. The v1 builder scoped page 2 to one designated primary season,
+  which erased a 36-inning, 8-start varsity spring from a sheet whose mound section read
+  "4.2 innings pitched" — the exact half-truth the claim matrix exists to prevent. A season
+  that qualifies nowhere simply contributes nothing (§ omission rule); a designated "primary"
+  may still order sections, never filter them.
+- **No self-narration (operator ruling, 2026-08-26)**: the sheet never describes its own design,
+  privacy properties, or provenance — no "this sheet contains/never names…" boilerplate, no
+  disclaimers, and no renderer-added page furniture (file paths, print headers/footers).
+  Information earns its place by informing the reader about BASEBALL; meta-information lives
+  in this document and on the staff page's provenance sections, not on a kid's sheet.
+- **Empty sections are OMITTED, never explained (operator ruling, 2026-08-26)**: a section
+  with no qualifying content (no arc, no standing rows, no Went-Well items) renders NOTHING —
+  no header, no placeholder sentence. Principle 2.5's "absence is a designed output" is
+  expressed at section level by nonexistence. Machinery vocabulary — "gated," "floor,"
+  "coverage," "standing floor," "sample" — joins the banned lexicon for player sheets; a
+  context line may still accompany PRESENT content when it informs in plain baseball terms
+  ("mostly relief work this summer"), never to explain an absence.
 - **Formatting standards**: AVG/OBP/SLG/OPS three decimals with leading dot; ERA and WHIP two
   decimals; ERA computed and labeled on the team's regulation innings
   (`teams.innings_per_game` — these leagues play 7; print the basis when it isn't 9);
   percentages one decimal; every rate's denominator visible on the sheet (PA, IP, BF,
   chances).
 
-Fixed scaffold at the end of every sheet — the meeting agenda embodied on paper:
-
-1. **Player's read** — blank lines the athlete fills in first ("what I think went well /
-   what I want to work on"). Self-assessment before verdicts.
-2. **Our focus this year** — chosen together in the meeting; blank.
-3. **How we'll measure it** — blank.
-4. **Next check-in** — blank.
+Fixed scaffold at the end of every sheet (v1.3.3, operator ruling 2026-08-26 — replaces the
+four-box scaffold): **Meeting Notes contains exactly one fillable block, "Where to grow,"**
+with several ruled blank lines for the coach to write or type into. The earlier
+Player's-read / Our-focus / How-we'll-measure-it / Next-check-in boxes are REMOVED.
 
 Delivery: one PDF per player, filename `<Last>-<First>-<year>-exit.pdf`; the coach reviews
 and approves the batch before anything reaches a player; sheets are introduced live, never

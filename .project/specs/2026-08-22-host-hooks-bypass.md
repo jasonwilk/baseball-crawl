@@ -18,9 +18,14 @@ because every day unfixed = more ungated commits.
 
 ## Owed by this chunk
 
-1. **Positive control on the fix, host side**: next host commit must print
-   `[pii-hook] PII scan passed.` — confirm it did (the first commit after 2026-08-22 on the
-   host is the natural specimen).
+1. ✅ **Host-side control — DONE 2026-08-22**, by explicit control pair rather than commit
+   observation (the `3c03b53` commit's own receipt went unobserved — the session's output
+   capture truncated it; lesson noted). Direct evidence: `git hook run pre-commit` with a
+   staged clean probe printed the full receipt chain (RC 0), and with a seeded email
+   violation printed `[PII BLOCKED]` and refused (RC 1). Git-resolved hook execution is
+   proven live on the host, both directions. (Caveat kept honest: `git hook run` with an
+   EMPTY staged set exits 0 silently — the hook's known early-exit — so a silent pass on an
+   empty index proves nothing; probe with staged content.)
 2. ✅ **Container-side verification — DONE 2026-08-22** by the in-devcontainer session
    (reply preserved at the concept chunk's `container-session-reply.md`, unversioned):
    git 2.53.0 `git hook run pre-commit` resolves and runs `.githooks/pre-commit` under the

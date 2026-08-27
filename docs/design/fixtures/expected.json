@@ -63,7 +63,7 @@
       "raw_diff": 0.0796,
       "rounded_diff": 0.08
     },
-    "single_window_abstention_precondition": {
+    "single_window_precondition": {
       "matches_expectation": true,
       "shown_count": 1
     },
@@ -93,7 +93,7 @@
       "matches_expectation": true,
       "n_claims": 1,
       "n_families": 4,
-      "text": "Against the hitters across the teams you played this season, your bat sat in the bottom third across the board."
+      "text": "Against the hitters across the teams you played this fixture season, your bat sat in the bottom third across the board."
     },
     "equal_team_weighting": {
       "matches_expectation": true,
@@ -110,12 +110,54 @@
       ],
       "matches_expectation": true
     },
+    "mixed_role_bottom_families_does_not_consolidate": {
+      "bottom_families": [
+        "contact",
+        "pitch_baserunners",
+        "pitch_missing_bats",
+        "power"
+      ],
+      "claim_types": [
+        "standing",
+        "standing",
+        "standing",
+        "standing"
+      ],
+      "matches_expectation": true,
+      "n_claims": 4
+    },
     "sensitivity_check_suppresses_borderline_stat": {
       "full_band": "middle third",
       "high_coverage_half_band": "top third",
       "matches_expectation": true,
       "sensitivity_ok": false
     }
+  },
+  "barometer_subject_floor": {
+    "matches_expectation": true,
+    "n_claims": 0,
+    "subject_pa": 30
+  },
+  "cameo_floor_scoping": {
+    "above_floor_gia": {
+      "contact_claims_via_csv": 0,
+      "standing_claims": 5
+    },
+    "below_floor_milo": {
+      "batting_standing_claims": 0,
+      "contact_claims_via_csv": 0,
+      "era_claims": 1,
+      "fielding_claims": [
+        "This fixture cameo season: 3 fielding chances at P, 0 errors (1.000 FPCT)"
+      ],
+      "mound_claims": 2,
+      "pitching_standing_claims": 3
+    },
+    "contact_floor_direct": {
+      "above_floor_renders": true,
+      "below_floor_suppressed": true
+    },
+    "matches_expectation": true
   },
   "cap_test_team": {
     "pool_sizes": {
@@ -174,9 +216,9 @@
           "SS"
         ],
         "strengths": [
-          "Batting average (AVG): .373 in 140 PA this season -- above the team middle",
-          "Strikeout rate (K%): 9.3% in 140 PA this season -- above the team middle",
-          "Getting on base (OBP): .471 in 140 PA this season -- above the team middle"
+          "Batting average (AVG): .373 in 140 PA this fixture season -- above the team middle",
+          "Strikeout rate (K%): 9.3% in 140 PA this fixture season -- above the team middle",
+          "Getting on base (OBP): .471 in 140 PA this fixture season -- above the team middle"
         ],
         "went_well_after_cap": 4,
         "went_well_candidates_before_cap": 5
@@ -207,6 +249,59 @@
       "passes": true,
       "reasons": []
     }
+  },
+  "empty_sections": {
+    "hollis_sage": {
+      "has_season_arc_header": false,
+      "has_went_well_header": false,
+      "has_where_you_stood_header": true,
+      "machinery_vocabulary_hits": []
+    },
+    "matches_expectation": true,
+    "ortiz_finn": {
+      "has_season_arc_header": false,
+      "has_went_well_header": false,
+      "has_where_you_stood_header": false,
+      "machinery_vocabulary_hits": []
+    }
+  },
+  "grow_section": {
+    "consolidation_in_meeting_prep_html": true,
+    "consolidation_in_player_html": false,
+    "consolidation_text": "Several related areas were below the team's middle this season (at-bat quality, putting the ball in play, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
+    "grow_as_standalone_h2": false,
+    "grow_in_meeting_notes": true,
+    "grow_occurrences": 1,
+    "matches_expectation": true,
+    "meeting_notes_blank_line_count": 6,
+    "meeting_notes_residue_after_stripping_scaffold": "",
+    "meeting_notes_section_html": "<h2>Meeting notes</h2>\n<div class='scaffold-block'><b>Where to grow</b>\n<div class='blank-line'></div>\n<div class='blank-line'></div>\n<div class='blank-line'></div>\n<div class='blank-line'></div>\n<div class='blank-line'></div>\n<div class='blank-line'></div>\n</div>\n</body></html>\n",
+    "old_scaffold_present": []
+  },
+  "hinge_tie_inclusivity": {
+    "matches_expectation": true,
+    "q1_side": {
+      "band": "bottom group of the 9 eligible arms",
+      "widened": true
+    },
+    "q3_side": {
+      "band": "bottom group of the 9 eligible arms",
+      "widened": true
+    }
+  },
+  "per_season_sections": {
+    "has_ambiguous_this_season_phrase": false,
+    "matches_expectation": true,
+    "mound_season_labels": [
+      "this fixture primary season",
+      "this spring"
+    ],
+    "primary_all_standing_n": 3,
+    "spring_all_standing_n": 3,
+    "standing_season_labels": [
+      "this fixture primary season",
+      "this spring"
+    ]
   },
   "strong_team": {
     "pool_sizes": {
@@ -313,9 +408,9 @@
           "SS"
         ],
         "strengths": [
-          "Batting average (AVG): .384 in 150 PA this season -- top group of the 8 eligible hitters",
-          "Strikeout rate (K%): 9.3% in 150 PA this season -- top group of the 8 eligible hitters",
-          "Getting on base (OBP): .480 in 150 PA this season -- top group of the 8 eligible hitters"
+          "Batting average (AVG): .384 in 150 PA this fixture season -- top group of the 8 eligible hitters",
+          "Strikeout rate (K%): 9.3% in 150 PA this fixture season -- top group of the 8 eligible hitters",
+          "Getting on base (OBP): .480 in 150 PA this fixture season -- top group of the 8 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -361,7 +456,7 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Driving the ball (SLG): .449 in 140 PA this season -- below the team middle"
+          "Driving the ball (SLG): .449 in 140 PA this fixture season -- below the team middle"
         ],
         "ip_outs": 0,
         "n_positions": 1,
@@ -414,7 +509,7 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Driving the ball (SLG): .449 in 140 PA this season -- below the team middle"
+          "Driving the ball (SLG): .449 in 140 PA this fixture season -- below the team middle"
         ],
         "ip_outs": 0,
         "n_positions": 1,
@@ -525,9 +620,9 @@
           "CF"
         ],
         "strengths": [
-          "Batting average (AVG): .403 in 148 PA this season -- top group of the 8 eligible hitters",
-          "Strikeout rate (K%): 8.1% in 148 PA this season -- top group of the 8 eligible hitters",
-          "Getting on base (OBP): .493 in 148 PA this season -- top group of the 8 eligible hitters"
+          "Batting average (AVG): .403 in 148 PA this fixture season -- top group of the 8 eligible hitters",
+          "Strikeout rate (K%): 8.1% in 148 PA this fixture season -- top group of the 8 eligible hitters",
+          "Getting on base (OBP): .493 in 148 PA this fixture season -- top group of the 8 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -588,9 +683,9 @@
           "SS"
         ],
         "strengths": [
-          "Batting average (AVG): .316 in 110 PA this season -- above the team middle",
-          "Strikeout rate (K%): 13.6% in 110 PA this season -- above the team middle",
-          "Getting on base (OBP): .393 in 110 PA this season -- above the team middle"
+          "Batting average (AVG): .316 in 110 PA this fixture season -- above the team middle",
+          "Strikeout rate (K%): 13.6% in 110 PA this fixture season -- above the team middle",
+          "Getting on base (OBP): .393 in 110 PA this fixture season -- above the team middle"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -803,9 +898,9 @@
           "CF"
         ],
         "strengths": [
-          "Batting average (AVG): .356 in 140 PA this season -- top group of the 11 eligible hitters",
-          "Strikeout rate (K%): 11.4% in 140 PA this season -- top group of the 11 eligible hitters",
-          "Getting on base (OBP): .457 in 140 PA this season -- top group of the 11 eligible hitters"
+          "Batting average (AVG): .356 in 140 PA this fixture season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 11.4% in 140 PA this fixture season -- top group of the 11 eligible hitters",
+          "Getting on base (OBP): .457 in 140 PA this fixture season -- top group of the 11 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -851,8 +946,8 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Batting average (AVG): .235 in 100 PA this season -- below the team middle",
-          "Driving the ball (SLG): .294 in 100 PA this season -- below the team middle"
+          "Batting average (AVG): .235 in 100 PA this fixture season -- below the team middle",
+          "Driving the ball (SLG): .294 in 100 PA this fixture season -- below the team middle"
         ],
         "ip_outs": 0,
         "n_positions": 1,
@@ -963,9 +1058,9 @@
           "1B"
         ],
         "strengths": [
-          "Batting average (AVG): .319 in 110 PA this season -- top group of the 11 eligible hitters",
-          "Strikeout rate (K%): 13.6% in 110 PA this season -- top group of the 11 eligible hitters",
-          "Getting on base (OBP): .418 in 110 PA this season -- top group of the 11 eligible hitters"
+          "Batting average (AVG): .319 in 110 PA this fixture season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 13.6% in 110 PA this fixture season -- top group of the 11 eligible hitters",
+          "Getting on base (OBP): .418 in 110 PA this fixture season -- top group of the 11 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -977,7 +1072,7 @@
             "denominator": 95,
             "family": "hitting",
             "metric": "avg",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "bottom group of the 11 eligible hitters",
@@ -998,7 +1093,7 @@
             "denominator": 95,
             "family": "power",
             "metric": "slg",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "bottom group of the 11 eligible hitters",
@@ -1035,7 +1130,7 @@
             "denominator": 105,
             "family": "on_base",
             "metric": "obp",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "around the team middle",
@@ -1056,7 +1151,7 @@
             "denominator": 105,
             "family": "at_bat_quality",
             "metric": "qab_pct",
-            "widened_tie": true
+            "widened_tie": false
           }
         ],
         "consolidation": "Several related areas were below the team's middle this season (at-bat quality, batting average, getting on base, driving the ball) -- one pattern worth a conversation, not a list of faults.",
@@ -1113,8 +1208,8 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Batting average (AVG): .235 in 100 PA this season -- below the team middle",
-          "Driving the ball (SLG): .294 in 100 PA this season -- below the team middle"
+          "Batting average (AVG): .235 in 100 PA this fixture season -- below the team middle",
+          "Driving the ball (SLG): .294 in 100 PA this fixture season -- below the team middle"
         ],
         "ip_outs": 0,
         "n_positions": 1,
@@ -1147,7 +1242,7 @@
             "denominator": 112,
             "family": "contact",
             "metric": "k_pct",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "above the team middle",
@@ -1176,9 +1271,9 @@
           "CF"
         ],
         "strengths": [
-          "Strikeout rate (K%): 16.1% in 112 PA this season -- top group of the 11 eligible hitters",
-          "Quality at-bat rate (QAB%): 46.0% in 112 PA this season -- above the team middle",
-          "Driving the ball (SLG): .365 in 112 PA this season -- above the team middle"
+          "Strikeout rate (K%): 16.1% in 112 PA this fixture season -- top group of the 11 eligible hitters",
+          "Quality at-bat rate (QAB%): 46.0% in 112 PA this fixture season -- above the team middle",
+          "Driving the ball (SLG): .365 in 112 PA this fixture season -- above the team middle"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -1211,14 +1306,14 @@
             "denominator": 120,
             "family": "power",
             "metric": "slg",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "top group of the 11 eligible hitters",
             "denominator": 120,
             "family": "at_bat_quality",
             "metric": "qab_pct",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "around the team middle",
@@ -1245,7 +1340,7 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Strikeout rate (K% of batters faced): 32.1% in 140 BF this season -- below the team middle"
+          "Strikeout rate (K% of batters faced): 32.1% in 140 BF this fixture season -- below the team middle"
         ],
         "ip_outs": 96,
         "n_positions": 1,
@@ -1254,9 +1349,9 @@
           "1B"
         ],
         "strengths": [
-          "Strikeout rate (K%): 16.7% in 120 PA this season -- above the team middle",
-          "Getting on base (OBP): .373 in 120 PA this season -- above the team middle",
-          "Quality at-bat rate (QAB%): 48.0% in 120 PA this season -- top group of the 11 eligible hitters"
+          "Strikeout rate (K%): 16.7% in 120 PA this fixture season -- above the team middle",
+          "Getting on base (OBP): .373 in 120 PA this fixture season -- above the team middle",
+          "Quality at-bat rate (QAB%): 48.0% in 120 PA this fixture season -- top group of the 11 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -1317,7 +1412,7 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Quality at-bat rate (QAB%): 40.0% in 40 PA this season -- below the team middle"
+          "Quality at-bat rate (QAB%): 40.0% in 40 PA this fixture season -- below the team middle"
         ],
         "ip_outs": 0,
         "n_positions": 1,
@@ -1326,7 +1421,7 @@
           "3B"
         ],
         "strengths": [
-          "Getting on base (OBP): .375 in 40 PA this season -- above the team middle"
+          "Getting on base (OBP): .375 in 40 PA this fixture season -- above the team middle"
         ],
         "went_well_after_cap": 1,
         "went_well_candidates_before_cap": 1
@@ -1338,14 +1433,14 @@
             "denominator": 41,
             "family": "hitting",
             "metric": "avg",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "top group of the 11 eligible hitters",
             "denominator": 41,
             "family": "on_base",
             "metric": "obp",
-            "widened_tie": true
+            "widened_tie": false
           },
           {
             "band": "above the team middle",
@@ -1379,9 +1474,9 @@
           "3B"
         ],
         "strengths": [
-          "Batting average (AVG): .306 in 41 PA this season -- top group of the 11 eligible hitters",
-          "Strikeout rate (K%): 19.5% in 41 PA this season -- above the team middle",
-          "Getting on base (OBP): .390 in 41 PA this season -- top group of the 11 eligible hitters"
+          "Batting average (AVG): .306 in 41 PA this fixture season -- top group of the 11 eligible hitters",
+          "Strikeout rate (K%): 19.5% in 41 PA this fixture season -- above the team middle",
+          "Getting on base (OBP): .390 in 41 PA this fixture season -- top group of the 11 eligible hitters"
         ],
         "went_well_after_cap": 3,
         "went_well_candidates_before_cap": 3
@@ -1413,8 +1508,8 @@
         "consolidation": null,
         "count_facts": [],
         "focus": [
-          "Walk rate (BB% of batters faced): 18.2% in 55 BF this season -- below the team middle",
-          "Baserunners allowed (WHIP): 3.00 in 10.0 IP this season -- below the team middle"
+          "Walk rate (BB% of batters faced): 18.2% in 55 BF this fixture season -- below the team middle",
+          "Baserunners allowed (WHIP): 3.00 in 10.0 IP this fixture season -- below the team middle"
         ],
         "ip_outs": 30,
         "n_positions": 1,
@@ -1423,7 +1518,7 @@
           "P"
         ],
         "strengths": [
-          "Strikeout rate (K% of batters faced): 63.6% in 55 BF this season -- above the team middle"
+          "Strikeout rate (K% of batters faced): 63.6% in 55 BF this fixture season -- above the team middle"
         ],
         "went_well_after_cap": 1,
         "went_well_candidates_before_cap": 1
