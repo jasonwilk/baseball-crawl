@@ -303,7 +303,17 @@ the cap 2 → 1 ruling.
 
 ## PARKED DECISIONS
 
-None open. The sitting of 2026-08-08 ruled all three (details in the named specs):
+None open. Ruled 2026-10-11:
+
+- **Exit-meeting player sheets: DROPPED.** The operator did not like how the v1 sheets turned
+  out. Removed in this commit: the athlete feedback model design doc and its fixtures
+  (`docs/design/`), the generator spec (`2026-08-22-exit-sheet-generator-v1.md`, OPEN at
+  round 16, never boarded), and the model-review research file. The generator itself only ever
+  lived in gitignored `ephemeral/` and is deleted from disk. History: commits `5edc3a2`,
+  `5b4cee8`, `3c03b53`, `8550edf`. The 2026-08-15 and 2026-08-22 vision signals stay parked
+  for curation; `2026-08-22-host-hooks-bypass.md` is unrelated safety work and stays live.
+
+The sitting of 2026-08-08 ruled all three (details in the named specs):
 
 1. **Bulk org discovery: DECLINED** — vision non-goal; the narrow roster-recovery measurement is
    funded instead (see NEXT).
